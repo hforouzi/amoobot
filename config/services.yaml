@@ -9,16 +9,13 @@ services:
         bind:
             string $botToken: '%env(TELEGRAM_BOT_TOKEN)%'
             string $webhookSecret: '%env(TELEGRAM_WEBHOOK_SECRET)%'
-            ?string $adminChatId: '%env(default::TELEGRAM_ADMIN_CHAT_ID)%'
-            string $paymentCardNumber: '%env(default::PAYMENT_CARD_NUMBER)%'
-            string $paymentCardHolder: '%env(default::PAYMENT_CARD_HOLDER)%'
-            ?string $paymentDescription: '%env(default::PAYMENT_DESCRIPTION)%'
+            $adminChatId: '%env(default::TELEGRAM_ADMIN_CHAT_ID)%'
+            string $paymentCardNumber: '%env(PAYMENT_CARD_NUMBER)%'
+            string $paymentCardHolder: '%env(PAYMENT_CARD_HOLDER)%'
+            $paymentDescription: '%env(default::PAYMENT_DESCRIPTION)%'
 
     App\:
         resource: '../src/'
-
-    App\Provisioning\Domain\VpnPanelDriverInterface:
-        tags: ['app.vpn_driver']
 
     App\Provisioning\Infrastructure\DummyVpnPanelDriver:
         tags: ['app.vpn_driver']

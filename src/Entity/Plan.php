@@ -136,4 +136,9 @@ class Plan
 
         return $this;
     }
+
+    public function __toString(): string
+    {
+        return sprintf('%s (%d)', $this->title ?? 'Plan', $this->id ?? 0);
+    }
 }

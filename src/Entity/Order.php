@@ -125,4 +125,9 @@ class Order
 
         return $this;
     }
+
+    public function __toString(): string
+    {
+        return sprintf('Order #%d', $this->id ?? 0);
+    }
 }

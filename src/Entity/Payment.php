@@ -183,4 +183,9 @@ class Payment
 
         return $this;
     }
+
+    public function __toString(): string
+    {
+        return sprintf('Payment #%d', $this->id ?? 0);
+    }
 }

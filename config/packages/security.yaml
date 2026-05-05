@@ -7,7 +7,7 @@ security:
             memory:
                 users:
                     admin:
-                        password: '%env(default:admin:ADMIN_PASSWORD)%'
+                        password: '%env(ADMIN_PASSWORD)%'
                         roles: ['ROLE_ADMIN']
 
     firewalls:

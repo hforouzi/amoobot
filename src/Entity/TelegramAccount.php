@@ -153,4 +153,9 @@ class TelegramAccount
 
         return $this;
     }
+
+    public function __toString(): string
+    {
+        return sprintf('@%s (%s)', $this->username ?: 'unknown', $this->telegramId);
+    }
 }

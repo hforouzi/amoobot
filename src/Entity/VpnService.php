@@ -230,4 +230,9 @@ class VpnService
 
         return $this;
     }
+
+    public function __toString(): string
+    {
+        return sprintf('VpnService #%d', $this->id ?? 0);
+    }
 }

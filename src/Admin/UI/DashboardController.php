@@ -13,16 +13,15 @@ use App\Entity\TelegramAccount;
 use App\Entity\User;
 use App\Entity\VpnPanel;
 use App\Entity\VpnService;
+use EasyCorp\Bundle\EasyAdminBundle\Attribute\AdminDashboard;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Dashboard;
 use EasyCorp\Bundle\EasyAdminBundle\Config\MenuItem;
 use EasyCorp\Bundle\EasyAdminBundle\Controller\AbstractDashboardController;
-use Symfony\Component\HttpFoundation\Response;
-use Symfony\Component\Routing\Attribute\Route;
 
+#[AdminDashboard(routePath: '/admin', routeName: 'admin')]
 class DashboardController extends AbstractDashboardController
 {
-    #[Route('/admin', name: 'admin')]
-    public function index(): Response
+    public function index(): \Symfony\Component\HttpFoundation\Response
     {
         return $this->render('admin/dashboard.html.twig');
     }
