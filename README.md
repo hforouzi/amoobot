@@ -4,7 +4,7 @@ Symfony 7 MVP for a self-hosted Telegram VPN shop bot with manual payment verifi
 
 ## Stack
 - PHP 8.2+
-- Symfony 7
+- Symfony 7.4
 - Doctrine ORM + Migrations
 - MySQL
 - EasyAdmin
