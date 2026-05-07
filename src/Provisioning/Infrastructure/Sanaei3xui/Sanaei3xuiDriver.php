@@ -14,7 +14,8 @@ use Symfony\Component\Uid\Uuid;
 
 final class Sanaei3xuiDriver implements VpnPanelDriverInterface
 {
-    private const DEFAULT_CONFIG_TEXT = 'کانفیگ از پنل ساخته شد، لینک اشتراک را از پنل بررسی کنید.';
+    private const CONFIG_TEXT_WITH_SUBSCRIPTION = 'سرویس با موفقیت در پنل ساخته شد.';
+    private const CONFIG_TEXT_SUBSCRIPTION_UNAVAILABLE = 'سرویس در پنل ساخته شد. برای دریافت لینک اشتراک، تنظیمات subscription پنل را بررسی کنید.';
 
     public function __construct(
         private readonly Sanaei3xuiApiClient $apiClient,
@@ -34,6 +35,9 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
         $inbound = $request->inbound;
         if (null === $inbound) {
             throw new \RuntimeException('Sanaei provisioning requires a selected inbound.');
+        }
+        if ($inbound->getPanel()->getId() !== $panel->getId()) {
+            throw new \RuntimeException('Selected inbound does not belong to selected panel.');
         }
 
         $inboundId = trim((string) ($request->remoteInboundId ?? $inbound->getRemoteInboundId()));
@@ -64,15 +68,17 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
         $this->assertPanelBusinessResult($result, 'addClient', true);
 
         $subscriptionUrl = $this->buildSubscriptionUrl($config, $subId, $email);
+        $configText = self::CONFIG_TEXT_WITH_SUBSCRIPTION;
         if (null === $subscriptionUrl) {
             $this->log(sprintf('subscription_url_missing panel_id=%s email="%s"', $panel->getId() ?? 'null', $email));
+            $configText = self::CONFIG_TEXT_SUBSCRIPTION_UNAVAILABLE;
         }
 
         return new CreatedVpnService(
-            remoteId: $this->remoteIdParser->format($inboundId, $clientUuid, $email),
+            remoteId: $this->remoteIdParser->format($panel->getId(), $inbound->getId(), $inboundId, $clientUuid, $email),
             username: $email,
             subscriptionUrl: $subscriptionUrl,
-            configText: self::DEFAULT_CONFIG_TEXT,
+            configText: $configText,
         );
     }
 

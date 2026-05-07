@@ -10,6 +10,8 @@ final class Sanaei3xuiRemoteClientRef
         public readonly string $inboundId,
         public readonly string $clientId,
         public readonly string $email,
+        public readonly ?int $panelId = null,
+        public readonly ?int $localInboundId = null,
     ) {
     }
 }

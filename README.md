@@ -210,18 +210,12 @@ In `/admin` -> Payments, use actions:
     }
     ```
 
-### Correct Phase 1.3 setup flow
+### Correct Phase 1.3 setup flow (Admin UX)
 1. Create `VpnPanel`.
-2. Test login:
-   ```bash
-   php bin/console app:panel:test-login {panelId}
-   ```
-3. Sync inbounds:
-   ```bash
-   php bin/console app:panel:sync-inbounds {panelId}
-   ```
-4. In `/admin` -> VPN Inbounds, edit metadata (`title`, `country`, `protocol`, `network`, `security`).
-5. In `/admin` -> Plans, assign `VpnInbound` to each plan.
+2. In VPN Panels click `تست اتصال`.
+3. In VPN Panels click `همگامسازی اینباندها`.
+4. In VPN Inbounds edit metadata (`title`, `country`, `location`) if needed.
+5. In Plans assign `VpnInbound` (`اینباند / سرور`) to each plan.
 6. User buys plan from bot.
 7. Admin approves payment.
 8. Client is created in selected inbound.
@@ -232,6 +226,13 @@ php bin/console app:panel:test-login {panelId}
 php bin/console app:panel:list-inbounds {panelId}
 php bin/console app:panel:sync-inbounds {panelId}
 php bin/console app:panel:test-create-client {inboundId}
+```
+
+### CLI equivalents
+```bash
+php bin/console app:panel:test-login 1
+php bin/console app:panel:sync-inbounds 1
+php bin/console app:panel:test-create-client 3
 ```
 
 ### Known issue

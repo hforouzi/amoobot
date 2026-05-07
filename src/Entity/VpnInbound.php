@@ -231,6 +231,16 @@ class VpnInbound
 
     public function __toString(): string
     {
-        return sprintf('%s (%s)', $this->title ?: 'Inbound', $this->remoteInboundId ?: '-');
+        $country = trim((string) ($this->country ?? ''));
+        $title = trim((string) $this->title);
+        $protocol = trim((string) ($this->protocol ?? ''));
+
+        return sprintf(
+            '%s - %s - %s - #%s',
+            '' !== $country ? $country : 'N/A',
+            '' !== $title ? $title : 'Inbound',
+            '' !== $protocol ? $protocol : 'unknown',
+            $this->remoteInboundId ?: '-'
+        );
     }
 }

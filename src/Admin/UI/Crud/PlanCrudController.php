@@ -30,7 +30,7 @@ class PlanCrudController extends AbstractCrudController
             IntegerField::new('durationDays'),
             IntegerField::new('trafficGb'),
             IntegerField::new('price'),
-            AssociationField::new('inbound'),
+            AssociationField::new('inbound', 'اینباند / سرور'),
             BooleanField::new('isActive'),
             DateTimeField::new('createdAt')->hideOnForm(),
             DateTimeField::new('updatedAt')->hideOnForm(),

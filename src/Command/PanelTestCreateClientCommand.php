@@ -55,7 +55,7 @@ final class PanelTestCreateClientCommand extends Command
         }
 
         $config = is_array($panel->getConfig()) ? $panel->getConfig() : [];
-        $email = sprintf('test_%d_%d', time(), random_int(1000, 9999));
+        $email = sprintf('test_amoobot_%d_%d', time(), random_int(1000, 9999));
         $client = [
             'id' => Uuid::v4()->toRfc4122(),
             'flow' => (string) ($config['default_flow'] ?? ''),
