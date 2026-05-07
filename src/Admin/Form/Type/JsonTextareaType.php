@@ -51,4 +51,3 @@ final class JsonTextareaType extends AbstractType
         return TextareaType::class;
     }
 }
-

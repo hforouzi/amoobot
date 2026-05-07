@@ -25,4 +25,3 @@ final class JsonFieldFormatter
         return false === $encoded ? '' : $encoded;
     }
 }
-
