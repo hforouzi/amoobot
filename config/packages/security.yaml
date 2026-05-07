@@ -18,6 +18,9 @@ security:
             lazy: true
             provider: users_in_memory
             http_basic: ~
+            logout:
+                path: /logout
+                target: /admin
 
     access_control:
         - { path: ^/admin, roles: ROLE_ADMIN }
