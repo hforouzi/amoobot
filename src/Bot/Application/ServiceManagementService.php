@@ -81,7 +81,7 @@ class ServiceManagementService
         $this->telegramApiClient->sendMessage($chatId, $this->formatServiceDetailForUser($service), $this->keyboardFactory->userServiceDetail((int) $service->getId()));
     }
 
-    public function showAdminServiceDetail(int $serviceId, string $chatId, string $callbackId): void
+    public function showAdminServiceDetail(int $serviceId, string $chatId, ?string $callbackId): void
     {
         $service = $this->entityManager->getRepository(VpnService::class)->find($serviceId);
         if (!$service instanceof VpnService) {
@@ -225,7 +225,7 @@ class ServiceManagementService
 
         $this->telegramApiClient->answerCallbackQuery($callbackId, 'سرویس غیرفعال شد.', true);
         $this->debugLog(sprintf('admin_service_suspend service_id=%d', $serviceId));
-        $this->showAdminServiceDetail($serviceId, $chatId, '');
+        $this->showAdminServiceDetail($serviceId, $chatId, null);
     }
 
     public function activateService(int $serviceId, string $chatId, string $callbackId): void
@@ -254,7 +254,7 @@ class ServiceManagementService
 
         $this->telegramApiClient->answerCallbackQuery($callbackId, 'سرویس فعال شد.', true);
         $this->debugLog(sprintf('admin_service_activate service_id=%d', $serviceId));
-        $this->showAdminServiceDetail($serviceId, $chatId, '');
+        $this->showAdminServiceDetail($serviceId, $chatId, null);
     }
 
     public function deleteService(int $serviceId, string $chatId, string $callbackId): void
@@ -281,7 +281,7 @@ class ServiceManagementService
 
         $this->telegramApiClient->answerCallbackQuery($callbackId, 'سرویس حذف شد.', true);
         $this->debugLog(sprintf('admin_service_delete service_id=%d', $serviceId));
-        $this->showAdminServiceDetail($serviceId, $chatId, '');
+        $this->showAdminServiceDetail($serviceId, $chatId, null);
     }
 
     public function resetUsage(int $serviceId, string $chatId, string $callbackId): void
@@ -298,7 +298,7 @@ class ServiceManagementService
 
         $this->telegramApiClient->answerCallbackQuery($callbackId, 'مصرف سرویس ریست شد.', true);
         $this->debugLog(sprintf('admin_service_reset_usage service_id=%d', $serviceId));
-        $this->showAdminServiceDetail($serviceId, $chatId, '');
+        $this->showAdminServiceDetail($serviceId, $chatId, null);
     }
 
     public function showExtendMenu(int $serviceId, string $chatId, string $callbackId): void
@@ -338,7 +338,7 @@ class ServiceManagementService
 
         $this->telegramApiClient->answerCallbackQuery($callbackId, 'تمدید انجام شد.', true);
         $this->debugLog(sprintf('admin_service_extend service_id=%d days=%d', $serviceId, $days));
-        $this->showAdminServiceDetail($serviceId, $chatId, '');
+        $this->showAdminServiceDetail($serviceId, $chatId, null);
     }
 
     public function showAddTrafficMenu(int $serviceId, string $chatId, string $callbackId): void
@@ -373,7 +373,7 @@ class ServiceManagementService
 
         $this->telegramApiClient->answerCallbackQuery($callbackId, 'افزایش حجم انجام شد.', true);
         $this->debugLog(sprintf('admin_service_add_traffic service_id=%d traffic_gb=%d', $serviceId, $trafficGb));
-        $this->showAdminServiceDetail($serviceId, $chatId, '');
+        $this->showAdminServiceDetail($serviceId, $chatId, null);
     }
 
     public function showAdminUserDetail(int $userId, string $chatId, string $callbackId, ?int $backServiceId = null): void
