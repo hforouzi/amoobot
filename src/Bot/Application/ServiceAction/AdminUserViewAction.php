@@ -59,6 +59,6 @@ final class AdminUserViewAction implements ServiceActionInterface
         $userId = (int) ($parts[0] ?? 0);
         $backServiceId = isset($parts[1]) ? (int) $parts[1] : null;
 
-        return [$userId, $backServiceId > 0 ? $backServiceId : null];
+        return [$userId, null !== $backServiceId && $backServiceId > 0 ? $backServiceId : null];
     }
 }

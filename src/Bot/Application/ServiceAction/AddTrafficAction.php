@@ -47,6 +47,12 @@ final class AddTrafficAction implements ServiceActionInterface
 
         $serviceId = (int) ($parts[1] ?? 0);
         $trafficGb = (int) ($parts[2] ?? 0);
+        if ($serviceId <= 0 || $trafficGb <= 0) {
+            $this->telegramApiClient->answerCallbackQuery($context->callbackId, 'عملیات نامعتبر است.', true);
+
+            return;
+        }
+
         $this->serviceManagementService->addTraffic($serviceId, $trafficGb, $context->chatId, $context->callbackId);
     }
 }

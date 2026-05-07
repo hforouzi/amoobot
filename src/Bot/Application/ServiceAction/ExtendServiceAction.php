@@ -47,6 +47,12 @@ final class ExtendServiceAction implements ServiceActionInterface
 
         $serviceId = (int) ($parts[1] ?? 0);
         $days = (int) ($parts[2] ?? 0);
+        if ($serviceId <= 0 || $days <= 0) {
+            $this->telegramApiClient->answerCallbackQuery($context->callbackId, 'عملیات نامعتبر است.', true);
+
+            return;
+        }
+
         $this->serviceManagementService->extendService($serviceId, $days, $context->chatId, $context->callbackId);
     }
 }
