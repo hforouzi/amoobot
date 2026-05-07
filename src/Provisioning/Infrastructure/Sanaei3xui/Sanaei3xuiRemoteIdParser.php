@@ -6,9 +6,9 @@ namespace App\Provisioning\Infrastructure\Sanaei3xui;
 
 final class Sanaei3xuiRemoteIdParser
 {
-    public function format(?int $panelId, ?int $localInboundId, string $remoteInboundId, string $clientId, string $email): string
+    public function format(?int $panelId, ?int $localInboundId, string $remoteInboundId, string $clientId, string $email, ?string $subId = null): string
     {
-        return sprintf(
+        $base = sprintf(
             'sanaei_3xui|panel=%d|inbound=%d|remoteInbound=%s|uuid=%s|email=%s',
             $panelId ?? 0,
             $localInboundId ?? 0,
@@ -16,6 +16,12 @@ final class Sanaei3xuiRemoteIdParser
             rawurlencode(trim($clientId)),
             rawurlencode(trim($email))
         );
+
+        if (null === $subId || '' === trim($subId)) {
+            return $base;
+        }
+
+        return sprintf('%s|subId=%s', $base, rawurlencode(trim($subId)));
     }
 
     public function parse(string $remoteId): ?Sanaei3xuiRemoteClientRef
@@ -50,7 +56,7 @@ final class Sanaei3xuiRemoteIdParser
         return $this->toRef($inboundId, $clientId, $email);
     }
 
-    private function toRef(string $inboundId, string $clientId, string $email, ?int $panelId = null, ?int $localInboundId = null): ?Sanaei3xuiRemoteClientRef
+    private function toRef(string $inboundId, string $clientId, string $email, ?int $panelId = null, ?int $localInboundId = null, ?string $subId = null): ?Sanaei3xuiRemoteClientRef
     {
         $parsedInboundId = trim($inboundId);
         $parsedClientId = trim($clientId);
@@ -60,7 +66,7 @@ final class Sanaei3xuiRemoteIdParser
             return null;
         }
 
-        return new Sanaei3xuiRemoteClientRef($parsedInboundId, $parsedClientId, $parsedEmail, $panelId, $localInboundId);
+        return new Sanaei3xuiRemoteClientRef($parsedInboundId, $parsedClientId, $parsedEmail, $panelId, $localInboundId, $subId);
     }
 
     private function parseStructuredRemoteId(string $remoteId): ?Sanaei3xuiRemoteClientRef
@@ -91,6 +97,8 @@ final class Sanaei3xuiRemoteIdParser
         $panelId = isset($fields['panel']) ? (int) $fields['panel'] : null;
         $localInboundId = isset($fields['inbound']) ? (int) $fields['inbound'] : null;
 
-        return $this->toRef($remoteInbound, $uuid, $email, $panelId, $localInboundId);
+        $subId = isset($fields['subId']) ? trim((string) $fields['subId']) : null;
+
+        return $this->toRef($remoteInbound, $uuid, $email, $panelId, $localInboundId, $subId);
     }
 }

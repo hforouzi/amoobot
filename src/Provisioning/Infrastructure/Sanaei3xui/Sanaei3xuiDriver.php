@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Provisioning\Infrastructure\Sanaei3xui;
 
+use App\Entity\VpnInbound;
 use App\Entity\VpnPanel;
 use App\Provisioning\Domain\Dto\CreatedVpnService;
 use App\Provisioning\Domain\Dto\CreateVpnServiceRequest;
@@ -45,27 +46,66 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
             throw new \RuntimeException('Sanaei provisioning requires a valid remote inbound id.');
         }
 
+        $email = trim((string) $request->username);
+        if ('' === $email) {
+            throw new \RuntimeException('Sanaei provisioning requires a valid email/username.');
+        }
         $clientUuid = Uuid::v4()->toRfc4122();
-        $email = $request->username;
         $subId = bin2hex(random_bytes(8));
-        $client = [
-            'id' => $clientUuid,
-            'flow' => (string) ($config['default_flow'] ?? ''),
-            'email' => $email,
-            'limitIp' => 0,
-            'totalGB' => $this->gbToBytes($request->trafficLimitGb),
-            'expiryTime' => $this->durationToMs($request->durationDays),
-            'enable' => true,
-            'tgId' => '',
-            'subId' => $subId,
-            'reset' => 0,
-            'security' => (string) ($inbound->getSecurity() ?? 'reality'),
-            'network' => (string) ($inbound->getNetwork() ?? 'tcp'),
-        ];
+        $totalBytes = $this->gbToBytes($request->trafficLimitGb);
+        $expiryTime = $this->durationToMs($request->durationDays);
 
-        $result = $this->apiClient->addClient($panel, $inboundId, $client);
+        $protocol = $this->resolveInboundProtocol($inbound);
+        $network = (string) ($inbound->getNetwork() ?? '');
+        $security = (string) ($inbound->getSecurity() ?? '');
+        $client = $this->buildClientPayload($protocol, $clientUuid, $email, $subId, $totalBytes, $expiryTime, $config);
+
+        $this->log(sprintf(
+            'create_service_add_client_request panel_id=%s local_inbound_id=%s remote_inbound_id="%s" protocol="%s" network="%s" security="%s" uuid="%s" email="%s" total_gb_bytes=%d expiry_time=%d',
+            $panel->getId() ?? 'null',
+            $inbound->getId() ?? 'null',
+            $inboundId,
+            $protocol,
+            $network,
+            $security,
+            $clientUuid,
+            $email,
+            $totalBytes,
+            $expiryTime
+        ));
+
+        $result = $this->apiClient->addClient($panel, $inboundId, $client, [
+            'localInboundId' => (string) ($inbound->getId() ?? 0),
+            'remoteInboundId' => $inboundId,
+            'protocol' => $protocol,
+            'network' => $network,
+            'security' => $security,
+            'clientUuid' => $clientUuid,
+            'email' => $email,
+            'totalGB' => (string) $totalBytes,
+            'expiryTime' => (string) $expiryTime,
+        ]);
+        $this->log(sprintf(
+            'create_service_add_client_response panel_id=%s local_inbound_id=%s remote_inbound_id="%s" status=%s ok=%s success=%s empty=%s error="%s" body_preview="%s"',
+            $panel->getId() ?? 'null',
+            $inbound->getId() ?? 'null',
+            $inboundId,
+            (string) ($result['status'] ?? 'null'),
+            (($result['ok'] ?? false) === true) ? 'true' : 'false',
+            (($result['success'] ?? false) === true) ? 'true' : 'false',
+            (($result['empty'] ?? false) === true) ? 'true' : 'false',
+            (string) ($result['error'] ?? ''),
+            (string) ($result['bodyPreview'] ?? '')
+        ));
+
         $this->assertPanelResult($result, 'addClient');
-        $this->assertPanelBusinessResult($result, 'addClient', true);
+        if (($result['empty'] ?? false) !== true) {
+            $this->assertPanelBusinessResult($result, 'addClient');
+        }
+
+        if (!$this->verifyClientExists($panel, $inboundId, $email)) {
+            throw new \RuntimeException('Sanaei addClient could not be verified on panel.');
+        }
 
         $subscriptionUrl = $this->buildSubscriptionUrl($config, $subId, $email);
         $configText = self::CONFIG_TEXT_WITH_SUBSCRIPTION;
@@ -75,7 +115,7 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
         }
 
         return new CreatedVpnService(
-            remoteId: $this->remoteIdParser->format($panel->getId(), $inbound->getId(), $inboundId, $clientUuid, $email),
+            remoteId: $this->remoteIdParser->format($panel->getId(), $inbound->getId(), $inboundId, $clientUuid, $email, $subId),
             username: $email,
             subscriptionUrl: $subscriptionUrl,
             configText: $configText,
@@ -240,7 +280,12 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
 
         $businessSuccess = $payload['success'] ?? true;
         if (false === $businessSuccess) {
-            throw new \RuntimeException(sprintf('Sanaei panel %s failed.', $operation));
+            $msg = trim((string) ($payload['msg'] ?? ''));
+            if ('' === $msg) {
+                throw new \RuntimeException(sprintf('Sanaei panel %s failed.', $operation));
+            }
+
+            throw new \RuntimeException(sprintf('Sanaei panel %s failed: %s', $operation, $msg));
         }
     }
 
@@ -284,5 +329,131 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
     private function log(string $message): void
     {
         error_log('[Sanaei3xuiDriver] '.$message);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function buildClientPayload(string $protocol, string $clientUuid, string $email, string $subId, int $totalBytes, int $expiryTime, array $panelConfig): array
+    {
+        $normalized = strtolower(trim($protocol));
+        if ('trojan' === $normalized) {
+            throw new \RuntimeException('Trojan client creation is not implemented yet.');
+        }
+
+        $client = [
+            'id' => $clientUuid,
+            'email' => $email,
+            'enable' => true,
+            'totalGB' => $totalBytes,
+            'expiryTime' => $expiryTime,
+            'tgId' => '',
+            'subId' => $subId,
+        ];
+
+        if ('vless' === $normalized) {
+            $client['flow'] = (string) ($panelConfig['default_flow'] ?? '');
+        }
+
+        return $client;
+    }
+
+    private function resolveInboundProtocol(VpnInbound $inbound): string
+    {
+        $protocol = trim((string) ($inbound->getProtocol() ?? ''));
+        if ('' !== $protocol) {
+            return strtolower($protocol);
+        }
+
+        $config = $inbound->getConfig();
+        if (is_array($config)) {
+            $candidate = trim((string) ($config['protocol'] ?? (($config['raw']['protocol'] ?? null))));
+            if ('' !== $candidate) {
+                return strtolower($candidate);
+            }
+        }
+
+        return 'vless';
+    }
+
+    private function verifyClientExists(VpnPanel $panel, string $remoteInboundId, string $email): bool
+    {
+        $trafficResult = $this->apiClient->getClientTraffic($panel, $email);
+        if (($trafficResult['ok'] ?? false) === true && ($trafficResult['empty'] ?? false) !== true) {
+            $payload = is_array($trafficResult['data'] ?? null) ? $trafficResult['data'] : [];
+            if (($payload['success'] ?? true) !== false) {
+                $obj = $payload['obj'] ?? null;
+                if (is_array($obj) || is_numeric($obj) || is_string($obj)) {
+                    $this->log(sprintf('add_client_verified_by_traffic email="%s"', $email));
+
+                    return true;
+                }
+            }
+        }
+
+        $inboundResult = $this->apiClient->getInbound($panel, $remoteInboundId);
+        if (($inboundResult['ok'] ?? false) !== true || ($inboundResult['empty'] ?? false) === true) {
+            $this->log(sprintf(
+                'add_client_verify_get_inbound_failed remote_inbound_id="%s" status=%s ok=%s body_preview="%s"',
+                $remoteInboundId,
+                (string) ($inboundResult['status'] ?? 'null'),
+                (($inboundResult['ok'] ?? false) === true) ? 'true' : 'false',
+                (string) ($inboundResult['bodyPreview'] ?? '')
+            ));
+
+            return false;
+        }
+
+        $payload = is_array($inboundResult['data'] ?? null) ? $inboundResult['data'] : [];
+        if (($payload['success'] ?? true) === false) {
+            $this->log(sprintf(
+                'add_client_verify_get_inbound_business_failed remote_inbound_id="%s" msg="%s"',
+                $remoteInboundId,
+                (string) ($payload['msg'] ?? '')
+            ));
+
+            return false;
+        }
+
+        $obj = is_array($payload['obj'] ?? null) ? $payload['obj'] : $payload;
+        $settings = $this->decodeSettings($obj['settings'] ?? null);
+        foreach (($settings['clients'] ?? []) as $client) {
+            if (!is_array($client)) {
+                continue;
+            }
+
+            if (trim((string) ($client['email'] ?? '')) === $email) {
+                $this->log(sprintf('add_client_verified_by_inbound remote_inbound_id="%s" email="%s"', $remoteInboundId, $email));
+
+                return true;
+            }
+        }
+
+        $this->log(sprintf(
+            'add_client_verify_not_found remote_inbound_id="%s" email="%s" body_preview="%s"',
+            $remoteInboundId,
+            $email,
+            (string) ($inboundResult['bodyPreview'] ?? '')
+        ));
+
+        return false;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function decodeSettings(mixed $settingsRaw): array
+    {
+        if (is_array($settingsRaw)) {
+            return $settingsRaw;
+        }
+
+        if (!is_string($settingsRaw) || '' === trim($settingsRaw)) {
+            return [];
+        }
+
+        $decoded = json_decode($settingsRaw, true);
+
+        return (JSON_ERROR_NONE === json_last_error() && is_array($decoded)) ? $decoded : [];
     }
 }

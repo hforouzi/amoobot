@@ -74,13 +74,20 @@ final class Sanaei3xuiApiClient
         return $this->request($panel, 'GET', '/panel/api/inbounds/get/'.rawurlencode($id));
     }
 
-    public function addClient(VpnPanel $panel, string $inboundId, array $client): array
+    public function addClient(VpnPanel $panel, string $inboundId, array $client, array $context = []): array
     {
         if (!$this->ensureLogin($panel)) {
             return $this->errorResult('login_failed');
         }
 
-        return $this->request(
+        $this->log(sprintf(
+            'add_client_request panel_id=%s inbound_id="%s" %s',
+            $panel->getId() ?? 'null',
+            $inboundId,
+            $this->formatDiagnosticContext($context)
+        ));
+
+        $result = $this->request(
             $panel,
             'POST',
             '/panel/api/inbounds/addClient',
@@ -91,6 +98,20 @@ final class Sanaei3xuiApiClient
                 ],
             ]
         );
+
+        $this->log(sprintf(
+            'add_client_response panel_id=%s inbound_id="%s" status=%s ok=%s success=%s empty=%s error="%s" body_preview="%s"',
+            $panel->getId() ?? 'null',
+            $inboundId,
+            (string) ($result['status'] ?? 'null'),
+            (($result['ok'] ?? false) === true) ? 'true' : 'false',
+            (($result['success'] ?? false) === true) ? 'true' : 'false',
+            (($result['empty'] ?? false) === true) ? 'true' : 'false',
+            (string) ($result['error'] ?? ''),
+            (string) ($result['bodyPreview'] ?? '')
+        ));
+
+        return $result;
     }
 
     public function updateClient(VpnPanel $panel, string $inboundId, string $clientId, array $client): array
@@ -179,27 +200,35 @@ final class Sanaei3xuiApiClient
                     'status' => $statusCode,
                     'data' => null,
                     'empty' => true,
+                    'success' => $this->isSuccessfulStatus($statusCode),
+                    'bodyPreview' => '',
                     'error' => null,
                 ];
             }
 
             $decoded = json_decode($content, true);
             if (JSON_ERROR_NONE === json_last_error() && is_array($decoded)) {
+                $businessSuccess = $decoded['success'] ?? null;
+                $previewRaw = json_encode($decoded, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+
                 return [
                     'ok' => $this->isSuccessfulStatus($statusCode),
                     'status' => $statusCode,
                     'data' => $decoded,
                     'empty' => false,
+                    'success' => is_bool($businessSuccess) ? $businessSuccess : $this->isSuccessfulStatus($statusCode),
+                    'bodyPreview' => $this->sanitizeSnippet((string) ($previewRaw ?: '')),
                     'error' => null,
                 ];
             }
 
             if ($expectJson) {
+                $preview = $this->sanitizeSnippet($content);
                 $this->log(sprintf(
                     'non_json_api_response endpoint="%s" status=%d body_preview="%s"',
                     $path,
                     $statusCode,
-                    $this->sanitizeSnippet($content)
+                    $preview
                 ));
 
                 return [
@@ -207,6 +236,8 @@ final class Sanaei3xuiApiClient
                     'status' => $statusCode,
                     'data' => null,
                     'empty' => false,
+                    'success' => false,
+                    'bodyPreview' => $preview,
                     'error' => 'non_json_response',
                 ];
             }
@@ -216,6 +247,8 @@ final class Sanaei3xuiApiClient
                 'status' => $statusCode,
                 'data' => null,
                 'empty' => false,
+                'success' => $this->isSuccessfulStatus($statusCode),
+                'bodyPreview' => $this->sanitizeSnippet($content),
                 'error' => null,
             ];
         } catch (TransportExceptionInterface $e) {
@@ -288,6 +321,7 @@ final class Sanaei3xuiApiClient
     private function sanitizeSnippet(string $text): string
     {
         $snippet = preg_replace('/https?:\/\/\S+/i', '[url-redacted]', $text) ?? $text;
+        $snippet = preg_replace('/("?(?:password|passwd|token|cookie|session)"?\s*[:=]\s*)"[^"]*"/i', '$1"[redacted]"', $snippet) ?? $snippet;
         $snippet = preg_replace('/\s+/', ' ', $snippet) ?? $snippet;
 
         return mb_substr(trim($snippet), 0, 300);
@@ -300,8 +334,36 @@ final class Sanaei3xuiApiClient
             'status' => null,
             'data' => null,
             'empty' => false,
+            'success' => false,
+            'bodyPreview' => '',
             'error' => $error,
         ];
+    }
+
+    private function formatDiagnosticContext(array $context): string
+    {
+        $allowed = [
+            'localInboundId',
+            'remoteInboundId',
+            'protocol',
+            'network',
+            'security',
+            'clientUuid',
+            'email',
+            'totalGB',
+            'expiryTime',
+        ];
+
+        $pairs = [];
+        foreach ($allowed as $key) {
+            if (!array_key_exists($key, $context)) {
+                continue;
+            }
+
+            $pairs[] = sprintf('%s="%s"', $key, $this->sanitizeSnippet((string) $context[$key]));
+        }
+
+        return implode(' ', $pairs);
     }
 
     private function log(string $message): void

@@ -65,7 +65,7 @@ class PaymentApprovalService
         } catch (\Throwable $e) {
             error_log(sprintf('[PaymentApprovalService] provisioning_failed payment_id=%d order_id=%d message="%s"', $payment->getId(), $order->getId(), $e->getMessage()));
 
-            return new PaymentApprovalResult(false, false, 'عملیات روی پنل انجام نشد. لاگ را بررسی کنید.');
+            return new PaymentApprovalResult(false, false, 'ساخت کاربر در پنل انجام نشد. لاگ را بررسی کنید.');
         }
 
         $this->entityManager->flush();

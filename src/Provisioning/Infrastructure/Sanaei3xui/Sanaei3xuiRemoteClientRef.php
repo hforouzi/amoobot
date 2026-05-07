@@ -12,6 +12,7 @@ final class Sanaei3xuiRemoteClientRef
         public readonly string $email,
         public readonly ?int $panelId = null,
         public readonly ?int $localInboundId = null,
+        public readonly ?string $subId = null,
     ) {
     }
 }

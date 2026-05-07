@@ -239,6 +239,15 @@ php bin/console app:panel:test-create-client 3
 - Some 3x-ui versions may return empty responses for `addClient`/`updateClient`.
 - The driver logs this safely and handles it as a warning path where applicable.
 
+### Troubleshooting addClient failures
+If `test login` works but provisioning still fails on `addClient`:
+- verify `remoteInboundId` is correct and mapped to the intended inbound
+- verify inbound is enabled on panel
+- verify payload compatibility with protocol (`vless`/`vmess`)
+- `trojan` client creation is not implemented yet in Phase 1.3
+- check for empty response behavior from your 3x-ui build
+- inspect safe diagnostics in logs: `var/log/dev.log`
+
 ## Reply Keyboard vs Inline Keyboard
 - **Reply Keyboard (persistent):** used for primary navigation at the bottom of Telegram chat.
   - `🛒 خرید سرویس`

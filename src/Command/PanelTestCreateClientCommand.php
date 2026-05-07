@@ -5,7 +5,8 @@ declare(strict_types=1);
 namespace App\Command;
 
 use App\Entity\VpnInbound;
-use App\Provisioning\Infrastructure\Sanaei3xui\Sanaei3xuiApiClient;
+use App\Provisioning\Domain\Dto\CreateVpnServiceRequest;
+use App\Provisioning\Infrastructure\VpnPanelDriverRegistry;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
@@ -13,14 +14,12 @@ use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Style\SymfonyStyle;
-use Symfony\Component\Uid\Uuid;
-
 #[AsCommand(name: 'app:panel:test-create-client', description: 'Create a test client on a Sanaei/3x-ui inbound')]
 final class PanelTestCreateClientCommand extends Command
 {
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
-        private readonly Sanaei3xuiApiClient $apiClient,
+        private readonly VpnPanelDriverRegistry $driverRegistry,
     ) {
         parent::__construct();
     }
@@ -54,37 +53,43 @@ final class PanelTestCreateClientCommand extends Command
             return Command::FAILURE;
         }
 
-        $config = is_array($panel->getConfig()) ? $panel->getConfig() : [];
-        $email = sprintf('test_amoobot_%d_%d', time(), random_int(1000, 9999));
-        $client = [
-            'id' => Uuid::v4()->toRfc4122(),
-            'flow' => (string) ($config['default_flow'] ?? ''),
-            'email' => $email,
-            'limitIp' => 0,
-            'totalGB' => 5 * 1073741824,
-            'expiryTime' => (new \DateTimeImmutable('+3 days'))->getTimestamp() * 1000,
-            'enable' => true,
-            'tgId' => '',
-            'subId' => bin2hex(random_bytes(8)),
-            'reset' => 0,
-            'security' => (string) ($inbound->getSecurity() ?? 'reality'),
-            'network' => (string) ($inbound->getNetwork() ?? 'tcp'),
-        ];
+        $driver = $this->driverRegistry->resolve($panel);
+        $username = sprintf('test_amoobot_%d', time());
+        $trafficGb = 1;
+        $durationDays = 1;
 
-        $result = $this->apiClient->addClient($panel, $inbound->getRemoteInboundId(), $client);
-        if (($result['ok'] ?? false) !== true) {
-            $io->error('Test addClient failed.');
+        $io->section('Safe diagnostics');
+        $io->listing([
+            sprintf('panelId: %d', $panel->getId() ?? 0),
+            sprintf('localInboundId: %d', $inbound->getId() ?? 0),
+            sprintf('remoteInboundId: %s', $inbound->getRemoteInboundId()),
+            sprintf('protocol: %s', $inbound->getProtocol() ?? ''),
+            sprintf('network: %s', $inbound->getNetwork() ?? ''),
+            sprintf('security: %s', $inbound->getSecurity() ?? ''),
+            sprintf('username/email: %s', $username),
+            sprintf('trafficGb: %d', $trafficGb),
+            sprintf('durationDays: %d', $durationDays),
+        ]);
+
+        try {
+            $created = $driver->createService(new CreateVpnServiceRequest(
+                username: $username,
+                durationDays: $durationDays,
+                trafficLimitGb: $trafficGb,
+                inbound: $inbound,
+                remoteInboundId: $inbound->getRemoteInboundId(),
+                meta: ['test' => true],
+            ), $panel);
+        } catch (\Throwable $e) {
+            $io->error(sprintf('Test client creation failed: %s', $e->getMessage()));
 
             return Command::FAILURE;
         }
 
-        if (($result['empty'] ?? false) === true) {
-            $io->warning(sprintf('Client add request sent and response was empty (email: %s).', $email));
-
-            return Command::SUCCESS;
-        }
-
-        $io->success(sprintf('Test client created (email: %s).', $email));
+        $io->success('Test client created successfully.');
+        $io->writeln(sprintf('remoteId: %s', $created->remoteId));
+        $io->writeln(sprintf('username: %s', $created->username));
+        $io->writeln(sprintf('subscriptionUrl: %s', $created->subscriptionUrl ?? 'null'));
 
         return Command::SUCCESS;
     }
