@@ -126,6 +126,44 @@ class TelegramKeyboardFactory
     /**
      * @return array<string, array<array<array<string, string>>>>
      */
+    public function paymentMethodSelectionMenu(int $planId): array
+    {
+        return [
+            'inline_keyboard' => [
+                [[
+                    'text' => '💳 کارت به کارت',
+                    'callback_data' => 'select_payment_method:'.$planId.':manual_card',
+                ]],
+                [[
+                    'text' => '🔙 بازگشت به پلنها',
+                    'callback_data' => 'buy_service',
+                ]],
+            ],
+        ];
+    }
+
+    /**
+     * @return array<string, array<array<array<string, string>>>>
+     */
+    public function paymentActionMenu(int $paymentId): array
+    {
+        return [
+            'inline_keyboard' => [
+                [[
+                    'text' => '✅ تایید و ارسال رسید',
+                    'callback_data' => 'payment_submit_receipt:'.$paymentId,
+                ]],
+                [[
+                    'text' => '❌ انصراف',
+                    'callback_data' => 'payment_cancel:'.$paymentId,
+                ]],
+            ],
+        ];
+    }
+
+    /**
+     * @return array<string, array<array<array<string, string>>>>
+     */
     public function adminPaymentActions(int $paymentId): array
     {
         return [

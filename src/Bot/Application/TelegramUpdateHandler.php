@@ -231,6 +231,24 @@ class TelegramUpdateHandler
             return;
         }
 
+        if (str_starts_with($data, 'select_payment_method:')) {
+            $this->handleSelectPaymentMethod($account, $chatId, $data, $callbackId);
+
+            return;
+        }
+
+        if (str_starts_with($data, 'payment_submit_receipt:')) {
+            $this->handlePaymentSubmitReceipt($account, $chatId, (int) str_replace('payment_submit_receipt:', '', $data), $callbackId);
+
+            return;
+        }
+
+        if (str_starts_with($data, 'payment_cancel:')) {
+            $this->handlePaymentCancel($account, $chatId, (int) str_replace('payment_cancel:', '', $data), $callbackId);
+
+            return;
+        }
+
         if ('support' === $data) {
             $this->handleSupport($chatId, $callbackId);
 
@@ -279,6 +297,35 @@ class TelegramUpdateHandler
             return;
         }
 
+        $this->acknowledgeCallback($callbackId);
+        $this->telegramApiClient->sendMessage($chatId, 'لطفاً روش پرداخت را انتخاب کنید:', $this->keyboardFactory->paymentMethodSelectionMenu($planId));
+    }
+
+    private function handleSelectPaymentMethod(TelegramAccount $account, string $chatId, string $data, ?string $callbackId = null): void
+    {
+        $parts = explode(':', $data);
+        if (3 !== count($parts)) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'روش پرداخت نامعتبر است.', 'popup_invalid_payment_method_callback');
+
+            return;
+        }
+
+        $planId = (int) $parts[1];
+        $paymentMethod = $parts[2];
+
+        if ('manual_card' !== $paymentMethod) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'روش پرداخت نامعتبر است.', 'popup_invalid_payment_method');
+
+            return;
+        }
+
+        $plan = $this->entityManager->getRepository(Plan::class)->find($planId);
+        if (!$plan instanceof Plan || !$plan->isActive()) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'این پلن دیگر فعال نیست یا وجود ندارد.', 'popup_invalid_plan_select_payment_method');
+
+            return;
+        }
+
         $order = (new Order())
             ->setUser($account->getUser())
             ->setPlan($plan)
@@ -287,7 +334,7 @@ class TelegramUpdateHandler
 
         $payment = (new Payment())
             ->setOrder($order)
-            ->setMethod('manual_card')
+            ->setMethod($paymentMethod)
             ->setAmount($plan->getPrice())
             ->setStatus(PaymentStatus::PENDING);
 
@@ -300,7 +347,7 @@ class TelegramUpdateHandler
         $description = $this->settingValueProvider->get('payment.description', $this->paymentDescription);
 
         $message = sprintf(
-            "پلن: %s\nمبلغ: %d تومان\nشماره کارت: %s\nبه نام: %s\n%s\n\nلطفا تصویر رسید یا کد پیگیری را ارسال کنید.",
+            "پلن: %s\nمبلغ: %d تومان\nشماره کارت: %s\nبه نام: %s\n%s",
             $plan->getTitle(),
             $plan->getPrice(),
             $cardNumber ?: '-',
@@ -309,7 +356,62 @@ class TelegramUpdateHandler
         );
 
         $this->acknowledgeCallback($callbackId);
-        $this->telegramApiClient->sendMessage($chatId, trim($message), $this->keyboardFactory->paymentInstructionsMenu());
+        $this->telegramApiClient->sendMessage($chatId, trim($message), $this->keyboardFactory->paymentActionMenu((int) $payment->getId()));
+    }
+
+    private function handlePaymentSubmitReceipt(TelegramAccount $account, string $chatId, int $paymentId, string $callbackId): void
+    {
+        $payment = $this->entityManager->getRepository(Payment::class)->find($paymentId);
+        if (!$payment instanceof Payment) {
+            $this->showPopupOrMessage($chatId, $callbackId, BotTexts::ADMIN_PAYMENT_NOT_FOUND, 'popup_payment_submit_receipt_not_found');
+
+            return;
+        }
+
+        if ($payment->getOrder()->getUser()->getId() !== $account->getUser()->getId()) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'دسترسی غیرمجاز.', 'popup_payment_submit_receipt_unauthorized');
+
+            return;
+        }
+
+        if (!in_array($payment->getStatus(), [PaymentStatus::PENDING, PaymentStatus::SUBMITTED], true)) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'امکان ارسال رسید برای این پرداخت وجود ندارد.', 'popup_payment_submit_receipt_invalid_status');
+
+            return;
+        }
+
+        $payment->getOrder()->setStatus(OrderStatus::WAITING_PAYMENT);
+        $this->entityManager->flush();
+
+        $this->telegramApiClient->answerCallbackQuery($callbackId, 'لطفاً تصویر رسید یا کد پیگیری را در همین چت ارسال کنید.', true);
+    }
+
+    private function handlePaymentCancel(TelegramAccount $account, string $chatId, int $paymentId, string $callbackId): void
+    {
+        $payment = $this->entityManager->getRepository(Payment::class)->find($paymentId);
+        if (!$payment instanceof Payment) {
+            $this->showPopupOrMessage($chatId, $callbackId, BotTexts::ADMIN_PAYMENT_NOT_FOUND, 'popup_payment_cancel_not_found');
+
+            return;
+        }
+
+        if ($payment->getOrder()->getUser()->getId() !== $account->getUser()->getId()) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'دسترسی غیرمجاز.', 'popup_payment_cancel_unauthorized');
+
+            return;
+        }
+
+        if (in_array($payment->getStatus(), [PaymentStatus::SUBMITTED, PaymentStatus::CONFIRMED, PaymentStatus::REJECTED], true)) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'امکان لغو این پرداخت وجود ندارد.', 'popup_payment_cancel_not_allowed');
+
+            return;
+        }
+
+        $payment->setStatus(PaymentStatus::REJECTED);
+        $payment->getOrder()->setStatus(OrderStatus::CANCELLED);
+        $this->entityManager->flush();
+
+        $this->telegramApiClient->answerCallbackQuery($callbackId, 'پرداخت لغو شد.', true);
     }
 
     private function handleMyServices(TelegramAccount $account, string $chatId, ?string $callbackId = null): void

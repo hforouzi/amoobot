@@ -114,12 +114,13 @@ Webhook endpoint:
 2. Bot auto-registers TelegramAccount/User and shows main menu.
 3. User clicks `🛒 خرید سرویس` and sees active plans.
 4. User selects plan (`select_plan:{id}`).
-5. Bot creates Order + Payment and sends manual card-to-card instructions.
-6. User sends receipt photo or tracking text.
-7. Payment becomes `submitted`, admin sees it in `/admin`.
-8. Admin confirms payment via `Confirm Payment` action.
-9. System provisions via `DummyVpnPanelDriver` and sends subscription/config to user.
-10. User can view non-deleted services from `📦 سرویسهای من`.
+5. Bot shows payment method selection (`select_payment_method:{planId}:manual_card`).
+6. User selects `💳 کارت به کارت`; bot creates Order + Payment and sends payment instructions.
+7. User taps `✅ تایید و ارسال رسید` (`payment_submit_receipt:{paymentId}`) and then sends receipt photo or tracking text in chat.
+8. Payment becomes `submitted`, admin sees it in `/admin`.
+9. Admin confirms payment via `Confirm Payment` action.
+10. System provisions via `DummyVpnPanelDriver` and sends subscription/config to user.
+11. User can view non-deleted services from `📦 سرویسهای من`.
 
 ## Confirm/Reject Payment
 In `/admin` -> Payments, use actions:
