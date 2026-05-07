@@ -100,4 +100,3 @@ final class PaymentTestProvisionCommand extends Command
         return Command::SUCCESS;
     }
 }
-

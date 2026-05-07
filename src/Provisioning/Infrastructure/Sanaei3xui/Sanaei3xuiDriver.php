@@ -364,7 +364,7 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
     {
         $normalized = strtolower(trim($protocol));
         if ('trojan' === $normalized) {
-            throw new \RuntimeException('Trojan protocol is not currently supported. Please use VLESS or VMESS inbounds.');
+            throw new \RuntimeException('Trojan protocol is not currently supported. Please use VLESS or VMess inbounds.');
         }
 
         $client = [
