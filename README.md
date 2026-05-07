@@ -119,7 +119,7 @@ Webhook endpoint:
 7. Payment becomes `submitted`, admin sees it in `/admin`.
 8. Admin confirms payment via `Confirm Payment` action.
 9. System provisions via `DummyVpnPanelDriver` and sends subscription/config to user.
-10. User can view active services from `📦 سرویسهای من`.
+10. User can view non-deleted services from `📦 سرویسهای من`.
 
 ## Confirm/Reject Payment
 In `/admin` -> Payments, use actions:
@@ -161,7 +161,7 @@ In `/admin` -> Payments, use actions:
 - Real panel synchronization/drivers (x-ui/3x-ui/MikroTik/WG APIs) are intentionally postponed to next phase.
 
 ## User Service Actions
-- `my_services`: shows latest active services as inline buttons.
+- `my_services`: shows latest non-deleted services as inline buttons.
 - `service_view:{id}`: shows service detail page with status, expiry, traffic, subscription, and config preview.
 - `service_subscription:{id}`: sends subscription link in a separate Telegram message.
 - `service_resend_config:{id}`: re-sends config and service summary.
@@ -169,7 +169,7 @@ In `/admin` -> Payments, use actions:
 - Users can access only their own services.
 
 ## Admin Service Actions
-- `admin_services`: lists latest services with admin detail entry buttons.
+- `admin_services`: lists latest non-deleted services with admin detail entry buttons.
 - `admin_service_view:{id}`: shows full service details and management actions.
 - `service_suspend:{id}` / `service_activate:{id}`
 - `service_delete:{id}` now opens a confirmation step and deletion is finalized by `service_delete_confirm:{id}`.
@@ -207,7 +207,7 @@ In `/admin` -> Payments, use actions:
 ## Popup Alerts
 - Bot uses Telegram popup alerts (`answerCallbackQuery` with `show_alert=true`) for inline callback warnings, including:
   - no active plans
-  - no active services
+  - no services
   - empty admin lists
   - invalid/inactive plan
   - already processed payment

@@ -23,13 +23,23 @@ class ServiceManagementService
 
     public function handleMyServices(TelegramAccount $account, string $chatId, ?string $callbackId = null): void
     {
-        $services = $this->entityManager->getRepository(VpnService::class)->findBy([
-            'user' => $account->getUser(),
-            'status' => VpnServiceStatus::ACTIVE,
-        ], ['id' => 'DESC'], 10);
+        $services = $this->entityManager->getRepository(VpnService::class)
+            ->createQueryBuilder('service')
+            ->andWhere('service.user = :user')
+            ->andWhere('service.status IN (:statuses)')
+            ->setParameter('user', $account->getUser())
+            ->setParameter('statuses', [
+                VpnServiceStatus::ACTIVE,
+                VpnServiceStatus::SUSPENDED,
+                VpnServiceStatus::EXPIRED,
+            ])
+            ->orderBy('service.id', 'DESC')
+            ->setMaxResults(10)
+            ->getQuery()
+            ->getResult();
 
         if ([] === $services) {
-            $this->showPopupOrMessage($chatId, $callbackId, 'شما در حال حاضر سرویس فعالی ندارید.', 'popup_no_active_services');
+            $this->showPopupOrMessage($chatId, $callbackId, 'شما در حال حاضر سرویسی ندارید.', 'popup_no_services_user');
 
             return;
         }
@@ -40,12 +50,19 @@ class ServiceManagementService
         }
 
         $this->acknowledgeCallback($callbackId);
-        $this->telegramApiClient->sendMessage($chatId, 'سرویس‌های فعال شما:', $this->keyboardFactory->userServicesList($serviceIds));
+        $this->telegramApiClient->sendMessage($chatId, 'سرویس‌های شما:', $this->keyboardFactory->userServicesList($serviceIds));
     }
 
     public function handleAdminServices(string $chatId, ?string $callbackId = null): void
     {
-        $services = $this->entityManager->getRepository(VpnService::class)->findBy([], ['id' => 'DESC'], 10);
+        $services = $this->entityManager->getRepository(VpnService::class)
+            ->createQueryBuilder('service')
+            ->andWhere('service.status != :deletedStatus')
+            ->setParameter('deletedStatus', VpnServiceStatus::DELETED)
+            ->orderBy('service.id', 'DESC')
+            ->setMaxResults(10)
+            ->getQuery()
+            ->getResult();
 
         if ([] === $services) {
             $this->showPopupOrMessage($chatId, $callbackId, 'سرویسی برای نمایش وجود ندارد.', 'popup_no_services');
@@ -73,6 +90,12 @@ class ServiceManagementService
 
         if ($service->getUser()->getId() !== $account->getUser()->getId()) {
             $this->showPopupOrMessage($chatId, $callbackId, 'دسترسی غیرمجاز.', 'unauthorized_service_access_user');
+
+            return;
+        }
+
+        if (VpnServiceStatus::DELETED === $service->getStatus()) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'سرویس معتبر نیست.', 'deleted_service_view_user_blocked');
 
             return;
         }
@@ -412,7 +435,16 @@ class ServiceManagementService
             return;
         }
 
-        $services = $this->entityManager->getRepository(VpnService::class)->findBy(['user' => $user], ['id' => 'DESC'], 10);
+        $services = $this->entityManager->getRepository(VpnService::class)
+            ->createQueryBuilder('service')
+            ->andWhere('service.user = :user')
+            ->andWhere('service.status != :deletedStatus')
+            ->setParameter('user', $user)
+            ->setParameter('deletedStatus', VpnServiceStatus::DELETED)
+            ->orderBy('service.id', 'DESC')
+            ->setMaxResults(10)
+            ->getQuery()
+            ->getResult();
         if ([] === $services) {
             $this->showPopupOrMessage($chatId, $callbackId, 'سرویسی برای این کاربر وجود ندارد.', 'empty_admin_user_services');
 
