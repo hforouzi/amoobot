@@ -51,4 +51,46 @@ class TelegramKeyboardFactory
 
         return ['inline_keyboard' => $rows];
     }
+
+    /**
+     * @return array<string, array<array<array<string, string>>>>
+     */
+    public function backToMainMenu(): array
+    {
+        return [
+            'inline_keyboard' => [[
+                ['text' => '⬅️ منوی اصلی', 'callback_data' => 'main_menu'],
+            ]],
+        ];
+    }
+
+    /**
+     * @return array<string, array<array<array<string, string>>>>
+     */
+    public function paymentInstructionsMenu(): array
+    {
+        return [
+            'inline_keyboard' => [
+                [
+                    ['text' => '⬅️ بازگشت به پلن‌ها', 'callback_data' => 'buy_service'],
+                ],
+                [
+                    ['text' => '🏠 منوی اصلی', 'callback_data' => 'main_menu'],
+                ],
+            ],
+        ];
+    }
+
+    /**
+     * @return array<string, array<array<array<string, string>>>>
+     */
+    public function adminPaymentActions(int $paymentId): array
+    {
+        return [
+            'inline_keyboard' => [[
+                ['text' => '✅ تایید پرداخت', 'callback_data' => 'admin_confirm_payment:'.$paymentId],
+                ['text' => '❌ رد پرداخت', 'callback_data' => 'admin_reject_payment:'.$paymentId],
+            ]],
+        ];
+    }
 }

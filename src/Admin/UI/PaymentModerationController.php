@@ -6,7 +6,6 @@ namespace App\Admin\UI;
 
 use App\Entity\Payment;
 use App\Payment\Application\PaymentConfirmationService;
-use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\RedirectResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -18,8 +17,8 @@ class PaymentModerationController extends AbstractController
     #[Route('/{id}/confirm', name: 'admin_payment_confirm', methods: ['GET'])]
     public function confirm(Payment $payment, PaymentConfirmationService $confirmationService): RedirectResponse
     {
-        $confirmationService->confirm($payment);
-        $this->addFlash('success', 'Payment confirmed and service provisioned.');
+        $result = $confirmationService->confirm($payment);
+        $this->addFlash($result->alreadyProcessed ? 'info' : 'success', $result->message);
 
         return $this->redirectToRoute('admin', [
             'crudAction' => 'index',
@@ -28,12 +27,11 @@ class PaymentModerationController extends AbstractController
     }
 
     #[Route('/{id}/reject', name: 'admin_payment_reject', methods: ['GET'])]
-    public function reject(Payment $payment, Request $request, PaymentConfirmationService $confirmationService, EntityManagerInterface $entityManager): RedirectResponse
+    public function reject(Payment $payment, Request $request, PaymentConfirmationService $confirmationService): RedirectResponse
     {
         $note = $request->request->get('note');
-        $confirmationService->reject($payment, is_string($note) ? $note : null);
-        $entityManager->flush();
-        $this->addFlash('warning', 'Payment rejected.');
+        $result = $confirmationService->reject($payment, is_string($note) ? $note : null);
+        $this->addFlash($result->alreadyProcessed ? 'info' : 'warning', $result->message);
 
         return $this->redirectToRoute('admin', [
             'crudAction' => 'index',

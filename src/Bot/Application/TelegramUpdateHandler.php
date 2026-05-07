@@ -10,6 +10,7 @@ use App\Entity\Payment;
 use App\Entity\Plan;
 use App\Entity\TelegramAccount;
 use App\Entity\VpnService;
+use App\Payment\Application\PaymentConfirmationService;
 use App\Payment\Domain\PaymentStatus;
 use App\Provisioning\Domain\VpnServiceStatus;
 use App\Shared\Infrastructure\SettingValueProvider;
@@ -23,6 +24,7 @@ class TelegramUpdateHandler
         private readonly TelegramApiClient $telegramApiClient,
         private readonly TelegramKeyboardFactory $keyboardFactory,
         private readonly EntityManagerInterface $entityManager,
+        private readonly PaymentConfirmationService $paymentConfirmationService,
         private readonly SettingValueProvider $settingValueProvider,
         private readonly ?string $adminChatId = null,
         private readonly string $paymentCardNumber = '',
@@ -97,7 +99,7 @@ class TelegramUpdateHandler
             return;
         }
 
-        $this->telegramApiClient->sendMessage($chatId, BotTexts::WELCOME, $this->keyboardFactory->mainMenu());
+        $this->telegramApiClient->sendMessage($chatId, BotTexts::UNKNOWN_COMMAND, $this->keyboardFactory->mainMenu());
     }
 
     private function handleCallbackQuery(array $callbackQuery): void
@@ -111,11 +113,17 @@ class TelegramUpdateHandler
             return;
         }
 
+        if (str_starts_with($data, 'admin_confirm_payment:') || str_starts_with($data, 'admin_reject_payment:')) {
+            $this->handleAdminPaymentCallback($callbackId, $chatId, $data);
+
+            return;
+        }
+
         $account = $this->telegramUserResolver->resolveFromTelegramUser($telegramUser);
         $this->telegramApiClient->answerCallbackQuery($callbackId);
 
         if ('main_menu' === $data) {
-            $this->telegramApiClient->sendMessage($chatId, 'منوی اصلی:', $this->keyboardFactory->mainMenu());
+            $this->telegramApiClient->sendMessage($chatId, BotTexts::MAIN_MENU, $this->keyboardFactory->mainMenu());
 
             return;
         }
@@ -140,7 +148,7 @@ class TelegramUpdateHandler
             ], ['id' => 'DESC']);
 
             if ([] === $services) {
-                $this->telegramApiClient->sendMessage($chatId, BotTexts::NO_SERVICES, $this->keyboardFactory->mainMenu());
+                $this->telegramApiClient->sendMessage($chatId, BotTexts::NO_SERVICES, $this->keyboardFactory->backToMainMenu());
 
                 return;
             }
@@ -154,13 +162,13 @@ class TelegramUpdateHandler
                 );
             }
 
-            $this->telegramApiClient->sendMessage($chatId, trim($text), $this->keyboardFactory->mainMenu());
+            $this->telegramApiClient->sendMessage($chatId, trim($text), $this->keyboardFactory->backToMainMenu());
 
             return;
         }
 
         if ('support' === $data) {
-            $this->telegramApiClient->sendMessage($chatId, BotTexts::SUPPORT, $this->keyboardFactory->mainMenu());
+            $this->telegramApiClient->sendMessage($chatId, BotTexts::SUPPORT, $this->keyboardFactory->backToMainMenu());
 
             return;
         }
@@ -169,7 +177,7 @@ class TelegramUpdateHandler
             $planId = (int) str_replace('select_plan:', '', $data);
             $plan = $this->entityManager->getRepository(Plan::class)->find($planId);
             if (!$plan instanceof Plan || !$plan->isActive()) {
-                $this->telegramApiClient->sendMessage($chatId, 'پلن انتخاب شده معتبر نیست.', $this->keyboardFactory->mainMenu());
+                $this->telegramApiClient->sendMessage($chatId, BotTexts::INVALID_PLAN, $this->keyboardFactory->mainMenu());
 
                 return;
             }
@@ -203,8 +211,12 @@ class TelegramUpdateHandler
                 $description ? 'توضیحات: '.$description : ''
             );
 
-            $this->telegramApiClient->sendMessage($chatId, trim($message), $this->keyboardFactory->mainMenu());
+            $this->telegramApiClient->sendMessage($chatId, trim($message), $this->keyboardFactory->paymentInstructionsMenu());
+
+            return;
         }
+
+        $this->telegramApiClient->sendMessage($chatId, BotTexts::UNKNOWN_COMMAND, $this->keyboardFactory->mainMenu());
     }
 
     private function findOpenPayment(TelegramAccount $account): ?Payment
@@ -230,13 +242,60 @@ class TelegramUpdateHandler
             return;
         }
 
+        $order = $payment->getOrder();
+        $telegramAccount = $this->entityManager->getRepository(TelegramAccount::class)->findOneBy(['user' => $order->getUser()]);
+        $username = $telegramAccount?->getUsername();
+        $telegramId = $telegramAccount?->getTelegramId() ?? '-';
+        $receiptInfo = 'tracking_code' === $kind
+            ? ($payment->getTrackingCode() ?: $payment->getReceiptMessage() ?: '-')
+            : ('file_id: '.($payment->getReceiptFileId() ?: '-'));
+
         $message = sprintf(
-            "پرداخت جدید ثبت شد\nPayment #%d\nOrder #%d\nنوع: %s",
+            "پرداخت جدید ثبت شد\n\nPayment ID: %d\nOrder ID: %d\nUser: @%s / %s\nPlan: %s\nAmount: %d تومان\nReceipt: %s",
             $payment->getId(),
-            $payment->getOrder()->getId(),
-            $kind
+            $order->getId(),
+            $username ?: '-',
+            $telegramId,
+            $order->getPlan()->getTitle(),
+            $payment->getAmount(),
+            $receiptInfo
         );
 
-        $this->telegramApiClient->sendMessage($this->adminChatId, $message);
+        $this->telegramApiClient->sendMessage($this->adminChatId, $message, $this->keyboardFactory->adminPaymentActions((int) $payment->getId()));
+    }
+
+    private function handleAdminPaymentCallback(string $callbackId, string $chatId, string $data): void
+    {
+        if (null === $this->adminChatId || '' === trim($this->adminChatId) || $chatId !== trim($this->adminChatId)) {
+            $this->telegramApiClient->answerCallbackQuery($callbackId, BotTexts::ADMIN_UNAUTHORIZED);
+
+            return;
+        }
+
+        $this->telegramApiClient->answerCallbackQuery($callbackId);
+
+        $paymentId = (int) substr($data, strrpos($data, ':') + 1);
+        $payment = $this->entityManager->getRepository(Payment::class)->find($paymentId);
+        if (!$payment instanceof Payment) {
+            $this->telegramApiClient->sendMessage($chatId, BotTexts::ADMIN_PAYMENT_NOT_FOUND);
+
+            return;
+        }
+
+        if (str_starts_with($data, 'admin_confirm_payment:')) {
+            $result = $this->paymentConfirmationService->confirm($payment);
+            $this->telegramApiClient->sendMessage(
+                $chatId,
+                $result->alreadyProcessed ? BotTexts::ADMIN_PAYMENT_ALREADY_PROCESSED : BotTexts::ADMIN_PAYMENT_CONFIRMED
+            );
+
+            return;
+        }
+
+        $result = $this->paymentConfirmationService->reject($payment);
+        $this->telegramApiClient->sendMessage(
+            $chatId,
+            $result->alreadyProcessed ? BotTexts::ADMIN_PAYMENT_ALREADY_PROCESSED : BotTexts::ADMIN_PAYMENT_REJECTED
+        );
     }
 }

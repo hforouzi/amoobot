@@ -125,6 +125,23 @@ In `/admin` -> Payments, use actions:
 - `Confirm Payment` -> marks payment confirmed, order paid/provisioned, creates VPN service, notifies user.
 - `Reject Payment` -> marks payment rejected and notifies user.
 
+## Admin approval from Telegram
+- Set `TELEGRAM_ADMIN_CHAT_ID` in `.env.local` to the admin Telegram chat ID.
+- After a user submits receipt photo/tracking text, bot sends admin a Telegram message with:
+  - Payment ID
+  - Order ID
+  - User username/telegram ID
+  - Plan title
+  - Amount
+  - Receipt/tracking info
+- Admin receives inline buttons in Telegram:
+  - `✅ تایید پرداخت`
+  - `❌ رد پرداخت`
+- Callback security:
+  - Only `TELEGRAM_ADMIN_CHAT_ID` can execute admin confirm/reject callbacks.
+  - Other users receive `Unauthorized`.
+- Telegram admin approval reuses the same payment confirmation/rejection business logic as EasyAdmin.
+
 ## Commands
 - `app:telegram:set-webhook {baseUrl}`
 - `app:telegram:delete-webhook`
