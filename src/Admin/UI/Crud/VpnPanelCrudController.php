@@ -4,11 +4,12 @@ declare(strict_types=1);
 
 namespace App\Admin\UI\Crud;
 
+use App\Admin\Form\Type\JsonTextareaType;
+use App\Admin\UI\Crud\Support\JsonFieldFormatter;
 use App\Entity\VpnPanel;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Action;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Actions;
 use EasyCorp\Bundle\EasyAdminBundle\Controller\AbstractCrudController;
-use EasyCorp\Bundle\EasyAdminBundle\Field\ArrayField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\BooleanField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\ChoiceField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\DateTimeField;
@@ -71,7 +72,11 @@ TEXT;
             TextField::new('username'),
             TextField::new('password')->hideOnIndex(),
             TextareaField::new('apiToken')->hideOnIndex(),
-            ArrayField::new('config')->setHelp(self::CONFIG_HELP_TEXT),
+            TextareaField::new('config')
+                ->setFormType(JsonTextareaType::class)
+                ->formatValue(static fn (mixed $value): string => JsonFieldFormatter::format($value))
+                ->setFormTypeOption('attr.rows', 18)
+                ->setHelp(self::CONFIG_HELP_TEXT),
             BooleanField::new('isActive'),
             DateTimeField::new('createdAt')->hideOnForm(),
             DateTimeField::new('updatedAt')->hideOnForm(),
