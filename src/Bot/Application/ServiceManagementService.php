@@ -304,8 +304,9 @@ class ServiceManagementService
         }
 
         $base = $service->getExpiresAt();
-        if (!$base instanceof \DateTimeImmutable || $base < new \DateTimeImmutable()) {
-            $base = new \DateTimeImmutable();
+        $now = new \DateTimeImmutable();
+        if (!$base instanceof \DateTimeImmutable || $base < $now) {
+            $base = $now;
         }
 
         $service
@@ -353,7 +354,7 @@ class ServiceManagementService
         $this->showAdminServiceDetail($serviceId, $chatId, '');
     }
 
-    public function showAdminUserDetail(int $userId, string $chatId, string $callbackId): void
+    public function showAdminUserDetail(int $userId, string $chatId, string $callbackId, ?int $backServiceId = null): void
     {
         $user = $this->entityManager->getRepository(User::class)->find($userId);
         if (!$user instanceof User) {
@@ -367,7 +368,7 @@ class ServiceManagementService
         $serviceCount = $this->entityManager->getRepository(VpnService::class)->count(['user' => $user]);
 
         $text = sprintf(
-            "کاربر #%d\nUsername: @%s\nTelegram ID: %s\nTotal orders: %d\nTotal services: %d\nLast activity: %s",
+            "کاربر #%d\nUsername: @%s\nTelegram ID: %s\nتعداد سفارشها: %d\nتعداد سرویسها: %d\nآخرین فعالیت: %s",
             $userId,
             $telegram?->getUsername() ?: '-',
             $telegram?->getTelegramId() ?: '-',
@@ -377,10 +378,10 @@ class ServiceManagementService
         );
 
         $this->acknowledgeCallback($callbackId);
-        $this->telegramApiClient->sendMessage($chatId, $text, $this->keyboardFactory->adminUserDetail($userId));
+        $this->telegramApiClient->sendMessage($chatId, $text, $this->keyboardFactory->adminUserDetail($userId, $backServiceId));
     }
 
-    public function showAdminUserServices(int $userId, string $chatId, string $callbackId): void
+    public function showAdminUserServices(int $userId, string $chatId, string $callbackId, ?int $backServiceId = null): void
     {
         $user = $this->entityManager->getRepository(User::class)->find($userId);
         if (!$user instanceof User) {
@@ -407,10 +408,10 @@ class ServiceManagementService
         }
 
         $this->acknowledgeCallback($callbackId);
-        $this->telegramApiClient->sendMessage($chatId, implode("\n", $lines), $this->keyboardFactory->adminUserDetail($userId));
+        $this->telegramApiClient->sendMessage($chatId, implode("\n", $lines), $this->keyboardFactory->adminUserDetail($userId, $backServiceId));
     }
 
-    public function showAdminUserOrders(int $userId, string $chatId, string $callbackId): void
+    public function showAdminUserOrders(int $userId, string $chatId, string $callbackId, ?int $backServiceId = null): void
     {
         $user = $this->entityManager->getRepository(User::class)->find($userId);
         if (!$user instanceof User) {
@@ -438,7 +439,7 @@ class ServiceManagementService
         }
 
         $this->acknowledgeCallback($callbackId);
-        $this->telegramApiClient->sendMessage($chatId, implode("\n", $lines), $this->keyboardFactory->adminUserDetail($userId));
+        $this->telegramApiClient->sendMessage($chatId, implode("\n", $lines), $this->keyboardFactory->adminUserDetail($userId, $backServiceId));
     }
 
     private function findServiceOrPopup(int $serviceId, string $chatId, ?string $callbackId, string $logKey): ?VpnService

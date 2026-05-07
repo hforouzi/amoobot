@@ -318,7 +318,7 @@ class TelegramKeyboardFactory
                 ]],
                 [[
                     'text' => '👤 مشاهده کاربر',
-                    'callback_data' => 'admin_user_view:'.$userId,
+                    'callback_data' => 'admin_user_view:'.$userId.':'.$serviceId,
                 ], [
                     'text' => '🔙 بازگشت',
                     'callback_data' => 'admin_services',
@@ -384,21 +384,24 @@ class TelegramKeyboardFactory
     /**
      * @return array<string, array<array<array<string, string>>>>
      */
-    public function adminUserDetail(int $userId): array
+    public function adminUserDetail(int $userId, ?int $backServiceId = null): array
     {
+        $suffix = null === $backServiceId ? '' : ':'.$backServiceId;
+        $backCallback = null === $backServiceId ? 'admin_services' : 'admin_service_view:'.$backServiceId;
+
         return [
             'inline_keyboard' => [
                 [[
                     'text' => '📦 سرویسهای کاربر',
-                    'callback_data' => 'admin_user_services:'.$userId,
+                    'callback_data' => 'admin_user_services:'.$userId.$suffix,
                 ]],
                 [[
                     'text' => '🧾 سفارشهای کاربر',
-                    'callback_data' => 'admin_user_orders:'.$userId,
+                    'callback_data' => 'admin_user_orders:'.$userId.$suffix,
                 ]],
                 [[
                     'text' => '🔙 بازگشت',
-                    'callback_data' => 'admin_services',
+                    'callback_data' => $backCallback,
                 ]],
             ],
         ];

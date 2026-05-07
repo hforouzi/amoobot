@@ -9,6 +9,8 @@ use App\Bot\Infrastructure\TelegramApiClient;
 
 final class ExtendServiceAction implements ServiceActionInterface
 {
+    private const EXTEND_CALLBACK_PARTS_COUNT = 3;
+
     public function __construct(
         private readonly ServiceManagementService $serviceManagementService,
         private readonly TelegramApiClient $telegramApiClient,
@@ -37,7 +39,7 @@ final class ExtendServiceAction implements ServiceActionInterface
         }
 
         $parts = explode(':', $context->data);
-        if (3 !== count($parts)) {
+        if (self::EXTEND_CALLBACK_PARTS_COUNT !== count($parts)) {
             $this->telegramApiClient->answerCallbackQuery($context->callbackId, 'عملیات نامعتبر است.', true);
 
             return;

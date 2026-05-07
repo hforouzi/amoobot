@@ -32,20 +32,33 @@ final class AdminUserViewAction implements ServiceActionInterface
         }
 
         if (str_starts_with($context->data, 'admin_user_services:')) {
-            $userId = (int) str_replace('admin_user_services:', '', $context->data);
-            $this->serviceManagementService->showAdminUserServices($userId, $context->chatId, $context->callbackId);
+            [$userId, $backServiceId] = $this->parseUserAndServiceIds($context->data, 'admin_user_services:');
+            $this->serviceManagementService->showAdminUserServices($userId, $context->chatId, $context->callbackId, $backServiceId);
 
             return;
         }
 
         if (str_starts_with($context->data, 'admin_user_orders:')) {
-            $userId = (int) str_replace('admin_user_orders:', '', $context->data);
-            $this->serviceManagementService->showAdminUserOrders($userId, $context->chatId, $context->callbackId);
+            [$userId, $backServiceId] = $this->parseUserAndServiceIds($context->data, 'admin_user_orders:');
+            $this->serviceManagementService->showAdminUserOrders($userId, $context->chatId, $context->callbackId, $backServiceId);
 
             return;
         }
 
-        $userId = (int) str_replace('admin_user_view:', '', $context->data);
-        $this->serviceManagementService->showAdminUserDetail($userId, $context->chatId, $context->callbackId);
+        [$userId, $backServiceId] = $this->parseUserAndServiceIds($context->data, 'admin_user_view:');
+        $this->serviceManagementService->showAdminUserDetail($userId, $context->chatId, $context->callbackId, $backServiceId);
+    }
+
+    /**
+     * @return array{int, ?int}
+     */
+    private function parseUserAndServiceIds(string $data, string $prefix): array
+    {
+        $raw = str_replace($prefix, '', $data);
+        $parts = explode(':', $raw);
+        $userId = (int) ($parts[0] ?? 0);
+        $backServiceId = isset($parts[1]) ? (int) $parts[1] : null;
+
+        return [$userId, $backServiceId > 0 ? $backServiceId : null];
     }
 }
