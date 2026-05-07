@@ -530,7 +530,7 @@ class TelegramUpdateHandler
             return;
         }
 
-        $result = $this->paymentConfirmationService->confirm($payment);
+        $result = $this->paymentConfirmationService->confirm($payment, 'telegram_payment_approval');
         $this->debugLog(sprintf(
             'admin_confirm_result payment_id=%d processed=%s already_processed=%s message="%s"',
             $paymentId,

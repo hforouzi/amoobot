@@ -22,7 +22,10 @@ class VpnProvisioningService
     ) {
     }
 
-    public function provisionOrder(Order $order): VpnService
+    /**
+     * @param array<string, scalar|null> $meta
+     */
+    public function provisionOrder(Order $order, array $meta = []): VpnService
     {
         $planInbound = $order->getPlan()->getInbound();
         if ($planInbound instanceof VpnInbound && !$planInbound->isActive()) {
@@ -38,16 +41,21 @@ class VpnProvisioningService
         $telegramId = $telegram?->getTelegramId() ?? (string) $order->getUser()->getId();
 
         $driver = $this->driverRegistry->resolve($panel);
+        $driverType = $panel?->getType() ?? 'dummy';
         $created = $driver->createService(new CreateVpnServiceRequest(
             username: sprintf('tg_%s_order_%d', $telegramId, $order->getId()),
             durationDays: $order->getPlan()->getDurationDays(),
             trafficLimitGb: $order->getPlan()->getTrafficGb(),
             inbound: $planInbound,
             remoteInboundId: $planInbound?->getRemoteInboundId(),
-            meta: [
+            meta: array_merge([
                 'orderId' => $order->getId(),
                 'telegramId' => $telegramId,
-            ],
+                'planId' => $order->getPlan()->getId(),
+                'planInboundId' => $planInbound?->getId(),
+                'panelId' => $panel?->getId(),
+                'driverType' => $driverType,
+            ], $meta),
         ), $panel);
 
         $vpnService = (new VpnService())

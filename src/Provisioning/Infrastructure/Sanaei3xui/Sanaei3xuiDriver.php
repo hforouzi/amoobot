@@ -63,6 +63,25 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
         $network = (string) ($inbound->getNetwork() ?? '');
         $security = (string) ($inbound->getSecurity() ?? '');
         $client = $this->buildClientPayload($protocol, $clientUuid, $email, $subId, $totalBytes, $expiryTime, $config);
+        $source = trim((string) ($request->meta['source'] ?? ''));
+        $orderId = (int) ($request->meta['orderId'] ?? 0);
+        $paymentId = (int) ($request->meta['paymentId'] ?? 0);
+        $planId = (int) ($request->meta['planId'] ?? 0);
+        $planInboundId = (int) ($request->meta['planInboundId'] ?? ($inbound->getId() ?? 0));
+        $driverType = trim((string) ($request->meta['driverType'] ?? $panel->getType()));
+
+        $this->log(sprintf(
+            'payment_approval_provision_context source="%s" order_id=%d payment_id=%d plan_id=%d plan_inbound_id=%d remote_inbound_id_raw="%s" remote_inbound_id_int=%d panel_id=%d driver_type="%s"',
+            $source,
+            $orderId,
+            $paymentId,
+            $planId,
+            $planInboundId,
+            $inboundIdRaw,
+            $inboundIdInt,
+            $panel->getId() ?? 0,
+            $driverType
+        ));
 
         $this->log(sprintf(
             'create_service_add_client_request panel_id=%s local_inbound_id=%s remote_inbound_id_raw="%s" remote_inbound_id_int=%d protocol="%s" network="%s" security="%s" uuid="%s" email="%s" total_gb_bytes=%d expiry_time=%d',

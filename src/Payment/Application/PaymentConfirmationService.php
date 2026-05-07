@@ -19,9 +19,9 @@ class PaymentConfirmationService
     ) {
     }
 
-    public function confirm(Payment $payment): PaymentApprovalResult
+    public function confirm(Payment $payment, string $source = 'payment_confirmation'): PaymentApprovalResult
     {
-        $result = $this->paymentApprovalService->confirm($payment);
+        $result = $this->paymentApprovalService->confirm($payment, $source);
         if ($result->processed) {
             $telegramAccount = $this->entityManager->getRepository(TelegramAccount::class)->findOneBy(['user' => $payment->getOrder()->getUser()]);
             if ($telegramAccount instanceof TelegramAccount) {

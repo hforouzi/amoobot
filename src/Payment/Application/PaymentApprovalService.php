@@ -19,10 +19,24 @@ class PaymentApprovalService
     ) {
     }
 
-    public function confirm(Payment $payment): PaymentApprovalResult
+    public function confirm(Payment $payment, string $source = 'payment_approval'): PaymentApprovalResult
     {
         $order = $payment->getOrder();
+        $plan = $order->getPlan();
+        $inbound = $plan->getInbound();
+        $panel = $inbound?->getPanel();
         $existingService = $this->entityManager->getRepository(VpnService::class)->findOneBy(['order' => $order]);
+
+        error_log(sprintf(
+            '[PaymentApprovalService] confirm_start source=%s payment_id=%d order_id=%d plan_id=%d plan_inbound_id=%d panel_id=%d panel_type="%s"',
+            $source,
+            $payment->getId() ?? 0,
+            $order->getId() ?? 0,
+            $plan->getId() ?? 0,
+            $inbound?->getId() ?? 0,
+            $panel?->getId() ?? 0,
+            (string) ($panel?->getType() ?? '')
+        ));
 
         if ($existingService instanceof VpnService) {
             if (PaymentStatus::CONFIRMED !== $payment->getStatus()) {
@@ -61,9 +75,26 @@ class PaymentApprovalService
         }
 
         try {
-            $vpnService = $this->vpnProvisioningService->provisionOrder($order);
+            $vpnService = $this->vpnProvisioningService->provisionOrder($order, [
+                'source' => $source,
+                'orderId' => $order->getId() ?? 0,
+                'paymentId' => $payment->getId() ?? 0,
+                'planId' => $plan->getId() ?? 0,
+                'planInboundId' => $inbound?->getId() ?? 0,
+                'panelId' => $panel?->getId() ?? 0,
+                'driverType' => (string) ($panel?->getType() ?? 'dummy'),
+            ]);
         } catch (\Throwable $e) {
-            error_log(sprintf('[PaymentApprovalService] provisioning_failed payment_id=%d order_id=%d message="%s"', $payment->getId(), $order->getId(), $e->getMessage()));
+            error_log(sprintf(
+                '[PaymentApprovalService] provisioning_failed source=%s payment_id=%d order_id=%d plan_id=%d plan_inbound_id=%d panel_id=%d message="%s"',
+                $source,
+                $payment->getId() ?? 0,
+                $order->getId() ?? 0,
+                $plan->getId() ?? 0,
+                $inbound?->getId() ?? 0,
+                $panel?->getId() ?? 0,
+                $e->getMessage()
+            ));
 
             return new PaymentApprovalResult(false, false, 'ساخت کاربر در پنل انجام نشد. لاگ را بررسی کنید.');
         }

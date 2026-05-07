@@ -17,7 +17,7 @@ class PaymentModerationController extends AbstractController
     #[Route('/{id}/confirm', name: 'admin_payment_confirm', methods: ['GET'])]
     public function confirm(Payment $payment, PaymentConfirmationService $confirmationService): RedirectResponse
     {
-        $result = $confirmationService->confirm($payment);
+        $result = $confirmationService->confirm($payment, 'easyadmin_payment_approval');
         if ($result->alreadyProcessed) {
             $this->addFlash('info', $result->message);
         } elseif ($result->processed) {
