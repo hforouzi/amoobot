@@ -67,7 +67,7 @@ class TelegramPollCommand extends Command
             }
         }
 
-        $io->writeln(sprintf('Polling started (limit=%d, timeout=%d, sleep=%s, once=%s).', $limit, $timeout, $input->getOption('sleep'), $once ? 'true' : 'false'));
+        $io->writeln(sprintf('Polling started (limit=%d, timeout=%d, sleep=%s, once=%s).', $limit, $timeout, (string) $sleepSeconds, $once ? 'true' : 'false'));
 
         do {
             try {

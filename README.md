@@ -128,7 +128,7 @@ In `/admin` -> Payments, use actions:
 ## Commands
 - `app:telegram:set-webhook {baseUrl}`
 - `app:telegram:delete-webhook`
-- `app:telegram:poll [--limit=20] [--timeout=25] [--sleep=1] [--once] [--drop-pending] [--no-delete-webhook]`
+- `app:telegram:poll [--limit=N] [--timeout=N] [--sleep=N] [--once] [--drop-pending] [--no-delete-webhook]` (defaults: limit=20, timeout=25, sleep=1)
 - `app:create-default-settings`
 - `app:create-sample-plans`
 
