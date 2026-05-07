@@ -338,7 +338,7 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
     {
         $normalized = strtolower(trim($protocol));
         if ('trojan' === $normalized) {
-            throw new \RuntimeException('Trojan client creation is not implemented yet.');
+            throw new \RuntimeException('Trojan client creation is not implemented yet in Phase 1.3. Use vless/vmess inbound for now.');
         }
 
         $client = [
