@@ -29,7 +29,10 @@ class TelegramApiClient
             $payload['reply_markup'] = $replyMarkup;
         }
 
-        $this->callApi('sendMessage', $payload);
+        try {
+            $this->callApi('sendMessage', $payload);
+        } catch (\Throwable) {
+        }
         $this->botMessageLogger->log(BotMessageDirection::OUTGOING, ['method' => 'sendMessage', 'payload' => $payload], $chatId, 'message');
     }
 
@@ -40,16 +43,66 @@ class TelegramApiClient
             $payload['text'] = $text;
         }
 
-        $this->callApi('answerCallbackQuery', $payload);
+        try {
+            $this->callApi('answerCallbackQuery', $payload);
+        } catch (\Throwable) {
+        }
     }
 
-    private function callApi(string $method, array $payload): void
+    public function getUpdates(?int $offset = null, int $limit = 20, int $timeout = 25): array
+    {
+        $payload = [
+            'limit' => $limit,
+            'timeout' => $timeout,
+        ];
+
+        if (null !== $offset) {
+            $payload['offset'] = $offset;
+        }
+
+        $data = $this->callApi('getUpdates', $payload);
+        $result = $data['result'] ?? [];
+
+        return is_array($result) ? $result : [];
+    }
+
+    public function deleteWebhook(bool $dropPendingUpdates = false): array
+    {
+        $payload = [];
+        if ($dropPendingUpdates) {
+            $payload['drop_pending_updates'] = true;
+        }
+
+        return $this->callApi('deleteWebhook', $payload);
+    }
+
+    public function getWebhookInfo(): array
+    {
+        return $this->callApi('getWebhookInfo', []);
+    }
+
+    private function callApi(string $method, array $payload): array
     {
         try {
-            $this->httpClient->request('POST', sprintf('https://api.telegram.org/bot%s/%s', $this->botToken, $method), [
+            $response = $this->httpClient->request('POST', sprintf('https://api.telegram.org/bot%s/%s', $this->botToken, $method), [
                 'json' => $payload,
             ]);
+            $data = $response->toArray(false);
         } catch (TransportExceptionInterface) {
+            throw new \RuntimeException(sprintf('Telegram API transport error on method "%s".', $method));
+        } catch (\Throwable) {
+            throw new \RuntimeException(sprintf('Telegram API request failed on method "%s".', $method));
         }
+
+        if (!is_array($data)) {
+            throw new \RuntimeException(sprintf('Invalid Telegram API response on method "%s".', $method));
+        }
+
+        if (true !== ($data['ok'] ?? false)) {
+            $description = (string) ($data['description'] ?? 'unknown error');
+            throw new \RuntimeException(sprintf('Telegram API returned ok=false on method "%s": %s', $method, $description));
+        }
+
+        return $data;
     }
 }

@@ -83,6 +83,28 @@ Delete webhook:
 php bin/console app:telegram:delete-webhook
 ```
 
+## Local development without domain using Long Polling
+Webhook requires a public HTTPS URL. Long polling does not require a domain and can run locally or on a private server.
+
+```bash
+php bin/console app:telegram:delete-webhook
+php bin/console app:telegram:poll
+```
+
+One-shot poll:
+```bash
+php bin/console app:telegram:poll --once
+```
+
+Drop pending updates before polling:
+```bash
+php bin/console app:telegram:poll --drop-pending
+```
+
+Notes:
+- Do not run webhook and long polling at the same time.
+- Keep the terminal open while polling is running.
+
 Webhook endpoint:
 - `POST /telegram/webhook/{secret}`
 
@@ -106,6 +128,7 @@ In `/admin` -> Payments, use actions:
 ## Commands
 - `app:telegram:set-webhook {baseUrl}`
 - `app:telegram:delete-webhook`
+- `app:telegram:poll [--limit=20] [--timeout=25] [--sleep=1] [--once] [--drop-pending] [--no-delete-webhook]`
 - `app:create-default-settings`
 - `app:create-sample-plans`
 
