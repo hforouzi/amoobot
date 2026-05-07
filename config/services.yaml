@@ -1,0 +1,25 @@
+# yaml-language-server: $schema=../vendor/symfony/dependency-injection/Loader/schema/services.schema.json
+
+parameters:
+
+services:
+    _defaults:
+        autowire: true
+        autoconfigure: true
+        bind:
+            string $botToken: '%env(TELEGRAM_BOT_TOKEN)%'
+            string $webhookSecret: '%env(TELEGRAM_WEBHOOK_SECRET)%'
+            $adminChatId: '%env(default::TELEGRAM_ADMIN_CHAT_ID)%'
+            string $paymentCardNumber: '%env(PAYMENT_CARD_NUMBER)%'
+            string $paymentCardHolder: '%env(PAYMENT_CARD_HOLDER)%'
+            $paymentDescription: '%env(default::PAYMENT_DESCRIPTION)%'
+
+    App\:
+        resource: '../src/'
+
+    App\Provisioning\Infrastructure\DummyVpnPanelDriver:
+        tags: ['app.vpn_driver']
+
+    App\Provisioning\Infrastructure\VpnPanelDriverRegistry:
+        arguments:
+            $drivers: !tagged_iterator 'app.vpn_driver'
