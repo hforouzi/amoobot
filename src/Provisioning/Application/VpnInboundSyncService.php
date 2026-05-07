@@ -160,9 +160,15 @@ final class VpnInboundSyncService
         $protocol = $this->nullableText($row['protocol'] ?? null);
         $streamSettings = $this->jsonToArray($row['streamSettings'] ?? null);
         $settings = $this->jsonToArray($row['settings'] ?? null);
+        $sniffing = $this->jsonToArray($row['sniffing'] ?? null);
+        $tlsSettings = $this->jsonToArray($streamSettings['tlsSettings'] ?? null);
+        $realitySettings = $this->jsonToArray($streamSettings['realitySettings'] ?? null);
+        $wsSettings = $this->jsonToArray($streamSettings['wsSettings'] ?? null);
+        $grpcSettings = $this->jsonToArray($streamSettings['grpcSettings'] ?? null);
 
         $network = $this->nullableText($streamSettings['network'] ?? null);
         $security = $this->nullableText($streamSettings['security'] ?? null);
+        $port = isset($row['port']) ? (int) $row['port'] : null;
 
         $title = $remark ?? ('Inbound '.$remoteInboundId);
         $isActive = isset($row['enable']) ? (bool) $row['enable'] : true;
@@ -180,11 +186,17 @@ final class VpnInboundSyncService
                 'remark' => $row['remark'] ?? null,
                 'protocol' => $row['protocol'] ?? null,
                 'enable' => $row['enable'] ?? null,
+                'port' => $port,
                 'total' => $row['total'] ?? null,
                 'up' => $row['up'] ?? null,
                 'down' => $row['down'] ?? null,
+                'sniffing' => $sniffing,
                 'settings' => $settings,
                 'streamSettings' => $streamSettings,
+                'tlsSettings' => $tlsSettings,
+                'realitySettings' => $realitySettings,
+                'wsSettings' => $wsSettings,
+                'grpcSettings' => $grpcSettings,
                 'raw' => $row,
             ],
         ];

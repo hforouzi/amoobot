@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Payment\Application;
 
 use App\Bot\Application\BotTexts;
+use App\Entity\VpnService;
 use App\Bot\Infrastructure\TelegramApiClient;
 use App\Entity\Payment;
 use App\Entity\TelegramAccount;
@@ -26,14 +27,9 @@ class PaymentConfirmationService
             $telegramAccount = $this->entityManager->getRepository(TelegramAccount::class)->findOneBy(['user' => $payment->getOrder()->getUser()]);
             if ($telegramAccount instanceof TelegramAccount) {
                 $vpnService = $result->vpnService;
-                $this->telegramApiClient->sendMessage(
-                    $telegramAccount->getTelegramId(),
-                    sprintf(
-                        BotTexts::PAYMENT_CONFIRMED_TEMPLATE,
-                        $vpnService?->getSubscriptionUrl() ?? '-',
-                        $vpnService?->getConfigText() ?? '-'
-                    )
-                );
+                foreach ($this->buildPaymentConfirmedMessages($vpnService) as $message) {
+                    $this->telegramApiClient->sendMessage($telegramAccount->getTelegramId(), $message);
+                }
             }
         }
 
@@ -51,5 +47,67 @@ class PaymentConfirmationService
         }
 
         return $result;
+    }
+
+    /**
+     * @return string[]
+     */
+    private function buildPaymentConfirmedMessages(?VpnService $vpnService): array
+    {
+        if (!$vpnService instanceof VpnService) {
+            return ['✅ پرداخت شما تایید شد.'];
+        }
+
+        $subscriptionUrl = trim((string) ($vpnService->getSubscriptionUrl() ?? ''));
+        $configText = trim((string) ($vpnService->getConfigText() ?? ''));
+        $lines = [
+            '✅ پرداخت شما تایید شد.',
+            '',
+            '📦 خلاصه سرویس',
+            sprintf('شناسه سرویس: %d', $vpnService->getId() ?? 0),
+            sprintf('کاربری: %s', (string) ($vpnService->getUsername() ?? '-')),
+        ];
+
+        if ('' !== $subscriptionUrl) {
+            $lines[] = '';
+            $lines[] = '🔗 لینک اشتراک:';
+            $lines[] = $subscriptionUrl;
+        }
+
+        if ('' !== $configText) {
+            $lines[] = '';
+            $lines[] = '📡 کانفیگ:';
+            $lines[] = $configText;
+        }
+
+        return $this->splitLongMessage(implode("\n", $lines));
+    }
+
+    /**
+     * @return string[]
+     */
+    private function splitLongMessage(string $message, int $maxLength = 3500): array
+    {
+        $message = trim($message);
+        if (mb_strlen($message) <= $maxLength) {
+            return [$message];
+        }
+
+        $chunks = [];
+        $remaining = $message;
+        while (mb_strlen($remaining) > $maxLength) {
+            $slice = mb_substr($remaining, 0, $maxLength);
+            $breakPos = mb_strrpos($slice, "\n");
+            if (false === $breakPos || $breakPos < ($maxLength / 2)) {
+                $breakPos = $maxLength;
+            }
+            $chunks[] = trim(mb_substr($remaining, 0, $breakPos));
+            $remaining = trim(mb_substr($remaining, (int) $breakPos));
+        }
+        if ('' !== $remaining) {
+            $chunks[] = $remaining;
+        }
+
+        return $chunks;
     }
 }

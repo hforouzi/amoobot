@@ -15,9 +15,6 @@ use Symfony\Component\Uid\Uuid;
 
 final class Sanaei3xuiDriver implements VpnPanelDriverInterface
 {
-    private const CONFIG_TEXT_WITH_SUBSCRIPTION = 'سرویس با موفقیت در پنل ساخته شد.';
-    private const CONFIG_TEXT_SUBSCRIPTION_UNAVAILABLE = 'سرویس در پنل ساخته شد. برای دریافت لینک اشتراک، تنظیمات subscription پنل را بررسی کنید.';
-
     public function __construct(
         private readonly Sanaei3xuiApiClient $apiClient,
         private readonly Sanaei3xuiRemoteIdParser $remoteIdParser,
@@ -133,12 +130,20 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
             throw new \RuntimeException('Sanaei addClient could not be verified on panel.');
         }
 
-        $subscriptionUrl = $this->buildSubscriptionUrl($config, $subId, $email);
-        $configText = self::CONFIG_TEXT_WITH_SUBSCRIPTION;
-        if (null === $subscriptionUrl) {
-            $this->log(sprintf('subscription_url_missing panel_id=%s email="%s"', $panel->getId() ?? 'null', $email));
-            $configText = self::CONFIG_TEXT_SUBSCRIPTION_UNAVAILABLE;
-        }
+        $inboundConfig = $this->inboundConfig($inbound);
+        $subscriptionUrl = $this->buildSubscriptionUrl($panel, $config, $subId, $email);
+        $configText = $this->buildClientConfigText(
+            protocol: $protocol,
+            inbound: $inbound,
+            panel: $panel,
+            panelConfig: $config,
+            inboundConfig: $inboundConfig,
+            clientUuid: $clientUuid,
+            email: $email,
+            subId: $subId,
+            subscriptionUrl: $subscriptionUrl,
+            clientPayload: $client
+        );
 
         return new CreatedVpnService(
             remoteId: $this->remoteIdParser->format($panel->getId(), $inbound->getId(), $inboundIdRaw, $clientUuid, $email, $subId),
@@ -315,15 +320,23 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
         }
     }
 
-    private function buildSubscriptionUrl(array $config, string $subId, string $email): ?string
+    private function buildSubscriptionUrl(VpnPanel $panel, array $config, string $subId, string $email): ?string
     {
         $base = trim((string) ($config['subscription_base_url'] ?? ''));
+        if ('' === $base) {
+            $base = trim((string) ($panel->getBaseUrl() ?? ''));
+        }
         if ('' === $base) {
             return null;
         }
 
         $base = rtrim($base, '/');
         if ('' === $base) {
+            return null;
+        }
+        if (false === filter_var($base, FILTER_VALIDATE_URL)) {
+            $this->log(sprintf('subscription_url_invalid_base panel_id=%s base="%s"', $panel->getId() ?? 'null', $base));
+
             return null;
         }
 
@@ -363,10 +376,6 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
     private function buildClientPayload(string $protocol, string $clientUuid, string $email, string $subId, int $totalBytes, int $expiryTime, array $panelConfig): array
     {
         $normalized = strtolower(trim($protocol));
-        if ('trojan' === $normalized) {
-            throw new \RuntimeException('Trojan protocol is not currently supported. Please use VLESS or VMess inbounds.');
-        }
-
         $client = [
             'id' => $clientUuid,
             'email' => $email,
@@ -379,6 +388,9 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
 
         if ('vless' === $normalized) {
             $client['flow'] = (string) ($panelConfig['default_flow'] ?? '');
+        }
+        if ('trojan' === $normalized) {
+            $client['password'] = $clientUuid;
         }
 
         return $client;
@@ -479,6 +491,305 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
         }
 
         $decoded = json_decode($settingsRaw, true);
+
+        return (JSON_ERROR_NONE === json_last_error() && is_array($decoded)) ? $decoded : [];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function inboundConfig(VpnInbound $inbound): array
+    {
+        $config = $inbound->getConfig();
+
+        return is_array($config) ? $config : [];
+    }
+
+    /**
+     * @param array<string, mixed> $panelConfig
+     * @param array<string, mixed> $inboundConfig
+     * @param array<string, mixed> $clientPayload
+     */
+    private function buildClientConfigText(string $protocol, VpnInbound $inbound, VpnPanel $panel, array $panelConfig, array $inboundConfig, string $clientUuid, string $email, string $subId, ?string $subscriptionUrl, array $clientPayload): string
+    {
+        $protocol = strtolower(trim($protocol));
+        $summary = [];
+        if (null !== $subscriptionUrl) {
+            $summary[] = '🔗 لینک اشتراک:';
+            $summary[] = $subscriptionUrl;
+            $summary[] = '';
+        }
+
+        $configUrl = match ($protocol) {
+            'vless' => $this->buildVlessUrl($inbound, $panel, $panelConfig, $inboundConfig, $clientUuid, $email, $subId, $clientPayload),
+            'vmess' => $this->buildVmessUrl($inbound, $panel, $panelConfig, $inboundConfig, $clientUuid, $email, $clientPayload),
+            'trojan' => $this->buildTrojanUrl($inbound, $panel, $panelConfig, $inboundConfig, $clientUuid, $email),
+            default => null,
+        };
+
+        if (null === $configUrl) {
+            $summary[] = '⚠️ کانفیگ قابل تولید نیست. تنظیمات اینباند/پنل را بررسی کنید.';
+
+            return implode("\n", $summary);
+        }
+
+        $summary[] = '📡 کانفیگ:';
+        $summary[] = $configUrl;
+
+        return implode("\n", $summary);
+    }
+
+    /**
+     * @param array<string, mixed> $panelConfig
+     * @param array<string, mixed> $inboundConfig
+     * @param array<string, mixed> $clientPayload
+     */
+    private function buildVlessUrl(VpnInbound $inbound, VpnPanel $panel, array $panelConfig, array $inboundConfig, string $clientUuid, string $email, string $subId, array $clientPayload): ?string
+    {
+        $host = $this->resolvePublicHost($panel, $panelConfig, $inboundConfig);
+        $port = $this->resolveInboundPort($inboundConfig);
+        if ('' === $host || null === $port) {
+            return null;
+        }
+
+        $stream = $this->toArray($inboundConfig['streamSettings'] ?? []);
+        $network = trim((string) ($stream['network'] ?? $inbound->getNetwork() ?? 'tcp'));
+        if ('' === $network) {
+            $network = 'tcp';
+        }
+        $security = trim((string) ($stream['security'] ?? $inbound->getSecurity() ?? 'none'));
+        if ('' === $security || 'none' === strtolower($security)) {
+            $security = 'none';
+        }
+
+        $query = [
+            'type' => strtolower($network),
+            'security' => strtolower($security),
+            'encryption' => 'none',
+        ];
+
+        $flow = trim((string) ($clientPayload['flow'] ?? ''));
+        if ('' !== $flow) {
+            $query['flow'] = $flow;
+        }
+
+        $tls = $this->toArray($stream['tlsSettings'] ?? ($inboundConfig['tlsSettings'] ?? []));
+        $reality = $this->toArray($stream['realitySettings'] ?? ($inboundConfig['realitySettings'] ?? []));
+        $ws = $this->toArray($stream['wsSettings'] ?? ($inboundConfig['wsSettings'] ?? []));
+        $grpc = $this->toArray($stream['grpcSettings'] ?? ($inboundConfig['grpcSettings'] ?? []));
+
+        if ('tls' === strtolower($security)) {
+            $serverName = trim((string) ($tls['serverName'] ?? ''));
+            if ('' !== $serverName) {
+                $query['sni'] = $serverName;
+            }
+            $alpn = $tls['alpn'] ?? null;
+            if (is_array($alpn) && [] !== $alpn) {
+                $query['alpn'] = implode(',', array_map('strval', $alpn));
+            }
+        }
+
+        if ('reality' === strtolower($security)) {
+            $publicKey = trim((string) ($reality['settings']['publicKey'] ?? $reality['publicKey'] ?? ''));
+            if ('' !== $publicKey) {
+                $query['pbk'] = $publicKey;
+            }
+            $fingerprint = trim((string) ($reality['settings']['fingerprint'] ?? $reality['fingerprint'] ?? ''));
+            if ('' !== $fingerprint) {
+                $query['fp'] = $fingerprint;
+            }
+            $serverNames = $reality['serverNames'] ?? [];
+            if (is_array($serverNames) && [] !== $serverNames) {
+                $query['sni'] = (string) ($serverNames[0] ?? '');
+            }
+            $shortIds = $reality['shortIds'] ?? [];
+            if (is_array($shortIds) && [] !== $shortIds) {
+                $shortId = trim((string) ($shortIds[0] ?? ''));
+                if ('' !== $shortId) {
+                    $query['sid'] = $shortId;
+                }
+            }
+            $spiderX = trim((string) ($reality['settings']['spiderX'] ?? $reality['spiderX'] ?? ''));
+            if ('' !== $spiderX) {
+                $query['spx'] = $spiderX;
+            }
+        }
+
+        if ('ws' === strtolower($network)) {
+            $path = trim((string) ($ws['path'] ?? '/'));
+            $headers = $this->toArray($ws['headers'] ?? []);
+            $hostHeader = trim((string) ($headers['Host'] ?? $headers['host'] ?? ''));
+            if ('' !== $hostHeader) {
+                $query['host'] = $hostHeader;
+            }
+            $query['path'] = '' !== $path ? $path : '/';
+        }
+
+        if ('grpc' === strtolower($network)) {
+            $serviceName = trim((string) ($grpc['serviceName'] ?? ''));
+            if ('' !== $serviceName) {
+                $query['serviceName'] = $serviceName;
+            }
+            $mode = trim((string) ($grpc['multiMode'] ?? ''));
+            if ('' !== $mode) {
+                $query['mode'] = $mode;
+            }
+        }
+
+        $queryString = http_build_query(array_filter($query, static fn ($v): bool => '' !== trim((string) $v)), '', '&', PHP_QUERY_RFC3986);
+        $fragment = rawurlencode($this->safeLinkName($inbound, $email));
+
+        return sprintf('vless://%s@%s:%d?%s#%s', rawurlencode($clientUuid), $host, $port, $queryString, $fragment);
+    }
+
+    /**
+     * @param array<string, mixed> $panelConfig
+     * @param array<string, mixed> $inboundConfig
+     * @param array<string, mixed> $clientPayload
+     */
+    private function buildVmessUrl(VpnInbound $inbound, VpnPanel $panel, array $panelConfig, array $inboundConfig, string $clientUuid, string $email, array $clientPayload): ?string
+    {
+        $host = $this->resolvePublicHost($panel, $panelConfig, $inboundConfig);
+        $port = $this->resolveInboundPort($inboundConfig);
+        if ('' === $host || null === $port) {
+            return null;
+        }
+
+        $stream = $this->toArray($inboundConfig['streamSettings'] ?? []);
+        $network = trim((string) ($stream['network'] ?? $inbound->getNetwork() ?? 'tcp'));
+        if ('' === $network) {
+            $network = 'tcp';
+        }
+        $security = trim((string) ($stream['security'] ?? $inbound->getSecurity() ?? ''));
+        $tls = $this->toArray($stream['tlsSettings'] ?? ($inboundConfig['tlsSettings'] ?? []));
+        $ws = $this->toArray($stream['wsSettings'] ?? ($inboundConfig['wsSettings'] ?? []));
+
+        $vmess = [
+            'v' => '2',
+            'ps' => $this->safeLinkName($inbound, $email),
+            'add' => $host,
+            'port' => (string) $port,
+            'id' => $clientUuid,
+            'aid' => '0',
+            'scy' => (string) ($clientPayload['security'] ?? 'auto'),
+            'net' => strtolower($network),
+            'type' => 'none',
+            'host' => '',
+            'path' => '',
+            'tls' => ('tls' === strtolower($security) || 'reality' === strtolower($security)) ? 'tls' : '',
+            'sni' => trim((string) ($tls['serverName'] ?? '')),
+        ];
+
+        if ('ws' === strtolower($network)) {
+            $vmess['path'] = trim((string) ($ws['path'] ?? '/'));
+            $headers = $this->toArray($ws['headers'] ?? []);
+            $vmess['host'] = trim((string) ($headers['Host'] ?? $headers['host'] ?? ''));
+        }
+
+        return 'vmess://'.base64_encode(json_encode($vmess, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+    }
+
+    /**
+     * @param array<string, mixed> $panelConfig
+     * @param array<string, mixed> $inboundConfig
+     */
+    private function buildTrojanUrl(VpnInbound $inbound, VpnPanel $panel, array $panelConfig, array $inboundConfig, string $clientUuid, string $email): ?string
+    {
+        $host = $this->resolvePublicHost($panel, $panelConfig, $inboundConfig);
+        $port = $this->resolveInboundPort($inboundConfig);
+        if ('' === $host || null === $port) {
+            return null;
+        }
+
+        $stream = $this->toArray($inboundConfig['streamSettings'] ?? []);
+        $network = trim((string) ($stream['network'] ?? $inbound->getNetwork() ?? 'tcp'));
+        if ('' === $network) {
+            $network = 'tcp';
+        }
+        $security = trim((string) ($stream['security'] ?? $inbound->getSecurity() ?? 'tls'));
+        if ('' === $security) {
+            $security = 'tls';
+        }
+
+        $query = [
+            'type' => strtolower($network),
+            'security' => strtolower($security),
+        ];
+
+        $tls = $this->toArray($stream['tlsSettings'] ?? ($inboundConfig['tlsSettings'] ?? []));
+        $serverName = trim((string) ($tls['serverName'] ?? ''));
+        if ('' !== $serverName) {
+            $query['sni'] = $serverName;
+        }
+
+        $queryString = http_build_query($query, '', '&', PHP_QUERY_RFC3986);
+        $fragment = rawurlencode($this->safeLinkName($inbound, $email));
+
+        return sprintf('trojan://%s@%s:%d?%s#%s', rawurlencode($clientUuid), $host, $port, $queryString, $fragment);
+    }
+
+    /**
+     * @param array<string, mixed> $panelConfig
+     * @param array<string, mixed> $inboundConfig
+     */
+    private function resolvePublicHost(VpnPanel $panel, array $panelConfig, array $inboundConfig): string
+    {
+        $publicHost = trim((string) ($panelConfig['public_host'] ?? ''));
+        if ('' !== $publicHost) {
+            return $publicHost;
+        }
+
+        $listen = trim((string) ($inboundConfig['listen'] ?? ($inboundConfig['raw']['listen'] ?? '')));
+        if ('' !== $listen && !in_array($listen, ['0.0.0.0', '::', '*'], true)) {
+            return $listen;
+        }
+
+        $base = trim((string) ($panel->getBaseUrl() ?? ''));
+        if ('' === $base) {
+            return '';
+        }
+        $host = (string) (parse_url($base, PHP_URL_HOST) ?? '');
+
+        return trim($host);
+    }
+
+    /**
+     * @param array<string, mixed> $inboundConfig
+     */
+    private function resolveInboundPort(array $inboundConfig): ?int
+    {
+        $port = $inboundConfig['port'] ?? ($inboundConfig['raw']['port'] ?? null);
+        if (!is_numeric($port)) {
+            return null;
+        }
+
+        $normalized = (int) $port;
+
+        return $normalized > 0 ? $normalized : null;
+    }
+
+    private function safeLinkName(VpnInbound $inbound, string $email): string
+    {
+        $name = trim((string) ($inbound->getRemark() ?? $inbound->getTitle()));
+        if ('' === $name) {
+            $name = $email;
+        }
+
+        return $name;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function toArray(mixed $value): array
+    {
+        if (is_array($value)) {
+            return $value;
+        }
+        if (!is_string($value) || '' === trim($value)) {
+            return [];
+        }
+        $decoded = json_decode($value, true);
 
         return (JSON_ERROR_NONE === json_last_error() && is_array($decoded)) ? $decoded : [];
     }
