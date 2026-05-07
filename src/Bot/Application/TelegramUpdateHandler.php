@@ -4,15 +4,15 @@ declare(strict_types=1);
 
 namespace App\Bot\Application;
 
+use App\Bot\Application\ServiceAction\ServiceActionContext;
+use App\Bot\Application\ServiceAction\ServiceActionResolver;
 use App\Bot\Infrastructure\TelegramApiClient;
 use App\Entity\Order;
 use App\Entity\Payment;
 use App\Entity\Plan;
 use App\Entity\TelegramAccount;
-use App\Entity\VpnService;
 use App\Payment\Application\PaymentConfirmationService;
 use App\Payment\Domain\PaymentStatus;
-use App\Provisioning\Domain\VpnServiceStatus;
 use App\Shared\Infrastructure\SettingValueProvider;
 use App\Shop\Domain\OrderStatus;
 use Doctrine\ORM\EntityManagerInterface;
@@ -28,6 +28,8 @@ class TelegramUpdateHandler
         private readonly TelegramUserResolver $telegramUserResolver,
         private readonly TelegramApiClient $telegramApiClient,
         private readonly TelegramKeyboardFactory $keyboardFactory,
+        private readonly ServiceManagementService $serviceManagementService,
+        private readonly ServiceActionResolver $serviceActionResolver,
         private readonly EntityManagerInterface $entityManager,
         private readonly PaymentConfirmationService $paymentConfirmationService,
         private readonly SettingValueProvider $settingValueProvider,
@@ -80,7 +82,7 @@ class TelegramUpdateHandler
         }
 
         if (self::BUTTON_MY_SERVICES === $text) {
-            $this->handleMyServices($account, $chatId);
+            $this->serviceManagementService->handleMyServices($account, $chatId);
 
             return;
         }
@@ -137,6 +139,8 @@ class TelegramUpdateHandler
             return;
         }
 
+        $account = $this->telegramUserResolver->resolveFromTelegramUser($telegramUser);
+
         if (str_starts_with($data, 'admin_')) {
             if (!$this->isAdminUserId($actorId)) {
                 $this->debugLog(sprintf('admin_callback_unauthorized data="%s" actor_id="%s" chat_id="%s"', $data, $actorId, $chatId));
@@ -165,12 +169,6 @@ class TelegramUpdateHandler
                 return;
             }
 
-            if ('admin_services' === $data) {
-                $this->handleAdminServices($chatId, $callbackId);
-
-                return;
-            }
-
             if ('admin_orders' === $data) {
                 $this->handleAdminOrders($chatId, $callbackId);
 
@@ -195,6 +193,17 @@ class TelegramUpdateHandler
                 return;
             }
 
+            if ($this->serviceActionResolver->dispatch(new ServiceActionContext(
+                account: $account,
+                actorId: $actorId,
+                chatId: $chatId,
+                callbackId: $callbackId,
+                data: $data,
+                isAdmin: true,
+            ))) {
+                return;
+            }
+
             $this->acknowledgeCallback($callbackId);
             $this->debugLog(sprintf('admin_callback_unknown data="%s"', $data));
 
@@ -202,8 +211,6 @@ class TelegramUpdateHandler
         }
 
         $isAdmin = $this->isAdminUserId($actorId);
-
-        $account = $this->telegramUserResolver->resolveFromTelegramUser($telegramUser);
 
         if ('main_menu' === $data) {
             $this->acknowledgeCallback($callbackId);
@@ -224,15 +231,20 @@ class TelegramUpdateHandler
             return;
         }
 
-        if ('my_services' === $data) {
-            $this->handleMyServices($account, $chatId, $callbackId);
+        if ('support' === $data) {
+            $this->handleSupport($chatId, $callbackId);
 
             return;
         }
 
-        if ('support' === $data) {
-            $this->handleSupport($chatId, $callbackId);
-
+        if ($this->serviceActionResolver->dispatch(new ServiceActionContext(
+            account: $account,
+            actorId: $actorId,
+            chatId: $chatId,
+            callbackId: $callbackId,
+            data: $data,
+            isAdmin: $isAdmin,
+        ))) {
             return;
         }
 
@@ -302,28 +314,7 @@ class TelegramUpdateHandler
 
     private function handleMyServices(TelegramAccount $account, string $chatId, ?string $callbackId = null): void
     {
-        $services = $this->entityManager->getRepository(VpnService::class)->findBy([
-            'user' => $account->getUser(),
-            'status' => VpnServiceStatus::ACTIVE,
-        ], ['id' => 'DESC']);
-
-        if ([] === $services) {
-            $this->showPopupOrMessage($chatId, $callbackId, 'شما در حال حاضر سرویس فعالی ندارید.', 'popup_no_active_services');
-
-            return;
-        }
-
-        $text = "سرویس‌های شما:\n\n";
-        foreach ($services as $service) {
-            $text .= sprintf(
-                "• اشتراک: %s\n• کانفیگ: %s\n\n",
-                $service->getSubscriptionUrl() ?? '-',
-                $service->getConfigText() ?? '-'
-            );
-        }
-
-        $this->acknowledgeCallback($callbackId);
-        $this->telegramApiClient->sendMessage($chatId, trim($text));
+        $this->serviceManagementService->handleMyServices($account, $chatId, $callbackId);
     }
 
     private function handleSupport(string $chatId, ?string $callbackId = null): void
@@ -523,31 +514,7 @@ class TelegramUpdateHandler
 
     private function handleAdminServices(string $chatId, ?string $callbackId = null): void
     {
-        $services = $this->entityManager->getRepository(VpnService::class)->findBy([], ['id' => 'DESC'], 10);
-        if ([] === $services) {
-            $this->showPopupOrMessage($chatId, $callbackId, 'سرویسی برای نمایش وجود ندارد.', 'popup_no_services');
-
-            return;
-        }
-
-        $lines = ["آخرین سرویسها:\n"];
-        foreach ($services as $service) {
-            $subscriptionUrl = $service->getSubscriptionUrl() ?: '-';
-            if (mb_strlen($subscriptionUrl) > 60) {
-                $subscriptionUrl = mb_substr($subscriptionUrl, 0, 60).'...';
-            }
-            $lines[] = sprintf(
-                "Service ID: %d\nUser: %s\nStatus: %s\nExpires at: %s\nSubscription: %s\n",
-                $service->getId(),
-                $this->formatTelegramIdentity($service->getUser()->getTelegramAccount()),
-                $service->getStatus(),
-                $service->getExpiresAt()?->format('Y-m-d H:i:s') ?? '-',
-                $subscriptionUrl
-            );
-        }
-
-        $this->acknowledgeCallback($callbackId);
-        $this->telegramApiClient->sendMessage($chatId, implode("\n", $lines), $this->keyboardFactory->backToAdminMenu());
+        $this->serviceManagementService->handleAdminServices($chatId, $callbackId);
     }
 
     private function handleAdminOrders(string $chatId, ?string $callbackId = null): void

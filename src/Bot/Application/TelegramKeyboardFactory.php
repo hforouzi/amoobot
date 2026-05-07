@@ -210,4 +210,197 @@ class TelegramKeyboardFactory
             ]],
         ];
     }
+
+    /**
+     * @param list<int> $serviceIds
+     *
+     * @return array<string, array<array<array<string, string>>>>
+     */
+    public function userServicesList(array $serviceIds): array
+    {
+        $rows = [];
+        foreach ($serviceIds as $serviceId) {
+            $rows[] = [[
+                'text' => sprintf('📦 سرویس #%d', $serviceId),
+                'callback_data' => 'service_view:'.$serviceId,
+            ]];
+        }
+
+        $rows[] = [[
+            'text' => '🏠 منوی اصلی',
+            'callback_data' => 'main_menu',
+        ]];
+
+        return ['inline_keyboard' => $rows];
+    }
+
+    /**
+     * @return array<string, array<array<array<string, string>>>>
+     */
+    public function userServiceDetail(int $serviceId): array
+    {
+        return [
+            'inline_keyboard' => [
+                [[
+                    'text' => '🔗 لینک اشتراک',
+                    'callback_data' => 'service_subscription:'.$serviceId,
+                ]],
+                [[
+                    'text' => '📨 ارسال مجدد کانفیگ',
+                    'callback_data' => 'service_resend_config:'.$serviceId,
+                ]],
+                [[
+                    'text' => '🔄 بروزرسانی اطلاعات',
+                    'callback_data' => 'service_refresh:'.$serviceId,
+                ]],
+                [[
+                    'text' => '🔙 بازگشت',
+                    'callback_data' => 'my_services',
+                ]],
+            ],
+        ];
+    }
+
+    /**
+     * @param list<int> $serviceIds
+     *
+     * @return array<string, array<array<array<string, string>>>>
+     */
+    public function adminServicesList(array $serviceIds): array
+    {
+        $rows = [];
+        foreach ($serviceIds as $serviceId) {
+            $rows[] = [[
+                'text' => sprintf('⚙️ سرویس #%d', $serviceId),
+                'callback_data' => 'admin_service_view:'.$serviceId,
+            ]];
+        }
+
+        $rows[] = [[
+            'text' => '🔙 بازگشت به مدیریت',
+            'callback_data' => 'admin_menu',
+        ]];
+
+        return ['inline_keyboard' => $rows];
+    }
+
+    /**
+     * @return array<string, array<array<array<string, string>>>>
+     */
+    public function adminServiceDetail(int $serviceId, int $userId): array
+    {
+        return [
+            'inline_keyboard' => [
+                [[
+                    'text' => '⏸ غیرفعال',
+                    'callback_data' => 'service_suspend:'.$serviceId,
+                ], [
+                    'text' => '▶️ فعال',
+                    'callback_data' => 'service_activate:'.$serviceId,
+                ]],
+                [[
+                    'text' => '📅 تمدید',
+                    'callback_data' => 'service_extend_menu:'.$serviceId,
+                ], [
+                    'text' => '➕ افزایش حجم',
+                    'callback_data' => 'service_add_traffic_menu:'.$serviceId,
+                ]],
+                [[
+                    'text' => '🔄 ریست مصرف',
+                    'callback_data' => 'service_reset_usage:'.$serviceId,
+                ], [
+                    'text' => '📨 ارسال مجدد',
+                    'callback_data' => 'service_resend_config:'.$serviceId,
+                ]],
+                [[
+                    'text' => '🗑 حذف سرویس',
+                    'callback_data' => 'service_delete:'.$serviceId,
+                ]],
+                [[
+                    'text' => '👤 مشاهده کاربر',
+                    'callback_data' => 'admin_user_view:'.$userId,
+                ], [
+                    'text' => '🔙 بازگشت',
+                    'callback_data' => 'admin_services',
+                ]],
+            ],
+        ];
+    }
+
+    /**
+     * @return array<string, array<array<array<string, string>>>>
+     */
+    public function serviceExtendMenu(int $serviceId): array
+    {
+        return [
+            'inline_keyboard' => [
+                [[
+                    'text' => '+7 روز',
+                    'callback_data' => 'service_extend:'.$serviceId.':7',
+                ]],
+                [[
+                    'text' => '+30 روز',
+                    'callback_data' => 'service_extend:'.$serviceId.':30',
+                ]],
+                [[
+                    'text' => '+90 روز',
+                    'callback_data' => 'service_extend:'.$serviceId.':90',
+                ]],
+                [[
+                    'text' => '🔙 بازگشت به سرویس',
+                    'callback_data' => 'admin_service_view:'.$serviceId,
+                ]],
+            ],
+        ];
+    }
+
+    /**
+     * @return array<string, array<array<array<string, string>>>>
+     */
+    public function serviceAddTrafficMenu(int $serviceId): array
+    {
+        return [
+            'inline_keyboard' => [
+                [[
+                    'text' => '+10GB',
+                    'callback_data' => 'service_add_traffic:'.$serviceId.':10',
+                ]],
+                [[
+                    'text' => '+50GB',
+                    'callback_data' => 'service_add_traffic:'.$serviceId.':50',
+                ]],
+                [[
+                    'text' => '+100GB',
+                    'callback_data' => 'service_add_traffic:'.$serviceId.':100',
+                ]],
+                [[
+                    'text' => '🔙 بازگشت به سرویس',
+                    'callback_data' => 'admin_service_view:'.$serviceId,
+                ]],
+            ],
+        ];
+    }
+
+    /**
+     * @return array<string, array<array<array<string, string>>>>
+     */
+    public function adminUserDetail(int $userId): array
+    {
+        return [
+            'inline_keyboard' => [
+                [[
+                    'text' => '📦 سرویسهای کاربر',
+                    'callback_data' => 'admin_user_services:'.$userId,
+                ]],
+                [[
+                    'text' => '🧾 سفارشهای کاربر',
+                    'callback_data' => 'admin_user_orders:'.$userId,
+                ]],
+                [[
+                    'text' => '🔙 بازگشت',
+                    'callback_data' => 'admin_services',
+                ]],
+            ],
+        ];
+    }
 }

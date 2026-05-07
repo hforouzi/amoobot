@@ -3,6 +3,10 @@
 parameters:
 
 services:
+    _instanceof:
+        App\Bot\Application\ServiceAction\ServiceActionInterface:
+            tags: ['app.telegram_service_action']
+
     _defaults:
         autowire: true
         autoconfigure: true
