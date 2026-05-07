@@ -143,6 +143,17 @@ In `/admin` -> Payments, use actions:
   - Other users receive `Unauthorized`.
 - Telegram admin approval reuses the same payment confirmation/rejection business logic as EasyAdmin.
 
+## Telegram Admin Menu
+- Set `TELEGRAM_ADMIN_CHAT_ID` in `.env.local`.
+- Admin Telegram user sees an extra `🛠 مدیریت` button in main menu.
+- Admin can open management menu and view:
+  - `💳 پرداختهای در انتظار`
+  - `👥 لیست کاربران`
+  - `📦 لیست سرویسها`
+  - `🧾 آخرین سفارشها`
+- Admin can open pending payments, view payment details, and view receipt photos in Telegram.
+- Admin can confirm/reject payments from Telegram using inline buttons.
+
 ## Commands
 - `app:telegram:set-webhook {baseUrl}`
 - `app:telegram:delete-webhook`

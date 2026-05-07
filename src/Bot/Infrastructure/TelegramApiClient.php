@@ -49,6 +49,28 @@ class TelegramApiClient
         }
     }
 
+    public function sendPhoto(string $chatId, string $photoFileId, string $caption = '', ?array $replyMarkup = null): void
+    {
+        $payload = [
+            'chat_id' => $chatId,
+            'photo' => $photoFileId,
+        ];
+
+        if ('' !== trim($caption)) {
+            $payload['caption'] = $caption;
+        }
+
+        if (null !== $replyMarkup) {
+            $payload['reply_markup'] = $replyMarkup;
+        }
+
+        try {
+            $this->callApi('sendPhoto', $payload);
+        } catch (\Throwable) {
+        }
+        $this->botMessageLogger->log(BotMessageDirection::OUTGOING, ['method' => 'sendPhoto', 'payload' => $payload], $chatId, 'photo');
+    }
+
     public function getUpdates(?int $offset = null, int $limit = 20, int $timeout = 25): array
     {
         $payload = [

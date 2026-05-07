@@ -51,6 +51,7 @@ class TelegramUpdateHandler
     private function handleMessage(array $message): void
     {
         $telegramUser = $message['from'] ?? null;
+        $actorId = (string) ($message['from']['id'] ?? '');
         $chatId = (string) ($message['chat']['id'] ?? '');
 
         if (!is_array($telegramUser) || '' === $chatId) {
@@ -59,9 +60,10 @@ class TelegramUpdateHandler
 
         $account = $this->telegramUserResolver->resolveFromTelegramUser($telegramUser);
         $text = trim((string) ($message['text'] ?? ''));
+        $isAdmin = $this->isAdminUserId($actorId);
 
         if ('/start' === $text) {
-            $this->handleStart($chatId);
+            $this->handleStart($chatId, $isAdmin);
 
             return;
         }
@@ -81,7 +83,7 @@ class TelegramUpdateHandler
         }
 
         if ('' !== $text && !($openPayment instanceof Payment)) {
-            $this->telegramApiClient->sendMessage($chatId, BotTexts::UNKNOWN_COMMAND, $this->keyboardFactory->mainMenu());
+            $this->telegramApiClient->sendMessage($chatId, BotTexts::UNKNOWN_COMMAND, $this->keyboardFactory->mainMenu($isAdmin));
         }
     }
 
@@ -99,23 +101,77 @@ class TelegramUpdateHandler
             return;
         }
 
-        if (str_starts_with($data, 'admin_confirm_payment:')) {
-            $this->handleAdminConfirmPayment($callbackId, $chatId, $actorId, (int) str_replace('admin_confirm_payment:', '', $data));
+        if (str_starts_with($data, 'admin_')) {
+            if (!$this->isAdminUserId($actorId)) {
+                $this->debugLog(sprintf('admin_callback_unauthorized data="%s" actor_id="%s" chat_id="%s"', $data, $actorId, $chatId));
+                $this->telegramApiClient->answerCallbackQuery($callbackId, BotTexts::ADMIN_UNAUTHORIZED);
+
+                return;
+            }
+
+            $this->telegramApiClient->answerCallbackQuery($callbackId);
+            $this->debugLog(sprintf('admin_callback_execute data="%s" actor_id="%s"', $data, $actorId));
+
+            if ('admin_menu' === $data) {
+                $this->handleAdminMenu($chatId);
+
+                return;
+            }
+
+            if ('admin_pending_payments' === $data) {
+                $this->handleAdminPendingPayments($chatId);
+
+                return;
+            }
+
+            if ('admin_users' === $data) {
+                $this->handleAdminUsers($chatId);
+
+                return;
+            }
+
+            if ('admin_services' === $data) {
+                $this->handleAdminServices($chatId);
+
+                return;
+            }
+
+            if ('admin_orders' === $data) {
+                $this->handleAdminOrders($chatId);
+
+                return;
+            }
+
+            if (str_starts_with($data, 'admin_view_payment:')) {
+                $this->handleAdminViewPayment($chatId, (int) str_replace('admin_view_payment:', '', $data));
+
+                return;
+            }
+
+            if (str_starts_with($data, 'admin_confirm_payment:')) {
+                $this->handleAdminConfirmPayment($chatId, (int) str_replace('admin_confirm_payment:', '', $data));
+
+                return;
+            }
+
+            if (str_starts_with($data, 'admin_reject_payment:')) {
+                $this->handleAdminRejectPayment($chatId, (int) str_replace('admin_reject_payment:', '', $data));
+
+                return;
+            }
+
+            $this->debugLog(sprintf('admin_callback_unknown data="%s"', $data));
 
             return;
         }
 
-        if (str_starts_with($data, 'admin_reject_payment:')) {
-            $this->handleAdminRejectPayment($callbackId, $chatId, $actorId, (int) str_replace('admin_reject_payment:', '', $data));
-
-            return;
-        }
+        $isAdmin = $this->isAdminUserId($actorId);
 
         $account = $this->telegramUserResolver->resolveFromTelegramUser($telegramUser);
         $this->telegramApiClient->answerCallbackQuery($callbackId);
 
         if ('main_menu' === $data) {
-            $this->telegramApiClient->sendMessage($chatId, BotTexts::MAIN_MENU, $this->keyboardFactory->mainMenu());
+            $this->telegramApiClient->sendMessage($chatId, BotTexts::MAIN_MENU, $this->keyboardFactory->mainMenu($isAdmin));
 
             return;
         }
@@ -147,9 +203,9 @@ class TelegramUpdateHandler
         $this->debugLog(sprintf('callback_unknown data="%s"', $data));
     }
 
-    private function handleStart(string $chatId): void
+    private function handleStart(string $chatId, bool $isAdmin): void
     {
-        $this->telegramApiClient->sendMessage($chatId, BotTexts::WELCOME, $this->keyboardFactory->mainMenu());
+        $this->telegramApiClient->sendMessage($chatId, BotTexts::WELCOME, $this->keyboardFactory->mainMenu($isAdmin));
     }
 
     private function handleBuyService(string $chatId): void
@@ -235,18 +291,93 @@ class TelegramUpdateHandler
         $this->telegramApiClient->sendMessage($chatId, BotTexts::SUPPORT, $this->keyboardFactory->backToMainMenu());
     }
 
-    private function handleAdminConfirmPayment(string $callbackId, string $chatId, string $actorId, int $paymentId): void
+    private function handleAdminMenu(string $chatId): void
     {
-        if (!$this->isAdminAuthorized($actorId, $chatId)) {
-            $this->debugLog(sprintf('admin_confirm_unauthorized actor_id="%s" chat_id="%s" payment_id=%d', $actorId, $chatId, $paymentId));
-            $this->telegramApiClient->answerCallbackQuery($callbackId, BotTexts::ADMIN_UNAUTHORIZED);
+        $this->telegramApiClient->sendMessage($chatId, 'منوی مدیریت:', $this->keyboardFactory->adminMenu());
+    }
+
+    private function handleAdminPendingPayments(string $chatId): void
+    {
+        $payments = $this->entityManager->getRepository(Payment::class)->findBy([
+            'status' => [PaymentStatus::SUBMITTED, PaymentStatus::PENDING],
+        ], ['id' => 'DESC'], 10);
+
+        if ([] === $payments) {
+            $this->telegramApiClient->sendMessage($chatId, 'پرداخت در انتظاری یافت نشد.', $this->keyboardFactory->backToAdminMenu());
 
             return;
         }
 
-        $this->telegramApiClient->answerCallbackQuery($callbackId);
-        $this->debugLog(sprintf('admin_confirm_execute actor_id="%s" payment_id=%d', $actorId, $paymentId));
+        $lines = ["پرداختهای در انتظار:\n"];
+        $paymentIds = [];
+        foreach ($payments as $payment) {
+            $paymentIds[] = (int) $payment->getId();
+            $order = $payment->getOrder();
+            $telegramAccount = $order->getUser()->getTelegramAccount();
+            $tracking = $payment->getTrackingCode() ?: '-';
+            $lines[] = sprintf(
+                "#%d | سفارش #%d\nکاربر: %s\nپلن: %s\nمبلغ: %d\nوضعیت: %s\nکد پیگیری: %s\n",
+                $payment->getId(),
+                $order->getId(),
+                $this->formatTelegramIdentity($telegramAccount),
+                $order->getPlan()->getTitle(),
+                $payment->getAmount(),
+                $payment->getStatus(),
+                $tracking
+            );
+        }
 
+        $this->telegramApiClient->sendMessage($chatId, implode("\n", $lines), $this->keyboardFactory->adminPendingPayments($paymentIds));
+    }
+
+    private function handleAdminViewPayment(string $chatId, int $paymentId): void
+    {
+        $payment = $this->entityManager->getRepository(Payment::class)->find($paymentId);
+        if (!$payment instanceof Payment) {
+            $this->telegramApiClient->sendMessage($chatId, BotTexts::ADMIN_PAYMENT_NOT_FOUND);
+
+            return;
+        }
+
+        $order = $payment->getOrder();
+        $telegramAccount = $order->getUser()->getTelegramAccount();
+        $detail = sprintf(
+            "Payment ID: %d\nOrder ID: %d\nUser: %s\nPlan: %s\nAmount: %d تومان\nStatus: %s\nTracking: %s\nReceipt message: %s\nCreated: %s\nSubmitted: %s",
+            $payment->getId(),
+            $order->getId(),
+            $this->formatTelegramIdentity($telegramAccount),
+            $order->getPlan()->getTitle(),
+            $payment->getAmount(),
+            $payment->getStatus(),
+            $payment->getTrackingCode() ?: '-',
+            $payment->getReceiptMessage() ?: '-',
+            $payment->getCreatedAt()->format('Y-m-d H:i:s'),
+            $payment->getSubmittedAt()?->format('Y-m-d H:i:s') ?? '-'
+        );
+        $this->telegramApiClient->sendMessage($chatId, $detail, $this->keyboardFactory->adminPaymentActions((int) $payment->getId()));
+
+        $receiptFileId = (string) ($payment->getReceiptFileId() ?? '');
+        if ('' === $receiptFileId) {
+            $this->debugLog(sprintf('admin_view_payment_missing_receipt_file payment_id=%d', $paymentId));
+
+            return;
+        }
+
+        $caption = sprintf(
+            "رسید پرداخت\nPayment ID: %d\nOrder ID: %d\nUser: %s\nPlan: %s\nAmount: %d تومان",
+            $payment->getId(),
+            $order->getId(),
+            $this->formatTelegramIdentity($telegramAccount),
+            $order->getPlan()->getTitle(),
+            $payment->getAmount()
+        );
+
+        $this->telegramApiClient->sendPhoto($chatId, $receiptFileId, $caption, $this->keyboardFactory->adminPaymentActions((int) $payment->getId()));
+        $this->debugLog(sprintf('admin_view_payment_sent_receipt_photo payment_id=%d', $paymentId));
+    }
+
+    private function handleAdminConfirmPayment(string $chatId, int $paymentId): void
+    {
         $payment = $this->entityManager->getRepository(Payment::class)->find($paymentId);
         if (!$payment instanceof Payment) {
             $this->telegramApiClient->sendMessage($chatId, BotTexts::ADMIN_PAYMENT_NOT_FOUND);
@@ -268,18 +399,8 @@ class TelegramUpdateHandler
         );
     }
 
-    private function handleAdminRejectPayment(string $callbackId, string $chatId, string $actorId, int $paymentId): void
+    private function handleAdminRejectPayment(string $chatId, int $paymentId): void
     {
-        if (!$this->isAdminAuthorized($actorId, $chatId)) {
-            $this->debugLog(sprintf('admin_reject_unauthorized actor_id="%s" chat_id="%s" payment_id=%d', $actorId, $chatId, $paymentId));
-            $this->telegramApiClient->answerCallbackQuery($callbackId, BotTexts::ADMIN_UNAUTHORIZED);
-
-            return;
-        }
-
-        $this->telegramApiClient->answerCallbackQuery($callbackId);
-        $this->debugLog(sprintf('admin_reject_execute actor_id="%s" payment_id=%d', $actorId, $paymentId));
-
         $payment = $this->entityManager->getRepository(Payment::class)->find($paymentId);
         if (!$payment instanceof Payment) {
             $this->telegramApiClient->sendMessage($chatId, BotTexts::ADMIN_PAYMENT_NOT_FOUND);
@@ -320,6 +441,83 @@ class TelegramUpdateHandler
         $this->telegramApiClient->sendMessage($chatId, BotTexts::RECEIPT_SUBMITTED);
     }
 
+    private function handleAdminUsers(string $chatId): void
+    {
+        $accounts = $this->entityManager->getRepository(TelegramAccount::class)->findBy([], ['id' => 'DESC'], 10);
+        if ([] === $accounts) {
+            $this->telegramApiClient->sendMessage($chatId, 'کاربر تلگرامی یافت نشد.', $this->keyboardFactory->backToAdminMenu());
+
+            return;
+        }
+
+        $lines = ["آخرین کاربران:\n"];
+        foreach ($accounts as $account) {
+            $lines[] = sprintf(
+                "User ID: %d\nTelegram ID: %s\nUsername: @%s\nFirst name: %s\nLast activity: %s\n",
+                $account->getUser()->getId(),
+                $account->getTelegramId(),
+                $account->getUsername() ?: '-',
+                $account->getFirstName() ?: '-',
+                $account->getLastActivityAt()?->format('Y-m-d H:i:s') ?? '-'
+            );
+        }
+
+        $this->telegramApiClient->sendMessage($chatId, implode("\n", $lines), $this->keyboardFactory->backToAdminMenu());
+    }
+
+    private function handleAdminServices(string $chatId): void
+    {
+        $services = $this->entityManager->getRepository(VpnService::class)->findBy([], ['id' => 'DESC'], 10);
+        if ([] === $services) {
+            $this->telegramApiClient->sendMessage($chatId, 'سرویسی یافت نشد.', $this->keyboardFactory->backToAdminMenu());
+
+            return;
+        }
+
+        $lines = ["آخرین سرویسها:\n"];
+        foreach ($services as $service) {
+            $subscriptionUrl = $service->getSubscriptionUrl() ?: '-';
+            if (mb_strlen($subscriptionUrl) > 60) {
+                $subscriptionUrl = mb_substr($subscriptionUrl, 0, 60).'...';
+            }
+            $lines[] = sprintf(
+                "Service ID: %d\nUser: %s\nStatus: %s\nExpires at: %s\nSubscription: %s\n",
+                $service->getId(),
+                $this->formatTelegramIdentity($service->getUser()->getTelegramAccount()),
+                $service->getStatus(),
+                $service->getExpiresAt()?->format('Y-m-d H:i:s') ?? '-',
+                $subscriptionUrl
+            );
+        }
+
+        $this->telegramApiClient->sendMessage($chatId, implode("\n", $lines), $this->keyboardFactory->backToAdminMenu());
+    }
+
+    private function handleAdminOrders(string $chatId): void
+    {
+        $orders = $this->entityManager->getRepository(Order::class)->findBy([], ['id' => 'DESC'], 10);
+        if ([] === $orders) {
+            $this->telegramApiClient->sendMessage($chatId, 'سفارشی یافت نشد.', $this->keyboardFactory->backToAdminMenu());
+
+            return;
+        }
+
+        $lines = ["آخرین سفارشها:\n"];
+        foreach ($orders as $order) {
+            $lines[] = sprintf(
+                "Order ID: %d\nUser: %s\nPlan: %s\nAmount: %d\nStatus: %s\nCreated at: %s\n",
+                $order->getId(),
+                $this->formatTelegramIdentity($order->getUser()->getTelegramAccount()),
+                $order->getPlan()->getTitle(),
+                $order->getAmount(),
+                $order->getStatus(),
+                $order->getCreatedAt()->format('Y-m-d H:i:s')
+            );
+        }
+
+        $this->telegramApiClient->sendMessage($chatId, implode("\n", $lines), $this->keyboardFactory->backToAdminMenu());
+    }
+
     private function handleReceiptText(Payment $openPayment, string $text, string $chatId): void
     {
         $openPayment
@@ -358,27 +556,38 @@ class TelegramUpdateHandler
 
         $order = $payment->getOrder();
         $telegramAccount = $this->entityManager->getRepository(TelegramAccount::class)->findOneBy(['user' => $order->getUser()]);
-        $username = $telegramAccount?->getUsername();
-        $telegramId = $telegramAccount?->getTelegramId() ?? '-';
-        $receiptInfo = 'tracking_code' === $kind
-            ? ($payment->getTrackingCode() ?: $payment->getReceiptMessage() ?: '-')
-            : ('file_id: '.($payment->getReceiptFileId() ?: '-'));
-
         $message = sprintf(
-            "پرداخت جدید ثبت شد\n\nPayment ID: %d\nOrder ID: %d\nUser: @%s / %s\nPlan: %s\nAmount: %d تومان\nReceipt: %s",
+            "پرداخت جدید ثبت شد\n\nPayment ID: %d\nOrder ID: %d\nUser: %s\nPlan: %s\nAmount: %d تومان\nTracking: %s\nReceipt message: %s",
             $payment->getId(),
             $order->getId(),
-            $username ?: '-',
-            $telegramId,
+            $this->formatTelegramIdentity($telegramAccount),
             $order->getPlan()->getTitle(),
             $payment->getAmount(),
-            $receiptInfo
+            $payment->getTrackingCode() ?: '-',
+            $payment->getReceiptMessage() ?: '-'
         );
+
+        if ('receipt_photo' === $kind) {
+            $receiptFileId = (string) ($payment->getReceiptFileId() ?? '');
+            if ('' !== $receiptFileId) {
+                $this->telegramApiClient->sendPhoto(
+                    $this->adminChatId,
+                    $receiptFileId,
+                    $message,
+                    $this->keyboardFactory->adminPaymentActions((int) $payment->getId())
+                );
+                $this->debugLog(sprintf('notify_admin_sent_receipt_photo payment_id=%d', $payment->getId()));
+
+                return;
+            }
+
+            $this->debugLog(sprintf('notify_admin_missing_receipt_file payment_id=%d', $payment->getId()));
+        }
 
         $this->telegramApiClient->sendMessage($this->adminChatId, $message, $this->keyboardFactory->adminPaymentActions((int) $payment->getId()));
     }
 
-    private function isAdminAuthorized(string $actorId, string $chatId): bool
+    private function isAdminUserId(string $actorId): bool
     {
         if (null === $this->adminChatId || '' === trim($this->adminChatId)) {
             return false;
@@ -386,7 +595,16 @@ class TelegramUpdateHandler
 
         $adminChatId = trim($this->adminChatId);
 
-        return $actorId === $adminChatId || $chatId === $adminChatId;
+        return $actorId === $adminChatId;
+    }
+
+    private function formatTelegramIdentity(?TelegramAccount $telegramAccount): string
+    {
+        if (!$telegramAccount instanceof TelegramAccount) {
+            return '@- / -';
+        }
+
+        return sprintf('@%s / %s', $telegramAccount->getUsername() ?: '-', $telegramAccount->getTelegramId());
     }
 
     private function debugLog(string $message): void
