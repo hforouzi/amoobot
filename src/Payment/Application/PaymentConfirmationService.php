@@ -21,7 +21,7 @@ class PaymentConfirmationService
 
     public function confirm(Payment $payment): PaymentApprovalResult
     {
-        $result = $this->paymentApprovalService->confirmPayment($payment);
+        $result = $this->paymentApprovalService->confirm($payment);
         if ($result->processed) {
             $telegramAccount = $this->entityManager->getRepository(TelegramAccount::class)->findOneBy(['user' => $payment->getOrder()->getUser()]);
             if ($telegramAccount instanceof TelegramAccount) {
@@ -42,7 +42,7 @@ class PaymentConfirmationService
 
     public function reject(Payment $payment, ?string $note = null): PaymentApprovalResult
     {
-        $result = $this->paymentApprovalService->rejectPayment($payment, $note);
+        $result = $this->paymentApprovalService->reject($payment, $note);
         if ($result->processed) {
             $telegramAccount = $this->entityManager->getRepository(TelegramAccount::class)->findOneBy(['user' => $payment->getOrder()->getUser()]);
             if ($telegramAccount instanceof TelegramAccount) {

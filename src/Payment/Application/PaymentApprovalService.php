@@ -19,7 +19,7 @@ class PaymentApprovalService
     ) {
     }
 
-    public function confirmPayment(Payment $payment): PaymentApprovalResult
+    public function confirm(Payment $payment): PaymentApprovalResult
     {
         $order = $payment->getOrder();
         $existingService = $this->entityManager->getRepository(VpnService::class)->findOneBy(['order' => $order]);
@@ -66,7 +66,7 @@ class PaymentApprovalService
         return PaymentApprovalResult::processed('Payment confirmed and service provisioned.', $vpnService);
     }
 
-    public function rejectPayment(Payment $payment, ?string $reason = null): PaymentApprovalResult
+    public function reject(Payment $payment, ?string $reason = null): PaymentApprovalResult
     {
         $order = $payment->getOrder();
         $existingService = $this->entityManager->getRepository(VpnService::class)->findOneBy(['order' => $order]);
@@ -87,5 +87,15 @@ class PaymentApprovalService
         $this->entityManager->flush();
 
         return PaymentApprovalResult::processed('Payment rejected.');
+    }
+
+    public function confirmPayment(Payment $payment): PaymentApprovalResult
+    {
+        return $this->confirm($payment);
+    }
+
+    public function rejectPayment(Payment $payment, ?string $reason = null): PaymentApprovalResult
+    {
+        return $this->reject($payment, $reason);
     }
 }

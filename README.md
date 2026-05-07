@@ -104,6 +104,7 @@ php bin/console app:telegram:poll --drop-pending
 Notes:
 - Do not run webhook and long polling at the same time.
 - Keep the terminal open while polling is running.
+- While polling, callback updates print `callback_data=...` in console for temporary debug.
 
 Webhook endpoint:
 - `POST /telegram/webhook/{secret}`

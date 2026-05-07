@@ -95,6 +95,9 @@ class TelegramPollCommand extends Command
                 }
 
                 $io->writeln(sprintf('Processing update_id=%d', $updateId));
+                if (isset($update['callback_query']['data'])) {
+                    $io->writeln(sprintf('callback_data=%s', (string) $update['callback_query']['data']));
+                }
                 $this->logIncoming($update);
 
                 try {
