@@ -41,10 +41,14 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
             throw new \RuntimeException('Selected inbound does not belong to selected panel.');
         }
 
-        $inboundId = trim((string) ($request->remoteInboundId ?? $inbound->getRemoteInboundId()));
-        if ('' === $inboundId) {
+        $inboundIdRaw = trim((string) ($request->remoteInboundId ?? $inbound->getRemoteInboundId()));
+        if ('' === $inboundIdRaw) {
             throw new \RuntimeException('Sanaei provisioning requires a valid remote inbound id.');
         }
+        if (!preg_match('/^\d+$/', $inboundIdRaw)) {
+            throw new \RuntimeException('Remote inbound id must be numeric for Sanaei/3x-ui.');
+        }
+        $inboundIdInt = (int) $inboundIdRaw;
 
         $email = trim((string) $request->username);
         if ('' === $email) {
@@ -61,10 +65,11 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
         $client = $this->buildClientPayload($protocol, $clientUuid, $email, $subId, $totalBytes, $expiryTime, $config);
 
         $this->log(sprintf(
-            'create_service_add_client_request panel_id=%s local_inbound_id=%s remote_inbound_id="%s" protocol="%s" network="%s" security="%s" uuid="%s" email="%s" total_gb_bytes=%d expiry_time=%d',
+            'create_service_add_client_request panel_id=%s local_inbound_id=%s remote_inbound_id_raw="%s" remote_inbound_id_int=%d protocol="%s" network="%s" security="%s" uuid="%s" email="%s" total_gb_bytes=%d expiry_time=%d',
             $panel->getId() ?? 'null',
             $inbound->getId() ?? 'null',
-            $inboundId,
+            $inboundIdRaw,
+            $inboundIdInt,
             $protocol,
             $network,
             $security,
@@ -74,9 +79,10 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
             $expiryTime
         ));
 
-        $result = $this->apiClient->addClient($panel, $inboundId, $client, [
+        $result = $this->apiClient->addClient($panel, $inboundIdInt, $client, [
             'localInboundId' => (string) ($inbound->getId() ?? 0),
-            'remoteInboundId' => $inboundId,
+            'remoteInboundIdRaw' => $inboundIdRaw,
+            'remoteInboundIdInt' => (string) $inboundIdInt,
             'protocol' => $protocol,
             'network' => $network,
             'security' => $security,
@@ -86,10 +92,11 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
             'expiryTime' => (string) $expiryTime,
         ]);
         $this->log(sprintf(
-            'create_service_add_client_response panel_id=%s local_inbound_id=%s remote_inbound_id="%s" status=%s ok=%s success=%s empty=%s error="%s" body_preview="%s"',
+            'create_service_add_client_response panel_id=%s local_inbound_id=%s remote_inbound_id_raw="%s" remote_inbound_id_int=%d status=%s ok=%s success=%s empty=%s error="%s" body_preview="%s"',
             $panel->getId() ?? 'null',
             $inbound->getId() ?? 'null',
-            $inboundId,
+            $inboundIdRaw,
+            $inboundIdInt,
             (string) ($result['status'] ?? 'null'),
             (($result['ok'] ?? false) === true) ? 'true' : 'false',
             (($result['success'] ?? false) === true) ? 'true' : 'false',
@@ -103,7 +110,7 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
             $this->assertPanelBusinessResult($result, 'addClient');
         }
 
-        if (!$this->verifyClientExists($panel, $inboundId, $email)) {
+        if (!$this->verifyClientExists($panel, $inboundIdRaw, $email)) {
             throw new \RuntimeException('Sanaei addClient could not be verified on panel.');
         }
 
@@ -115,7 +122,7 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
         }
 
         return new CreatedVpnService(
-            remoteId: $this->remoteIdParser->format($panel->getId(), $inbound->getId(), $inboundId, $clientUuid, $email, $subId),
+            remoteId: $this->remoteIdParser->format($panel->getId(), $inbound->getId(), $inboundIdRaw, $clientUuid, $email, $subId),
             username: $email,
             subscriptionUrl: $subscriptionUrl,
             configText: $configText,

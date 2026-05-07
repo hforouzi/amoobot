@@ -76,7 +76,7 @@ final class Sanaei3xuiApiClient
         return $this->request($panel, 'GET', '/panel/api/inbounds/get/'.rawurlencode($id));
     }
 
-    public function addClient(VpnPanel $panel, string $inboundId, array $client, array $context = []): array
+    public function addClient(VpnPanel $panel, int $inboundId, array $client, array $context = []): array
     {
         if (!$this->ensureLogin($panel)) {
             return $this->errorResult('login_failed');
@@ -349,6 +349,8 @@ final class Sanaei3xuiApiClient
         $allowed = [
             'localInboundId',
             'remoteInboundId',
+            'remoteInboundIdRaw',
+            'remoteInboundIdInt',
             'protocol',
             'network',
             'security',
