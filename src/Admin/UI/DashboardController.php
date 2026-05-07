@@ -4,15 +4,15 @@ declare(strict_types=1);
 
 namespace App\Admin\UI;
 
-use App\Entity\BotMessageLog;
-use App\Entity\Order;
-use App\Entity\Payment;
-use App\Entity\Plan;
-use App\Entity\Setting;
-use App\Entity\TelegramAccount;
-use App\Entity\User;
-use App\Entity\VpnPanel;
-use App\Entity\VpnService;
+use App\Admin\UI\Crud\BotMessageLogCrudController;
+use App\Admin\UI\Crud\OrderCrudController;
+use App\Admin\UI\Crud\PaymentCrudController;
+use App\Admin\UI\Crud\PlanCrudController;
+use App\Admin\UI\Crud\SettingCrudController;
+use App\Admin\UI\Crud\TelegramAccountCrudController;
+use App\Admin\UI\Crud\UserCrudController;
+use App\Admin\UI\Crud\VpnPanelCrudController;
+use App\Admin\UI\Crud\VpnServiceCrudController;
 use EasyCorp\Bundle\EasyAdminBundle\Attribute\AdminDashboard;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Dashboard;
 use EasyCorp\Bundle\EasyAdminBundle\Config\MenuItem;
@@ -34,14 +34,14 @@ class DashboardController extends AbstractDashboardController
     public function configureMenuItems(): iterable
     {
         yield MenuItem::linkToDashboard('Dashboard', 'fa fa-home');
-        yield MenuItem::linkToCrud('Users', 'fa fa-users', User::class);
-        yield MenuItem::linkToCrud('Telegram Accounts', 'fa fa-paper-plane', TelegramAccount::class);
-        yield MenuItem::linkToCrud('Plans', 'fa fa-list', Plan::class);
-        yield MenuItem::linkToCrud('Orders', 'fa fa-shopping-cart', Order::class);
-        yield MenuItem::linkToCrud('Payments', 'fa fa-credit-card', Payment::class);
-        yield MenuItem::linkToCrud('VPN Panels', 'fa fa-server', VpnPanel::class);
-        yield MenuItem::linkToCrud('VPN Services', 'fa fa-link', VpnService::class);
-        yield MenuItem::linkToCrud('Bot Logs', 'fa fa-file-text', BotMessageLog::class);
-        yield MenuItem::linkToCrud('Settings', 'fa fa-cog', Setting::class);
+        yield MenuItem::linkTo(UserCrudController::class, 'Users', 'fa fa-users');
+        yield MenuItem::linkTo(TelegramAccountCrudController::class, 'Telegram Accounts', 'fa fa-paper-plane');
+        yield MenuItem::linkTo(PlanCrudController::class, 'Plans', 'fa fa-list');
+        yield MenuItem::linkTo(OrderCrudController::class, 'Orders', 'fa fa-shopping-cart');
+        yield MenuItem::linkTo(PaymentCrudController::class, 'Payments', 'fa fa-credit-card');
+        yield MenuItem::linkTo(VpnPanelCrudController::class, 'VPN Panels', 'fa fa-server');
+        yield MenuItem::linkTo(VpnServiceCrudController::class, 'VPN Services', 'fa fa-link');
+        yield MenuItem::linkTo(BotMessageLogCrudController::class, 'Bot Logs', 'fa fa-file-text');
+        yield MenuItem::linkTo(SettingCrudController::class, 'Settings', 'fa fa-cog');
     }
 }
