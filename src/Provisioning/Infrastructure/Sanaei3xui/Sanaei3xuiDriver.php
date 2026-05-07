@@ -14,7 +14,7 @@ use Symfony\Component\Uid\Uuid;
 
 final class Sanaei3xuiDriver implements VpnPanelDriverInterface
 {
-    private const FALLBACK_CONFIG_TEXT = 'کانفیگ از پنل ساخته شد، لینک اشتراک را از پنل بررسی کنید.';
+    private const DEFAULT_CONFIG_TEXT = 'کانفیگ از پنل ساخته شد، لینک اشتراک را از پنل بررسی کنید.';
 
     public function __construct(
         private readonly Sanaei3xuiApiClient $apiClient,
@@ -24,13 +24,7 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
 
     public function supports(?VpnPanel $panel): bool
     {
-        if (!$panel instanceof VpnPanel || 'sanaei_3xui' !== $panel->getType()) {
-            return false;
-        }
-
-        $this->activePanel = $panel;
-
-        return true;
+        return $panel instanceof VpnPanel && 'sanaei_3xui' === $panel->getType();
     }
 
     public function createService(CreateVpnServiceRequest $request, ?VpnPanel $panel = null): CreatedVpnService
@@ -73,25 +67,27 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
             remoteId: $this->remoteIdParser->format($inboundId, $clientUuid, $email),
             username: $email,
             subscriptionUrl: $subscriptionUrl,
-            configText: self::FALLBACK_CONFIG_TEXT,
+            configText: self::DEFAULT_CONFIG_TEXT,
         );
     }
 
-    public function suspendService(string $remoteId): void
+    public function suspendService(string $remoteId, ?VpnPanel $panel = null): void
     {
+        $panel = $this->requireSupportedPanel($panel);
         $ref = $this->parseRemoteIdOrFail($remoteId);
-        $client = $this->fetchClientByReference($ref);
+        $client = $this->fetchClientByReference($panel, $ref);
         $client['enable'] = false;
 
-        $result = $this->apiClient->updateClient($this->requireSupportedPanel($this->currentPanel()), $ref->inboundId, $ref->clientId, $client);
+        $result = $this->apiClient->updateClient($panel, $ref->inboundId, $ref->clientId, $client);
         $this->assertPanelResult($result, 'updateClient');
         $this->assertPanelBusinessResult($result, 'updateClient', true);
     }
 
-    public function renewService(string $remoteId, RenewVpnServiceRequest $request): void
+    public function renewService(string $remoteId, RenewVpnServiceRequest $request, ?VpnPanel $panel = null): void
     {
+        $panel = $this->requireSupportedPanel($panel);
         $ref = $this->parseRemoteIdOrFail($remoteId);
-        $client = $this->fetchClientByReference($ref);
+        $client = $this->fetchClientByReference($panel, $ref);
         $client['enable'] = true;
 
         if ($request->durationDays > 0) {
@@ -102,31 +98,34 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
             $client['totalGB'] = $this->gbToBytes($request->trafficLimitGb);
         }
 
-        $result = $this->apiClient->updateClient($this->requireSupportedPanel($this->currentPanel()), $ref->inboundId, $ref->clientId, $client);
+        $result = $this->apiClient->updateClient($panel, $ref->inboundId, $ref->clientId, $client);
         $this->assertPanelResult($result, 'updateClient');
         $this->assertPanelBusinessResult($result, 'updateClient', true);
     }
 
-    public function deleteService(string $remoteId): void
+    public function deleteService(string $remoteId, ?VpnPanel $panel = null): void
     {
+        $panel = $this->requireSupportedPanel($panel);
         $ref = $this->parseRemoteIdOrFail($remoteId);
-        $result = $this->apiClient->deleteClient($this->requireSupportedPanel($this->currentPanel()), $ref->inboundId, $ref->clientId);
+        $result = $this->apiClient->deleteClient($panel, $ref->inboundId, $ref->clientId);
         $this->assertPanelResult($result, 'delClient');
         $this->assertPanelBusinessResult($result, 'delClient');
     }
 
-    public function resetUsage(string $remoteId): void
+    public function resetUsage(string $remoteId, ?VpnPanel $panel = null): void
     {
+        $panel = $this->requireSupportedPanel($panel);
         $ref = $this->parseRemoteIdOrFail($remoteId);
-        $result = $this->apiClient->resetClientTraffic($this->requireSupportedPanel($this->currentPanel()), $ref->inboundId, $ref->email);
+        $result = $this->apiClient->resetClientTraffic($panel, $ref->inboundId, $ref->email);
         $this->assertPanelResult($result, 'resetClientTraffic');
         $this->assertPanelBusinessResult($result, 'resetClientTraffic');
     }
 
-    public function getUsage(string $remoteId): VpnUsage
+    public function getUsage(string $remoteId, ?VpnPanel $panel = null): VpnUsage
     {
+        $panel = $this->requireSupportedPanel($panel);
         $ref = $this->parseRemoteIdOrFail($remoteId);
-        $result = $this->apiClient->getClientTraffic($this->requireSupportedPanel($this->currentPanel()), $ref->email);
+        $result = $this->apiClient->getClientTraffic($panel, $ref->email);
         $this->assertPanelResult($result, 'getClientTraffics');
         $this->assertPanelBusinessResult($result, 'getClientTraffics');
 
@@ -143,22 +142,13 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
         );
     }
 
-    private ?VpnPanel $activePanel = null;
-
     private function requireSupportedPanel(?VpnPanel $panel): VpnPanel
     {
         if (!$panel instanceof VpnPanel || 'sanaei_3xui' !== $panel->getType()) {
             throw new \RuntimeException('Requested panel is not a Sanaei/3x-ui panel.');
         }
 
-        $this->activePanel = $panel;
-
         return $panel;
-    }
-
-    private function currentPanel(): ?VpnPanel
-    {
-        return $this->activePanel;
     }
 
     private function parseRemoteIdOrFail(string $remoteId): Sanaei3xuiRemoteClientRef
@@ -177,9 +167,8 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
         return is_array($panel->getConfig()) ? $panel->getConfig() : [];
     }
 
-    private function fetchClientByReference(Sanaei3xuiRemoteClientRef $ref): array
+    private function fetchClientByReference(VpnPanel $panel, Sanaei3xuiRemoteClientRef $ref): array
     {
-        $panel = $this->requireSupportedPanel($this->currentPanel());
         $result = $this->apiClient->getInbound($panel, $ref->inboundId);
         $this->assertPanelResult($result, 'getInbound');
         $this->assertPanelBusinessResult($result, 'getInbound');

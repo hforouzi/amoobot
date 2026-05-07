@@ -236,7 +236,12 @@ final class Sanaei3xuiApiClient
                 continue;
             }
 
-            [$cookieName, $cookieValue] = explode('=', $nameValue, 2);
+            $nameValueParts = explode('=', $nameValue, 2);
+            if (2 !== count($nameValueParts)) {
+                continue;
+            }
+
+            [$cookieName, $cookieValue] = $nameValueParts;
             $cookieName = trim($cookieName);
             if ('' === $cookieName) {
                 continue;

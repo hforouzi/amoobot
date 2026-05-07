@@ -16,6 +16,19 @@ use EasyCorp\Bundle\EasyAdminBundle\Field\TextareaField;
 
 class VpnPanelCrudController extends AbstractCrudController
 {
+    private const CONFIG_HELP_TEXT = <<<'TEXT'
+JSON example:
+{
+  "inbound_id": 1,
+  "protocol": "vless",
+  "default_flow": "",
+  "default_security": "reality",
+  "default_network": "tcp",
+  "subscription_base_url": "https://example.com",
+  "remark_prefix": "amoobot"
+}
+TEXT;
+
     public static function getEntityFqcn(): string
     {
         return VpnPanel::class;
@@ -35,7 +48,7 @@ class VpnPanelCrudController extends AbstractCrudController
             TextField::new('username'),
             TextField::new('password')->hideOnIndex(),
             TextareaField::new('apiToken')->hideOnIndex(),
-            ArrayField::new('config')->setHelp('JSON example: {"inbound_id":1,"protocol":"vless","default_flow":"","default_security":"reality","default_network":"tcp","subscription_base_url":"https://example.com","remark_prefix":"amoobot"}'),
+            ArrayField::new('config')->setHelp(self::CONFIG_HELP_TEXT),
             BooleanField::new('isActive'),
             DateTimeField::new('createdAt')->hideOnForm(),
             DateTimeField::new('updatedAt')->hideOnForm(),

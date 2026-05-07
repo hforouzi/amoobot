@@ -258,7 +258,7 @@ class ServiceManagementService
         if ($this->shouldSyncWithPanel($service)) {
             try {
                 $driver = $this->driverRegistry->resolve($service->getPanel());
-                $driver->suspendService((string) $service->getRemoteId());
+                $driver->suspendService((string) $service->getRemoteId(), $service->getPanel());
             } catch (\Throwable $e) {
                 $this->debugLog(sprintf('service_sync_failure action=suspend service_id=%d message="%s"', $serviceId, $e->getMessage()));
                 $this->showPopupOrMessage($chatId, $callbackId, 'عملیات روی پنل انجام نشد. لاگ را بررسی کنید.', 'panel_suspend_failed');
@@ -302,7 +302,7 @@ class ServiceManagementService
                 $driver->renewService((string) $service->getRemoteId(), new RenewVpnServiceRequest(
                     durationDays: 0,
                     trafficLimitGb: $service->getTrafficLimitGb(),
-                ));
+                ), $service->getPanel());
             } catch (\Throwable $e) {
                 $this->debugLog(sprintf('service_sync_failure action=activate service_id=%d message="%s"', $serviceId, $e->getMessage()));
                 $this->showPopupOrMessage($chatId, $callbackId, 'عملیات روی پنل انجام نشد. لاگ را بررسی کنید.', 'panel_activate_failed');
@@ -341,7 +341,7 @@ class ServiceManagementService
         if ($this->shouldSyncWithPanel($service)) {
             try {
                 $driver = $this->driverRegistry->resolve($service->getPanel());
-                $driver->deleteService((string) $service->getRemoteId());
+                $driver->deleteService((string) $service->getRemoteId(), $service->getPanel());
             } catch (\Throwable $e) {
                 $this->debugLog(sprintf('service_sync_failure action=delete service_id=%d message="%s"', $serviceId, $e->getMessage()));
                 $this->showPopupOrMessage($chatId, $callbackId, 'عملیات روی پنل انجام نشد. لاگ را بررسی کنید.', 'panel_delete_failed');
@@ -370,7 +370,7 @@ class ServiceManagementService
         if ($this->shouldSyncWithPanel($service)) {
             try {
                 $driver = $this->driverRegistry->resolve($service->getPanel());
-                $driver->resetUsage((string) $service->getRemoteId());
+                $driver->resetUsage((string) $service->getRemoteId(), $service->getPanel());
             } catch (\Throwable $e) {
                 $this->debugLog(sprintf('service_sync_failure action=reset_usage service_id=%d message="%s"', $serviceId, $e->getMessage()));
                 $this->showPopupOrMessage($chatId, $callbackId, 'عملیات روی پنل انجام نشد. لاگ را بررسی کنید.', 'panel_reset_usage_failed');
@@ -675,7 +675,7 @@ class ServiceManagementService
     private function syncServiceUsageFromPanel(VpnService $service): void
     {
         $driver = $this->driverRegistry->resolve($service->getPanel());
-        $usage = $driver->getUsage((string) $service->getRemoteId());
+        $usage = $driver->getUsage((string) $service->getRemoteId(), $service->getPanel());
 
         $service
             ->setTrafficUsedGb($usage->trafficUsedGb ?? $service->getTrafficUsedGb())

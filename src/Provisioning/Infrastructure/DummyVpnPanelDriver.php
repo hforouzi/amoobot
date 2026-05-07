@@ -30,23 +30,23 @@ class DummyVpnPanelDriver implements VpnPanelDriverInterface
         );
     }
 
-    public function suspendService(string $remoteId): void
+    public function suspendService(string $remoteId, ?VpnPanel $panel = null): void
     {
     }
 
-    public function renewService(string $remoteId, RenewVpnServiceRequest $request): void
+    public function renewService(string $remoteId, RenewVpnServiceRequest $request, ?VpnPanel $panel = null): void
     {
     }
 
-    public function deleteService(string $remoteId): void
+    public function deleteService(string $remoteId, ?VpnPanel $panel = null): void
     {
     }
 
-    public function resetUsage(string $remoteId): void
+    public function resetUsage(string $remoteId, ?VpnPanel $panel = null): void
     {
     }
 
-    public function getUsage(string $remoteId): VpnUsage
+    public function getUsage(string $remoteId, ?VpnPanel $panel = null): VpnUsage
     {
         return new VpnUsage(trafficUsedGb: 0, trafficLimitGb: null);
     }
