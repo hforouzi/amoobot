@@ -22,5 +22,7 @@ interface VpnPanelDriverInterface
 
     public function deleteService(string $remoteId): void;
 
+    public function resetUsage(string $remoteId): void;
+
     public function getUsage(string $remoteId): VpnUsage;
 }

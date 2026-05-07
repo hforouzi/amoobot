@@ -6,6 +6,8 @@ services:
     _instanceof:
         App\Bot\Application\ServiceAction\ServiceActionInterface:
             tags: ['app.telegram_service_action']
+        App\Provisioning\Domain\VpnPanelDriverInterface:
+            tags: ['app.vpn_driver']
 
     _defaults:
         autowire: true
@@ -20,9 +22,6 @@ services:
 
     App\:
         resource: '../src/'
-
-    App\Provisioning\Infrastructure\DummyVpnPanelDriver:
-        tags: ['app.vpn_driver']
 
     App\Provisioning\Infrastructure\VpnPanelDriverRegistry:
         arguments:

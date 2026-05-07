@@ -9,7 +9,9 @@ use App\Entity\Order;
 use App\Entity\TelegramAccount;
 use App\Entity\User;
 use App\Entity\VpnService;
+use App\Provisioning\Domain\Dto\RenewVpnServiceRequest;
 use App\Provisioning\Domain\VpnServiceStatus;
+use App\Provisioning\Infrastructure\VpnPanelDriverRegistry;
 use Doctrine\ORM\EntityManagerInterface;
 
 class ServiceManagementService
@@ -18,6 +20,7 @@ class ServiceManagementService
         private readonly EntityManagerInterface $entityManager,
         private readonly TelegramApiClient $telegramApiClient,
         private readonly TelegramKeyboardFactory $keyboardFactory,
+        private readonly VpnPanelDriverRegistry $driverRegistry,
     ) {
     }
 
@@ -217,6 +220,17 @@ class ServiceManagementService
             return;
         }
 
+        if ($this->shouldSyncWithPanel($service)) {
+            try {
+                $this->syncServiceUsageFromPanel($service);
+            } catch (\Throwable $e) {
+                $this->debugLog(sprintf('service_sync_failure action=refresh service_id=%d message="%s"', $serviceId, $e->getMessage()));
+                $this->showPopupOrMessage($chatId, $callbackId, 'عملیات روی پنل انجام نشد. لاگ را بررسی کنید.', 'panel_refresh_failed');
+
+                return;
+            }
+        }
+
         $this->entityManager->refresh($service);
         $this->acknowledgeCallback($callbackId);
         $this->telegramApiClient->sendMessage($chatId, $this->formatServiceDetailForUser($service), $this->keyboardFactory->userServiceDetail((int) $service->getId()));
@@ -239,6 +253,18 @@ class ServiceManagementService
             $this->showPopupOrMessage($chatId, $callbackId, 'عملیات نامعتبر است.', 'invalid_suspend_deleted');
 
             return;
+        }
+
+        if ($this->shouldSyncWithPanel($service)) {
+            try {
+                $driver = $this->driverRegistry->resolve($service->getPanel());
+                $driver->suspendService((string) $service->getRemoteId());
+            } catch (\Throwable $e) {
+                $this->debugLog(sprintf('service_sync_failure action=suspend service_id=%d message="%s"', $serviceId, $e->getMessage()));
+                $this->showPopupOrMessage($chatId, $callbackId, 'عملیات روی پنل انجام نشد. لاگ را بررسی کنید.', 'panel_suspend_failed');
+
+                return;
+            }
         }
 
         $service
@@ -270,6 +296,21 @@ class ServiceManagementService
             return;
         }
 
+        if ($this->shouldSyncWithPanel($service)) {
+            try {
+                $driver = $this->driverRegistry->resolve($service->getPanel());
+                $driver->renewService((string) $service->getRemoteId(), new RenewVpnServiceRequest(
+                    durationDays: 0,
+                    trafficLimitGb: $service->getTrafficLimitGb(),
+                ));
+            } catch (\Throwable $e) {
+                $this->debugLog(sprintf('service_sync_failure action=activate service_id=%d message="%s"', $serviceId, $e->getMessage()));
+                $this->showPopupOrMessage($chatId, $callbackId, 'عملیات روی پنل انجام نشد. لاگ را بررسی کنید.', 'panel_activate_failed');
+
+                return;
+            }
+        }
+
         $service
             ->setStatus(VpnServiceStatus::ACTIVE)
             ->setUpdatedAt(new \DateTimeImmutable());
@@ -297,6 +338,18 @@ class ServiceManagementService
             return;
         }
 
+        if ($this->shouldSyncWithPanel($service)) {
+            try {
+                $driver = $this->driverRegistry->resolve($service->getPanel());
+                $driver->deleteService((string) $service->getRemoteId());
+            } catch (\Throwable $e) {
+                $this->debugLog(sprintf('service_sync_failure action=delete service_id=%d message="%s"', $serviceId, $e->getMessage()));
+                $this->showPopupOrMessage($chatId, $callbackId, 'عملیات روی پنل انجام نشد. لاگ را بررسی کنید.', 'panel_delete_failed');
+
+                return;
+            }
+        }
+
         $service
             ->setStatus(VpnServiceStatus::DELETED)
             ->setUpdatedAt(new \DateTimeImmutable());
@@ -312,6 +365,18 @@ class ServiceManagementService
         $service = $this->findServiceOrPopup($serviceId, $chatId, $callbackId, 'invalid_service_reset_usage');
         if (!$service instanceof VpnService) {
             return;
+        }
+
+        if ($this->shouldSyncWithPanel($service)) {
+            try {
+                $driver = $this->driverRegistry->resolve($service->getPanel());
+                $driver->resetUsage((string) $service->getRemoteId());
+            } catch (\Throwable $e) {
+                $this->debugLog(sprintf('service_sync_failure action=reset_usage service_id=%d message="%s"', $serviceId, $e->getMessage()));
+                $this->showPopupOrMessage($chatId, $callbackId, 'عملیات روی پنل انجام نشد. لاگ را بررسی کنید.', 'panel_reset_usage_failed');
+
+                return;
+            }
         }
 
         $service
@@ -605,5 +670,24 @@ class ServiceManagementService
     private function debugLog(string $message): void
     {
         error_log('[ServiceManagementService] '.$message);
+    }
+
+    private function syncServiceUsageFromPanel(VpnService $service): void
+    {
+        $driver = $this->driverRegistry->resolve($service->getPanel());
+        $usage = $driver->getUsage((string) $service->getRemoteId());
+
+        $service
+            ->setTrafficUsedGb($usage->trafficUsedGb ?? $service->getTrafficUsedGb())
+            ->setTrafficLimitGb($usage->trafficLimitGb ?? $service->getTrafficLimitGb())
+            ->setUpdatedAt(new \DateTimeImmutable());
+        $this->entityManager->flush();
+    }
+
+    private function shouldSyncWithPanel(VpnService $service): bool
+    {
+        $panel = $service->getPanel();
+
+        return null !== $panel && 'sanaei_3xui' === $panel->getType();
     }
 }

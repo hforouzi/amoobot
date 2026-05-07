@@ -544,6 +544,12 @@ class TelegramUpdateHandler
             return;
         }
 
+        if (!$result->processed) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'عملیات روی پنل انجام نشد. لاگ را بررسی کنید.', 'popup_payment_confirm_panel_failed');
+
+            return;
+        }
+
         $this->acknowledgeCallback($callbackId);
         $this->telegramApiClient->sendMessage($chatId, BotTexts::ADMIN_PAYMENT_CONFIRMED);
     }
@@ -568,6 +574,12 @@ class TelegramUpdateHandler
         ));
         if ($result->alreadyProcessed) {
             $this->showPopupOrMessage($chatId, $callbackId, 'این پرداخت قبلاً بررسی شده است.', 'popup_payment_already_processed_reject');
+
+            return;
+        }
+
+        if (!$result->processed) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'عملیات انجام نشد.', 'popup_payment_reject_failed');
 
             return;
         }

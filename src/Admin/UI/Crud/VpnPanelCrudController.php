@@ -8,6 +8,7 @@ use App\Entity\VpnPanel;
 use EasyCorp\Bundle\EasyAdminBundle\Controller\AbstractCrudController;
 use EasyCorp\Bundle\EasyAdminBundle\Field\ArrayField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\BooleanField;
+use EasyCorp\Bundle\EasyAdminBundle\Field\ChoiceField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\DateTimeField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\IdField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\TextField;
@@ -24,13 +25,17 @@ class VpnPanelCrudController extends AbstractCrudController
     {
         return [
             IdField::new('id')->onlyOnIndex(),
-            TextField::new('type'),
+            ChoiceField::new('type')
+                ->setChoices([
+                    'dummy' => 'dummy',
+                    'sanaei_3xui' => 'sanaei_3xui',
+                ]),
             TextField::new('title'),
             TextField::new('baseUrl'),
             TextField::new('username'),
             TextField::new('password')->hideOnIndex(),
             TextareaField::new('apiToken')->hideOnIndex(),
-            ArrayField::new('config'),
+            ArrayField::new('config')->setHelp('JSON example: {"inbound_id":1,"protocol":"vless","default_flow":"","default_security":"reality","default_network":"tcp","subscription_base_url":"https://example.com","remark_prefix":"amoobot"}'),
             BooleanField::new('isActive'),
             DateTimeField::new('createdAt')->hideOnForm(),
             DateTimeField::new('updatedAt')->hideOnForm(),

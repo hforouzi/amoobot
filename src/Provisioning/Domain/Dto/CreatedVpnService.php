@@ -9,8 +9,8 @@ class CreatedVpnService
     public function __construct(
         public readonly string $remoteId,
         public readonly string $username,
-        public readonly string $subscriptionUrl,
-        public readonly string $configText,
+        public readonly ?string $subscriptionUrl,
+        public readonly ?string $configText,
     ) {
     }
 }

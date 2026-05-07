@@ -18,7 +18,13 @@ class PaymentModerationController extends AbstractController
     public function confirm(Payment $payment, PaymentConfirmationService $confirmationService): RedirectResponse
     {
         $result = $confirmationService->confirm($payment);
-        $this->addFlash($result->alreadyProcessed ? 'info' : 'success', $result->message);
+        if ($result->alreadyProcessed) {
+            $this->addFlash('info', $result->message);
+        } elseif ($result->processed) {
+            $this->addFlash('success', $result->message);
+        } else {
+            $this->addFlash('danger', $result->message);
+        }
 
         return $this->redirectToRoute('admin', [
             'crudAction' => 'index',
@@ -31,7 +37,13 @@ class PaymentModerationController extends AbstractController
     {
         $note = $request->request->get('note');
         $result = $confirmationService->reject($payment, is_string($note) ? $note : null);
-        $this->addFlash($result->alreadyProcessed ? 'info' : 'warning', $result->message);
+        if ($result->alreadyProcessed) {
+            $this->addFlash('info', $result->message);
+        } elseif ($result->processed) {
+            $this->addFlash('warning', $result->message);
+        } else {
+            $this->addFlash('danger', $result->message);
+        }
 
         return $this->redirectToRoute('admin', [
             'crudAction' => 'index',

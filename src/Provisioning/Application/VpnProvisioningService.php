@@ -24,16 +24,24 @@ class VpnProvisioningService
 
     public function provisionOrder(Order $order): VpnService
     {
-        $panel = $this->entityManager->getRepository(VpnPanel::class)->findOneBy(['isActive' => true], ['id' => 'ASC']);
+        $planPanel = $order->getPlan()->getPanel();
+        if ($planPanel instanceof VpnPanel && !$planPanel->isActive()) {
+            throw new \RuntimeException('Selected VPN panel is inactive.');
+        }
+
+        $panel = $planPanel instanceof VpnPanel ? $planPanel : null;
         $telegram = $this->entityManager->getRepository(TelegramAccount::class)->findOneBy(['user' => $order->getUser()]);
         $telegramId = $telegram?->getTelegramId() ?? (string) $order->getUser()->getId();
 
         $driver = $this->driverRegistry->resolve($panel instanceof VpnPanel ? $panel : null);
         $created = $driver->createService(new CreateVpnServiceRequest(
-            username: 'tg_'.$telegramId,
+            username: sprintf('tg_%s_order_%d', $telegramId, $order->getId()),
             durationDays: $order->getPlan()->getDurationDays(),
             trafficLimitGb: $order->getPlan()->getTrafficGb(),
-            meta: ['orderId' => $order->getId()],
+            meta: [
+                'orderId' => $order->getId(),
+                'telegramId' => $telegramId,
+            ],
         ), $panel instanceof VpnPanel ? $panel : null);
 
         $vpnService = (new VpnService())

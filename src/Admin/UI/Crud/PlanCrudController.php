@@ -6,6 +6,7 @@ namespace App\Admin\UI\Crud;
 
 use App\Entity\Plan;
 use EasyCorp\Bundle\EasyAdminBundle\Controller\AbstractCrudController;
+use EasyCorp\Bundle\EasyAdminBundle\Field\AssociationField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\BooleanField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\DateTimeField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\IdField;
@@ -29,6 +30,7 @@ class PlanCrudController extends AbstractCrudController
             IntegerField::new('durationDays'),
             IntegerField::new('trafficGb'),
             IntegerField::new('price'),
+            AssociationField::new('panel'),
             BooleanField::new('isActive'),
             DateTimeField::new('createdAt')->hideOnForm(),
             DateTimeField::new('updatedAt')->hideOnForm(),

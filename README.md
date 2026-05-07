@@ -187,10 +187,47 @@ In `/admin` -> Payments, use actions:
 - `deleted` (🗑)
 - Status operations in Phase 1.2 update local `VpnService` fields only.
 
-## Local-only Operations Before Real Drivers
-- Suspend/activate/delete/update usage/extend/add traffic are persisted in local DB.
-- No upstream panel API calls are performed for these operations yet.
-- This architecture keeps callbacks and service logic ready for real driver integration in later phases.
+## Local-only vs Panel-synced Operations
+- For services on `dummy` panel (or no panel), operations remain local DB updates.
+- For services on `sanaei_3xui`, suspend/activate/delete/reset usage/refresh usage are synced with panel API first, then local DB is updated.
+- If panel API action fails, local state is not silently changed and admin sees an alert.
+
+## Phase 1.3 Sanaei / 3x-ui Driver
+- Dummy driver remains available for local/testing fallback.
+- Real provisioning is available for panel type `sanaei_3xui` (MHSanaei/3x-ui compatible).
+
+### Create a VpnPanel for Sanaei
+- In `/admin` -> VPN Panels create/edit:
+  - `type`: `sanaei_3xui`
+  - `baseUrl`: panel base URL (example: `https://panel.example.com`)
+  - `username` / `password`: panel login credentials
+  - `config` JSON example:
+    ```json
+    {
+      "inbound_id": 1,
+      "protocol": "vless",
+      "default_flow": "",
+      "default_security": "reality",
+      "default_network": "tcp",
+      "subscription_base_url": "https://example.com",
+      "remark_prefix": "amoobot"
+    }
+    ```
+
+### Assign panel to plan
+- In `/admin` -> Plans select a `panel` per plan.
+- If plan panel is empty, provisioning falls back to Dummy driver.
+
+### Test panel commands
+```bash
+php bin/console app:panel:test-login {panelId}
+php bin/console app:panel:list-inbounds {panelId}
+php bin/console app:panel:test-create-client {panelId} {inboundId}
+```
+
+### Known issue
+- Some 3x-ui versions may return empty responses for `addClient`/`updateClient`.
+- The driver logs this safely and handles it as a warning path where applicable.
 
 ## Reply Keyboard vs Inline Keyboard
 - **Reply Keyboard (persistent):** used for primary navigation at the bottom of Telegram chat.
@@ -237,6 +274,9 @@ In `/admin` -> Payments, use actions:
 - `app:telegram:poll [--limit=N] [--timeout=N] [--sleep=N] [--once] [--drop-pending] [--no-delete-webhook]` (defaults: limit=20, timeout=25, sleep=1)
 - `app:create-default-settings`
 - `app:create-sample-plans`
+- `app:panel:test-login {panelId}`
+- `app:panel:list-inbounds {panelId}`
+- `app:panel:test-create-client {panelId} {inboundId}`
 
 ## Not implemented in Phase 1
 - SaaS
@@ -246,4 +286,4 @@ In `/admin` -> Payments, use actions:
 - Referral
 - Wallet
 - Online payment gateways
-- Real Xray/Marzban/MikroTik drivers
+- Additional real panel drivers beyond `sanaei_3xui`

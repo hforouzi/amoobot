@@ -32,6 +32,10 @@ class Plan
     #[ORM\Column]
     private bool $isActive = true;
 
+    #[ORM\ManyToOne]
+    #[ORM\JoinColumn(nullable: true, onDelete: 'SET NULL')]
+    private ?VpnPanel $panel = null;
+
     #[ORM\Column]
     private \DateTimeImmutable $createdAt;
 
@@ -116,6 +120,18 @@ class Plan
     public function setIsActive(bool $isActive): self
     {
         $this->isActive = $isActive;
+
+        return $this;
+    }
+
+    public function getPanel(): ?VpnPanel
+    {
+        return $this->panel;
+    }
+
+    public function setPanel(?VpnPanel $panel): self
+    {
+        $this->panel = $panel;
 
         return $this;
     }
