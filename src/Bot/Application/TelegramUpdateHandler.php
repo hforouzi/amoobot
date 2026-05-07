@@ -347,7 +347,7 @@ class TelegramUpdateHandler
         $description = $this->settingValueProvider->get('payment.description', $this->paymentDescription);
 
         $message = sprintf(
-            "پلن: %s\nمبلغ: %d تومان\nشماره کارت: %s\nبه نام: %s\n%s",
+            "پلن: %s\nمبلغ: %d تومان\nشماره کارت: %s\nبه نام: %s\n%s\n\nبرای ارسال رسید روی «✅ تایید و ارسال رسید» بزنید.",
             $plan->getTitle(),
             $plan->getPrice(),
             $cardNumber ?: '-',
@@ -374,7 +374,13 @@ class TelegramUpdateHandler
             return;
         }
 
-        if (!in_array($payment->getStatus(), [PaymentStatus::PENDING, PaymentStatus::SUBMITTED], true)) {
+        if (PaymentStatus::SUBMITTED === $payment->getStatus()) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'رسید این پرداخت قبلاً ارسال شده است.', 'popup_payment_submit_receipt_already_submitted');
+
+            return;
+        }
+
+        if (PaymentStatus::PENDING !== $payment->getStatus()) {
             $this->showPopupOrMessage($chatId, $callbackId, 'امکان ارسال رسید برای این پرداخت وجود ندارد.', 'popup_payment_submit_receipt_invalid_status');
 
             return;
