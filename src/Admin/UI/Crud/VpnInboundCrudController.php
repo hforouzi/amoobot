@@ -14,9 +14,9 @@ use EasyCorp\Bundle\EasyAdminBundle\Controller\AbstractCrudController;
 use EasyCorp\Bundle\EasyAdminBundle\Field\AssociationField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\BooleanField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\DateTimeField;
+use EasyCorp\Bundle\EasyAdminBundle\Field\Field;
 use EasyCorp\Bundle\EasyAdminBundle\Field\IdField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\TextField;
-use EasyCorp\Bundle\EasyAdminBundle\Field\TextareaField;
 
 class VpnInboundCrudController extends AbstractCrudController
 {
@@ -63,7 +63,7 @@ class VpnInboundCrudController extends AbstractCrudController
             TextField::new('network'),
             TextField::new('security'),
             BooleanField::new('isActive'),
-            TextareaField::new('config')
+            Field::new('config')
                 ->setFormType(JsonTextareaType::class)
                 ->formatValue(static fn (mixed $value): string => JsonFieldFormatter::format($value))
                 ->setFormTypeOption('attr.rows', 20)
