@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Command;
 
-use App\Entity\VpnPanel;
+use App\Entity\VpnInbound;
 use App\Provisioning\Infrastructure\Sanaei3xui\Sanaei3xuiApiClient;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\Console\Attribute\AsCommand;
@@ -27,15 +27,12 @@ final class PanelTestCreateClientCommand extends Command
 
     protected function configure(): void
     {
-        $this
-            ->addArgument('panelId', InputArgument::REQUIRED, 'VpnPanel id')
-            ->addArgument('inboundId', InputArgument::REQUIRED, 'Inbound id');
+        $this->addArgument('inboundId', InputArgument::REQUIRED, 'Local VpnInbound id');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $io = new SymfonyStyle($input, $output);
-        $panelId = (int) $input->getArgument('panelId');
         $inboundId = (int) $input->getArgument('inboundId');
         if ($inboundId <= 0) {
             $io->error('inboundId must be greater than zero.');
@@ -43,13 +40,14 @@ final class PanelTestCreateClientCommand extends Command
             return Command::FAILURE;
         }
 
-        $panel = $this->entityManager->getRepository(VpnPanel::class)->find($panelId);
-        if (!$panel instanceof VpnPanel) {
-            $io->error('Panel not found.');
+        $inbound = $this->entityManager->getRepository(VpnInbound::class)->find($inboundId);
+        if (!$inbound instanceof VpnInbound) {
+            $io->error('Inbound not found.');
 
             return Command::FAILURE;
         }
 
+        $panel = $inbound->getPanel();
         if ('sanaei_3xui' !== $panel->getType()) {
             $io->error('Panel type must be sanaei_3xui.');
 
@@ -69,11 +67,11 @@ final class PanelTestCreateClientCommand extends Command
             'tgId' => '',
             'subId' => bin2hex(random_bytes(8)),
             'reset' => 0,
-            'security' => (string) ($config['default_security'] ?? 'reality'),
-            'network' => (string) ($config['default_network'] ?? 'tcp'),
+            'security' => (string) ($inbound->getSecurity() ?? 'reality'),
+            'network' => (string) ($inbound->getNetwork() ?? 'tcp'),
         ];
 
-        $result = $this->apiClient->addClient($panel, $inboundId, $client);
+        $result = $this->apiClient->addClient($panel, $inbound->getRemoteInboundId(), $client);
         if (($result['ok'] ?? false) !== true) {
             $io->error('Test addClient failed.');
 

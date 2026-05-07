@@ -69,6 +69,7 @@ Manage:
 - Orders
 - Payments
 - VPN Panels
+- VPN Inbounds
 - VPN Services
 - Bot Message Logs
 - Settings
@@ -201,28 +202,36 @@ In `/admin` -> Payments, use actions:
   - `type`: `sanaei_3xui`
   - `baseUrl`: panel base URL (example: `https://panel.example.com`)
   - `username` / `password`: panel login credentials
-  - `config` JSON example:
+  - `config` JSON for global panel settings (no `inbound_id`):
     ```json
     {
-      "inbound_id": 1,
-      "protocol": "vless",
-      "default_flow": "",
-      "default_security": "reality",
-      "default_network": "tcp",
-      "subscription_base_url": "https://example.com",
+      "subscription_base_url": "https://panel.example.com",
       "remark_prefix": "amoobot"
     }
     ```
 
-### Assign panel to plan
-- In `/admin` -> Plans select a `panel` per plan.
-- If plan panel is empty, provisioning falls back to Dummy driver.
+### Correct Phase 1.3 setup flow
+1. Create `VpnPanel`.
+2. Test login:
+   ```bash
+   php bin/console app:panel:test-login {panelId}
+   ```
+3. Sync inbounds:
+   ```bash
+   php bin/console app:panel:sync-inbounds {panelId}
+   ```
+4. In `/admin` -> VPN Inbounds, edit metadata (`title`, `country`, `protocol`, `network`, `security`).
+5. In `/admin` -> Plans, assign `VpnInbound` to each plan.
+6. User buys plan from bot.
+7. Admin approves payment.
+8. Client is created in selected inbound.
 
 ### Test panel commands
 ```bash
 php bin/console app:panel:test-login {panelId}
 php bin/console app:panel:list-inbounds {panelId}
-php bin/console app:panel:test-create-client {panelId} {inboundId}
+php bin/console app:panel:sync-inbounds {panelId}
+php bin/console app:panel:test-create-client {inboundId}
 ```
 
 ### Known issue
@@ -276,7 +285,8 @@ php bin/console app:panel:test-create-client {panelId} {inboundId}
 - `app:create-sample-plans`
 - `app:panel:test-login {panelId}`
 - `app:panel:list-inbounds {panelId}`
-- `app:panel:test-create-client {panelId} {inboundId}`
+- `app:panel:sync-inbounds {panelId}`
+- `app:panel:test-create-client {inboundId}`
 
 ## Not implemented in Phase 1
 - SaaS

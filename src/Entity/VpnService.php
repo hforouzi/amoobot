@@ -27,6 +27,10 @@ class VpnService
     #[ORM\JoinColumn(nullable: true, onDelete: 'SET NULL')]
     private ?VpnPanel $panel = null;
 
+    #[ORM\ManyToOne]
+    #[ORM\JoinColumn(nullable: true, onDelete: 'SET NULL')]
+    private ?VpnInbound $inbound = null;
+
     #[ORM\Column(length: 255, nullable: true)]
     private ?string $remoteId = null;
 
@@ -102,6 +106,18 @@ class VpnService
     public function setPanel(?VpnPanel $panel): self
     {
         $this->panel = $panel;
+
+        return $this;
+    }
+
+    public function getInbound(): ?VpnInbound
+    {
+        return $this->inbound;
+    }
+
+    public function setInbound(?VpnInbound $inbound): self
+    {
+        $this->inbound = $inbound;
 
         return $this;
     }

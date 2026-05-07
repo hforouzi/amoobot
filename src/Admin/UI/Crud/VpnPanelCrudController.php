@@ -19,12 +19,7 @@ class VpnPanelCrudController extends AbstractCrudController
     private const CONFIG_HELP_TEXT = <<<'TEXT'
 JSON example:
 {
-  "inbound_id": 1,
-  "protocol": "vless",
-  "default_flow": "",
-  "default_security": "reality",
-  "default_network": "tcp",
-  "subscription_base_url": "https://example.com",
+  "subscription_base_url": "https://panel.example.com",
   "remark_prefix": "amoobot"
 }
 TEXT;

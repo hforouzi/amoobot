@@ -6,9 +6,9 @@ namespace App\Provisioning\Infrastructure\Sanaei3xui;
 
 final class Sanaei3xuiRemoteIdParser
 {
-    public function format(int $inboundId, string $clientId, string $email): string
+    public function format(string $inboundId, string $clientId, string $email): string
     {
-        return sprintf('%d|%s|%s', $inboundId, $clientId, $email);
+        return sprintf('%s|%s|%s', trim($inboundId), $clientId, $email);
     }
 
     public function parse(string $remoteId): ?Sanaei3xuiRemoteClientRef
@@ -41,11 +41,11 @@ final class Sanaei3xuiRemoteIdParser
 
     private function toRef(string $inboundId, string $clientId, string $email): ?Sanaei3xuiRemoteClientRef
     {
-        $parsedInboundId = (int) $inboundId;
+        $parsedInboundId = trim($inboundId);
         $parsedClientId = trim($clientId);
         $parsedEmail = trim($email);
 
-        if ($parsedInboundId <= 0 || '' === $parsedClientId || '' === $parsedEmail) {
+        if ('' === $parsedInboundId || '' === $parsedClientId || '' === $parsedEmail) {
             return null;
         }
 

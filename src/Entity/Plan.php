@@ -34,7 +34,7 @@ class Plan
 
     #[ORM\ManyToOne]
     #[ORM\JoinColumn(nullable: true, onDelete: 'SET NULL')]
-    private ?VpnPanel $panel = null;
+    private ?VpnInbound $inbound = null;
 
     #[ORM\Column]
     private \DateTimeImmutable $createdAt;
@@ -124,14 +124,14 @@ class Plan
         return $this;
     }
 
-    public function getPanel(): ?VpnPanel
+    public function getInbound(): ?VpnInbound
     {
-        return $this->panel;
+        return $this->inbound;
     }
 
-    public function setPanel(?VpnPanel $panel): self
+    public function setInbound(?VpnInbound $inbound): self
     {
-        $this->panel = $panel;
+        $this->inbound = $inbound;
 
         return $this;
     }

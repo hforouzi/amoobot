@@ -27,6 +27,7 @@ class VpnServiceCrudController extends AbstractCrudController
             AssociationField::new('user'),
             AssociationField::new('order'),
             AssociationField::new('panel'),
+            AssociationField::new('inbound'),
             TextField::new('remoteId'),
             TextField::new('username'),
             TextareaField::new('subscriptionUrl')->hideOnIndex(),

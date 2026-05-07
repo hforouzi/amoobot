@@ -65,16 +65,16 @@ final class Sanaei3xuiApiClient
         return $this->request($panel, 'GET', '/panel/api/inbounds/list');
     }
 
-    public function getInbound(VpnPanel $panel, int $id): array
+    public function getInbound(VpnPanel $panel, string $id): array
     {
         if (!$this->ensureLogin($panel)) {
             return $this->errorResult('login_failed');
         }
 
-        return $this->request($panel, 'GET', '/panel/api/inbounds/get/'.$id);
+        return $this->request($panel, 'GET', '/panel/api/inbounds/get/'.rawurlencode($id));
     }
 
-    public function addClient(VpnPanel $panel, int $inboundId, array $client): array
+    public function addClient(VpnPanel $panel, string $inboundId, array $client): array
     {
         if (!$this->ensureLogin($panel)) {
             return $this->errorResult('login_failed');
@@ -93,7 +93,7 @@ final class Sanaei3xuiApiClient
         );
     }
 
-    public function updateClient(VpnPanel $panel, int $inboundId, string $clientId, array $client): array
+    public function updateClient(VpnPanel $panel, string $inboundId, string $clientId, array $client): array
     {
         if (!$this->ensureLogin($panel)) {
             return $this->errorResult('login_failed');
@@ -112,22 +112,22 @@ final class Sanaei3xuiApiClient
         );
     }
 
-    public function deleteClient(VpnPanel $panel, int $inboundId, string $clientId): array
+    public function deleteClient(VpnPanel $panel, string $inboundId, string $clientId): array
     {
         if (!$this->ensureLogin($panel)) {
             return $this->errorResult('login_failed');
         }
 
-        return $this->request($panel, 'POST', sprintf('/panel/api/inbounds/%d/delClient/%s', $inboundId, rawurlencode($clientId)));
+        return $this->request($panel, 'POST', sprintf('/panel/api/inbounds/%s/delClient/%s', rawurlencode($inboundId), rawurlencode($clientId)));
     }
 
-    public function resetClientTraffic(VpnPanel $panel, int $inboundId, string $email): array
+    public function resetClientTraffic(VpnPanel $panel, string $inboundId, string $email): array
     {
         if (!$this->ensureLogin($panel)) {
             return $this->errorResult('login_failed');
         }
 
-        return $this->request($panel, 'POST', sprintf('/panel/api/inbounds/%d/resetClientTraffic/%s', $inboundId, rawurlencode($email)));
+        return $this->request($panel, 'POST', sprintf('/panel/api/inbounds/%s/resetClientTraffic/%s', rawurlencode($inboundId), rawurlencode($email)));
     }
 
     public function getClientTraffic(VpnPanel $panel, string $email): array

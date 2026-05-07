@@ -6,7 +6,7 @@ namespace App\Provisioning\Application;
 
 use App\Entity\Order;
 use App\Entity\TelegramAccount;
-use App\Entity\VpnPanel;
+use App\Entity\VpnInbound;
 use App\Entity\VpnService;
 use App\Provisioning\Domain\Dto\CreateVpnServiceRequest;
 use App\Provisioning\Domain\VpnServiceStatus;
@@ -24,30 +24,37 @@ class VpnProvisioningService
 
     public function provisionOrder(Order $order): VpnService
     {
-        $planPanel = $order->getPlan()->getPanel();
-        if ($planPanel instanceof VpnPanel && !$planPanel->isActive()) {
+        $planInbound = $order->getPlan()->getInbound();
+        if ($planInbound instanceof VpnInbound && !$planInbound->isActive()) {
+            throw new \RuntimeException('Selected VPN inbound is inactive.');
+        }
+
+        $panel = $planInbound?->getPanel();
+        if (null !== $panel && !$panel->isActive()) {
             throw new \RuntimeException('Selected VPN panel is inactive.');
         }
 
-        $panel = $planPanel instanceof VpnPanel ? $planPanel : null;
         $telegram = $this->entityManager->getRepository(TelegramAccount::class)->findOneBy(['user' => $order->getUser()]);
         $telegramId = $telegram?->getTelegramId() ?? (string) $order->getUser()->getId();
 
-        $driver = $this->driverRegistry->resolve($panel instanceof VpnPanel ? $panel : null);
+        $driver = $this->driverRegistry->resolve($panel);
         $created = $driver->createService(new CreateVpnServiceRequest(
             username: sprintf('tg_%s_order_%d', $telegramId, $order->getId()),
             durationDays: $order->getPlan()->getDurationDays(),
             trafficLimitGb: $order->getPlan()->getTrafficGb(),
+            inbound: $planInbound,
+            remoteInboundId: $planInbound?->getRemoteInboundId(),
             meta: [
                 'orderId' => $order->getId(),
                 'telegramId' => $telegramId,
             ],
-        ), $panel instanceof VpnPanel ? $panel : null);
+        ), $panel);
 
         $vpnService = (new VpnService())
             ->setUser($order->getUser())
             ->setOrder($order)
-            ->setPanel($panel instanceof VpnPanel ? $panel : null)
+            ->setPanel($panel)
+            ->setInbound($planInbound)
             ->setRemoteId($created->remoteId)
             ->setUsername($created->username)
             ->setSubscriptionUrl($created->subscriptionUrl)

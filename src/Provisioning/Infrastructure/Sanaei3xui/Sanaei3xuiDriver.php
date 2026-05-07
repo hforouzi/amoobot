@@ -31,9 +31,14 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
     {
         $panel = $this->requireSupportedPanel($panel);
         $config = $this->panelConfig($panel);
-        $inboundId = (int) ($config['inbound_id'] ?? 0);
-        if ($inboundId <= 0) {
-            throw new \RuntimeException('Sanaei panel config must include a valid inbound_id.');
+        $inbound = $request->inbound;
+        if (null === $inbound) {
+            throw new \RuntimeException('Sanaei provisioning requires a selected inbound.');
+        }
+
+        $inboundId = trim((string) ($request->remoteInboundId ?? $inbound->getRemoteInboundId()));
+        if ('' === $inboundId) {
+            throw new \RuntimeException('Sanaei provisioning requires a valid remote inbound id.');
         }
 
         $clientUuid = Uuid::v4()->toRfc4122();
@@ -50,8 +55,8 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
             'tgId' => '',
             'subId' => $subId,
             'reset' => 0,
-            'security' => (string) ($config['default_security'] ?? 'reality'),
-            'network' => (string) ($config['default_network'] ?? 'tcp'),
+            'security' => (string) ($inbound->getSecurity() ?? 'reality'),
+            'network' => (string) ($inbound->getNetwork() ?? 'tcp'),
         ];
 
         $result = $this->apiClient->addClient($panel, $inboundId, $client);
