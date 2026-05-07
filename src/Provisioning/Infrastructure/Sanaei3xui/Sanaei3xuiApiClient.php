@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Provisioning\Infrastructure\Sanaei3xui;
 
 use App\Entity\VpnPanel;
+use App\Provisioning\Infrastructure\PanelHttpClientFactory;
 use Symfony\Contracts\HttpClient\Exception\TransportExceptionInterface;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 
@@ -15,6 +16,7 @@ final class Sanaei3xuiApiClient
 
     public function __construct(
         private readonly HttpClientInterface $httpClient,
+        private readonly PanelHttpClientFactory $panelHttpClientFactory,
     ) {
     }
 
@@ -177,6 +179,8 @@ final class Sanaei3xuiApiClient
         if ('' === $baseUrl) {
             return $this->errorResult('invalid_base_url');
         }
+
+        $options = array_replace($this->panelHttpClientFactory->createRequestOptions($panel), $options);
 
         $headers = $options['headers'] ?? [];
         $headers[] = 'Accept: application/json';

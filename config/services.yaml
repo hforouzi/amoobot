@@ -3,6 +3,13 @@
 parameters:
     default_telegram_mode: long_polling
     default_telegram_proxy: ''
+    default_panel_proxy_enabled: 'false'
+    default_panel_proxy_type: socks5
+    default_panel_proxy_host: ''
+    default_panel_proxy_port: ''
+    default_panel_proxy_username: ''
+    default_panel_proxy_password: ''
+    default_panel_proxy_timeout: ''
 
 services:
     _instanceof:
@@ -20,6 +27,13 @@ services:
             $adminChatId: '%env(default::TELEGRAM_ADMIN_CHAT_ID)%'
             string $telegramMode: '%env(default:default_telegram_mode:TELEGRAM_MODE)%'
             string $telegramProxy: '%env(default:default_telegram_proxy:TELEGRAM_PROXY)%'
+            string $panelProxyEnabled: '%env(default:default_panel_proxy_enabled:PANEL_PROXY_ENABLED)%'
+            string $panelProxyType: '%env(default:default_panel_proxy_type:PANEL_PROXY_TYPE)%'
+            string $panelProxyHost: '%env(default:default_panel_proxy_host:PANEL_PROXY_HOST)%'
+            string $panelProxyPort: '%env(default:default_panel_proxy_port:PANEL_PROXY_PORT)%'
+            string $panelProxyUsername: '%env(default:default_panel_proxy_username:PANEL_PROXY_USERNAME)%'
+            string $panelProxyPassword: '%env(default:default_panel_proxy_password:PANEL_PROXY_PASSWORD)%'
+            string $panelProxyTimeout: '%env(default:default_panel_proxy_timeout:PANEL_PROXY_TIMEOUT)%'
             string $paymentCardNumber: '%env(PAYMENT_CARD_NUMBER)%'
             string $paymentCardHolder: '%env(PAYMENT_CARD_HOLDER)%'
             $paymentDescription: '%env(default::PAYMENT_DESCRIPTION)%'

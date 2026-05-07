@@ -6,7 +6,6 @@ namespace App\Command;
 
 use App\Entity\VpnPanel;
 use App\Provisioning\Infrastructure\PanelHttpClientFactory;
-use App\Provisioning\Infrastructure\Sanaei3xui\Sanaei3xuiApiClient;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
@@ -15,12 +14,11 @@ use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Style\SymfonyStyle;
 
-#[AsCommand(name: 'app:panel:test-login', description: 'Test login to a Sanaei/3x-ui panel')]
-final class PanelTestLoginCommand extends Command
+#[AsCommand(name: 'app:panel:debug-transport', description: 'Show resolved panel transport diagnostics')]
+final class PanelDebugTransportCommand extends Command
 {
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
-        private readonly Sanaei3xuiApiClient $apiClient,
         private readonly PanelHttpClientFactory $panelHttpClientFactory,
     ) {
         parent::__construct();
@@ -42,14 +40,7 @@ final class PanelTestLoginCommand extends Command
             return Command::FAILURE;
         }
 
-        if ('sanaei_3xui' !== $panel->getType()) {
-            $io->error('Panel type must be sanaei_3xui.');
-
-            return Command::FAILURE;
-        }
-
         $diagnostics = $this->panelHttpClientFactory->diagnostics($panel);
-        $io->section('Transport diagnostics');
         $io->listing([
             sprintf('panel id: %s', (string) ($diagnostics['panelId'] ?? '')),
             sprintf('proxy source: %s', (string) ($diagnostics['proxySource'] ?? 'none')),
@@ -59,15 +50,6 @@ final class PanelTestLoginCommand extends Command
             sprintf('proxy port: %s', (string) ($diagnostics['proxyPort'] ?? '')),
             sprintf('timeout: %s', (string) ($diagnostics['timeout'] ?? '')),
         ]);
-
-        $result = $this->apiClient->login($panel);
-        if (($result['ok'] ?? false) !== true) {
-            $io->error('Login failed.');
-
-            return Command::FAILURE;
-        }
-
-        $io->success('Login successful.');
 
         return Command::SUCCESS;
     }

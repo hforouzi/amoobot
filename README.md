@@ -35,6 +35,13 @@ Optional:
 - `ADMIN_PASSWORD` (default: admin)
 - `TELEGRAM_MODE` (default: `long_polling`) — allowed: `webhook`, `long_polling`
 - `TELEGRAM_PROXY` — optional outgoing proxy for Bot → Telegram API, e.g. `socks5://host:1080`
+- `PANEL_PROXY_ENABLED` (default: `false`)
+- `PANEL_PROXY_TYPE` (default: `socks5`) — allowed: `socks5`, `http`
+- `PANEL_PROXY_HOST`
+- `PANEL_PROXY_PORT`
+- `PANEL_PROXY_USERNAME`
+- `PANEL_PROXY_PASSWORD`
+- `PANEL_PROXY_TIMEOUT` (default: `30`)
 
 ## Database Migration
 ```bash
@@ -225,6 +232,7 @@ In `/admin` -> Payments, use actions:
 ### Test panel commands
 ```bash
 php bin/console app:panel:test-login {panelId}
+php bin/console app:panel:debug-transport {panelId}
 php bin/console app:panel:list-inbounds {panelId}
 php bin/console app:panel:sync-inbounds {panelId}
 php bin/console app:panel:test-create-client {inboundId}
@@ -233,6 +241,7 @@ php bin/console app:panel:test-create-client {inboundId}
 ### CLI equivalents
 ```bash
 php bin/console app:panel:test-login 1
+php bin/console app:panel:debug-transport 1
 php bin/console app:panel:sync-inbounds 1
 php bin/console app:panel:test-create-client 3
 ```
@@ -298,6 +307,7 @@ If `test login` works but provisioning still fails on `addClient`:
 - `app:create-default-settings`
 - `app:create-sample-plans`
 - `app:panel:test-login {panelId}`
+- `app:panel:debug-transport {panelId}`
 - `app:panel:list-inbounds {panelId}`
 - `app:panel:sync-inbounds {panelId}`
 - `app:panel:test-create-client {inboundId}`
@@ -308,6 +318,34 @@ If `test login` works but provisioning still fails on `addClient`:
 - `TELEGRAM_PROXY` applies only to **Bot → Telegram API** (outgoing: getUpdates, sendMessage, setWebhook, etc.).
 - Webhook inbound requests (Telegram → Bot) cannot be proxied; they arrive at your server's public URL.
 - The VPN panel proxy (if any) is configured separately and does not affect Telegram API calls.
+
+### Global Panel Proxy from .env
+Use this when a panel has no `config.proxy` enabled and you want one shared transport policy:
+
+```env
+PANEL_PROXY_ENABLED=true
+PANEL_PROXY_TYPE=socks5
+PANEL_PROXY_HOST=127.0.0.1
+PANEL_PROXY_PORT=1080
+PANEL_PROXY_USERNAME=
+PANEL_PROXY_PASSWORD=
+PANEL_PROXY_TIMEOUT=30
+```
+
+Resolution order:
+1. If `VpnPanel.config.proxy.enabled=true`, use panel-specific proxy.
+2. Else if `PANEL_PROXY_ENABLED=true`, use global env proxy.
+3. Else use direct connection.
+
+Timeout order:
+1. `VpnPanel.config.timeout`
+2. `PANEL_PROXY_TIMEOUT`
+3. `15` seconds fallback
+
+Important:
+- `TELEGRAM_PROXY` is only for Bot → Telegram API.
+- Panel proxy vars are only for Bot → VPN Panel API.
+- `app:panel:debug-transport {panelId}` prints safe transport diagnostics (no passwords/tokens/cookies).
 
 ---
 
