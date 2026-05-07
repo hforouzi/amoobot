@@ -545,7 +545,7 @@ class TelegramUpdateHandler
         }
 
         if (!$result->processed) {
-            $this->showPopupOrMessage($chatId, $callbackId, 'عملیات روی پنل انجام نشد. لاگ را بررسی کنید.', 'popup_payment_confirm_panel_failed');
+            $this->showPopupOrMessage($chatId, $callbackId, 'ساخت سرویس در پنل انجام نشد. لاگ را بررسی کنید.', 'popup_payment_confirm_panel_failed');
 
             return;
         }
