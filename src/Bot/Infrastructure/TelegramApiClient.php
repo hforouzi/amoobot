@@ -36,11 +36,14 @@ class TelegramApiClient
         $this->botMessageLogger->log(BotMessageDirection::OUTGOING, ['method' => 'sendMessage', 'payload' => $payload], $chatId, 'message');
     }
 
-    public function answerCallbackQuery(string $callbackQueryId, ?string $text = null): void
+    public function answerCallbackQuery(string $callbackQueryId, ?string $text = null, bool $showAlert = false): void
     {
         $payload = ['callback_query_id' => $callbackQueryId];
         if (null !== $text) {
             $payload['text'] = $text;
+        }
+        if ($showAlert) {
+            $payload['show_alert'] = true;
         }
 
         try {

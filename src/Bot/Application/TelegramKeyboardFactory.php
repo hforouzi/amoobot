@@ -9,6 +9,42 @@ use App\Entity\Plan;
 class TelegramKeyboardFactory
 {
     /**
+     * @return array<string, mixed>
+     */
+    public function mainReplyKeyboard(bool $isAdmin): array
+    {
+        $keyboard = [
+            [
+                ['text' => '🛒 خرید سرویس'],
+                ['text' => '📦 سرویسهای من'],
+            ],
+            [
+                ['text' => '🎧 پشتیبانی'],
+            ],
+        ];
+
+        if ($isAdmin) {
+            $keyboard[1][] = ['text' => '🛠 مدیریت'];
+        }
+
+        return [
+            'keyboard' => $keyboard,
+            'resize_keyboard' => true,
+            'one_time_keyboard' => false,
+        ];
+    }
+
+    /**
+     * @return array<string, bool>
+     */
+    public function removeReplyKeyboard(): array
+    {
+        return [
+            'remove_keyboard' => true,
+        ];
+    }
+
+    /**
      * @return array<string, array<array<array<string, string>>>>
      */
     public function mainMenu(bool $isAdmin = false): array

@@ -154,6 +154,45 @@ In `/admin` -> Payments, use actions:
 - Admin can open pending payments, view payment details, and view receipt photos in Telegram.
 - Admin can confirm/reject payments from Telegram using inline buttons.
 
+## Reply Keyboard vs Inline Keyboard
+- **Reply Keyboard (persistent):** used for primary navigation at the bottom of Telegram chat.
+  - `🛒 خرید سرویس`
+  - `📦 سرویسهای من`
+  - `🎧 پشتیبانی`
+  - `🛠 مدیریت` (admin only)
+- **Inline Keyboard (contextual):** used for action-specific flows:
+  - plan selection
+  - admin menu actions
+  - pending payment views
+  - payment confirm/reject
+  - back navigation buttons
+
+## Popup Alerts
+- Bot uses Telegram popup alerts (`answerCallbackQuery` with `show_alert=true`) for inline callback warnings, including:
+  - no active plans
+  - no active services
+  - empty admin lists
+  - invalid/inactive plan
+  - already processed payment
+- Note: popup alerts are callback-only; text/reply-keyboard actions return short normal messages.
+
+## TELEGRAM_ADMIN_CHAT_ID
+- Configure `TELEGRAM_ADMIN_CHAT_ID` to the Telegram numeric user/chat id of the admin.
+- Only this id can execute `admin_*` callbacks.
+- Non-admin users receive `Unauthorized`.
+
+## Long polling local development
+- Recommended local flow:
+  ```bash
+  php bin/console app:telegram:delete-webhook
+  php bin/console app:telegram:poll
+  ```
+- One-shot poll:
+  ```bash
+  php bin/console app:telegram:poll --once
+  ```
+- Debug: polling logs incoming `callback_data=...` for callback troubleshooting.
+
 ## Commands
 - `app:telegram:set-webhook {baseUrl}`
 - `app:telegram:delete-webhook`
