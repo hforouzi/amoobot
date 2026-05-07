@@ -406,4 +406,23 @@ class TelegramKeyboardFactory
             ],
         ];
     }
+
+    /**
+     * @return array<string, array<array<array<string, string>>>>
+     */
+    public function serviceDeleteConfirmation(int $serviceId): array
+    {
+        return [
+            'inline_keyboard' => [
+                [[
+                    'text' => '✅ بله، حذف کن',
+                    'callback_data' => 'service_delete_confirm:'.$serviceId,
+                ]],
+                [[
+                    'text' => '❌ انصراف',
+                    'callback_data' => 'admin_service_view:'.$serviceId,
+                ]],
+            ],
+        ];
+    }
 }

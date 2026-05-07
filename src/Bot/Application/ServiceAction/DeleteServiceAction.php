@@ -17,7 +17,8 @@ final class DeleteServiceAction implements ServiceActionInterface
 
     public function supports(string $callbackData): bool
     {
-        return str_starts_with($callbackData, 'service_delete:');
+        return str_starts_with($callbackData, 'service_delete:')
+            || str_starts_with($callbackData, 'service_delete_confirm:');
     }
 
     public function handle(ServiceActionContext $context): void
@@ -29,7 +30,28 @@ final class DeleteServiceAction implements ServiceActionInterface
             return;
         }
 
+        if (str_starts_with($context->data, 'service_delete_confirm:')) {
+            $serviceId = (int) str_replace('service_delete_confirm:', '', $context->data);
+            if ($serviceId <= 0) {
+                error_log(sprintf('[ServiceAction] invalid service_delete_confirm data="%s" actor_id="%s"', $context->data, $context->actorId));
+                $this->telegramApiClient->answerCallbackQuery($context->callbackId, 'سرویس معتبر نیست.', true);
+
+                return;
+            }
+
+            $this->serviceManagementService->deleteService($serviceId, $context->chatId, $context->callbackId);
+
+            return;
+        }
+
         $serviceId = (int) str_replace('service_delete:', '', $context->data);
-        $this->serviceManagementService->deleteService($serviceId, $context->chatId, $context->callbackId);
+        if ($serviceId <= 0) {
+            error_log(sprintf('[ServiceAction] invalid service_delete data="%s" actor_id="%s"', $context->data, $context->actorId));
+            $this->telegramApiClient->answerCallbackQuery($context->callbackId, 'سرویس معتبر نیست.', true);
+
+            return;
+        }
+
+        $this->serviceManagementService->requestDeleteConfirmation($serviceId, $context->chatId, $context->callbackId);
     }
 }

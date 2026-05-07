@@ -171,7 +171,8 @@ In `/admin` -> Payments, use actions:
 ## Admin Service Actions
 - `admin_services`: lists latest services with admin detail entry buttons.
 - `admin_service_view:{id}`: shows full service details and management actions.
-- `service_suspend:{id}` / `service_activate:{id}` / `service_delete:{id}`
+- `service_suspend:{id}` / `service_activate:{id}`
+- `service_delete:{id}` now opens a confirmation step and deletion is finalized by `service_delete_confirm:{id}`.
 - `service_reset_usage:{id}`
 - `service_extend_menu:{id}` -> `service_extend:{id}:{days}`
 - `service_add_traffic_menu:{id}` -> `service_add_traffic:{id}:{gb}`

@@ -98,6 +98,24 @@ class ServiceManagementService
         );
     }
 
+    public function requestDeleteConfirmation(int $serviceId, string $chatId, string $callbackId): void
+    {
+        $this->debugLog(sprintf('admin_service_delete_request service_id=%d', $serviceId));
+        $service = $this->findServiceOrPopup($serviceId, $chatId, $callbackId, 'invalid_service_delete_request');
+        if (!$service instanceof VpnService) {
+            $this->debugLog(sprintf('admin_service_delete_request_invalid service_id=%d', $serviceId));
+
+            return;
+        }
+
+        $this->acknowledgeCallback($callbackId);
+        $this->telegramApiClient->sendMessage(
+            $chatId,
+            'آیا از حذف این سرویس مطمئن هستید؟',
+            $this->keyboardFactory->serviceDeleteConfirmation((int) $service->getId())
+        );
+    }
+
     public function sendSubscription(TelegramAccount $account, int $serviceId, string $chatId, string $callbackId): void
     {
         $service = $this->entityManager->getRepository(VpnService::class)->find($serviceId);
@@ -241,13 +259,17 @@ class ServiceManagementService
 
     public function deleteService(int $serviceId, string $chatId, string $callbackId): void
     {
+        $this->debugLog(sprintf('admin_service_delete_confirm service_id=%d', $serviceId));
         $service = $this->findServiceOrPopup($serviceId, $chatId, $callbackId, 'invalid_service_delete');
         if (!$service instanceof VpnService) {
+            $this->debugLog(sprintf('admin_service_delete_confirm_invalid service_id=%d', $serviceId));
+
             return;
         }
 
         if (VpnServiceStatus::DELETED === $service->getStatus()) {
             $this->showPopupOrMessage($chatId, $callbackId, 'سرویس قبلاً حذف شده است.', 'already_deleted');
+            $this->debugLog(sprintf('admin_service_delete_already_deleted service_id=%d', $serviceId));
 
             return;
         }

@@ -34,6 +34,7 @@ final class ShowServiceAction implements ServiceActionInterface
         }
 
         $serviceId = (int) str_replace('admin_service_view:', '', $context->data);
+        error_log(sprintf('[ServiceAction] admin_service_view_opened service_id=%d actor_id="%s" (includes delete-cancel returns)', $serviceId, $context->actorId));
         $this->serviceManagementService->showAdminServiceDetail($serviceId, $context->chatId, $context->callbackId);
     }
 }
