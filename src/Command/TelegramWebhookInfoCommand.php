@@ -9,9 +9,10 @@ use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
+use Symfony\Component\Console\Style\SymfonyStyle;
 
-#[AsCommand(name: 'app:telegram:delete-webhook', description: 'Delete Telegram webhook')]
-class DeleteTelegramWebhookCommand extends Command
+#[AsCommand(name: 'app:telegram:webhook-info', description: 'Show current Telegram webhook info')]
+class TelegramWebhookInfoCommand extends Command
 {
     public function __construct(
         private readonly TelegramApiClient $telegramApiClient,
@@ -21,8 +22,17 @@ class DeleteTelegramWebhookCommand extends Command
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $data = $this->telegramApiClient->deleteWebhook();
-        $output->writeln(json_encode($data, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT) ?: 'done');
+        $io = new SymfonyStyle($input, $output);
+
+        try {
+            $data = $this->telegramApiClient->getWebhookInfo();
+        } catch (\Throwable $e) {
+            $io->error('getWebhookInfo failed: '.$e->getMessage());
+
+            return Command::FAILURE;
+        }
+
+        $io->writeln(json_encode($data, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT) ?: 'done');
 
         return Command::SUCCESS;
     }

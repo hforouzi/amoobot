@@ -22,6 +22,7 @@ class TelegramPollCommand extends Command
         private readonly TelegramApiClient $telegramApiClient,
         private readonly TelegramUpdateHandler $telegramUpdateHandler,
         private readonly BotMessageLogger $botMessageLogger,
+        private readonly string $telegramMode = 'long_polling',
     ) {
         parent::__construct();
     }
@@ -34,12 +35,24 @@ class TelegramPollCommand extends Command
             ->addOption('sleep', null, InputOption::VALUE_REQUIRED, 'Sleep seconds between empty/error polls', '1')
             ->addOption('once', null, InputOption::VALUE_NONE, 'Run only one getUpdates request')
             ->addOption('drop-pending', null, InputOption::VALUE_NONE, 'Drop pending updates on startup')
-            ->addOption('no-delete-webhook', null, InputOption::VALUE_NONE, 'Do not call deleteWebhook on startup');
+            ->addOption('no-delete-webhook', null, InputOption::VALUE_NONE, 'Do not call deleteWebhook on startup')
+            ->addOption('force', null, InputOption::VALUE_NONE, 'Run polling even if TELEGRAM_MODE is not long_polling');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $io = new SymfonyStyle($input, $output);
+        $force = (bool) $input->getOption('force');
+
+        if ('long_polling' !== $this->telegramMode && !$force) {
+            $io->warning('TELEGRAM_MODE is webhook, but polling was started manually. Use --force to run anyway.');
+
+            return Command::SUCCESS;
+        }
+
+        if ('long_polling' !== $this->telegramMode && $force) {
+            $io->warning('TELEGRAM_MODE is webhook, but polling was forced via --force.');
+        }
         $limit = max(1, (int) $input->getOption('limit'));
         $timeout = max(0, (int) $input->getOption('timeout'));
         $sleepSeconds = max(0.0, (float) $input->getOption('sleep'));

@@ -15,6 +15,7 @@ class TelegramApiClient
         private readonly HttpClientInterface $httpClient,
         private readonly BotMessageLogger $botMessageLogger,
         private readonly string $botToken,
+        private readonly string $telegramProxy = '',
     ) {
     }
 
@@ -101,6 +102,11 @@ class TelegramApiClient
         return $this->callApi('deleteWebhook', $payload);
     }
 
+    public function setWebhook(string $url): array
+    {
+        return $this->callApi('setWebhook', ['url' => $url]);
+    }
+
     public function getWebhookInfo(): array
     {
         return $this->callApi('getWebhookInfo', []);
@@ -108,10 +114,14 @@ class TelegramApiClient
 
     private function callApi(string $method, array $payload): array
     {
+        $options = ['json' => $payload];
+        $proxy = trim($this->telegramProxy);
+        if ('' !== $proxy) {
+            $options['proxy'] = $proxy;
+        }
+
         try {
-            $response = $this->httpClient->request('POST', sprintf('https://api.telegram.org/bot%s/%s', $this->botToken, $method), [
-                'json' => $payload,
-            ]);
+            $response = $this->httpClient->request('POST', sprintf('https://api.telegram.org/bot%s/%s', $this->botToken, $method), $options);
             $data = $response->toArray(false);
         } catch (TransportExceptionInterface) {
             throw new \RuntimeException(sprintf('Telegram API transport error on method "%s".', $method));
@@ -129,5 +139,28 @@ class TelegramApiClient
         }
 
         return $data;
+    }
+
+    public function isProxyEnabled(): bool
+    {
+        return '' !== trim($this->telegramProxy);
+    }
+
+    public function proxyType(): string
+    {
+        $proxy = trim($this->telegramProxy);
+        if ('' === $proxy) {
+            return 'none';
+        }
+
+        if (str_starts_with($proxy, 'socks5://')) {
+            return 'socks5';
+        }
+
+        if (str_starts_with($proxy, 'http://') || str_starts_with($proxy, 'https://')) {
+            return 'http';
+        }
+
+        return 'unknown';
     }
 }

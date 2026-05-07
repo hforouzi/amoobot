@@ -33,6 +33,8 @@ Optional:
 - `TELEGRAM_ADMIN_CHAT_ID`
 - `PAYMENT_DESCRIPTION`
 - `ADMIN_PASSWORD` (default: admin)
+- `TELEGRAM_MODE` (default: `long_polling`) — allowed: `webhook`, `long_polling`
+- `TELEGRAM_PROXY` — optional outgoing proxy for Bot → Telegram API, e.g. `socks5://host:1080`
 
 ## Database Migration
 ```bash
@@ -290,13 +292,87 @@ If `test login` works but provisioning still fails on `addClient`:
 ## Commands
 - `app:telegram:set-webhook {baseUrl}`
 - `app:telegram:delete-webhook`
-- `app:telegram:poll [--limit=N] [--timeout=N] [--sleep=N] [--once] [--drop-pending] [--no-delete-webhook]` (defaults: limit=20, timeout=25, sleep=1)
+- `app:telegram:webhook-info`
+- `app:telegram:mode-info`
+- `app:telegram:poll [--limit=N] [--timeout=N] [--sleep=N] [--once] [--drop-pending] [--no-delete-webhook] [--force]` (defaults: limit=20, timeout=25, sleep=1)
 - `app:create-default-settings`
 - `app:create-sample-plans`
 - `app:panel:test-login {panelId}`
 - `app:panel:list-inbounds {panelId}`
 - `app:panel:sync-inbounds {panelId}`
 - `app:panel:test-create-client {inboundId}`
+
+## Deployment Guide
+
+### Proxy considerations
+- `TELEGRAM_PROXY` applies only to **Bot → Telegram API** (outgoing: getUpdates, sendMessage, setWebhook, etc.).
+- Webhook inbound requests (Telegram → Bot) cannot be proxied; they arrive at your server's public URL.
+- The VPN panel proxy (if any) is configured separately and does not affect Telegram API calls.
+
+---
+
+### Scenario A: Server outside Iran with domain and SSL
+```env
+TELEGRAM_MODE=webhook
+TELEGRAM_PROXY=
+```
+Setup:
+```bash
+php bin/console app:telegram:set-webhook https://mydomain.com
+```
+Telegram delivers updates directly to your HTTPS endpoint. No proxy needed.
+
+---
+
+### Scenario B: Server inside Iran (outgoing Telegram blocked)
+```env
+TELEGRAM_MODE=long_polling
+TELEGRAM_PROXY=socks5://host:1080
+# or: TELEGRAM_PROXY=socks5://user:pass@host:1080
+```
+Setup:
+```bash
+php bin/console app:telegram:poll
+```
+Bot polls Telegram through the proxy. No public domain required.
+
+---
+
+### Scenario C: Bot and VPN panel both inside Iran
+```env
+TELEGRAM_MODE=long_polling
+TELEGRAM_PROXY=socks5://host:1080    # for Telegram API only
+# VPN panel proxy (if needed) is separate panel-level config
+```
+Run polling command as above. Panel proxy is not controlled by `TELEGRAM_PROXY`.
+
+---
+
+### Scenario D: Bot outside Iran, VPN panel inside Iran
+```env
+TELEGRAM_MODE=webhook                 # or long_polling depending on preference
+TELEGRAM_PROXY=                       # usually not needed for Telegram
+# VPN panel reverse proxy / tunnel handled separately
+```
+Webhook mode is possible since the server is outside Iran. Panel connectivity uses its own proxy.
+
+---
+
+### Check current mode:
+```bash
+php bin/console app:telegram:mode-info
+```
+
+### Check webhook status:
+```bash
+php bin/console app:telegram:webhook-info
+```
+
+### Running poll when mode is webhook:
+```bash
+php bin/console app:telegram:poll --force
+```
+
 
 ## Not implemented in Phase 1
 - SaaS

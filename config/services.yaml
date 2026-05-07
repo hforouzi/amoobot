@@ -1,6 +1,8 @@
 # yaml-language-server: $schema=../vendor/symfony/dependency-injection/Loader/schema/services.schema.json
 
 parameters:
+    default_telegram_mode: long_polling
+    default_telegram_proxy: ''
 
 services:
     _instanceof:
@@ -16,6 +18,8 @@ services:
             string $botToken: '%env(TELEGRAM_BOT_TOKEN)%'
             string $webhookSecret: '%env(TELEGRAM_WEBHOOK_SECRET)%'
             $adminChatId: '%env(default::TELEGRAM_ADMIN_CHAT_ID)%'
+            string $telegramMode: '%env(default:default_telegram_mode:TELEGRAM_MODE)%'
+            string $telegramProxy: '%env(default:default_telegram_proxy:TELEGRAM_PROXY)%'
             string $paymentCardNumber: '%env(PAYMENT_CARD_NUMBER)%'
             string $paymentCardHolder: '%env(PAYMENT_CARD_HOLDER)%'
             $paymentDescription: '%env(default::PAYMENT_DESCRIPTION)%'
