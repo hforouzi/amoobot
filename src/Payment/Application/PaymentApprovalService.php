@@ -89,13 +89,4 @@ class PaymentApprovalService
         return PaymentApprovalResult::processed('Payment rejected.');
     }
 
-    public function confirmPayment(Payment $payment): PaymentApprovalResult
-    {
-        return $this->confirm($payment);
-    }
-
-    public function rejectPayment(Payment $payment, ?string $reason = null): PaymentApprovalResult
-    {
-        return $this->reject($payment, $reason);
-    }
 }
