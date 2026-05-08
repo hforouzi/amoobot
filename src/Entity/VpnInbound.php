@@ -491,7 +491,7 @@ class VpnInbound
 
         $intValue = (int) $scalar;
 
-        return $intValue > 0 ? $intValue : null;
+        return $intValue >= 1 && $intValue <= 65535 ? $intValue : null;
     }
 
     private function extractFirstScalar(mixed $value): string|int|float|bool|null

@@ -302,7 +302,13 @@ final class VpnInboundSyncService
 
         $intValue = (int) $scalar;
 
-        return $intValue > 0 ? $intValue : null;
+        if ($intValue < 1 || $intValue > 65535) {
+            $this->logTypeMismatch($field, $value, 'port-range(1..65535)');
+
+            return null;
+        }
+
+        return $intValue;
     }
 
     private function extractFirstScalar(mixed $value, string $field): string|int|float|bool|null
