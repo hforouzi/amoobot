@@ -29,6 +29,8 @@ class PlanCrudController extends AbstractCrudController
             TextareaField::new('description')->hideOnIndex(),
             IntegerField::new('durationDays'),
             IntegerField::new('trafficGb'),
+            IntegerField::new('ipLimit')
+                ->setHelp('Maximum simultaneous IPs/devices. Empty means panel/default/unlimited.'),
             IntegerField::new('price'),
             AssociationField::new('inbound', 'اینباند / سرور'),
             BooleanField::new('isActive'),

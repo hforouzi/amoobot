@@ -30,6 +30,10 @@ class VpnServiceCrudController extends AbstractCrudController
             AssociationField::new('inbound'),
             TextField::new('remoteId'),
             TextField::new('username'),
+            TextField::new('clientUuid')->hideOnIndex(),
+            TextField::new('clientEmail')->hideOnIndex(),
+            TextField::new('subId')->hideOnIndex(),
+            IntegerField::new('ipLimit'),
             TextareaField::new('subscriptionUrl')->hideOnIndex(),
             TextareaField::new('configText')->hideOnIndex(),
             TextField::new('status'),
@@ -37,6 +41,7 @@ class VpnServiceCrudController extends AbstractCrudController
             DateTimeField::new('expiresAt'),
             IntegerField::new('trafficLimitGb'),
             IntegerField::new('trafficUsedGb'),
+            DateTimeField::new('lastAccessInfoSyncedAt')->hideOnForm(),
             DateTimeField::new('createdAt')->hideOnForm(),
             DateTimeField::new('updatedAt')->hideOnForm(),
         ];

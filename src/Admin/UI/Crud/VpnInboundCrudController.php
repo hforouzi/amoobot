@@ -14,7 +14,6 @@ use EasyCorp\Bundle\EasyAdminBundle\Field\BooleanField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\DateTimeField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\IdField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\TextField;
-use EasyCorp\Bundle\EasyAdminBundle\Field\TextareaField;
 
 class VpnInboundCrudController extends AbstractCrudController
 {
@@ -35,11 +34,18 @@ class VpnInboundCrudController extends AbstractCrudController
             ->setCssClass('btn btn-primary')
             ->displayIf(fn (VpnInbound $inbound): bool => 'sanaei_3xui' === $inbound->getPanel()->getType());
 
+        $syncAccessMetadata = Action::new('syncAccessMetadata', 'همگامسازی متادیتای دسترسی')
+            ->linkToRoute('admin_vpn_inbound_sync_access_metadata', fn (VpnInbound $inbound): array => ['id' => $inbound->getId()])
+            ->setCssClass('btn btn-warning')
+            ->displayIf(fn (VpnInbound $inbound): bool => 'sanaei_3xui' === $inbound->getPanel()->getType());
+
         return $actions
             ->add(Action::INDEX, $testCreateClient)
             ->add(Action::INDEX, $resync)
+            ->add(Action::INDEX, $syncAccessMetadata)
             ->add(Action::DETAIL, $testCreateClient)
-            ->add(Action::DETAIL, $resync);
+            ->add(Action::DETAIL, $resync)
+            ->add(Action::DETAIL, $syncAccessMetadata);
     }
 
     public function configureFilters(Filters $filters): Filters
@@ -58,13 +64,22 @@ class VpnInboundCrudController extends AbstractCrudController
             TextField::new('country'),
             TextField::new('location')->hideOnIndex(),
             TextField::new('protocol'),
+            TextField::new('host'),
+            TextField::new('port'),
             TextField::new('network'),
             TextField::new('security'),
+            TextField::new('sni'),
+            TextField::new('path')->hideOnIndex(),
+            TextField::new('hostHeader')->hideOnIndex(),
+            TextField::new('publicKey')->hideOnIndex(),
+            TextField::new('shortId')->hideOnIndex(),
+            TextField::new('spiderX')->hideOnIndex(),
+            TextField::new('flow')->hideOnIndex(),
+            TextField::new('serviceName')->hideOnIndex(),
+            TextField::new('fingerprint')->hideOnIndex(),
+            TextField::new('alpn')->hideOnIndex(),
             BooleanField::new('isActive'),
-            TextareaField::new('configJson', 'Config JSON')
-                ->hideOnIndex()
-                ->setNumOfRows(12)
-                ->setHelp('Enter valid JSON config.'),
+            DateTimeField::new('lastAccessMetadataSyncedAt')->hideOnForm(),
             DateTimeField::new('lastSyncedAt'),
             DateTimeField::new('createdAt')->hideOnForm(),
             DateTimeField::new('updatedAt')->hideOnForm(),

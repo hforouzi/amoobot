@@ -36,6 +36,12 @@ class VpnPanel
     #[ORM\Column(type: Types::JSON, nullable: true)]
     private ?array $config = null;
 
+    #[ORM\Column(length: 255, nullable: true)]
+    private ?string $subscriptionBaseUrl = null;
+
+    #[ORM\Column(length: 255, nullable: true)]
+    private ?string $publicHost = null;
+
     #[ORM\Column]
     private bool $isActive = true;
 
@@ -135,6 +141,30 @@ class VpnPanel
     public function setConfig(?array $config): self
     {
         $this->config = $config;
+
+        return $this;
+    }
+
+    public function getSubscriptionBaseUrl(): ?string
+    {
+        return $this->subscriptionBaseUrl;
+    }
+
+    public function setSubscriptionBaseUrl(?string $subscriptionBaseUrl): self
+    {
+        $this->subscriptionBaseUrl = $subscriptionBaseUrl;
+
+        return $this;
+    }
+
+    public function getPublicHost(): ?string
+    {
+        return $this->publicHost;
+    }
+
+    public function setPublicHost(?string $publicHost): self
+    {
+        $this->publicHost = $publicHost;
 
         return $this;
     }

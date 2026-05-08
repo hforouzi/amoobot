@@ -87,6 +87,7 @@ final class VpnPanelInboundActionsController extends AbstractController
                 username: $username,
                 durationDays: 1,
                 trafficLimitGb: 1,
+                ipLimit: 1,
                 inbound: $inbound,
                 remoteInboundId: $inbound->getRemoteInboundId(),
                 meta: ['test' => true],
@@ -109,6 +110,19 @@ final class VpnPanelInboundActionsController extends AbstractController
         try {
             $inboundSyncService->syncInbound($inbound);
             $this->addFlash('success', 'همگام‌سازی مجدد اینباند انجام شد.');
+        } catch (\Throwable $e) {
+            $this->addFlash('danger', $e->getMessage());
+        }
+
+        return $this->redirectToInbounds();
+    }
+
+    #[Route('/vpn-inbound/{id}/sync-access-metadata', name: 'admin_vpn_inbound_sync_access_metadata', methods: ['GET'])]
+    public function syncInboundAccessMetadata(VpnInbound $inbound, VpnInboundSyncService $inboundSyncService): RedirectResponse
+    {
+        try {
+            $inboundSyncService->syncInbound($inbound);
+            $this->addFlash('success', 'همگام‌سازی متادیتای دسترسی انجام شد.');
         } catch (\Throwable $e) {
             $this->addFlash('danger', $e->getMessage());
         }

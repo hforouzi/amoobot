@@ -131,9 +131,22 @@ final class VpnInboundSyncService
             ->setProtocol($parsed['protocol'])
             ->setNetwork($parsed['network'])
             ->setSecurity($parsed['security'])
-            ->setConfig($parsed['config'])
+            ->setHost($parsed['host'] ?? $panel->getPublicHost())
+            ->setPort($parsed['port'])
+            ->setSni($parsed['sni'])
+            ->setPath($parsed['path'])
+            ->setHostHeader($parsed['hostHeader'])
+            ->setPublicKey($parsed['publicKey'])
+            ->setShortId($parsed['shortId'])
+            ->setSpiderX($parsed['spiderX'])
+            ->setFlow($parsed['flow'])
+            ->setServiceName($parsed['serviceName'])
+            ->setFingerprint($parsed['fingerprint'])
+            ->setAlpn($parsed['alpn'])
+            ->setConfig([])
             ->setIsActive($parsed['isActive'])
             ->setLastSyncedAt(new \DateTimeImmutable())
+            ->setLastAccessMetadataSyncedAt(new \DateTimeImmutable())
             ->setUpdatedAt(new \DateTimeImmutable());
 
         return $inbound;
@@ -149,8 +162,19 @@ final class VpnInboundSyncService
      *   protocol: ?string,
      *   network: ?string,
      *   security: ?string,
+     *   host: ?string,
+     *   port: ?int,
+     *   sni: ?string,
+     *   path: ?string,
+     *   hostHeader: ?string,
+     *   publicKey: ?string,
+     *   shortId: ?string,
+     *   spiderX: ?string,
+     *   flow: ?string,
+     *   serviceName: ?string,
+     *   fingerprint: ?string,
+     *   alpn: ?string,
      *   isActive: bool,
-     *   config: array<string, mixed>
      * }
      */
     private function parseInboundRow(array $row): array
@@ -160,7 +184,6 @@ final class VpnInboundSyncService
         $protocol = $this->nullableText($row['protocol'] ?? null);
         $streamSettings = $this->jsonToArray($row['streamSettings'] ?? null);
         $settings = $this->jsonToArray($row['settings'] ?? null);
-        $sniffing = $this->jsonToArray($row['sniffing'] ?? null);
         $tlsSettings = $this->jsonToArray($streamSettings['tlsSettings'] ?? null);
         $realitySettings = $this->jsonToArray($streamSettings['realitySettings'] ?? null);
         $wsSettings = $this->jsonToArray($streamSettings['wsSettings'] ?? null);
@@ -169,9 +192,49 @@ final class VpnInboundSyncService
         $network = $this->nullableText($streamSettings['network'] ?? null);
         $security = $this->nullableText($streamSettings['security'] ?? null);
         $port = isset($row['port']) ? (int) $row['port'] : null;
+        $listen = $this->nullableText($row['listen'] ?? null);
+        if (in_array((string) $listen, ['0.0.0.0', '::', '*'], true)) {
+            $listen = null;
+        }
 
         $title = $remark ?? ('Inbound '.$remoteInboundId);
         $isActive = isset($row['enable']) ? (bool) $row['enable'] : true;
+        $clients = is_array($settings['clients'] ?? null) ? $settings['clients'] : [];
+        $firstClient = is_array($clients[0] ?? null) ? $clients[0] : [];
+
+        $tlsFingerprint = $this->nullableText($tlsSettings['fingerprint'] ?? null);
+        $tlsAlpnRaw = $tlsSettings['alpn'] ?? null;
+        $tlsAlpn = null;
+        if (is_array($tlsAlpnRaw) && [] !== $tlsAlpnRaw) {
+            $tlsAlpn = $this->nullableText(implode(',', array_map('strval', $tlsAlpnRaw)));
+        } else {
+            $tlsAlpn = $this->nullableText($tlsAlpnRaw);
+        }
+
+        $realityServerNames = is_array($realitySettings['serverNames'] ?? null) ? $realitySettings['serverNames'] : [];
+        $realityShortIds = is_array($realitySettings['shortIds'] ?? null) ? $realitySettings['shortIds'] : [];
+        $realityPublicKey = $this->nullableText($realitySettings['publicKey'] ?? ($realitySettings['settings']['publicKey'] ?? null));
+        $realityFingerprint = $this->nullableText($realitySettings['fingerprint'] ?? ($realitySettings['settings']['fingerprint'] ?? null));
+        $realitySpiderX = $this->nullableText($realitySettings['spiderX'] ?? ($realitySettings['settings']['spiderX'] ?? null));
+
+        $wsHeaders = $this->jsonToArray($wsSettings['headers'] ?? null);
+        $hostHeader = $this->nullableText($wsHeaders['Host'] ?? ($wsHeaders['host'] ?? null));
+        $path = $this->nullableText($wsSettings['path'] ?? null);
+        $serviceName = $this->nullableText($grpcSettings['serviceName'] ?? null);
+
+        $sni = $this->nullableText($tlsSettings['serverName'] ?? null);
+        $publicKey = null;
+        $shortId = null;
+        $spiderX = null;
+        $fingerprint = $tlsFingerprint;
+        if ('reality' === strtolower((string) ($security ?? ''))) {
+            $sni = $this->nullableText($realityServerNames[0] ?? null);
+            $publicKey = $realityPublicKey;
+            $shortId = $this->nullableText($realityShortIds[0] ?? null);
+            $spiderX = $realitySpiderX;
+            $fingerprint = $realityFingerprint;
+        }
+        $flow = $this->nullableText($firstClient['flow'] ?? null);
 
         return [
             'remoteInboundId' => $remoteInboundId,
@@ -180,25 +243,19 @@ final class VpnInboundSyncService
             'protocol' => $protocol,
             'network' => $network,
             'security' => $security,
+            'host' => $listen,
+            'port' => null !== $port && $port > 0 ? $port : null,
+            'sni' => $sni,
+            'path' => $path,
+            'hostHeader' => $hostHeader,
+            'publicKey' => $publicKey,
+            'shortId' => $shortId,
+            'spiderX' => $spiderX,
+            'flow' => $flow,
+            'serviceName' => $serviceName,
+            'fingerprint' => $fingerprint,
+            'alpn' => $tlsAlpn,
             'isActive' => $isActive,
-            'config' => [
-                'id' => $row['id'] ?? null,
-                'remark' => $row['remark'] ?? null,
-                'protocol' => $row['protocol'] ?? null,
-                'enable' => $row['enable'] ?? null,
-                'port' => $port,
-                'total' => $row['total'] ?? null,
-                'up' => $row['up'] ?? null,
-                'down' => $row['down'] ?? null,
-                'sniffing' => $sniffing,
-                'settings' => $settings,
-                'streamSettings' => $streamSettings,
-                'tlsSettings' => $tlsSettings,
-                'realitySettings' => $realitySettings,
-                'wsSettings' => $wsSettings,
-                'grpcSettings' => $grpcSettings,
-                'raw' => $row,
-            ],
         ];
     }
 

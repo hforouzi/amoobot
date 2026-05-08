@@ -26,6 +26,9 @@ class Plan
     #[ORM\Column(nullable: true)]
     private ?int $trafficGb = null;
 
+    #[ORM\Column(nullable: true)]
+    private ?int $ipLimit = null;
+
     #[ORM\Column]
     private int $price;
 
@@ -96,6 +99,18 @@ class Plan
     public function setTrafficGb(?int $trafficGb): self
     {
         $this->trafficGb = $trafficGb;
+
+        return $this;
+    }
+
+    public function getIpLimit(): ?int
+    {
+        return $this->ipLimit;
+    }
+
+    public function setIpLimit(?int $ipLimit): self
+    {
+        $this->ipLimit = $ipLimit;
 
         return $this;
     }

@@ -19,6 +19,7 @@ class VpnProvisioningService
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
         private readonly VpnPanelDriverRegistry $driverRegistry,
+        private readonly VpnAccessLinkGenerator $vpnAccessLinkGenerator,
     ) {
     }
 
@@ -46,6 +47,7 @@ class VpnProvisioningService
             username: sprintf('tg_%s_order_%d', $telegramId, $order->getId()),
             durationDays: $order->getPlan()->getDurationDays(),
             trafficLimitGb: $order->getPlan()->getTrafficGb(),
+            ipLimit: $order->getPlan()->getIpLimit(),
             inbound: $planInbound,
             remoteInboundId: $planInbound?->getRemoteInboundId(),
             meta: array_merge([
@@ -66,12 +68,24 @@ class VpnProvisioningService
             ->setRemoteId($created->remoteId)
             ->setUsername($created->username)
             ->setSubscriptionUrl($created->subscriptionUrl)
+            ->setClientUuid($created->clientUuid)
+            ->setClientEmail($created->clientEmail)
+            ->setSubId($created->subId)
+            ->setIpLimit($created->ipLimit ?? $order->getPlan()->getIpLimit())
+            ->setConfigLinks($created->configLinks)
             ->setConfigText($created->configText)
             ->setStatus(VpnServiceStatus::ACTIVE)
             ->setStartsAt(new \DateTimeImmutable())
             ->setExpiresAt((new \DateTimeImmutable())->modify('+'.$order->getPlan()->getDurationDays().' days'))
             ->setTrafficLimitGb($order->getPlan()->getTrafficGb())
             ->setTrafficUsedGb(0);
+
+        $links = $this->vpnAccessLinkGenerator->generate($vpnService);
+        $vpnService
+            ->setSubscriptionUrl($links['subscriptionUrl'] ?? $vpnService->getSubscriptionUrl())
+            ->setConfigLinks($links['configLinks'] ?? [])
+            ->setConfigText([] !== ($links['configLinks'] ?? []) ? implode("\n", (array) $links['configLinks']) : null)
+            ->setLastAccessInfoSyncedAt(new \DateTimeImmutable());
 
         $order
             ->setStatus(OrderStatus::PROVISIONED)

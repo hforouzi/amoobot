@@ -11,6 +11,11 @@ class CreatedVpnService
         public readonly string $username,
         public readonly ?string $subscriptionUrl,
         public readonly ?string $configText,
+        public readonly ?string $clientUuid = null,
+        public readonly ?string $clientEmail = null,
+        public readonly ?string $subId = null,
+        public readonly ?int $ipLimit = null,
+        public readonly ?array $configLinks = null,
     ) {
     }
 }

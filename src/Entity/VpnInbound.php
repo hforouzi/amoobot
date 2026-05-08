@@ -43,6 +43,42 @@ class VpnInbound
     #[ORM\Column(length: 64, nullable: true)]
     private ?string $security = null;
 
+    #[ORM\Column(length: 255, nullable: true)]
+    private ?string $host = null;
+
+    #[ORM\Column(nullable: true)]
+    private ?int $port = null;
+
+    #[ORM\Column(length: 255, nullable: true)]
+    private ?string $sni = null;
+
+    #[ORM\Column(length: 255, nullable: true)]
+    private ?string $path = null;
+
+    #[ORM\Column(length: 255, nullable: true)]
+    private ?string $hostHeader = null;
+
+    #[ORM\Column(length: 255, nullable: true)]
+    private ?string $publicKey = null;
+
+    #[ORM\Column(length: 255, nullable: true)]
+    private ?string $shortId = null;
+
+    #[ORM\Column(length: 255, nullable: true)]
+    private ?string $spiderX = null;
+
+    #[ORM\Column(length: 255, nullable: true)]
+    private ?string $flow = null;
+
+    #[ORM\Column(length: 255, nullable: true)]
+    private ?string $serviceName = null;
+
+    #[ORM\Column(length: 255, nullable: true)]
+    private ?string $fingerprint = null;
+
+    #[ORM\Column(length: 255, nullable: true)]
+    private ?string $alpn = null;
+
     #[ORM\Column]
     private bool $isActive = true;
 
@@ -51,6 +87,9 @@ class VpnInbound
 
     #[ORM\Column(nullable: true)]
     private ?\DateTimeImmutable $lastSyncedAt = null;
+
+    #[ORM\Column(nullable: true)]
+    private ?\DateTimeImmutable $lastAccessMetadataSyncedAt = null;
 
     #[ORM\Column]
     private \DateTimeImmutable $createdAt;
@@ -176,6 +215,150 @@ class VpnInbound
         return $this;
     }
 
+    public function getHost(): ?string
+    {
+        return $this->host;
+    }
+
+    public function setHost(?string $host): self
+    {
+        $this->host = $host;
+
+        return $this;
+    }
+
+    public function getPort(): ?int
+    {
+        return $this->port;
+    }
+
+    public function setPort(?int $port): self
+    {
+        $this->port = $port;
+
+        return $this;
+    }
+
+    public function getSni(): ?string
+    {
+        return $this->sni;
+    }
+
+    public function setSni(?string $sni): self
+    {
+        $this->sni = $sni;
+
+        return $this;
+    }
+
+    public function getPath(): ?string
+    {
+        return $this->path;
+    }
+
+    public function setPath(?string $path): self
+    {
+        $this->path = $path;
+
+        return $this;
+    }
+
+    public function getHostHeader(): ?string
+    {
+        return $this->hostHeader;
+    }
+
+    public function setHostHeader(?string $hostHeader): self
+    {
+        $this->hostHeader = $hostHeader;
+
+        return $this;
+    }
+
+    public function getPublicKey(): ?string
+    {
+        return $this->publicKey;
+    }
+
+    public function setPublicKey(?string $publicKey): self
+    {
+        $this->publicKey = $publicKey;
+
+        return $this;
+    }
+
+    public function getShortId(): ?string
+    {
+        return $this->shortId;
+    }
+
+    public function setShortId(?string $shortId): self
+    {
+        $this->shortId = $shortId;
+
+        return $this;
+    }
+
+    public function getSpiderX(): ?string
+    {
+        return $this->spiderX;
+    }
+
+    public function setSpiderX(?string $spiderX): self
+    {
+        $this->spiderX = $spiderX;
+
+        return $this;
+    }
+
+    public function getFlow(): ?string
+    {
+        return $this->flow;
+    }
+
+    public function setFlow(?string $flow): self
+    {
+        $this->flow = $flow;
+
+        return $this;
+    }
+
+    public function getServiceName(): ?string
+    {
+        return $this->serviceName;
+    }
+
+    public function setServiceName(?string $serviceName): self
+    {
+        $this->serviceName = $serviceName;
+
+        return $this;
+    }
+
+    public function getFingerprint(): ?string
+    {
+        return $this->fingerprint;
+    }
+
+    public function setFingerprint(?string $fingerprint): self
+    {
+        $this->fingerprint = $fingerprint;
+
+        return $this;
+    }
+
+    public function getAlpn(): ?string
+    {
+        return $this->alpn;
+    }
+
+    public function setAlpn(?string $alpn): self
+    {
+        $this->alpn = $alpn;
+
+        return $this;
+    }
+
     public function isActive(): bool
     {
         return $this->isActive;
@@ -239,6 +422,18 @@ class VpnInbound
     public function setLastSyncedAt(?\DateTimeImmutable $lastSyncedAt): self
     {
         $this->lastSyncedAt = $lastSyncedAt;
+
+        return $this;
+    }
+
+    public function getLastAccessMetadataSyncedAt(): ?\DateTimeImmutable
+    {
+        return $this->lastAccessMetadataSyncedAt;
+    }
+
+    public function setLastAccessMetadataSyncedAt(?\DateTimeImmutable $lastAccessMetadataSyncedAt): self
+    {
+        $this->lastAccessMetadataSyncedAt = $lastAccessMetadataSyncedAt;
 
         return $this;
     }

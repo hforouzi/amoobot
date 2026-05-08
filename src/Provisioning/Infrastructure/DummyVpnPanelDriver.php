@@ -26,7 +26,12 @@ class DummyVpnPanelDriver implements VpnPanelDriverInterface
             remoteId: 'dummy_'.$token,
             username: $request->username,
             subscriptionUrl: 'https://example.com/sub/'.$token,
-            configText: 'vless://dummy-config-for-user'
+            configText: 'vless://dummy-config-for-user',
+            clientUuid: $token,
+            clientEmail: $request->username,
+            subId: $token,
+            ipLimit: $request->ipLimit,
+            configLinks: ['vless://dummy-config-for-user'],
         );
     }
 

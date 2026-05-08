@@ -40,6 +40,24 @@ class VpnService
     #[ORM\Column(type: 'text', nullable: true)]
     private ?string $subscriptionUrl = null;
 
+    #[ORM\Column(length: 64, nullable: true)]
+    private ?string $clientUuid = null;
+
+    #[ORM\Column(length: 255, nullable: true)]
+    private ?string $clientEmail = null;
+
+    #[ORM\Column(length: 64, nullable: true)]
+    private ?string $subId = null;
+
+    #[ORM\Column(nullable: true)]
+    private ?int $ipLimit = null;
+
+    #[ORM\Column(type: 'json', nullable: true)]
+    private ?array $configLinks = null;
+
+    #[ORM\Column(nullable: true)]
+    private ?\DateTimeImmutable $lastAccessInfoSyncedAt = null;
+
     #[ORM\Column(type: 'text', nullable: true)]
     private ?string $configText = null;
 
@@ -154,6 +172,78 @@ class VpnService
     public function setSubscriptionUrl(?string $subscriptionUrl): self
     {
         $this->subscriptionUrl = $subscriptionUrl;
+
+        return $this;
+    }
+
+    public function getClientUuid(): ?string
+    {
+        return $this->clientUuid;
+    }
+
+    public function setClientUuid(?string $clientUuid): self
+    {
+        $this->clientUuid = $clientUuid;
+
+        return $this;
+    }
+
+    public function getClientEmail(): ?string
+    {
+        return $this->clientEmail;
+    }
+
+    public function setClientEmail(?string $clientEmail): self
+    {
+        $this->clientEmail = $clientEmail;
+
+        return $this;
+    }
+
+    public function getSubId(): ?string
+    {
+        return $this->subId;
+    }
+
+    public function setSubId(?string $subId): self
+    {
+        $this->subId = $subId;
+
+        return $this;
+    }
+
+    public function getIpLimit(): ?int
+    {
+        return $this->ipLimit;
+    }
+
+    public function setIpLimit(?int $ipLimit): self
+    {
+        $this->ipLimit = $ipLimit;
+
+        return $this;
+    }
+
+    public function getConfigLinks(): ?array
+    {
+        return $this->configLinks;
+    }
+
+    public function setConfigLinks(?array $configLinks): self
+    {
+        $this->configLinks = $configLinks;
+
+        return $this;
+    }
+
+    public function getLastAccessInfoSyncedAt(): ?\DateTimeImmutable
+    {
+        return $this->lastAccessInfoSyncedAt;
+    }
+
+    public function setLastAccessInfoSyncedAt(?\DateTimeImmutable $lastAccessInfoSyncedAt): self
+    {
+        $this->lastAccessInfoSyncedAt = $lastAccessInfoSyncedAt;
 
         return $this;
     }

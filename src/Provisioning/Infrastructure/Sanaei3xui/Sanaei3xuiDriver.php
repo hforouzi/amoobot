@@ -55,11 +55,12 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
         $subId = bin2hex(random_bytes(8));
         $totalBytes = $this->gbToBytes($request->trafficLimitGb);
         $expiryTime = $this->durationToMs($request->durationDays);
+        $ipLimit = $request->ipLimit;
 
         $protocol = $this->resolveInboundProtocol($inbound);
         $network = (string) ($inbound->getNetwork() ?? '');
         $security = (string) ($inbound->getSecurity() ?? '');
-        $client = $this->buildClientPayload($protocol, $clientUuid, $email, $subId, $totalBytes, $expiryTime, $config);
+        $client = $this->buildClientPayload($protocol, $clientUuid, $email, $subId, $totalBytes, $expiryTime, $config, $ipLimit);
         $source = trim((string) ($request->meta['source'] ?? ''));
         $orderId = (int) ($request->meta['orderId'] ?? 0);
         $paymentId = (int) ($request->meta['paymentId'] ?? 0);
@@ -130,26 +131,17 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
             throw new \RuntimeException('Sanaei addClient could not be verified on panel.');
         }
 
-        $inboundConfig = $this->inboundConfig($inbound);
         $subscriptionUrl = $this->buildSubscriptionUrl($panel, $config, $subId, $email);
-        $configText = $this->buildClientConfigText(
-            protocol: $protocol,
-            inbound: $inbound,
-            panel: $panel,
-            panelConfig: $config,
-            inboundConfig: $inboundConfig,
-            clientUuid: $clientUuid,
-            email: $email,
-            subId: $subId,
-            subscriptionUrl: $subscriptionUrl,
-            clientPayload: $client
-        );
 
         return new CreatedVpnService(
             remoteId: $this->remoteIdParser->format($panel->getId(), $inbound->getId(), $inboundIdRaw, $clientUuid, $email, $subId),
             username: $email,
             subscriptionUrl: $subscriptionUrl,
-            configText: $configText,
+            configText: null,
+            clientUuid: $clientUuid,
+            clientEmail: $email,
+            subId: $subId,
+            ipLimit: $ipLimit,
         );
     }
 
@@ -322,7 +314,10 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
 
     private function buildSubscriptionUrl(VpnPanel $panel, array $config, string $subId, string $email): ?string
     {
-        $base = trim((string) ($config['subscription_base_url'] ?? ''));
+        $base = trim((string) ($panel->getSubscriptionBaseUrl() ?? ''));
+        if ('' === $base) {
+            $base = trim((string) ($config['subscription_base_url'] ?? ''));
+        }
         if ('' === $base) {
             $base = trim((string) ($panel->getBaseUrl() ?? ''));
         }
@@ -373,7 +368,7 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
     /**
      * @return array<string, mixed>
      */
-    private function buildClientPayload(string $protocol, string $clientUuid, string $email, string $subId, int $totalBytes, int $expiryTime, array $panelConfig): array
+    private function buildClientPayload(string $protocol, string $clientUuid, string $email, string $subId, int $totalBytes, int $expiryTime, array $panelConfig, ?int $ipLimit): array
     {
         $normalized = strtolower(trim($protocol));
         $client = [
@@ -388,6 +383,9 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
 
         if ('vless' === $normalized) {
             $client['flow'] = (string) ($panelConfig['default_flow'] ?? '');
+        }
+        if (null !== $ipLimit) {
+            $client['limitIp'] = max(0, (int) $ipLimit);
         }
         if ('trojan' === $normalized) {
             $client['password'] = $clientUuid;

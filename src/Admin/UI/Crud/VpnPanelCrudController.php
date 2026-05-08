@@ -59,13 +59,11 @@ class VpnPanelCrudController extends AbstractCrudController
                 ]),
             TextField::new('title'),
             TextField::new('baseUrl'),
+            TextField::new('subscriptionBaseUrl'),
+            TextField::new('publicHost'),
             TextField::new('username'),
             TextField::new('password')->hideOnIndex(),
             TextareaField::new('apiToken')->hideOnIndex(),
-            TextareaField::new('configJson', 'Config JSON')
-                ->hideOnIndex()
-                ->setNumOfRows(12)
-                ->setHelp('Enter valid JSON config.'),
             BooleanField::new('isActive'),
             DateTimeField::new('createdAt')->hideOnForm(),
             DateTimeField::new('updatedAt')->hideOnForm(),

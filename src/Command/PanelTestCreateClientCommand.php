@@ -76,6 +76,7 @@ final class PanelTestCreateClientCommand extends Command
                 username: $username,
                 durationDays: $durationDays,
                 trafficLimitGb: $trafficGb,
+                ipLimit: 1,
                 inbound: $inbound,
                 remoteInboundId: $inbound->getRemoteInboundId(),
                 meta: ['test' => true],

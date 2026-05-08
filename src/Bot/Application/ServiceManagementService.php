@@ -9,6 +9,7 @@ use App\Entity\Order;
 use App\Entity\TelegramAccount;
 use App\Entity\User;
 use App\Entity\VpnService;
+use App\Provisioning\Application\VpnAccessLinkGenerator;
 use App\Provisioning\Domain\Dto\RenewVpnServiceRequest;
 use App\Provisioning\Domain\VpnServiceStatus;
 use App\Provisioning\Infrastructure\VpnPanelDriverRegistry;
@@ -21,6 +22,7 @@ class ServiceManagementService
         private readonly TelegramApiClient $telegramApiClient,
         private readonly TelegramKeyboardFactory $keyboardFactory,
         private readonly VpnPanelDriverRegistry $driverRegistry,
+        private readonly VpnAccessLinkGenerator $vpnAccessLinkGenerator,
     ) {
     }
 
@@ -159,7 +161,7 @@ class ServiceManagementService
 
         $subscriptionUrl = trim((string) $service->getSubscriptionUrl());
         if ('' === $subscriptionUrl) {
-            $this->showPopupOrMessage($chatId, $callbackId, 'لینک اشتراک موجود نیست.', 'missing_subscription_url');
+            $this->showPopupOrMessage($chatId, $callbackId, 'اطلاعات اتصال کامل نیست. لطفاً با پشتیبانی تماس بگیرید.', 'missing_subscription_url');
 
             return;
         }
@@ -184,25 +186,41 @@ class ServiceManagementService
             return;
         }
 
-        $configText = trim((string) $service->getConfigText());
-        if ('' === $configText) {
-            $this->showPopupOrMessage($chatId, $callbackId, 'کانفیگ موجود نیست.', 'missing_config');
+        $configLinks = $service->getConfigLinks();
+        if (!is_array($configLinks) || [] === $configLinks) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'اطلاعات اتصال کامل نیست. لطفاً با پشتیبانی تماس بگیرید.', 'missing_config');
 
             return;
         }
 
         $this->acknowledgeCallback($callbackId);
-        $message = sprintf(
-            "خلاصه سرویس #%d\nوضعیت: %s\nانقضا: %s\nاشتراک: %s\n\nکانفیگ:\n%s",
-            $serviceId,
-            $this->statusLabel($service->getStatus()),
-            $service->getExpiresAt()?->format('Y-m-d H:i:s') ?? '-',
-            $service->getSubscriptionUrl() ?: '-',
-            $configText
-        );
-
-        $this->telegramApiClient->sendMessage($chatId, $message);
+        $this->telegramApiClient->sendMessage($chatId, "کانفیگهای سرویس #{$serviceId}:\n".implode("\n", $configLinks));
         $this->debugLog(sprintf('service_resend_config service_id=%d actor_user_id=%d admin_mode=%s', $serviceId, $account->getUser()->getId(), $adminMode ? 'true' : 'false'));
+    }
+
+    public function sendSubscriptionQr(TelegramAccount $account, int $serviceId, string $chatId, string $callbackId): void
+    {
+        $service = $this->entityManager->getRepository(VpnService::class)->find($serviceId);
+        if (!$service instanceof VpnService || $service->getUser()->getId() !== $account->getUser()->getId()) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'سرویس معتبر نیست.', 'invalid_service_subscription_qr');
+
+            return;
+        }
+
+        $subscriptionUrl = trim((string) ($service->getSubscriptionUrl() ?? ''));
+        if ('' === $subscriptionUrl) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'اطلاعات اتصال کامل نیست. لطفاً با پشتیبانی تماس بگیرید.', 'missing_subscription_qr');
+
+            return;
+        }
+
+        $this->acknowledgeCallback($callbackId);
+        $this->telegramApiClient->sendMessage($chatId, "QR لینک اشتراک (متن لینک):\n{$subscriptionUrl}");
+    }
+
+    public function sendConfigLinks(TelegramAccount $account, int $serviceId, string $chatId, string $callbackId): void
+    {
+        $this->resendConfig($account, $serviceId, $chatId, $callbackId, false);
     }
 
     public function refreshUserService(TelegramAccount $account, int $serviceId, string $chatId, string $callbackId): void
@@ -230,6 +248,16 @@ class ServiceManagementService
                 return;
             }
         }
+
+        $links = $this->vpnAccessLinkGenerator->generate($service);
+        $configLinks = $links['configLinks'] ?? [];
+        $service
+            ->setSubscriptionUrl(($links['subscriptionUrl'] ?? $service->getSubscriptionUrl()) ?: $service->getSubscriptionUrl())
+            ->setConfigLinks($configLinks)
+            ->setConfigText(is_array($configLinks) && [] !== $configLinks ? implode("\n", $configLinks) : null)
+            ->setLastAccessInfoSyncedAt(new \DateTimeImmutable())
+            ->setUpdatedAt(new \DateTimeImmutable());
+        $this->entityManager->flush();
 
         $this->entityManager->refresh($service);
         $this->acknowledgeCallback($callbackId);
@@ -575,20 +603,26 @@ class ServiceManagementService
 
     private function formatServiceDetailForUser(VpnService $service): string
     {
+        $inbound = $service->getInbound();
         $limit = $service->getTrafficLimitGb();
         $used = $service->getTrafficUsedGb() ?? 0;
         $remaining = null === $limit ? 'نامحدود' : max($limit - $used, 0).' GB';
+        $ipLimit = $service->getIpLimit();
 
         return sprintf(
-            "سرویس #%d\nوضعیت: %s\nتاریخ انقضا: %s\nحجم کل: %s\nمصرف: %s\nباقیمانده: %s\nلینک اشتراک: %s\nپیشنمایش کانفیگ: %s",
+            "سرویس #%d\nوضعیت: %s\nسرور/کشور: %s\nپروتکل/شبکه/امنیت: %s / %s / %s\nتاریخ انقضا: %s\nحجم کل: %s\nمصرف: %s\nباقیمانده: %s\nمحدودیت IP: %s\nلینک اشتراک: %s",
             $service->getId(),
             $this->statusLabel($service->getStatus()),
+            sprintf('%s / %s', $inbound?->getHost() ?? '-', $inbound?->getCountry() ?? '-'),
+            $inbound?->getProtocol() ?? '-',
+            $inbound?->getNetwork() ?? '-',
+            $inbound?->getSecurity() ?? '-',
             $service->getExpiresAt()?->format('Y-m-d H:i:s') ?? '-',
             null === $limit ? 'نامحدود' : $limit.' GB',
             $used.' GB',
             $remaining,
-            $service->getSubscriptionUrl() ?: '-',
-            $this->preview($service->getConfigText(), 120)
+            null === $ipLimit ? 'پیشفرض/نامحدود' : (string) $ipLimit,
+            $service->getSubscriptionUrl() ?: '-'
         );
     }
 

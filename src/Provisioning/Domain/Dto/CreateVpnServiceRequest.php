@@ -12,6 +12,7 @@ class CreateVpnServiceRequest
         public readonly string $username,
         public readonly int $durationDays,
         public readonly ?int $trafficLimitGb = null,
+        public readonly ?int $ipLimit = null,
         public readonly ?VpnInbound $inbound = null,
         public readonly ?string $remoteInboundId = null,
         public readonly array $meta = [],
