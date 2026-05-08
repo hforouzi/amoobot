@@ -13,7 +13,6 @@ use EasyCorp\Bundle\EasyAdminBundle\Controller\AbstractCrudController;
 use EasyCorp\Bundle\EasyAdminBundle\Field\BooleanField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\ChoiceField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\DateTimeField;
-use EasyCorp\Bundle\EasyAdminBundle\Field\Field;
 use EasyCorp\Bundle\EasyAdminBundle\Field\IdField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\TextField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\TextareaField;
@@ -73,7 +72,7 @@ TEXT;
             TextField::new('username'),
             TextField::new('password')->hideOnIndex(),
             TextareaField::new('apiToken')->hideOnIndex(),
-            Field::new('config')
+            TextareaField::new('config')
                 ->setFormType(JsonTextareaType::class)
                 ->formatValue(static fn (mixed $value): string => JsonFieldFormatter::format($value))
                 ->setFormTypeOption('attr.rows', 18)
