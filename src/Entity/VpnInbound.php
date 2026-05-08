@@ -184,9 +184,9 @@ class VpnInbound
         return $this->protocol;
     }
 
-    public function setProtocol(?string $protocol): self
+    public function setProtocol(mixed $protocol): self
     {
-        $this->protocol = $protocol;
+        $this->protocol = $this->normalizeNullableString($protocol);
 
         return $this;
     }
@@ -196,9 +196,9 @@ class VpnInbound
         return $this->network;
     }
 
-    public function setNetwork(?string $network): self
+    public function setNetwork(mixed $network): self
     {
-        $this->network = $network;
+        $this->network = $this->normalizeNullableString($network);
 
         return $this;
     }
@@ -208,9 +208,9 @@ class VpnInbound
         return $this->security;
     }
 
-    public function setSecurity(?string $security): self
+    public function setSecurity(mixed $security): self
     {
-        $this->security = $security;
+        $this->security = $this->normalizeNullableString($security);
 
         return $this;
     }
@@ -220,9 +220,9 @@ class VpnInbound
         return $this->host;
     }
 
-    public function setHost(?string $host): self
+    public function setHost(mixed $host): self
     {
-        $this->host = $host;
+        $this->host = $this->normalizeNullableString($host);
 
         return $this;
     }
@@ -232,9 +232,9 @@ class VpnInbound
         return $this->port;
     }
 
-    public function setPort(?int $port): self
+    public function setPort(mixed $port): self
     {
-        $this->port = $port;
+        $this->port = $this->normalizeNullableInt($port);
 
         return $this;
     }
@@ -244,9 +244,9 @@ class VpnInbound
         return $this->sni;
     }
 
-    public function setSni(?string $sni): self
+    public function setSni(mixed $sni): self
     {
-        $this->sni = $sni;
+        $this->sni = $this->normalizeNullableString($sni);
 
         return $this;
     }
@@ -256,9 +256,9 @@ class VpnInbound
         return $this->path;
     }
 
-    public function setPath(?string $path): self
+    public function setPath(mixed $path): self
     {
-        $this->path = $path;
+        $this->path = $this->normalizeNullableString($path);
 
         return $this;
     }
@@ -268,9 +268,9 @@ class VpnInbound
         return $this->hostHeader;
     }
 
-    public function setHostHeader(?string $hostHeader): self
+    public function setHostHeader(mixed $hostHeader): self
     {
-        $this->hostHeader = $hostHeader;
+        $this->hostHeader = $this->normalizeNullableString($hostHeader);
 
         return $this;
     }
@@ -280,9 +280,9 @@ class VpnInbound
         return $this->publicKey;
     }
 
-    public function setPublicKey(?string $publicKey): self
+    public function setPublicKey(mixed $publicKey): self
     {
-        $this->publicKey = $publicKey;
+        $this->publicKey = $this->normalizeNullableString($publicKey);
 
         return $this;
     }
@@ -292,9 +292,9 @@ class VpnInbound
         return $this->shortId;
     }
 
-    public function setShortId(?string $shortId): self
+    public function setShortId(mixed $shortId): self
     {
-        $this->shortId = $shortId;
+        $this->shortId = $this->normalizeNullableString($shortId);
 
         return $this;
     }
@@ -304,9 +304,9 @@ class VpnInbound
         return $this->spiderX;
     }
 
-    public function setSpiderX(?string $spiderX): self
+    public function setSpiderX(mixed $spiderX): self
     {
-        $this->spiderX = $spiderX;
+        $this->spiderX = $this->normalizeNullableString($spiderX);
 
         return $this;
     }
@@ -316,9 +316,9 @@ class VpnInbound
         return $this->flow;
     }
 
-    public function setFlow(?string $flow): self
+    public function setFlow(mixed $flow): self
     {
-        $this->flow = $flow;
+        $this->flow = $this->normalizeNullableString($flow);
 
         return $this;
     }
@@ -328,9 +328,9 @@ class VpnInbound
         return $this->serviceName;
     }
 
-    public function setServiceName(?string $serviceName): self
+    public function setServiceName(mixed $serviceName): self
     {
-        $this->serviceName = $serviceName;
+        $this->serviceName = $this->normalizeNullableString($serviceName);
 
         return $this;
     }
@@ -340,9 +340,9 @@ class VpnInbound
         return $this->fingerprint;
     }
 
-    public function setFingerprint(?string $fingerprint): self
+    public function setFingerprint(mixed $fingerprint): self
     {
-        $this->fingerprint = $fingerprint;
+        $this->fingerprint = $this->normalizeNullableString($fingerprint);
 
         return $this;
     }
@@ -352,9 +352,9 @@ class VpnInbound
         return $this->alpn;
     }
 
-    public function setAlpn(?string $alpn): self
+    public function setAlpn(mixed $alpn): self
     {
-        $this->alpn = $alpn;
+        $this->alpn = $this->normalizeNullableString($alpn);
 
         return $this;
     }
@@ -468,5 +468,59 @@ class VpnInbound
             '' !== $protocol ? $protocol : 'unknown',
             $this->remoteInboundId ?: '-'
         );
+    }
+
+    private function normalizeNullableString(mixed $value): ?string
+    {
+        $scalar = $this->extractFirstScalar($value);
+        if (null === $scalar) {
+            return null;
+        }
+
+        $text = trim((string) $scalar);
+
+        return '' === $text ? null : $text;
+    }
+
+    private function normalizeNullableInt(mixed $value): ?int
+    {
+        $scalar = $this->extractFirstScalar($value);
+        if (null === $scalar || is_bool($scalar) || !is_numeric($scalar)) {
+            return null;
+        }
+
+        $intValue = (int) $scalar;
+
+        return $intValue > 0 ? $intValue : null;
+    }
+
+    private function extractFirstScalar(mixed $value): string|int|float|bool|null
+    {
+        if (null === $value) {
+            return null;
+        }
+
+        if (is_scalar($value)) {
+            return $value;
+        }
+
+        if (is_array($value)) {
+            foreach ($value as $item) {
+                $scalar = $this->extractFirstScalar($item);
+                if (null !== $scalar) {
+                    return $scalar;
+                }
+            }
+
+            return null;
+        }
+
+        if (is_object($value) && method_exists($value, '__toString')) {
+            $text = trim((string) $value);
+
+            return '' === $text ? null : $text;
+        }
+
+        return null;
     }
 }

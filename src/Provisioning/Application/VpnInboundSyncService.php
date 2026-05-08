@@ -180,8 +180,8 @@ final class VpnInboundSyncService
     private function parseInboundRow(array $row): array
     {
         $remoteInboundId = trim((string) ($row['id'] ?? ''));
-        $remark = $this->nullableText($row['remark'] ?? null);
-        $protocol = $this->nullableText($row['protocol'] ?? null);
+        $remark = $this->nullableText($row['remark'] ?? null, 'remark');
+        $protocol = $this->nullableText($row['protocol'] ?? null, 'protocol');
         $streamSettings = $this->jsonToArray($row['streamSettings'] ?? null);
         $settings = $this->jsonToArray($row['settings'] ?? null);
         $tlsSettings = $this->jsonToArray($streamSettings['tlsSettings'] ?? null);
@@ -189,10 +189,10 @@ final class VpnInboundSyncService
         $wsSettings = $this->jsonToArray($streamSettings['wsSettings'] ?? null);
         $grpcSettings = $this->jsonToArray($streamSettings['grpcSettings'] ?? null);
 
-        $network = $this->nullableText($streamSettings['network'] ?? null);
-        $security = $this->nullableText($streamSettings['security'] ?? null);
-        $port = isset($row['port']) ? (int) $row['port'] : null;
-        $listen = $this->nullableText($row['listen'] ?? null);
+        $network = $this->nullableText($streamSettings['network'] ?? null, 'streamSettings.network');
+        $security = $this->nullableText($streamSettings['security'] ?? null, 'streamSettings.security');
+        $port = $this->nullableInt($row['port'] ?? null, 'port');
+        $listen = $this->nullableText($row['listen'] ?? null, 'listen');
         if (in_array((string) $listen, ['0.0.0.0', '::', '*'], true)) {
             $listen = null;
         }
@@ -202,39 +202,39 @@ final class VpnInboundSyncService
         $clients = is_array($settings['clients'] ?? null) ? $settings['clients'] : [];
         $firstClient = is_array($clients[0] ?? null) ? $clients[0] : [];
 
-        $tlsFingerprint = $this->nullableText($tlsSettings['fingerprint'] ?? null);
+        $tlsFingerprint = $this->nullableText($tlsSettings['fingerprint'] ?? null, 'tlsSettings.fingerprint');
         $tlsAlpnRaw = $tlsSettings['alpn'] ?? null;
         $tlsAlpn = null;
         if (is_array($tlsAlpnRaw) && [] !== $tlsAlpnRaw) {
-            $tlsAlpn = $this->nullableText(implode(',', array_map('strval', $tlsAlpnRaw)));
+            $tlsAlpn = $this->nullableText(implode(',', array_map('strval', $tlsAlpnRaw)), 'tlsSettings.alpn');
         } else {
-            $tlsAlpn = $this->nullableText($tlsAlpnRaw);
+            $tlsAlpn = $this->nullableText($tlsAlpnRaw, 'tlsSettings.alpn');
         }
 
         $realityServerNames = is_array($realitySettings['serverNames'] ?? null) ? $realitySettings['serverNames'] : [];
         $realityShortIds = is_array($realitySettings['shortIds'] ?? null) ? $realitySettings['shortIds'] : [];
-        $realityPublicKey = $this->nullableText($realitySettings['publicKey'] ?? ($realitySettings['settings']['publicKey'] ?? null));
-        $realityFingerprint = $this->nullableText($realitySettings['fingerprint'] ?? ($realitySettings['settings']['fingerprint'] ?? null));
-        $realitySpiderX = $this->nullableText($realitySettings['spiderX'] ?? ($realitySettings['settings']['spiderX'] ?? null));
+        $realityPublicKey = $this->nullableText($realitySettings['publicKey'] ?? ($realitySettings['settings']['publicKey'] ?? null), 'realitySettings.publicKey');
+        $realityFingerprint = $this->nullableText($realitySettings['fingerprint'] ?? ($realitySettings['settings']['fingerprint'] ?? null), 'realitySettings.fingerprint');
+        $realitySpiderX = $this->nullableText($realitySettings['spiderX'] ?? ($realitySettings['settings']['spiderX'] ?? null), 'realitySettings.spiderX');
 
         $wsHeaders = $this->jsonToArray($wsSettings['headers'] ?? null);
-        $hostHeader = $this->nullableText($wsHeaders['Host'] ?? ($wsHeaders['host'] ?? null));
-        $path = $this->nullableText($wsSettings['path'] ?? null);
-        $serviceName = $this->nullableText($grpcSettings['serviceName'] ?? null);
+        $hostHeader = $this->nullableText($wsHeaders['Host'] ?? ($wsHeaders['host'] ?? null), 'wsSettings.headers.Host');
+        $path = $this->nullableText($wsSettings['path'] ?? null, 'wsSettings.path');
+        $serviceName = $this->nullableText($grpcSettings['serviceName'] ?? null, 'grpcSettings.serviceName');
 
-        $sni = $this->nullableText($tlsSettings['serverName'] ?? null);
+        $sni = $this->nullableText($tlsSettings['serverName'] ?? null, 'tlsSettings.serverName');
         $publicKey = null;
         $shortId = null;
         $spiderX = null;
         $fingerprint = $tlsFingerprint;
         if ('reality' === strtolower((string) ($security ?? ''))) {
-            $sni = $this->nullableText($realityServerNames[0] ?? null);
+            $sni = $this->nullableText($realityServerNames[0] ?? null, 'realitySettings.serverNames[0]');
             $publicKey = $realityPublicKey;
-            $shortId = $this->nullableText($realityShortIds[0] ?? null);
+            $shortId = $this->nullableText($realityShortIds[0] ?? null, 'realitySettings.shortIds[0]');
             $spiderX = $realitySpiderX;
             $fingerprint = $realityFingerprint;
         }
-        $flow = $this->nullableText($firstClient['flow'] ?? null);
+        $flow = $this->nullableText($firstClient['flow'] ?? null, 'settings.clients[0].flow');
 
         return [
             'remoteInboundId' => $remoteInboundId,
@@ -244,7 +244,7 @@ final class VpnInboundSyncService
             'network' => $network,
             'security' => $security,
             'host' => $listen,
-            'port' => null !== $port && $port > 0 ? $port : null,
+            'port' => $port,
             'sni' => $sni,
             'path' => $path,
             'hostHeader' => $hostHeader,
@@ -277,11 +277,89 @@ final class VpnInboundSyncService
         return (JSON_ERROR_NONE === json_last_error() && is_array($decoded)) ? $decoded : [];
     }
 
-    private function nullableText(mixed $value): ?string
+    private function nullableText(mixed $value, string $field): ?string
     {
-        $text = trim((string) $value);
+        $scalar = $this->extractFirstScalar($value, $field);
+        if (null === $scalar) {
+            return null;
+        }
+
+        $text = trim((string) $scalar);
 
         return '' === $text ? null : $text;
+    }
+
+    private function nullableInt(mixed $value, string $field): ?int
+    {
+        $scalar = $this->extractFirstScalar($value, $field);
+        if (null === $scalar || is_bool($scalar) || !is_numeric($scalar)) {
+            if (null !== $scalar) {
+                $this->logTypeMismatch($field, $value, 'numeric-scalar');
+            }
+
+            return null;
+        }
+
+        $intValue = (int) $scalar;
+
+        return $intValue > 0 ? $intValue : null;
+    }
+
+    private function extractFirstScalar(mixed $value, string $field): string|int|float|bool|null
+    {
+        if (null === $value) {
+            return null;
+        }
+
+        if (is_scalar($value)) {
+            return $value;
+        }
+
+        if (is_array($value)) {
+            $this->logTypeMismatch($field, $value, 'scalar');
+            foreach ($value as $item) {
+                if (null !== $item) {
+                    return $this->extractFirstScalar($item, $field);
+                }
+            }
+
+            return null;
+        }
+
+        if (is_object($value)) {
+            if (method_exists($value, '__toString')) {
+                $this->logTypeMismatch($field, $value, 'scalar');
+
+                return trim((string) $value);
+            }
+
+            $this->logTypeMismatch($field, $value, 'scalar');
+
+            return null;
+        }
+
+        return null;
+    }
+
+    private function logTypeMismatch(string $field, mixed $value, string $expected): void
+    {
+        $type = get_debug_type($value);
+        $preview = '';
+        if (is_scalar($value)) {
+            $preview = (string) $value;
+        } elseif (is_array($value)) {
+            $preview = sprintf('array(len=%d)', count($value));
+        } elseif (is_object($value)) {
+            $preview = 'object';
+        }
+
+        error_log(sprintf(
+            '[VpnInboundSyncService] metadata_type_mismatch field="%s" expected="%s" got="%s" preview="%s"',
+            $field,
+            $expected,
+            $type,
+            mb_substr($preview, 0, 120)
+        ));
     }
 
     private function ensureSupportedPanel(VpnPanel $panel): void

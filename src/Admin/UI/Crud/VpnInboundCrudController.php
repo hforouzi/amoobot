@@ -13,6 +13,7 @@ use EasyCorp\Bundle\EasyAdminBundle\Field\AssociationField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\BooleanField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\DateTimeField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\IdField;
+use EasyCorp\Bundle\EasyAdminBundle\Field\IntegerField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\TextField;
 
 class VpnInboundCrudController extends AbstractCrudController
@@ -65,7 +66,7 @@ class VpnInboundCrudController extends AbstractCrudController
             TextField::new('location')->hideOnIndex(),
             TextField::new('protocol'),
             TextField::new('host'),
-            TextField::new('port'),
+            IntegerField::new('port'),
             TextField::new('network'),
             TextField::new('security'),
             TextField::new('sni'),
