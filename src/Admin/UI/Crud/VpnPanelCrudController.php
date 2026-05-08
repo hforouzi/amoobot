@@ -4,8 +4,6 @@ declare(strict_types=1);
 
 namespace App\Admin\UI\Crud;
 
-use App\Admin\Form\Type\JsonTextareaType;
-use App\Admin\UI\Crud\Support\JsonFieldFormatter;
 use App\Entity\VpnPanel;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Action;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Actions;
@@ -19,14 +17,6 @@ use EasyCorp\Bundle\EasyAdminBundle\Field\TextareaField;
 
 class VpnPanelCrudController extends AbstractCrudController
 {
-    private const CONFIG_HELP_TEXT = <<<'TEXT'
-JSON example:
-{
-  "subscription_base_url": "https://panel.example.com",
-  "remark_prefix": "amoobot"
-}
-TEXT;
-
     public static function getEntityFqcn(): string
     {
         return VpnPanel::class;
@@ -72,11 +62,10 @@ TEXT;
             TextField::new('username'),
             TextField::new('password')->hideOnIndex(),
             TextareaField::new('apiToken')->hideOnIndex(),
-            TextareaField::new('config')
-                ->setFormType(JsonTextareaType::class)
-                ->formatValue(static fn (mixed $value): string => JsonFieldFormatter::format($value))
-                ->setFormTypeOption('attr.rows', 18)
-                ->setHelp(self::CONFIG_HELP_TEXT),
+            TextareaField::new('configJson', 'Config JSON')
+                ->hideOnIndex()
+                ->setNumOfRows(12)
+                ->setHelp('Enter valid JSON config.'),
             BooleanField::new('isActive'),
             DateTimeField::new('createdAt')->hideOnForm(),
             DateTimeField::new('updatedAt')->hideOnForm(),

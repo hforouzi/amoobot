@@ -4,8 +4,6 @@ declare(strict_types=1);
 
 namespace App\Admin\UI\Crud;
 
-use App\Admin\Form\Type\JsonTextareaType;
-use App\Admin\UI\Crud\Support\JsonFieldFormatter;
 use App\Entity\VpnInbound;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Action;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Actions;
@@ -63,11 +61,10 @@ class VpnInboundCrudController extends AbstractCrudController
             TextField::new('network'),
             TextField::new('security'),
             BooleanField::new('isActive'),
-            TextareaField::new('config')
-                ->setFormType(JsonTextareaType::class)
-                ->formatValue(static fn (mixed $value): string => JsonFieldFormatter::format($value))
-                ->setFormTypeOption('attr.rows', 20)
-                ->hideOnIndex(),
+            TextareaField::new('configJson', 'Config JSON')
+                ->hideOnIndex()
+                ->setNumOfRows(12)
+                ->setHelp('Enter valid JSON config.'),
             DateTimeField::new('lastSyncedAt'),
             DateTimeField::new('createdAt')->hideOnForm(),
             DateTimeField::new('updatedAt')->hideOnForm(),

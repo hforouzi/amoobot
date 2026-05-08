@@ -200,6 +200,37 @@ class VpnInbound
         return $this;
     }
 
+    public function getConfigJson(): string
+    {
+        if ($this->config === null || $this->config === []) {
+            return '';
+        }
+
+        return json_encode(
+            $this->config,
+            JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
+        ) ?: '';
+    }
+
+    public function setConfigJson(?string $json): self
+    {
+        if ($json === null || trim($json) === '') {
+            $this->config = [];
+
+            return $this;
+        }
+
+        $decoded = json_decode($json, true);
+
+        if (json_last_error() !== JSON_ERROR_NONE || !is_array($decoded)) {
+            throw new \InvalidArgumentException('Invalid JSON config: ' . json_last_error_msg());
+        }
+
+        $this->config = $decoded;
+
+        return $this;
+    }
+
     public function getLastSyncedAt(): ?\DateTimeImmutable
     {
         return $this->lastSyncedAt;
