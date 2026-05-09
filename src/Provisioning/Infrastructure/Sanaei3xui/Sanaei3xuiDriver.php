@@ -111,11 +111,11 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
             'network' => $network,
             'security' => $security,
             'clientUuid' => $clientUuid,
-                'email' => $email,
-                'totalGB' => (string) $totalBytes,
-                'expiryTime' => (string) $expiryTime,
-                'subId' => $subId,
-            ]);
+            'email' => $email,
+            'totalGB' => (string) $totalBytes,
+            'expiryTime' => (string) $expiryTime,
+            'subId' => $subId,
+        ]);
         $this->log(sprintf(
             'create_service_add_client_response panel_id=%s local_inbound_id=%s remote_inbound_id_raw="%s" remote_inbound_id_int=%d status=%s ok=%s success=%s empty=%s error="%s" body_preview="%s"',
             $panel->getId() ?? 'null',

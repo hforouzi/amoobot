@@ -116,7 +116,7 @@ class PaymentConfirmationService
             $slice = mb_substr($remaining, 0, $maxLength);
             $breakPos = mb_strrpos($slice, "\n");
             if (false === $breakPos || $breakPos < ($maxLength / 2)) {
-                $breakPos = $maxLength;
+                $breakPos = min($maxLength, mb_strlen($remaining));
             }
             $chunks[] = trim(mb_substr($remaining, 0, $breakPos));
             $remaining = trim(mb_substr($remaining, (int) $breakPos));
