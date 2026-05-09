@@ -6,11 +6,13 @@ namespace App\Command;
 
 use App\Entity\VpnPanel;
 use App\Provisioning\Application\VpnInboundSyncService;
+use App\Provisioning\Infrastructure\Sanaei3xui\Sanaei3xuiApiClient;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputInterface;
+use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Style\SymfonyStyle;
 
@@ -20,19 +22,25 @@ final class PanelSyncInboundsCommand extends Command
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
         private readonly VpnInboundSyncService $inboundSyncService,
+        private readonly Sanaei3xuiApiClient $apiClient,
     ) {
         parent::__construct();
     }
 
     protected function configure(): void
     {
-        $this->addArgument('panelId', InputArgument::REQUIRED, 'VpnPanel id');
+        $this
+            ->addArgument('panelId', InputArgument::REQUIRED, 'VpnPanel id')
+            ->addOption('force', null, InputOption::VALUE_NONE, 'Force overwrite parsed technical metadata.')
+            ->addOption('raw', null, InputOption::VALUE_NONE, 'Print sanitized raw inbound JSON.');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $io = new SymfonyStyle($input, $output);
         $panelId = (int) $input->getArgument('panelId');
+        $force = (bool) $input->getOption('force');
+        $raw = (bool) $input->getOption('raw');
 
         $panel = $this->entityManager->getRepository(VpnPanel::class)->find($panelId);
         if (!$panel instanceof VpnPanel) {
@@ -47,8 +55,29 @@ final class PanelSyncInboundsCommand extends Command
             return Command::FAILURE;
         }
 
+        if ($raw) {
+            $result = $this->apiClient->listInbounds($panel);
+            if (($result['ok'] ?? false) === true && is_array($result['data'] ?? null)) {
+                $payload = $result['data'];
+                $inbounds = $payload['obj'] ?? $payload;
+                if (is_array($inbounds)) {
+                    $sanitized = [];
+                    foreach ($inbounds as $inbound) {
+                        $sanitized[] = $this->sanitizeForRawOutput($inbound);
+                    }
+
+                    $io->writeln((string) json_encode(
+                        $sanitized,
+                        JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
+                    ));
+                }
+            } else {
+                $io->warning('Unable to print raw payload: failed to fetch inbounds.');
+            }
+        }
+
         try {
-            $sync = $this->inboundSyncService->syncPanelInbounds($panel);
+            $sync = $this->inboundSyncService->syncPanelInbounds($panel, $force);
         } catch (\Throwable $e) {
             $io->error($e->getMessage());
 
@@ -62,5 +91,28 @@ final class PanelSyncInboundsCommand extends Command
         $io->success(sprintf('Synced %d inbound(s).', $sync->syncedCount));
 
         return Command::SUCCESS;
+    }
+
+    private function sanitizeForRawOutput(mixed $value): mixed
+    {
+        if (is_array($value)) {
+            $sanitized = [];
+            foreach ($value as $key => $item) {
+                if (is_string($key) && preg_match('/(?:password|passwd|token|cookie|session|authorization)/i', $key)) {
+                    $sanitized[$key] = '[redacted]';
+                    continue;
+                }
+
+                $sanitized[$key] = $this->sanitizeForRawOutput($item);
+            }
+
+            return $sanitized;
+        }
+
+        if (is_object($value)) {
+            return '[object]';
+        }
+
+        return $value;
     }
 }

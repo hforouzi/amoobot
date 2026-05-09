@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Admin\UI\Crud;
 
+use App\Admin\Form\Type\JsonTextareaType;
 use App\Entity\VpnInbound;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Action;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Actions;
@@ -12,6 +13,7 @@ use EasyCorp\Bundle\EasyAdminBundle\Controller\AbstractCrudController;
 use EasyCorp\Bundle\EasyAdminBundle\Field\AssociationField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\BooleanField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\DateTimeField;
+use EasyCorp\Bundle\EasyAdminBundle\Field\Field;
 use EasyCorp\Bundle\EasyAdminBundle\Field\IdField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\IntegerField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\TextField;
@@ -79,6 +81,7 @@ class VpnInboundCrudController extends AbstractCrudController
             TextField::new('serviceName')->hideOnIndex(),
             TextField::new('fingerprint')->hideOnIndex(),
             TextField::new('alpn')->hideOnIndex(),
+            Field::new('config')->setFormType(JsonTextareaType::class)->hideOnIndex(),
             BooleanField::new('isActive'),
             DateTimeField::new('lastAccessMetadataSyncedAt')->hideOnForm(),
             DateTimeField::new('lastSyncedAt'),

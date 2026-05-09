@@ -17,7 +17,7 @@ final class VpnInboundSyncService
     ) {
     }
 
-    public function syncPanelInbounds(VpnPanel $panel): VpnInboundSyncResult
+    public function syncPanelInbounds(VpnPanel $panel, bool $force = false): VpnInboundSyncResult
     {
         $this->ensureSupportedPanel($panel);
 
@@ -45,7 +45,7 @@ final class VpnInboundSyncService
             }
 
             $remoteIds[] = $remoteInboundId;
-            $this->upsertInboundFromRemote($panel, $row, null);
+            $this->upsertInboundFromRemote($panel, $row, null, $force);
             ++$synced;
         }
 
@@ -78,7 +78,7 @@ final class VpnInboundSyncService
         return new VpnInboundSyncResult($synced, $missingLocalCount, $warnings);
     }
 
-    public function syncInbound(VpnInbound $inbound): VpnInboundSyncResult
+    public function syncInbound(VpnInbound $inbound, bool $force = false): VpnInboundSyncResult
     {
         $panel = $inbound->getPanel();
         $this->ensureSupportedPanel($panel);
@@ -94,7 +94,7 @@ final class VpnInboundSyncService
             throw new \RuntimeException('Inbound response payload is empty or invalid.');
         }
 
-        $this->upsertInboundFromRemote($panel, $row, $inbound);
+        $this->upsertInboundFromRemote($panel, $row, $inbound, $force);
         $this->entityManager->flush();
 
         return new VpnInboundSyncResult(1);
@@ -103,7 +103,7 @@ final class VpnInboundSyncService
     /**
      * @param array<string, mixed> $row
      */
-    private function upsertInboundFromRemote(VpnPanel $panel, array $row, ?VpnInbound $existingInbound): ?VpnInbound
+    private function upsertInboundFromRemote(VpnPanel $panel, array $row, ?VpnInbound $existingInbound, bool $force = false): ?VpnInbound
     {
         $parsed = $this->parseInboundRow($row);
         if ('' === $parsed['remoteInboundId']) {
@@ -125,13 +125,16 @@ final class VpnInboundSyncService
             $this->entityManager->persist($inbound);
         }
 
+        if ($force || '' === trim((string) $inbound->getTitle())) {
+            $inbound->setTitle($parsed['title']);
+        }
+
         $inbound
-            ->setTitle($parsed['title'])
             ->setRemark($parsed['remark'])
             ->setProtocol($parsed['protocol'])
             ->setNetwork($parsed['network'])
             ->setSecurity($parsed['security'])
-            ->setHost($parsed['host'] ?? $panel->getPublicHost())
+            ->setHost($this->resolveInboundHost($panel, $inbound, $force))
             ->setPort($parsed['port'])
             ->setSni($parsed['sni'])
             ->setPath($parsed['path'])
@@ -143,11 +146,13 @@ final class VpnInboundSyncService
             ->setServiceName($parsed['serviceName'])
             ->setFingerprint($parsed['fingerprint'])
             ->setAlpn($parsed['alpn'])
-            ->setConfig([])
+            ->setConfig($parsed['config'])
             ->setIsActive($parsed['isActive'])
             ->setLastSyncedAt(new \DateTimeImmutable())
             ->setLastAccessMetadataSyncedAt(new \DateTimeImmutable())
             ->setUpdatedAt(new \DateTimeImmutable());
+
+        $this->logInboundSyncSummary($inbound);
 
         return $inbound;
     }
@@ -174,6 +179,7 @@ final class VpnInboundSyncService
      *   serviceName: ?string,
      *   fingerprint: ?string,
      *   alpn: ?string,
+     *   config: array<string, mixed>,
      *   isActive: bool,
      * }
      */
@@ -182,21 +188,20 @@ final class VpnInboundSyncService
         $remoteInboundId = trim((string) ($row['id'] ?? ''));
         $remark = $this->nullableText($row['remark'] ?? null, 'remark');
         $protocol = $this->nullableText($row['protocol'] ?? null, 'protocol');
-        $streamSettings = $this->jsonToArray($row['streamSettings'] ?? null);
-        $settings = $this->jsonToArray($row['settings'] ?? null);
+        $settingsPayload = $this->decodeInboundSection($row['settings'] ?? null, 'settings', $remoteInboundId);
+        $streamSettingsPayload = $this->decodeInboundSection($row['streamSettings'] ?? null, 'streamSettings', $remoteInboundId);
+        $sniffingPayload = $this->decodeInboundSection($row['sniffing'] ?? null, 'sniffing', $remoteInboundId);
+        $settings = is_array($settingsPayload) ? $settingsPayload : [];
+        $streamSettings = is_array($streamSettingsPayload) ? $streamSettingsPayload : [];
         $tlsSettings = $this->jsonToArray($streamSettings['tlsSettings'] ?? null);
         $realitySettings = $this->jsonToArray($streamSettings['realitySettings'] ?? null);
         $wsSettings = $this->jsonToArray($streamSettings['wsSettings'] ?? null);
         $grpcSettings = $this->jsonToArray($streamSettings['grpcSettings'] ?? null);
+        $tcpSettings = $this->jsonToArray($streamSettings['tcpSettings'] ?? null);
 
         $network = $this->nullableText($streamSettings['network'] ?? null, 'streamSettings.network');
         $security = $this->nullableText($streamSettings['security'] ?? null, 'streamSettings.security');
         $port = $this->nullableInt($row['port'] ?? null, 'port');
-        $listen = $this->nullableText($row['listen'] ?? null, 'listen');
-        if (in_array((string) $listen, ['0.0.0.0', '::', '*'], true)) {
-            $listen = null;
-        }
-
         $title = $remark ?? ('Inbound '.$remoteInboundId);
         $isActive = isset($row['enable']) ? (bool) $row['enable'] : true;
         $clients = is_array($settings['clients'] ?? null) ? $settings['clients'] : [];
@@ -221,6 +226,9 @@ final class VpnInboundSyncService
         $hostHeader = $this->nullableText($wsHeaders['Host'] ?? ($wsHeaders['host'] ?? null), 'wsSettings.headers.Host');
         $path = $this->nullableText($wsSettings['path'] ?? null, 'wsSettings.path');
         $serviceName = $this->nullableText($grpcSettings['serviceName'] ?? null, 'grpcSettings.serviceName');
+        if ('tcp' === strtolower((string) ($network ?? '')) && null === $hostHeader) {
+            $hostHeader = $this->extractTcpHostHeader($tcpSettings);
+        }
 
         $sni = $this->nullableText($tlsSettings['serverName'] ?? null, 'tlsSettings.serverName');
         $publicKey = null;
@@ -235,6 +243,9 @@ final class VpnInboundSyncService
             $fingerprint = $realityFingerprint;
         }
         $flow = $this->nullableText($firstClient['flow'] ?? null, 'settings.clients[0].flow');
+        if (null === $flow) {
+            $flow = $this->nullableText($streamSettings['flow'] ?? ($settings['flow'] ?? null), 'flow');
+        }
 
         return [
             'remoteInboundId' => $remoteInboundId,
@@ -243,7 +254,6 @@ final class VpnInboundSyncService
             'protocol' => $protocol,
             'network' => $network,
             'security' => $security,
-            'host' => $listen,
             'port' => $port,
             'sni' => $sni,
             'path' => $path,
@@ -255,6 +265,12 @@ final class VpnInboundSyncService
             'serviceName' => $serviceName,
             'fingerprint' => $fingerprint,
             'alpn' => $tlsAlpn,
+            'config' => [
+                'raw' => $this->sanitizeInboundData($row),
+                'settings' => $this->sanitizeInboundData($settingsPayload),
+                'streamSettings' => $this->sanitizeInboundData($streamSettingsPayload),
+                'sniffing' => $this->sanitizeInboundData($sniffingPayload),
+            ],
             'isActive' => $isActive,
         ];
     }
@@ -366,6 +382,137 @@ final class VpnInboundSyncService
             $type,
             mb_substr($preview, 0, 120)
         ));
+    }
+
+    private function resolveInboundHost(VpnPanel $panel, VpnInbound $inbound, bool $force): ?string
+    {
+        $existingHost = trim((string) ($inbound->getHost() ?? ''));
+        if (!$force && '' !== $existingHost) {
+            return $existingHost;
+        }
+
+        $panelConfig = $panel->getConfig();
+        $configHost = $this->nullableText(is_array($panelConfig) ? ($panelConfig['public_host'] ?? null) : null, 'panel.config.public_host');
+        if (null !== $configHost) {
+            return $configHost;
+        }
+
+        $baseUrlHost = $this->hostFromBaseUrl($panel->getBaseUrl());
+        if (null !== $baseUrlHost) {
+            return $baseUrlHost;
+        }
+
+        error_log(sprintf(
+            '[VpnInboundSyncService] inbound_host_missing panel_id=%d remote_inbound_id="%s"',
+            $panel->getId() ?? 0,
+            $inbound->getRemoteInboundId()
+        ));
+
+        return null;
+    }
+
+    private function hostFromBaseUrl(?string $baseUrl): ?string
+    {
+        if (null === $baseUrl || '' === trim($baseUrl)) {
+            return null;
+        }
+
+        $host = parse_url(trim($baseUrl), PHP_URL_HOST);
+        if (!is_string($host)) {
+            return null;
+        }
+
+        $host = trim($host);
+
+        return '' === $host ? null : $host;
+    }
+
+    /**
+     * @return array<string, mixed>|string|null
+     */
+    private function decodeInboundSection(mixed $value, string $field, string $remoteInboundId): array|string|null
+    {
+        if (null === $value) {
+            return null;
+        }
+
+        if (is_array($value)) {
+            return $value;
+        }
+
+        if (!is_string($value)) {
+            $this->logTypeMismatch($field, $value, 'array-or-json-string');
+
+            return null;
+        }
+
+        $text = trim($value);
+        if ('' === $text) {
+            return null;
+        }
+
+        $decoded = json_decode($text, true);
+        if (JSON_ERROR_NONE !== json_last_error() || !is_array($decoded)) {
+            error_log(sprintf(
+                '[VpnInboundSyncService] inbound_section_invalid_json remote_inbound_id="%s" field="%s"',
+                $remoteInboundId,
+                $field
+            ));
+
+            return $text;
+        }
+
+        return $decoded;
+    }
+
+    private function extractTcpHostHeader(array $tcpSettings): ?string
+    {
+        $header = $this->jsonToArray($tcpSettings['header'] ?? null);
+        $request = $this->jsonToArray($header['request'] ?? null);
+        $headers = $this->jsonToArray($request['headers'] ?? null);
+        $host = $headers['Host'] ?? ($headers['host'] ?? null);
+
+        return $this->nullableText($host, 'tcpSettings.header.request.headers.Host');
+    }
+
+    private function logInboundSyncSummary(VpnInbound $inbound): void
+    {
+        error_log(sprintf(
+            '[VpnInboundSyncService] inbound_synced remote_inbound_id="%s" protocol="%s" port="%s" network="%s" security="%s" host="%s" sni="%s" path="%s" public_key=%s short_id=%s',
+            $inbound->getRemoteInboundId(),
+            (string) ($inbound->getProtocol() ?? ''),
+            (string) ($inbound->getPort() ?? ''),
+            (string) ($inbound->getNetwork() ?? ''),
+            (string) ($inbound->getSecurity() ?? ''),
+            (string) ($inbound->getHost() ?? ''),
+            (string) ($inbound->getSni() ?? ''),
+            (string) ($inbound->getPath() ?? ''),
+            null !== $inbound->getPublicKey() && '' !== trim($inbound->getPublicKey()) ? 'yes' : 'no',
+            null !== $inbound->getShortId() && '' !== trim($inbound->getShortId()) ? 'yes' : 'no'
+        ));
+    }
+
+    private function sanitizeInboundData(mixed $value): mixed
+    {
+        if (is_array($value)) {
+            $sanitized = [];
+            foreach ($value as $key => $item) {
+                if (is_string($key) && preg_match('/(?:password|passwd|token|cookie|session|authorization)/i', $key)) {
+                    $sanitized[$key] = '[redacted]';
+                    continue;
+                }
+
+                $sanitized[$key] = $this->sanitizeInboundData($item);
+            }
+
+            return $sanitized;
+        }
+
+        if (is_object($value)) {
+            return '[object]';
+        }
+
+        return $value;
     }
 
     private function ensureSupportedPanel(VpnPanel $panel): void

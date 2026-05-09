@@ -11,6 +11,7 @@ use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputInterface;
+use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Style\SymfonyStyle;
 
@@ -26,13 +27,16 @@ final class PanelListInboundsCommand extends Command
 
     protected function configure(): void
     {
-        $this->addArgument('panelId', InputArgument::REQUIRED, 'VpnPanel id');
+        $this
+            ->addArgument('panelId', InputArgument::REQUIRED, 'VpnPanel id')
+            ->addOption('raw', null, InputOption::VALUE_NONE, 'Print sanitized raw inbound JSON.');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $io = new SymfonyStyle($input, $output);
         $panelId = (int) $input->getArgument('panelId');
+        $raw = (bool) $input->getOption('raw');
         $panel = $this->entityManager->getRepository(VpnPanel::class)->find($panelId);
         if (!$panel instanceof VpnPanel) {
             $io->error('Panel not found.');
@@ -62,9 +66,14 @@ final class PanelListInboundsCommand extends Command
         }
 
         $rows = [];
+        $sanitizedRaw = [];
         foreach ($inbounds as $inbound) {
             if (!is_array($inbound)) {
                 continue;
+            }
+
+            if ($raw) {
+                $sanitizedRaw[] = $this->sanitizeForRawOutput($inbound);
             }
 
             $rows[] = [
@@ -77,6 +86,36 @@ final class PanelListInboundsCommand extends Command
 
         $io->table(['id', 'remark', 'port', 'protocol'], $rows);
 
+        if ($raw) {
+            $io->writeln((string) json_encode(
+                $sanitizedRaw,
+                JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
+            ));
+        }
+
         return Command::SUCCESS;
+    }
+
+    private function sanitizeForRawOutput(mixed $value): mixed
+    {
+        if (is_array($value)) {
+            $sanitized = [];
+            foreach ($value as $key => $item) {
+                if (is_string($key) && preg_match('/(?:password|passwd|token|cookie|session|authorization)/i', $key)) {
+                    $sanitized[$key] = '[redacted]';
+                    continue;
+                }
+
+                $sanitized[$key] = $this->sanitizeForRawOutput($item);
+            }
+
+            return $sanitized;
+        }
+
+        if (is_object($value)) {
+            return '[object]';
+        }
+
+        return $value;
     }
 }
