@@ -60,13 +60,16 @@ class VpnPanelCrudController extends AbstractCrudController
                 ]),
             TextField::new('title'),
             TextField::new('baseUrl'),
-            TextField::new('subscriptionBaseUrl'),
-            TextField::new('publicHost'),
+            TextField::new('subscriptionBaseUrl')
+                ->setHelp('For Sanaei subscriptions, prefer config.subscription_base_url and config.subscription_path_prefix.'),
+            TextField::new('publicHost')
+                ->setHelp('Used as fallback host for generated single links when inbound/external proxy host is missing.'),
             TextField::new('username'),
             TextField::new('password')->hideOnIndex(),
             TextareaField::new('apiToken')->hideOnIndex(),
             Field::new('config')
                 ->formatValue(static fn (mixed $value): string => json_encode($value, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '')
+                ->setHelp('Example: {"subscription_base_url":"https://sub.boodbash.ir:8443","subscription_path_prefix":"/rain","public_host":"sub.boodbash.ir"}')
                 ->hideOnForm()
                 ->hideOnIndex(),
             BooleanField::new('isActive'),

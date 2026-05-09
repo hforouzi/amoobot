@@ -82,6 +82,13 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
         ));
 
         $this->log(sprintf(
+            'generated_sub_id panel_id=%d inbound_id=%d sub_id="%s"',
+            $panel->getId() ?? 0,
+            $inbound->getId() ?? 0,
+            $subId
+        ));
+
+        $this->log(sprintf(
             'create_service_add_client_request panel_id=%s local_inbound_id=%s remote_inbound_id_raw="%s" remote_inbound_id_int=%d protocol="%s" network="%s" security="%s" uuid="%s" email="%s" total_gb_bytes=%d expiry_time=%d',
             $panel->getId() ?? 'null',
             $inbound->getId() ?? 'null',
@@ -104,10 +111,11 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
             'network' => $network,
             'security' => $security,
             'clientUuid' => $clientUuid,
-            'email' => $email,
-            'totalGB' => (string) $totalBytes,
-            'expiryTime' => (string) $expiryTime,
-        ]);
+                'email' => $email,
+                'totalGB' => (string) $totalBytes,
+                'expiryTime' => (string) $expiryTime,
+                'subId' => $subId,
+            ]);
         $this->log(sprintf(
             'create_service_add_client_response panel_id=%s local_inbound_id=%s remote_inbound_id_raw="%s" remote_inbound_id_int=%d status=%s ok=%s success=%s empty=%s error="%s" body_preview="%s"',
             $panel->getId() ?? 'null',
@@ -131,7 +139,7 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
             throw new \RuntimeException('Sanaei addClient could not be verified on panel.');
         }
 
-        $subscriptionUrl = $this->buildSubscriptionUrl($panel, $config, $subId, $email);
+        $subscriptionUrl = $this->buildSubscriptionUrl($panel, $config, $subId);
 
         return new CreatedVpnService(
             remoteId: $this->remoteIdParser->format($panel->getId(), $inbound->getId(), $inboundIdRaw, $clientUuid, $email, $subId),
@@ -312,16 +320,30 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
         }
     }
 
-    private function buildSubscriptionUrl(VpnPanel $panel, array $config, string $subId, string $email): ?string
+    private function buildSubscriptionUrl(VpnPanel $panel, array $config, string $subId): ?string
     {
-        $base = trim((string) ($panel->getSubscriptionBaseUrl() ?? ''));
+        $base = trim((string) ($config['subscription_base_url'] ?? ''));
         if ('' === $base) {
-            $base = trim((string) ($config['subscription_base_url'] ?? ''));
+            $base = trim((string) ($panel->getSubscriptionBaseUrl() ?? ''));
         }
-        if ('' === $base) {
-            $base = trim((string) ($panel->getBaseUrl() ?? ''));
+        $prefix = trim((string) ($config['subscription_path_prefix'] ?? ''));
+
+        $this->log(sprintf(
+            'subscription_url_inputs panel_id=%s subscription_base_url_exists=%s subscription_path_prefix="%s" sub_id_present=%s',
+            $panel->getId() ?? 'null',
+            '' !== $base ? 'yes' : 'no',
+            $prefix,
+            '' !== trim($subId) ? 'yes' : 'no'
+        ));
+
+        if ('' === trim($subId)) {
+            $this->log(sprintf('subscription_url_missing_sub_id panel_id=%s', $panel->getId() ?? 'null'));
+
+            return null;
         }
+
         if ('' === $base) {
+            $this->log(sprintf('subscription_url_missing_base panel_id=%s', $panel->getId() ?? 'null'));
             return null;
         }
 
@@ -335,11 +357,21 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
             return null;
         }
 
-        if ('' !== trim($subId)) {
-            return sprintf('%s/sub/%s', $base, rawurlencode($subId));
+        if ('' === $prefix) {
+            $prefix = '/sub';
         }
+        $prefix = '/'.trim($prefix, '/');
+        $url = sprintf('%s%s/%s', $base, $prefix, rawurlencode($subId));
+        $url = preg_replace('#(?<!:)/{2,}#', '/', $url) ?? $url;
 
-        return sprintf('%s/sub/%s', $base, rawurlencode($email));
+        $this->log(sprintf(
+            'subscription_url_generated panel_id=%s generated=%s url="%s"',
+            $panel->getId() ?? 'null',
+            '' !== trim((string) $url) ? 'yes' : 'no',
+            (string) $url
+        ));
+
+        return '' === trim((string) $url) ? null : $url;
     }
 
     private function gbToBytes(?int $gb): int

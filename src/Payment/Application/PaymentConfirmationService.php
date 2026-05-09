@@ -60,6 +60,18 @@ class PaymentConfirmationService
 
         $subscriptionUrl = trim((string) ($vpnService->getSubscriptionUrl() ?? ''));
         $configText = trim((string) ($vpnService->getConfigText() ?? ''));
+        $singleConfigLink = '';
+        foreach ((array) ($vpnService->getConfigLinks() ?? []) as $link) {
+            $candidate = trim((string) $link);
+            if ('' !== $candidate) {
+                $singleConfigLink = $candidate;
+                break;
+            }
+        }
+        if ('' === $singleConfigLink && preg_match('/^(vless|vmess|trojan):\/\//i', $configText) === 1) {
+            $singleConfigLink = $configText;
+        }
+
         $lines = [
             '✅ پرداخت شما تایید شد.',
             '',
@@ -74,9 +86,14 @@ class PaymentConfirmationService
             $lines[] = $subscriptionUrl;
         }
 
-        if ('' !== $configText) {
+        if ('' !== $singleConfigLink) {
             $lines[] = '';
-            $lines[] = '📡 کانفیگ:';
+            $lines[] = '📡 لینک اتصال:';
+            $lines[] = $singleConfigLink;
+        }
+
+        if ('' === $subscriptionUrl && '' === $singleConfigLink && '' !== $configText) {
+            $lines[] = '';
             $lines[] = $configText;
         }
 

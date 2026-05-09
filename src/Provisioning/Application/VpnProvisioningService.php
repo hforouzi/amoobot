@@ -81,10 +81,20 @@ class VpnProvisioningService
             ->setTrafficUsedGb(0);
 
         $links = $this->vpnAccessLinkGenerator->generate($vpnService);
+        $configLinks = array_values(array_filter((array) ($links['configLinks'] ?? []), static fn (mixed $link): bool => '' !== trim((string) $link)));
+        $missing = array_values(array_filter((array) ($links['missing'] ?? []), static fn (mixed $item): bool => '' !== trim((string) $item)));
+        $configWarning = [] !== $missing
+            ? '⚠️ لینک اتصال قابل تولید نیست. فیلدهای ناقص: '.implode(', ', $missing)
+            : null;
+        $existingConfigText = trim((string) ($vpnService->getConfigText() ?? ''));
+        $finalConfigText = [] !== $configLinks
+            ? (string) $configLinks[0]
+            : ('' !== $existingConfigText ? $existingConfigText : $configWarning);
+
         $vpnService
             ->setSubscriptionUrl($links['subscriptionUrl'] ?? $vpnService->getSubscriptionUrl())
-            ->setConfigLinks($links['configLinks'] ?? [])
-            ->setConfigText([] !== ($links['configLinks'] ?? []) ? implode("\n", (array) $links['configLinks']) : null)
+            ->setConfigLinks($configLinks)
+            ->setConfigText($finalConfigText)
             ->setLastAccessInfoSyncedAt(new \DateTimeImmutable());
 
         $order

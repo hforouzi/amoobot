@@ -358,6 +358,7 @@ final class Sanaei3xuiApiClient
             'email',
             'totalGB',
             'expiryTime',
+            'subId',
         ];
 
         $pairs = [];

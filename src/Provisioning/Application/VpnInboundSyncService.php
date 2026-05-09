@@ -134,7 +134,7 @@ final class VpnInboundSyncService
             ->setProtocol($parsed['protocol'])
             ->setNetwork($parsed['network'])
             ->setSecurity($parsed['security'])
-            ->setHost($this->resolveInboundHost($panel, $inbound, $force))
+            ->setHost($parsed['host'] ?? $this->resolveInboundHost($panel, $inbound, $force))
             ->setPort($parsed['port'])
             ->setSni($parsed['sni'])
             ->setPath($parsed['path'])
@@ -193,15 +193,19 @@ final class VpnInboundSyncService
         $sniffingPayload = $this->decodeInboundSection($row['sniffing'] ?? null, 'sniffing', $remoteInboundId);
         $settings = is_array($settingsPayload) ? $settingsPayload : [];
         $streamSettings = is_array($streamSettingsPayload) ? $streamSettingsPayload : [];
+        $externalProxy = $this->extractExternalProxy($row, $settings, $streamSettings);
         $tlsSettings = $this->jsonToArray($streamSettings['tlsSettings'] ?? null);
         $realitySettings = $this->jsonToArray($streamSettings['realitySettings'] ?? null);
         $wsSettings = $this->jsonToArray($streamSettings['wsSettings'] ?? null);
         $grpcSettings = $this->jsonToArray($streamSettings['grpcSettings'] ?? null);
         $tcpSettings = $this->jsonToArray($streamSettings['tcpSettings'] ?? null);
 
-        $network = $this->nullableText($streamSettings['network'] ?? null, 'streamSettings.network');
-        $security = $this->nullableText($streamSettings['security'] ?? null, 'streamSettings.security');
-        $port = $this->nullableInt($row['port'] ?? null, 'port');
+        $network = $this->externalProxyText($externalProxy, ['network', 'type', 'stream.network'], 'externalProxy.network')
+            ?? $this->nullableText($streamSettings['network'] ?? null, 'streamSettings.network');
+        $security = $this->externalProxyText($externalProxy, ['security', 'stream.security', 'tls.security'], 'externalProxy.security')
+            ?? $this->nullableText($streamSettings['security'] ?? null, 'streamSettings.security');
+        $port = $this->externalProxyInt($externalProxy, ['port'], 'externalProxy.port')
+            ?? $this->nullableInt($row['port'] ?? null, 'port');
         $title = $remark ?? ('Inbound '.$remoteInboundId);
         $isActive = isset($row['enable']) ? (bool) $row['enable'] : true;
         $clients = is_array($settings['clients'] ?? null) ? $settings['clients'] : [];
@@ -246,12 +250,31 @@ final class VpnInboundSyncService
         if (null === $flow) {
             $flow = $this->nullableText($streamSettings['flow'] ?? ($settings['flow'] ?? null), 'flow');
         }
+        $host = $this->externalProxyText($externalProxy, ['host', 'server', 'address', 'domain', 'publicHost'], 'externalProxy.host');
+        $sni = $this->externalProxyText($externalProxy, ['sni', 'serverName', 'tls.sni', 'reality.sni'], 'externalProxy.sni') ?? $sni;
+        $path = $this->externalProxyText($externalProxy, ['path', 'ws.path'], 'externalProxy.path') ?? $path;
+        $hostHeader = $this->externalProxyText($externalProxy, ['hostHeader', 'headers.Host', 'ws.host', 'host'], 'externalProxy.hostHeader') ?? $hostHeader;
+        $publicKey = $this->externalProxyText($externalProxy, ['publicKey', 'pbk', 'reality.publicKey'], 'externalProxy.publicKey') ?? $publicKey;
+        $shortId = $this->externalProxyText($externalProxy, ['shortId', 'sid', 'reality.shortId'], 'externalProxy.shortId') ?? $shortId;
+        $spiderX = $this->externalProxyText($externalProxy, ['spiderX', 'spx', 'reality.spiderX'], 'externalProxy.spiderX') ?? $spiderX;
+        $fingerprint = $this->externalProxyText($externalProxy, ['fingerprint', 'fp', 'tls.fingerprint', 'reality.fingerprint'], 'externalProxy.fingerprint') ?? $fingerprint;
+        $alpnFromExternalProxy = $this->externalProxyText($externalProxy, ['alpn', 'tls.alpn'], 'externalProxy.alpn');
+        $flow = $this->externalProxyText($externalProxy, ['flow'], 'externalProxy.flow') ?? $flow;
+        $serviceName = $this->externalProxyText($externalProxy, ['serviceName', 'grpc.serviceName'], 'externalProxy.serviceName') ?? $serviceName;
+        $tlsAlpn = $alpnFromExternalProxy ?? $tlsAlpn;
+
+        error_log(sprintf(
+            '[VpnInboundSyncService] external_proxy_detected remote_inbound_id="%s" detected=%s',
+            $remoteInboundId,
+            [] !== $externalProxy ? 'yes' : 'no'
+        ));
 
         return [
             'remoteInboundId' => $remoteInboundId,
             'title' => $title,
             'remark' => $remark,
             'protocol' => $protocol,
+            'host' => $host,
             'network' => $network,
             'security' => $security,
             'port' => $port,
@@ -270,6 +293,7 @@ final class VpnInboundSyncService
                 'settings' => $this->sanitizeInboundData($settingsPayload),
                 'streamSettings' => $this->sanitizeInboundData($streamSettingsPayload),
                 'sniffing' => $this->sanitizeInboundData($sniffingPayload),
+                'externalProxy' => $this->sanitizeInboundData($externalProxy),
             ],
             'isActive' => $isActive,
         ];
@@ -291,6 +315,89 @@ final class VpnInboundSyncService
         $decoded = json_decode($value, true);
 
         return (JSON_ERROR_NONE === json_last_error() && is_array($decoded)) ? $decoded : [];
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     * @param array<string, mixed> $settings
+     * @param array<string, mixed> $streamSettings
+     *
+     * @return array<string, mixed>
+     */
+    private function extractExternalProxy(array $row, array $settings, array $streamSettings): array
+    {
+        $candidates = [
+            $row['externalProxy'] ?? null,
+            $row['external_proxy'] ?? null,
+            $row['external proxy'] ?? null,
+            $settings['externalProxy'] ?? null,
+            $settings['external_proxy'] ?? null,
+            $settings['external proxy'] ?? null,
+            $streamSettings['externalProxy'] ?? null,
+            $streamSettings['external_proxy'] ?? null,
+            $streamSettings['external proxy'] ?? null,
+            $streamSettings['sockopt'] ?? null,
+        ];
+
+        foreach ($candidates as $candidate) {
+            $normalized = $this->jsonToArray($candidate);
+            if ([] !== $normalized) {
+                return $normalized;
+            }
+        }
+
+        return [];
+    }
+
+    /**
+     * @param array<string, mixed> $externalProxy
+     * @param array<int, string>   $paths
+     */
+    private function externalProxyText(array $externalProxy, array $paths, string $field): ?string
+    {
+        foreach ($paths as $path) {
+            $value = $this->readPath($externalProxy, $path);
+            $text = $this->nullableText($value, $field.'.'.$path);
+            if (null !== $text) {
+                return $text;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @param array<string, mixed> $externalProxy
+     * @param array<int, string>   $paths
+     */
+    private function externalProxyInt(array $externalProxy, array $paths, string $field): ?int
+    {
+        foreach ($paths as $path) {
+            $value = $this->readPath($externalProxy, $path);
+            $intValue = $this->nullableInt($value, $field.'.'.$path);
+            if (null !== $intValue) {
+                return $intValue;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     */
+    private function readPath(array $data, string $path): mixed
+    {
+        $segments = explode('.', $path);
+        $current = $data;
+        foreach ($segments as $segment) {
+            if (!is_array($current) || !array_key_exists($segment, $current)) {
+                return null;
+            }
+            $current = $current[$segment];
+        }
+
+        return $current;
     }
 
     private function nullableText(mixed $value, string $field): ?string

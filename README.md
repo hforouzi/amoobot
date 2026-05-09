@@ -214,8 +214,9 @@ In `/admin` -> Payments, use actions:
   - `config` JSON for global panel settings (no `inbound_id`):
     ```json
     {
-      "subscription_base_url": "https://panel.example.com",
-      "remark_prefix": "amoobot"
+      "subscription_base_url": "https://sub.boodbash.ir:8443",
+      "subscription_path_prefix": "/rain",
+      "public_host": "sub.boodbash.ir"
     }
     ```
 
