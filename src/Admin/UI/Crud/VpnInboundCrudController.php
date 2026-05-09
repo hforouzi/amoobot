@@ -13,10 +13,10 @@ use EasyCorp\Bundle\EasyAdminBundle\Controller\AbstractCrudController;
 use EasyCorp\Bundle\EasyAdminBundle\Field\AssociationField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\BooleanField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\DateTimeField;
-use EasyCorp\Bundle\EasyAdminBundle\Field\Field;
 use EasyCorp\Bundle\EasyAdminBundle\Field\IdField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\IntegerField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\TextField;
+use EasyCorp\Bundle\EasyAdminBundle\Field\TextareaField;
 
 class VpnInboundCrudController extends AbstractCrudController
 {
@@ -81,7 +81,7 @@ class VpnInboundCrudController extends AbstractCrudController
             TextField::new('serviceName')->hideOnIndex(),
             TextField::new('fingerprint')->hideOnIndex(),
             TextField::new('alpn')->hideOnIndex(),
-            Field::new('config')->setFormType(JsonTextareaType::class)->hideOnIndex(),
+            TextareaField::new('config')->setFormType(JsonTextareaType::class)->hideOnIndex(),
             BooleanField::new('isActive'),
             DateTimeField::new('lastAccessMetadataSyncedAt')->hideOnForm(),
             DateTimeField::new('lastSyncedAt'),
