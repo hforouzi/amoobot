@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Admin\UI\Crud;
 
-use App\Admin\Form\Type\JsonTextareaType;
 use App\Entity\VpnInbound;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Action;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Actions;
@@ -13,10 +12,10 @@ use EasyCorp\Bundle\EasyAdminBundle\Controller\AbstractCrudController;
 use EasyCorp\Bundle\EasyAdminBundle\Field\AssociationField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\BooleanField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\DateTimeField;
+use EasyCorp\Bundle\EasyAdminBundle\Field\Field;
 use EasyCorp\Bundle\EasyAdminBundle\Field\IdField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\IntegerField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\TextField;
-use EasyCorp\Bundle\EasyAdminBundle\Field\TextareaField;
 
 class VpnInboundCrudController extends AbstractCrudController
 {
@@ -81,7 +80,10 @@ class VpnInboundCrudController extends AbstractCrudController
             TextField::new('serviceName')->hideOnIndex(),
             TextField::new('fingerprint')->hideOnIndex(),
             TextField::new('alpn')->hideOnIndex(),
-            TextareaField::new('config')->setFormType(JsonTextareaType::class)->hideOnIndex(),
+            Field::new('config')
+                ->formatValue(static fn (mixed $value): string => json_encode($value, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '')
+                ->hideOnForm()
+                ->hideOnIndex(),
             BooleanField::new('isActive'),
             DateTimeField::new('lastAccessMetadataSyncedAt')->hideOnForm(),
             DateTimeField::new('lastSyncedAt'),
