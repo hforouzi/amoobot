@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Admin\UI\Crud;
 
 use App\Entity\VpnService;
+use EasyCorp\Bundle\EasyAdminBundle\Config\Action;
+use EasyCorp\Bundle\EasyAdminBundle\Config\Actions;
 use EasyCorp\Bundle\EasyAdminBundle\Controller\AbstractCrudController;
 use EasyCorp\Bundle\EasyAdminBundle\Field\AssociationField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\DateTimeField;
@@ -18,6 +20,17 @@ class VpnServiceCrudController extends AbstractCrudController
     public static function getEntityFqcn(): string
     {
         return VpnService::class;
+    }
+
+    public function configureActions(Actions $actions): Actions
+    {
+        $regenerateConfig = Action::new('regenerateConfig', '🔄 بازسازی کانفیگ')
+            ->linkToRoute('admin_vpn_service_regenerate_config', fn (VpnService $service): array => ['id' => $service->getId()])
+            ->setCssClass('btn btn-info');
+
+        return $actions
+            ->add(Action::INDEX, $regenerateConfig)
+            ->add(Action::DETAIL, $regenerateConfig);
     }
 
     public function configureFields(string $pageName): iterable

@@ -6,12 +6,17 @@ namespace App\Admin\UI;
 
 use App\Admin\UI\Crud\VpnInboundCrudController;
 use App\Admin\UI\Crud\VpnPanelCrudController;
+use App\Admin\UI\Crud\VpnServiceCrudController;
 use App\Entity\VpnInbound;
 use App\Entity\VpnPanel;
+use App\Entity\VpnService;
+use App\Provisioning\Application\VpnAccessLinkGenerator;
 use App\Provisioning\Application\VpnInboundSyncService;
 use App\Provisioning\Domain\Dto\CreateVpnServiceRequest;
+use App\Provisioning\Domain\VpnServiceStatus;
 use App\Provisioning\Infrastructure\Sanaei3xui\Sanaei3xuiApiClient;
 use App\Provisioning\Infrastructure\VpnPanelDriverRegistry;
+use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\RedirectResponse;
 use Symfony\Component\Routing\Attribute\Route;
@@ -19,6 +24,12 @@ use Symfony\Component\Routing\Attribute\Route;
 #[Route('/admin')]
 final class VpnPanelInboundActionsController extends AbstractController
 {
+    public function __construct(
+        private readonly EntityManagerInterface $entityManager,
+        private readonly VpnAccessLinkGenerator $vpnAccessLinkGenerator,
+    ) {
+    }
+
     #[Route('/vpn-panel/{id}/test-connection', name: 'admin_vpn_panel_test_connection', methods: ['GET'])]
     public function testPanelConnection(VpnPanel $panel, Sanaei3xuiApiClient $apiClient): RedirectResponse
     {
@@ -47,6 +58,7 @@ final class VpnPanelInboundActionsController extends AbstractController
             if ($sync->missingLocalCount > 0) {
                 $this->addFlash('warning', sprintf('%d اینباند محلی در پنل یافت نشد.', $sync->missingLocalCount));
             }
+            $this->addFlash('info', 'اینباندها بروزرسانی شدند. اگر External Proxy تغییر کرده، کانفیگ سرویسها را بازسازی کنید.');
         } catch (\Throwable $e) {
             $this->addFlash('danger', $e->getMessage());
         }
@@ -130,6 +142,108 @@ final class VpnPanelInboundActionsController extends AbstractController
         return $this->redirectToInbounds();
     }
 
+    #[Route('/vpn-inbound/{id}/regenerate-service-configs', name: 'admin_vpn_inbound_regenerate_service_configs', methods: ['GET'])]
+    public function regenerateInboundServiceConfigs(VpnInbound $inbound): RedirectResponse
+    {
+        $config = is_array($inbound->getConfig()) ? $inbound->getConfig() : [];
+        $externalProxyList = $config['externalProxyList'] ?? [];
+        $externalProxyCount = is_array($externalProxyList) ? count($externalProxyList) : 0;
+
+        /** @var VpnService[] $services */
+        $services = $this->entityManager->getRepository(VpnService::class)->findBy(['inbound' => $inbound]);
+
+        $updated = 0;
+        $skipped = 0;
+        $failed = 0;
+
+        foreach ($services as $service) {
+            if (VpnServiceStatus::DELETED === $service->getStatus()) {
+                ++$skipped;
+                continue;
+            }
+
+            $uuid = $service->getClientUuid();
+            $subId = $service->getSubId();
+            if (null === $uuid || '' === $uuid || null === $subId || '' === $subId) {
+                ++$skipped;
+                continue;
+            }
+
+            try {
+                $links = $this->vpnAccessLinkGenerator->generate($service);
+                $configLinks = array_values(array_filter(
+                    (array) ($links['configLinks'] ?? []),
+                    static fn (mixed $link): bool => '' !== trim((string) $link)
+                ));
+                $subscriptionUrl = $links['subscriptionUrl'] ?? null;
+                $finalConfigText = [] !== $configLinks ? implode("\n", $configLinks) : null;
+
+                $service
+                    ->setConfigLinks($configLinks)
+                    ->setConfigText($finalConfigText)
+                    ->setSubscriptionUrl($subscriptionUrl ?? $service->getSubscriptionUrl())
+                    ->setLastAccessInfoSyncedAt(new \DateTimeImmutable());
+
+                ++$updated;
+            } catch (\Throwable) {
+                ++$failed;
+            }
+        }
+
+        $this->entityManager->flush();
+
+        if ($failed > 0) {
+            $this->addFlash('warning', sprintf(
+                'کانفیگ %d سرویس بروزرسانی شد. %d سرویس با خطا. (externalProxy count: %d)',
+                $updated,
+                $failed,
+                $externalProxyCount
+            ));
+        } else {
+            $this->addFlash('success', sprintf('کانفیگ %d سرویس بروزرسانی شد.', $updated));
+        }
+
+        return $this->redirectToInbounds();
+    }
+
+    #[Route('/vpn-service/{id}/regenerate-config', name: 'admin_vpn_service_regenerate_config', methods: ['GET'])]
+    public function regenerateServiceConfig(VpnService $service): RedirectResponse
+    {
+        $uuid = $service->getClientUuid();
+        $subId = $service->getSubId();
+
+        if (null === $uuid || '' === $uuid || null === $subId || '' === $subId) {
+            $this->addFlash('danger', 'سرویس uuid یا subId ندارد. بازسازی امکان‌پذیر نیست.');
+
+            return $this->redirectToServices();
+        }
+
+        try {
+            $links = $this->vpnAccessLinkGenerator->generate($service);
+            $configLinks = array_values(array_filter(
+                (array) ($links['configLinks'] ?? []),
+                static fn (mixed $link): bool => '' !== trim((string) $link)
+            ));
+            $subscriptionUrl = $links['subscriptionUrl'] ?? null;
+            $finalConfigText = [] !== $configLinks ? implode("\n", $configLinks) : null;
+
+            $service
+                ->setConfigLinks($configLinks)
+                ->setConfigText($finalConfigText)
+                ->setSubscriptionUrl($subscriptionUrl ?? $service->getSubscriptionUrl())
+                ->setLastAccessInfoSyncedAt(new \DateTimeImmutable());
+
+            $this->entityManager->flush();
+
+            $this->addFlash('success', sprintf('کانفیگ سرویس #%d بازسازی شد. %d لینک.', $service->getId() ?? 0, count($configLinks)));
+        } catch (\Throwable $e) {
+            $this->addFlash('danger', sprintf('بازسازی کانفیگ ناموفق: %s', $e->getMessage()));
+        }
+
+        return $this->redirectToServices();
+    }
+
+
     /**
      * @param array<string, mixed> $result
      */
@@ -158,6 +272,14 @@ final class VpnPanelInboundActionsController extends AbstractController
         return $this->redirectToRoute('admin', [
             'crudAction' => 'index',
             'crudControllerFqcn' => VpnInboundCrudController::class,
+        ]);
+    }
+
+    private function redirectToServices(): RedirectResponse
+    {
+        return $this->redirectToRoute('admin', [
+            'crudAction' => 'index',
+            'crudControllerFqcn' => VpnServiceCrudController::class,
         ]);
     }
 }

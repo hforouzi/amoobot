@@ -4,8 +4,12 @@ declare(strict_types=1);
 
 namespace App\Command;
 
+use App\Entity\VpnInbound;
 use App\Entity\VpnPanel;
+use App\Entity\VpnService;
+use App\Provisioning\Application\VpnAccessLinkGenerator;
 use App\Provisioning\Application\VpnInboundSyncService;
+use App\Provisioning\Domain\VpnServiceStatus;
 use App\Provisioning\Infrastructure\Sanaei3xui\Sanaei3xuiApiClient;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\Console\Attribute\AsCommand;
@@ -23,6 +27,7 @@ final class PanelSyncInboundsCommand extends Command
         private readonly EntityManagerInterface $entityManager,
         private readonly VpnInboundSyncService $inboundSyncService,
         private readonly Sanaei3xuiApiClient $apiClient,
+        private readonly VpnAccessLinkGenerator $vpnAccessLinkGenerator,
     ) {
         parent::__construct();
     }
@@ -32,7 +37,8 @@ final class PanelSyncInboundsCommand extends Command
         $this
             ->addArgument('panelId', InputArgument::REQUIRED, 'VpnPanel id')
             ->addOption('force', null, InputOption::VALUE_NONE, 'Force overwrite parsed technical metadata.')
-            ->addOption('raw', null, InputOption::VALUE_NONE, 'Print sanitized raw inbound JSON.');
+            ->addOption('raw', null, InputOption::VALUE_NONE, 'Print sanitized raw inbound JSON.')
+            ->addOption('regenerate-configs', null, InputOption::VALUE_NONE, 'After sync, regenerate configText for all services of each synced inbound.');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
@@ -41,6 +47,7 @@ final class PanelSyncInboundsCommand extends Command
         $panelId = (int) $input->getArgument('panelId');
         $force = (bool) $input->getOption('force');
         $raw = (bool) $input->getOption('raw');
+        $regenerateConfigs = (bool) $input->getOption('regenerate-configs');
 
         $panel = $this->entityManager->getRepository(VpnPanel::class)->find($panelId);
         if (!$panel instanceof VpnPanel) {
@@ -89,6 +96,55 @@ final class PanelSyncInboundsCommand extends Command
         }
 
         $io->success(sprintf('Synced %d inbound(s).', $sync->syncedCount));
+
+        if ($regenerateConfigs) {
+            $io->section('Regenerating service configs for synced inbounds…');
+            $inbounds = $this->entityManager->getRepository(VpnInbound::class)->findBy(['panel' => $panel]);
+            $totalUpdated = 0;
+            $totalSkipped = 0;
+            $totalFailed = 0;
+
+            foreach ($inbounds as $inbound) {
+                /** @var VpnService[] $services */
+                $services = $this->entityManager->getRepository(VpnService::class)->findBy(['inbound' => $inbound]);
+                foreach ($services as $service) {
+                    if (VpnServiceStatus::DELETED === $service->getStatus()) {
+                        ++$totalSkipped;
+                        continue;
+                    }
+                    $uuid = $service->getClientUuid();
+                    $subId = $service->getSubId();
+                    if (null === $uuid || '' === $uuid || null === $subId || '' === $subId) {
+                        ++$totalSkipped;
+                        continue;
+                    }
+                    try {
+                        $links = $this->vpnAccessLinkGenerator->generate($service);
+                        $configLinks = array_values(array_filter(
+                            (array) ($links['configLinks'] ?? []),
+                            static fn (mixed $link): bool => '' !== trim((string) $link)
+                        ));
+                        $subscriptionUrl = $links['subscriptionUrl'] ?? null;
+                        $finalConfigText = [] !== $configLinks ? implode("\n", $configLinks) : null;
+
+                        $service
+                            ->setConfigLinks($configLinks)
+                            ->setConfigText($finalConfigText)
+                            ->setSubscriptionUrl($subscriptionUrl ?? $service->getSubscriptionUrl())
+                            ->setLastAccessInfoSyncedAt(new \DateTimeImmutable());
+
+                        ++$totalUpdated;
+                    } catch (\Throwable) {
+                        ++$totalFailed;
+                    }
+                }
+            }
+
+            $this->entityManager->flush();
+            $io->success(sprintf('Config regeneration done: %d updated, %d skipped, %d failed.', $totalUpdated, $totalSkipped, $totalFailed));
+        } else {
+            $io->note('اینباندها بروزرسانی شدند. اگر External Proxy تغییر کرده، کانفیگ سرویسها را بازسازی کنید: app:inbound:regenerate-service-configs {inboundId}');
+        }
 
         return Command::SUCCESS;
     }

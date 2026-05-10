@@ -41,13 +41,20 @@ class VpnInboundCrudController extends AbstractCrudController
             ->setCssClass('btn btn-warning')
             ->displayIf(fn (VpnInbound $inbound): bool => 'sanaei_3xui' === $inbound->getPanel()->getType());
 
+        $regenerateServiceConfigs = Action::new('regenerateServiceConfigs', '🔄 بازسازی کانفیگ سرویسها')
+            ->linkToRoute('admin_vpn_inbound_regenerate_service_configs', fn (VpnInbound $inbound): array => ['id' => $inbound->getId()])
+            ->setCssClass('btn btn-info')
+            ->displayIf(fn (VpnInbound $inbound): bool => 'sanaei_3xui' === $inbound->getPanel()->getType());
+
         return $actions
             ->add(Action::INDEX, $testCreateClient)
             ->add(Action::INDEX, $resync)
             ->add(Action::INDEX, $syncAccessMetadata)
+            ->add(Action::INDEX, $regenerateServiceConfigs)
             ->add(Action::DETAIL, $testCreateClient)
             ->add(Action::DETAIL, $resync)
-            ->add(Action::DETAIL, $syncAccessMetadata);
+            ->add(Action::DETAIL, $syncAccessMetadata)
+            ->add(Action::DETAIL, $regenerateServiceConfigs);
     }
 
     public function configureFilters(Filters $filters): Filters
