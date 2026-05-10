@@ -6,9 +6,15 @@ namespace App\Provisioning\Application;
 
 use App\Entity\VpnPanel;
 use App\Entity\VpnService;
+use App\Provisioning\Infrastructure\Sanaei3xui\Sanaei3xuiConfigGenerator;
 
 final class VpnAccessLinkGenerator
 {
+    public function __construct(
+        private readonly Sanaei3xuiConfigGenerator $sanaei3xuiConfigGenerator,
+    ) {
+    }
+
     /**
      * @return array{subscriptionUrl: ?string, configLinks: array<int, string>, missing: array<int, string>}
      */
@@ -44,8 +50,24 @@ final class VpnAccessLinkGenerator
 
         $configLinks = [];
 
+        $panelType = strtolower(trim((string) ($panel->getType() ?? '')));
+        if ('sanaei_3xui' === $panelType && 'vless' === $protocol) {
+            $generatedConfigText = trim($this->sanaei3xuiConfigGenerator->generateConfigText(
+                $inbound,
+                $clientUuid,
+                $email,
+                trim((string) ($service->getSubId() ?? ''))
+            ));
+            if ('' !== $generatedConfigText) {
+                $configLinks = array_values(array_filter(
+                    array_map('trim', explode("\n", $generatedConfigText)),
+                    static fn (string $line): bool => '' !== $line
+                ));
+            }
+        }
+
         // Generate one config link per externalProxy list entry when the list has entries
-        if ([] !== $externalProxyList && 'vless' === $protocol) {
+        if ([] === $configLinks && [] !== $externalProxyList && 'vless' === $protocol) {
             $configLinks = $this->buildLinksFromExternalProxyList($service, $externalProxyList, $externalProxy, $missing, $clientUuid, $email);
         }
 
