@@ -194,6 +194,7 @@ final class VpnInboundSyncService
         $settings = is_array($settingsPayload) ? $settingsPayload : [];
         $streamSettings = is_array($streamSettingsPayload) ? $streamSettingsPayload : [];
         $externalProxy = $this->extractExternalProxy($row, $settings, $streamSettings);
+        $externalProxyList = $this->extractExternalProxyList($streamSettings, $row, $settings);
         $tlsSettings = $this->jsonToArray($streamSettings['tlsSettings'] ?? null);
         $realitySettings = $this->jsonToArray($streamSettings['realitySettings'] ?? null);
         $wsSettings = $this->jsonToArray($streamSettings['wsSettings'] ?? null);
@@ -264,11 +265,12 @@ final class VpnInboundSyncService
         $tlsAlpn = $alpnFromExternalProxy ?? $tlsAlpn;
 
         error_log(sprintf(
-            '[VpnInboundSyncService] external_proxy_detected remote_inbound_id="%s" detected=%s host="%s" port="%s"',
+            '[VpnInboundSyncService] external_proxy_detected remote_inbound_id="%s" detected=%s host="%s" port="%s" external_proxy_list_count=%d',
             $remoteInboundId,
-            [] !== $externalProxy ? 'yes' : 'no',
+            [] !== $externalProxy || [] !== $externalProxyList ? 'yes' : 'no',
             (string) ($host ?? ''),
-            (string) ($port ?? '')
+            (string) ($port ?? ''),
+            count($externalProxyList)
         ));
 
         return [
@@ -296,6 +298,7 @@ final class VpnInboundSyncService
                 'streamSettings' => $this->sanitizeInboundData($streamSettingsPayload),
                 'sniffing' => $this->sanitizeInboundData($sniffingPayload),
                 'externalProxy' => $this->sanitizeInboundData($externalProxy),
+                'externalProxyList' => $this->sanitizeInboundData($externalProxyList),
             ],
             'isActive' => $isActive,
         ];
@@ -317,6 +320,81 @@ final class VpnInboundSyncService
         $decoded = json_decode($value, true);
 
         return (JSON_ERROR_NONE === json_last_error() && is_array($decoded)) ? $decoded : [];
+    }
+
+    /**
+     * Extract externalProxy as a list of individual proxy entries (sequential array format used by 3x-ui).
+     *
+     * In 3x-ui, streamSettings.externalProxy is an array of objects like:
+     *   [{"dest": "snapp.ir", "port": 80, "forceTls": "same", "remark": ""}]
+     *
+     * @param array<string, mixed> $streamSettings
+     * @param array<string, mixed> $row
+     * @param array<string, mixed> $settings
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function extractExternalProxyList(array $streamSettings, array $row, array $settings): array
+    {
+        $candidates = [
+            $streamSettings['externalProxy'] ?? null,
+            $streamSettings['external_proxy'] ?? null,
+            $row['externalProxy'] ?? null,
+            $row['external_proxy'] ?? null,
+            $settings['externalProxy'] ?? null,
+            $settings['external_proxy'] ?? null,
+        ];
+
+        foreach ($candidates as $candidate) {
+            if (is_string($candidate) && '' !== trim($candidate)) {
+                $decoded = json_decode($candidate, true);
+                if (JSON_ERROR_NONE === json_last_error() && is_array($decoded)) {
+                    $candidate = $decoded;
+                }
+            }
+            if (!is_array($candidate) || [] === $candidate) {
+                continue;
+            }
+            if (!$this->isExternalProxyObjectList($candidate)) {
+                continue;
+            }
+            $result = [];
+            foreach ($candidate as $item) {
+                if (is_array($item) && (isset($item['dest']) || isset($item['port']))) {
+                    $result[] = $item;
+                }
+            }
+            if ([] !== $result) {
+                return $result;
+            }
+        }
+
+        return [];
+    }
+
+    /**
+     * Check if an array is a sequential list of proxy entry objects (each with dest or port).
+     *
+     * @param array<mixed, mixed> $data
+     */
+    private function isExternalProxyObjectList(array $data): bool
+    {
+        if ([] === $data) {
+            return false;
+        }
+        if (!array_is_list($data)) {
+            return false;
+        }
+        foreach ($data as $item) {
+            if (!is_array($item)) {
+                return false;
+            }
+            if (!isset($item['dest']) && !isset($item['port'])) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**

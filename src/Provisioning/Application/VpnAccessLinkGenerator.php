@@ -26,60 +26,15 @@ final class VpnAccessLinkGenerator
 
         $config = is_array($inbound->getConfig()) ? $inbound->getConfig() : [];
         $externalProxy = $this->extractExternalProxy($config);
-        $externalProxyDetected = [] !== $externalProxy;
+        $externalProxyList = $this->extractExternalProxyList($config);
+        $externalProxyDetected = [] !== $externalProxy || [] !== $externalProxyList;
         $subscriptionUrl = $this->buildSubscriptionUrl($service, $externalProxy) ?? $service->getSubscriptionUrl();
-
-        $hostCandidates = [
-            $this->readPathText($externalProxy, 'host'),
-            $this->readPathText($externalProxy, 'server'),
-            $this->readPathText($externalProxy, 'address'),
-            $this->readPathText($externalProxy, 'domain'),
-            $this->readPathText($externalProxy, 'externalProxyHost'),
-            $this->readPathText($externalProxy, 'external_proxy_host'),
-            $inbound->getHost(),
-            $this->readPathText($panel->getConfig() ?? [], 'public_host'),
-            $panel->getPublicHost(),
-        ];
-        if (!$externalProxyDetected) {
-            $hostCandidates[] = $this->hostFromBaseUrl($panel->getBaseUrl());
-        }
-
-        $portCandidates = [
-            $this->readPathInt($externalProxy, 'port'),
-            $this->readPathInt($externalProxy, 'externalProxyPort'),
-            $this->readPathInt($externalProxy, 'external_proxy_port'),
-            $inbound->getPort(),
-            $this->readPathInt($panel->getConfig() ?? [], 'public_port'),
-        ];
-        if (!$externalProxyDetected) {
-            $portCandidates[] = $this->portFromBaseUrl($panel->getBaseUrl());
-        }
-
-        $host = $this->firstText($hostCandidates);
-        $port = $this->firstInt($portCandidates);
-        $network = strtolower($this->firstText([
-            $this->readPathText($externalProxy, 'network'),
-            $this->readPathText($externalProxy, 'type'),
-            $inbound->getNetwork(),
-            'tcp',
-        ]) ?? 'tcp');
-        $security = strtolower($this->firstText([
-            $this->readPathText($externalProxy, 'security'),
-            $inbound->getSecurity(),
-            'none',
-        ]) ?? 'none');
 
         $clientUuid = trim((string) ($service->getClientUuid() ?? ''));
         $email = trim((string) ($service->getClientEmail() ?? $service->getUsername() ?? ''));
         $protocol = strtolower(trim((string) ($inbound->getProtocol() ?? '')));
 
         $missing = [];
-        if ('' === $host) {
-            $missing[] = 'host';
-        }
-        if (null === $port || $port <= 0) {
-            $missing[] = 'port';
-        }
         if ('' === $clientUuid) {
             $missing[] = 'clientUuid';
         }
@@ -88,31 +43,77 @@ final class VpnAccessLinkGenerator
         }
 
         $configLinks = [];
-        if ('vless' === $protocol) {
-            $vless = $this->buildVlessLink($service, $host, $port, $network, $security, $externalProxy, $missing, $clientUuid, $email);
-            if (null !== $vless) {
-                $configLinks[] = $vless;
-            }
-        } else {
-            $missing[] = 'unsupported_protocol_for_single_link';
+
+        // Generate one config link per externalProxy list entry when the list has entries
+        if ([] !== $externalProxyList && 'vless' === $protocol) {
+            $configLinks = $this->buildLinksFromExternalProxyList($service, $externalProxyList, $externalProxy, $missing, $clientUuid, $email);
         }
 
-        error_log(sprintf(
-            '[VpnAccessLinkGenerator] external_proxy_detected=%s external_proxy_host="%s" external_proxy_port="%s" generated_subscription_url=%s generated_single_config=%s missing="%s"',
-            $externalProxyDetected ? 'yes' : 'no',
-            (string) ($this->firstText([
+        // Fallback: single-link generation using flat externalProxy / inbound / panel data
+        if ([] === $configLinks) {
+            $hostCandidates = [
                 $this->readPathText($externalProxy, 'host'),
                 $this->readPathText($externalProxy, 'server'),
                 $this->readPathText($externalProxy, 'address'),
                 $this->readPathText($externalProxy, 'domain'),
-            ]) ?? ''),
-            (string) ($this->firstInt([
+                $this->readPathText($externalProxy, 'externalProxyHost'),
+                $this->readPathText($externalProxy, 'external_proxy_host'),
+                $inbound->getHost(),
+                $this->readPathText($panel->getConfig() ?? [], 'public_host'),
+                $panel->getPublicHost(),
+            ];
+            if (!$externalProxyDetected) {
+                $hostCandidates[] = $this->hostFromBaseUrl($panel->getBaseUrl());
+            }
+
+            $portCandidates = [
                 $this->readPathInt($externalProxy, 'port'),
                 $this->readPathInt($externalProxy, 'externalProxyPort'),
                 $this->readPathInt($externalProxy, 'external_proxy_port'),
-            ]) ?? ''),
+                $inbound->getPort(),
+                $this->readPathInt($panel->getConfig() ?? [], 'public_port'),
+            ];
+            if (!$externalProxyDetected) {
+                $portCandidates[] = $this->portFromBaseUrl($panel->getBaseUrl());
+            }
+
+            $host = $this->firstText($hostCandidates);
+            $port = $this->firstInt($portCandidates);
+            $network = strtolower($this->firstText([
+                $this->readPathText($externalProxy, 'network'),
+                $this->readPathText($externalProxy, 'type'),
+                $inbound->getNetwork(),
+                'tcp',
+            ]) ?? 'tcp');
+            $security = strtolower($this->firstText([
+                $this->readPathText($externalProxy, 'security'),
+                $inbound->getSecurity(),
+                'none',
+            ]) ?? 'none');
+
+            if ('' === ($host ?? '')) {
+                $missing[] = 'host';
+            }
+            if (null === $port || $port <= 0) {
+                $missing[] = 'port';
+            }
+
+            if ('vless' === $protocol) {
+                $vless = $this->buildVlessLink($service, $host ?? '', $port, $network, $security, $externalProxy, $missing, $clientUuid, $email, null);
+                if (null !== $vless) {
+                    $configLinks[] = $vless;
+                }
+            } else {
+                $missing[] = 'unsupported_protocol_for_single_link';
+            }
+        }
+
+        error_log(sprintf(
+            '[VpnAccessLinkGenerator] external_proxy_detected=%s external_proxy_list_count=%d generated_link_count=%d generated_subscription_url=%s missing="%s"',
+            $externalProxyDetected ? 'yes' : 'no',
+            count($externalProxyList),
+            count($configLinks),
             '' !== trim((string) ($subscriptionUrl ?? '')) ? 'yes' : 'no',
-            [] !== $configLinks ? 'yes' : 'no',
             implode(',', array_values(array_unique($missing)))
         ));
 
@@ -127,7 +128,7 @@ final class VpnAccessLinkGenerator
      * @param array<string, mixed> $externalProxy
      * @param array<int, string>   $missing
      */
-    private function buildVlessLink(VpnService $service, string $host, ?int $port, string $network, string $security, array $externalProxy, array &$missing, string $clientUuid, string $email): ?string
+    private function buildVlessLink(VpnService $service, string $host, ?int $port, string $network, string $security, array $externalProxy, array &$missing, string $clientUuid, string $email, ?string $remarkOverride): ?string
     {
         if ('' === $host || null === $port || '' === $clientUuid) {
             return null;
@@ -235,7 +236,8 @@ final class VpnAccessLinkGenerator
         }
 
         $queryString = http_build_query(array_filter($query, static fn (mixed $value): bool => '' !== trim((string) $value)), '', '&', PHP_QUERY_RFC3986);
-        $name = rawurlencode(trim((string) ($inbound->getRemark() ?? $inbound->getTitle() ?? $email ?: 'service')));
+        $defaultRemark = trim((string) ($inbound->getRemark() ?? $inbound->getTitle() ?? $email ?: 'service'));
+        $name = rawurlencode(null !== $remarkOverride && '' !== $remarkOverride ? $remarkOverride : $defaultRemark);
 
         return sprintf('vless://%s@%s:%d?%s#%s', rawurlencode($clientUuid), $host, $port, $queryString, $name);
     }
@@ -570,5 +572,158 @@ final class VpnAccessLinkGenerator
         $port = parse_url(trim((string) $baseUrl), PHP_URL_PORT);
 
         return is_int($port) && $port > 0 && $port <= 65535 ? $port : null;
+    }
+
+    /**
+     * Extract sequential externalProxy list from inbound config (stored by VpnInboundSyncService).
+     *
+     * @param array<string, mixed> $inboundConfig
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function extractExternalProxyList(array $inboundConfig): array
+    {
+        $candidate = $inboundConfig['externalProxyList'] ?? null;
+        if (!is_array($candidate) || [] === $candidate) {
+            return [];
+        }
+        if (!array_is_list($candidate)) {
+            return [];
+        }
+        $result = [];
+        foreach ($candidate as $item) {
+            if (is_array($item) && (isset($item['dest']) || isset($item['port']))) {
+                $result[] = $item;
+            }
+        }
+
+        return $result;
+    }
+
+    /**
+     * Build one VLESS config link per externalProxy list entry.
+     *
+     * @param list<array<string, mixed>> $externalProxyList
+     * @param array<string, mixed>       $flatExternalProxy
+     * @param array<int, string>         $missing
+     *
+     * @return array<int, string>
+     */
+    private function buildLinksFromExternalProxyList(VpnService $service, array $externalProxyList, array $flatExternalProxy, array &$missing, string $clientUuid, string $email): array
+    {
+        $inbound = $service->getInbound();
+        if (null === $inbound) {
+            $missing[] = 'inbound';
+
+            return [];
+        }
+
+        $config = is_array($inbound->getConfig()) ? $inbound->getConfig() : [];
+        $streamSettings = is_array($config['streamSettings'] ?? null) ? $config['streamSettings'] : [];
+        $wsSettings = is_array($streamSettings['wsSettings'] ?? null) ? $streamSettings['wsSettings'] : [];
+        $grpcSettings = is_array($streamSettings['grpcSettings'] ?? null) ? $streamSettings['grpcSettings'] : [];
+
+        $baseNetwork = strtolower((string) ($streamSettings['network'] ?? $inbound->getNetwork() ?? 'tcp'));
+        $baseSecurity = strtolower((string) ($streamSettings['security'] ?? $inbound->getSecurity() ?? 'none'));
+
+        $wsPath = trim((string) ($wsSettings['path'] ?? $inbound->getPath() ?? '/'));
+        $wsHeaders = is_array($wsSettings['headers'] ?? null) ? $wsSettings['headers'] : [];
+        $wsHost = trim((string) ($wsSettings['host'] ?? $wsHeaders['Host'] ?? $wsHeaders['host'] ?? $inbound->getHostHeader() ?? ''));
+
+        $grpcServiceName = trim((string) ($grpcSettings['serviceName'] ?? $inbound->getServiceName() ?? ''));
+
+        $inboundRemark = trim((string) ($inbound->getRemark() ?? $inbound->getTitle() ?? $email ?: 'service'));
+
+        $links = [];
+        foreach ($externalProxyList as $entry) {
+            $dest = trim((string) ($entry['dest'] ?? ''));
+            $port = is_numeric($entry['port'] ?? null) ? (int) $entry['port'] : null;
+            if ('' === $dest || null === $port || $port <= 0 || $port > 65535) {
+                continue;
+            }
+
+            $forceTls = strtolower(trim((string) ($entry['forceTls'] ?? 'same')));
+            $security = match ($forceTls) {
+                'tls' => 'tls',
+                'none' => 'none',
+                default => $baseSecurity,
+            };
+
+            $entryRemark = trim((string) ($entry['remark'] ?? ''));
+            $remark = '' !== $entryRemark ? $entryRemark : ($inboundRemark.' '.$dest);
+
+            $query = [
+                'type' => $baseNetwork,
+                'security' => $security,
+                'encryption' => 'none',
+            ];
+
+            if ('reality' === $security) {
+                $publicKey = $inbound->getPublicKey();
+                if (null === $publicKey || '' === trim($publicKey)) {
+                    $missing[] = 'publicKey';
+                    continue;
+                }
+                $query['pbk'] = $publicKey;
+                if (null !== $inbound->getFingerprint()) {
+                    $query['fp'] = $inbound->getFingerprint();
+                }
+                if (null !== $inbound->getSni()) {
+                    $query['sni'] = $inbound->getSni();
+                }
+                if (null !== $inbound->getShortId()) {
+                    $query['sid'] = $inbound->getShortId();
+                }
+                if (null !== $inbound->getSpiderX()) {
+                    $query['spx'] = $inbound->getSpiderX();
+                }
+                if (null !== $inbound->getFlow()) {
+                    $query['flow'] = $inbound->getFlow();
+                }
+            } elseif ('tls' === $security && null !== $inbound->getSni()) {
+                $query['sni'] = $inbound->getSni();
+            }
+
+            if ('ws' === $baseNetwork) {
+                $query['path'] = '' !== $wsPath ? $wsPath : '/';
+                if ('' !== $wsHost) {
+                    $query['host'] = $wsHost;
+                }
+            }
+
+            if ('grpc' === $baseNetwork && '' !== $grpcServiceName) {
+                $query['serviceName'] = $grpcServiceName;
+            }
+
+            if (null !== $inbound->getAlpn()) {
+                $query['alpn'] = $inbound->getAlpn();
+            }
+
+            $queryString = http_build_query(
+                array_filter($query, static fn (mixed $v): bool => '' !== trim((string) $v)),
+                '',
+                '&',
+                PHP_QUERY_RFC3986
+            );
+
+            error_log(sprintf(
+                '[VpnAccessLinkGenerator] external_proxy_entry dest="%s" port=%d security="%s" network="%s"',
+                $dest,
+                $port,
+                $security,
+                $baseNetwork
+            ));
+
+            $links[] = sprintf(
+                'vless://%s@%s:%d?%s#%s',
+                rawurlencode($clientUuid),
+                $dest,
+                $port,
+                $queryString,
+                rawurlencode($remark)
+            );
+        }
+
+        return $links;
     }
 }

@@ -88,7 +88,7 @@ class VpnProvisioningService
             : null;
         $existingConfigText = trim((string) ($vpnService->getConfigText() ?? ''));
         $finalConfigText = [] !== $configLinks
-            ? (string) $configLinks[0]
+            ? implode("\n", $configLinks)
             : ('' !== $existingConfigText ? $existingConfigText : $configWarning);
 
         $vpnService

@@ -60,16 +60,15 @@ class PaymentConfirmationService
 
         $subscriptionUrl = trim((string) ($vpnService->getSubscriptionUrl() ?? ''));
         $configText = trim((string) ($vpnService->getConfigText() ?? ''));
-        $singleConfigLink = '';
+        $allConfigLinks = [];
         foreach ((array) ($vpnService->getConfigLinks() ?? []) as $link) {
             $candidate = trim((string) $link);
             if ('' !== $candidate) {
-                $singleConfigLink = $candidate;
-                break;
+                $allConfigLinks[] = $candidate;
             }
         }
-        if ('' === $singleConfigLink && preg_match('/^(vless|vmess|trojan):\/\//i', $configText) === 1) {
-            $singleConfigLink = $configText;
+        if ([] === $allConfigLinks && preg_match('/^(vless|vmess|trojan):\/\//i', $configText) === 1) {
+            $allConfigLinks = [$configText];
         }
 
         $lines = [
@@ -86,13 +85,15 @@ class PaymentConfirmationService
             $lines[] = $subscriptionUrl;
         }
 
-        if ('' !== $singleConfigLink) {
+        if ([] !== $allConfigLinks) {
             $lines[] = '';
-            $lines[] = '📡 لینک اتصال:';
-            $lines[] = $singleConfigLink;
+            $lines[] = '📡 لینکهای اتصال:';
+            foreach ($allConfigLinks as $i => $link) {
+                $lines[] = sprintf('%d. %s', $i + 1, $link);
+            }
         }
 
-        if ('' === $subscriptionUrl && '' === $singleConfigLink && '' !== $configText) {
+        if ([] === $allConfigLinks && '' === $subscriptionUrl && '' !== $configText) {
             $lines[] = '';
             $lines[] = $configText;
         }
