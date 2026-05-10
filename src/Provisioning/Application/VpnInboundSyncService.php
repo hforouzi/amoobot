@@ -264,9 +264,11 @@ final class VpnInboundSyncService
         $tlsAlpn = $alpnFromExternalProxy ?? $tlsAlpn;
 
         error_log(sprintf(
-            '[VpnInboundSyncService] external_proxy_detected remote_inbound_id="%s" detected=%s',
+            '[VpnInboundSyncService] external_proxy_detected remote_inbound_id="%s" detected=%s host="%s" port="%s"',
             $remoteInboundId,
-            [] !== $externalProxy ? 'yes' : 'no'
+            [] !== $externalProxy ? 'yes' : 'no',
+            (string) ($host ?? ''),
+            (string) ($port ?? '')
         ));
 
         return [
@@ -326,27 +328,136 @@ final class VpnInboundSyncService
      */
     private function extractExternalProxy(array $row, array $settings, array $streamSettings): array
     {
+        $merged = [];
         $candidates = [
             $row['externalProxy'] ?? null,
             $row['external_proxy'] ?? null,
             $row['external proxy'] ?? null,
+            $row['externalProxySettings'] ?? null,
+            $row['external_proxy_settings'] ?? null,
             $settings['externalProxy'] ?? null,
             $settings['external_proxy'] ?? null,
             $settings['external proxy'] ?? null,
+            $settings['externalProxySettings'] ?? null,
+            $settings['external_proxy_settings'] ?? null,
             $streamSettings['externalProxy'] ?? null,
             $streamSettings['external_proxy'] ?? null,
             $streamSettings['external proxy'] ?? null,
+            $streamSettings['externalProxySettings'] ?? null,
+            $streamSettings['external_proxy_settings'] ?? null,
             $streamSettings['sockopt'] ?? null,
         ];
 
         foreach ($candidates as $candidate) {
             $normalized = $this->jsonToArray($candidate);
             if ([] !== $normalized) {
-                return $normalized;
+                $merged = $this->mergeArrayRecursiveDistinct($merged, $normalized);
             }
         }
 
-        return [];
+        $this->collectExternalProxyLikeObjects($row, $merged);
+
+        $host = $this->findScalarByKeyPatterns(
+            [$row, $settings, $streamSettings],
+            ['externalProxyHost', 'external_proxy_host', 'external proxy host', 'externalProxyDomain', 'external_proxy_domain']
+        );
+        if (null !== $host && !isset($merged['host'])) {
+            $merged['host'] = trim((string) $host);
+        }
+
+        $port = $this->findScalarByKeyPatterns(
+            [$row, $settings, $streamSettings],
+            ['externalProxyPort', 'external_proxy_port', 'external proxy port']
+        );
+        if (null !== $port && !isset($merged['port']) && is_numeric($port)) {
+            $merged['port'] = (int) $port;
+        }
+
+        return $merged;
+    }
+
+    /**
+     * @param array<string, mixed> $source
+     * @param array<string, mixed> $accumulator
+     */
+    private function collectExternalProxyLikeObjects(array $source, array &$accumulator): void
+    {
+        foreach ($source as $key => $value) {
+            if (is_string($key) && preg_match('/external[\s_]*proxy(?:settings)?/i', $key)) {
+                $normalized = $this->jsonToArray($value);
+                if ([] !== $normalized) {
+                    $accumulator = $this->mergeArrayRecursiveDistinct($accumulator, $normalized);
+                }
+            }
+
+            if (is_array($value)) {
+                $this->collectExternalProxyLikeObjects($value, $accumulator);
+            }
+        }
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $sources
+     * @param array<int, string>               $patterns
+     */
+    private function findScalarByKeyPatterns(array $sources, array $patterns): string|int|float|bool|null
+    {
+        foreach ($sources as $source) {
+            $value = $this->findScalarInArrayByKeyPatterns($source, $patterns);
+            if (null !== $value) {
+                return $value;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @param array<string, mixed> $source
+     * @param array<int, string>   $patterns
+     */
+    private function findScalarInArrayByKeyPatterns(array $source, array $patterns): string|int|float|bool|null
+    {
+        foreach ($source as $key => $value) {
+            if (is_string($key)) {
+                foreach ($patterns as $pattern) {
+                    if (0 === strcasecmp($key, $pattern)) {
+                        $scalar = $this->extractFirstScalar($value, 'externalProxyPattern.'.$pattern);
+                        if (null !== $scalar) {
+                            return $scalar;
+                        }
+                    }
+                }
+            }
+
+            if (is_array($value)) {
+                $nested = $this->findScalarInArrayByKeyPatterns($value, $patterns);
+                if (null !== $nested) {
+                    return $nested;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @param array<string, mixed> $left
+     * @param array<string, mixed> $right
+     *
+     * @return array<string, mixed>
+     */
+    private function mergeArrayRecursiveDistinct(array $left, array $right): array
+    {
+        foreach ($right as $key => $value) {
+            if (is_string($key) && array_key_exists($key, $left) && is_array($left[$key]) && is_array($value)) {
+                $left[$key] = $this->mergeArrayRecursiveDistinct($left[$key], $value);
+                continue;
+            }
+            $left[$key] = $value;
+        }
+
+        return $left;
     }
 
     /**
