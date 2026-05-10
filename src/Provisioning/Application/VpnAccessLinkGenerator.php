@@ -467,7 +467,7 @@ final class VpnAccessLinkGenerator
     private function collectExternalProxyLikeObjects(array $source, array &$accumulator): void
     {
         foreach ($source as $key => $value) {
-            if (is_string($key) && preg_match('/external[\s_]*proxy(?:settings)?/i', $key)) {
+            if (is_string($key) && $this->isExternalProxyLikeKey($key)) {
                 $normalized = $this->toArray($value);
                 if ([] !== $normalized) {
                     $accumulator = $this->mergeArrayRecursiveDistinct($accumulator, $normalized);
@@ -546,6 +546,16 @@ final class VpnAccessLinkGenerator
         }
 
         return $left;
+    }
+
+    private function isExternalProxyLikeKey(string $key): bool
+    {
+        $normalized = strtolower(str_replace([' ', '-'], '_', trim($key)));
+        if (str_contains($normalized, 'externalproxy')) {
+            return true;
+        }
+
+        return str_contains($normalized, 'external_proxy');
     }
 
     private function hostFromBaseUrl(?string $baseUrl): ?string
