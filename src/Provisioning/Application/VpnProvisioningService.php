@@ -80,22 +80,46 @@ class VpnProvisioningService
             ->setTrafficLimitGb($order->getPlan()->getTrafficGb())
             ->setTrafficUsedGb(0);
 
-        $links = $this->vpnAccessLinkGenerator->generate($vpnService);
-        $configLinks = array_values(array_filter((array) ($links['configLinks'] ?? []), static fn (mixed $link): bool => '' !== trim((string) $link)));
-        $missing = array_values(array_filter((array) ($links['missing'] ?? []), static fn (mixed $item): bool => '' !== trim((string) $item)));
-        $configWarning = [] !== $missing
-            ? '⚠️ لینک اتصال قابل تولید نیست. فیلدهای ناقص: '.implode(', ', $missing)
-            : null;
+        $panelType = strtolower(trim((string) ($panel?->getType() ?? '')));
+        $createdConfigText = trim((string) ($created->configText ?? ''));
+        $createdConfigLinks = array_values(array_filter((array) ($created->configLinks ?? []), static fn (mixed $link): bool => '' !== trim((string) $link)));
+        $configLinks = $createdConfigLinks;
+        $missing = [];
+        $subscriptionUrl = $vpnService->getSubscriptionUrl();
+
+        if ('sanaei_3xui' !== $panelType || ([] === $configLinks && '' === $createdConfigText)) {
+            $links = $this->vpnAccessLinkGenerator->generate($vpnService);
+            $configLinks = array_values(array_filter((array) ($links['configLinks'] ?? []), static fn (mixed $link): bool => '' !== trim((string) $link)));
+            $missing = array_values(array_filter((array) ($links['missing'] ?? []), static fn (mixed $item): bool => '' !== trim((string) $item)));
+            $subscriptionUrl = $links['subscriptionUrl'] ?? $subscriptionUrl;
+        }
+
+        $configWarning = [] !== $missing ? '⚠️ لینک اتصال قابل تولید نیست. فیلدهای ناقص: '.implode(', ', $missing) : null;
         $existingConfigText = trim((string) ($vpnService->getConfigText() ?? ''));
         $finalConfigText = [] !== $configLinks
             ? implode("\n", $configLinks)
             : ('' !== $existingConfigText ? $existingConfigText : $configWarning);
 
+        $finalSubscriptionUrl = $subscriptionUrl ?? $vpnService->getSubscriptionUrl();
+
         $vpnService
-            ->setSubscriptionUrl($links['subscriptionUrl'] ?? $vpnService->getSubscriptionUrl())
+            ->setSubscriptionUrl($finalSubscriptionUrl)
             ->setConfigLinks($configLinks)
             ->setConfigText($finalConfigText)
             ->setLastAccessInfoSyncedAt(new \DateTimeImmutable());
+
+        $source = trim((string) ($meta['source'] ?? ''));
+        $this->logProvisioningConfig(
+            source: $source,
+            serviceId: $vpnService->getId(),
+            inboundId: $planInbound?->getId(),
+            uuid: (string) ($vpnService->getClientUuid() ?? ''),
+            subId: (string) ($vpnService->getSubId() ?? ''),
+            generatedConfigLinkCount: count($configLinks),
+            configTextEmpty: '' === trim((string) ($finalConfigText ?? '')),
+            subscriptionUrl: (string) ($finalSubscriptionUrl ?? ''),
+            configTextPreview: (string) ($finalConfigText ?? '')
+        );
 
         $order
             ->setStatus(OrderStatus::PROVISIONED)
@@ -104,5 +128,40 @@ class VpnProvisioningService
         $this->entityManager->persist($vpnService);
 
         return $vpnService;
+    }
+
+    private function logProvisioningConfig(
+        string $source,
+        ?int $serviceId,
+        ?int $inboundId,
+        string $uuid,
+        string $subId,
+        int $generatedConfigLinkCount,
+        bool $configTextEmpty,
+        string $subscriptionUrl,
+        string $configTextPreview
+    ): void {
+        error_log(sprintf(
+            '[VpnProvisioningService] provisioning_config source="%s" service_id=%d inbound_id=%d uuid="%s" sub_id="%s" generated_config_link_count=%d config_text_empty=%s subscription_url="%s" config_text_preview="%s"',
+            $source,
+            $serviceId ?? 0,
+            $inboundId ?? 0,
+            $uuid,
+            $subId,
+            $generatedConfigLinkCount,
+            $configTextEmpty ? 'yes' : 'no',
+            $subscriptionUrl,
+            $this->sanitizeLogPreview($configTextPreview)
+        ));
+    }
+
+    private function sanitizeLogPreview(string $value, int $max = 120): string
+    {
+        $text = trim(preg_replace('/\s+/', ' ', $value) ?? '');
+        if ('' === $text) {
+            return '';
+        }
+
+        return mb_substr($text, 0, $max);
     }
 }

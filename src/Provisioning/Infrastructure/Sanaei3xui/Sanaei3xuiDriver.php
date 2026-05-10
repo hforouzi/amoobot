@@ -18,6 +18,7 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
     public function __construct(
         private readonly Sanaei3xuiApiClient $apiClient,
         private readonly Sanaei3xuiRemoteIdParser $remoteIdParser,
+        private readonly Sanaei3xuiConfigGenerator $configGenerator,
     ) {
     }
 
@@ -140,16 +141,34 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
         }
 
         $subscriptionUrl = $this->buildSubscriptionUrl($panel, $config, $subId);
+        $configText = trim($this->configGenerator->generateConfigText($inbound, $clientUuid, $email, $subId));
+        $configLinks = array_values(array_filter(
+            array_map('trim', explode("\n", $configText)),
+            static fn (string $line): bool => '' !== $line
+        ));
+
+        $this->log(sprintf(
+            'create_service_generated_config source="%s" inbound_id=%d uuid="%s" sub_id="%s" generated_config_link_count=%d config_text_empty=%s subscription_url_present=%s config_text_preview="%s"',
+            $source,
+            $inbound->getId() ?? 0,
+            $clientUuid,
+            $subId,
+            count($configLinks),
+            '' === $configText ? 'yes' : 'no',
+            '' !== trim((string) ($subscriptionUrl ?? '')) ? 'yes' : 'no',
+            $this->sanitizeLogPreview($configText)
+        ));
 
         return new CreatedVpnService(
             remoteId: $this->remoteIdParser->format($panel->getId(), $inbound->getId(), $inboundIdRaw, $clientUuid, $email, $subId),
             username: $email,
             subscriptionUrl: $subscriptionUrl,
-            configText: null,
+            configText: '' !== $configText ? $configText : null,
             clientUuid: $clientUuid,
             clientEmail: $email,
             subId: $subId,
             ipLimit: $ipLimit,
+            configLinks: $configLinks,
         );
     }
 
@@ -395,6 +414,16 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
     private function log(string $message): void
     {
         error_log('[Sanaei3xuiDriver] '.$message);
+    }
+
+    private function sanitizeLogPreview(string $value, int $max = 120): string
+    {
+        $text = trim(preg_replace('/\s+/', ' ', $value) ?? '');
+        if ('' === $text) {
+            return '';
+        }
+
+        return mb_substr($text, 0, $max);
     }
 
     /**
