@@ -93,11 +93,16 @@ final class PlanPriceAdjustmentService
 
     private function writeField(Plan $plan, string $field, int $value): void
     {
-        match ($field) {
-            'price' => $plan->setPrice($value),
-            'pricePerGb' => $plan->setPricePerGb($value),
-            'pricePerDay' => $plan->setPricePerDay($value),
-            default => null,
-        };
+        switch ($field) {
+            case 'price':
+                $plan->setPrice($value);
+                break;
+            case 'pricePerGb':
+                $plan->setPricePerGb($value);
+                break;
+            case 'pricePerDay':
+                $plan->setPricePerDay($value);
+                break;
+        }
     }
 }

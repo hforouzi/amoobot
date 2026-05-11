@@ -68,9 +68,6 @@ final class ServiceRenewalService
         }
 
         $driver = $this->driverRegistry->resolve($service->getPanel());
-        if (!$carryRemainingTraffic) {
-            $driver->resetUsage((string) ($service->getRemoteId() ?? ''), $service->getPanel());
-        }
         $driver->renewService(
             (string) ($service->getRemoteId() ?? ''),
             new RenewVpnServiceRequest(
