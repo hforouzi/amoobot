@@ -209,8 +209,8 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
 
         try {
             $verifyResult = $this->apiClient->getClientTraffic($panel, $ref->email);
-            $this->assertPanelResult($verifyResult, 'getClientTraffics');
-            $this->assertPanelBusinessResult($verifyResult, 'getClientTraffics');
+            $this->assertPanelResult($verifyResult, 'getClientTraffic');
+            $this->assertPanelBusinessResult($verifyResult, 'getClientTraffic');
         } catch (\Throwable $e) {
             $this->log(sprintf(
                 'renew_verify_warning panel_id=%s email="%s" message="%s"',
@@ -261,7 +261,7 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
         $isEnabled = isset($obj['enable']) ? (bool) $obj['enable'] : null;
 
         $usedBytes = null;
-        if (null !== $allTimeBytes && $allTimeBytes >= 0) {
+        if (null !== $allTimeBytes) {
             $usedBytes = $allTimeBytes;
         } elseif (null !== $upBytes || null !== $downBytes) {
             $usedBytes = max(0, (int) (($upBytes ?? 0) + ($downBytes ?? 0)));
