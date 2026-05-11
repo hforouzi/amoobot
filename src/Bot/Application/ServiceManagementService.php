@@ -14,6 +14,8 @@ use App\Provisioning\Domain\Dto\RenewVpnServiceRequest;
 use App\Provisioning\Domain\VpnServiceStatus;
 use App\Provisioning\Infrastructure\VpnPanelDriverRegistry;
 use Doctrine\ORM\EntityManagerInterface;
+use Endroid\QrCode\QrCode;
+use Endroid\QrCode\Writer\PngWriter;
 
 class ServiceManagementService
 {
@@ -161,13 +163,20 @@ class ServiceManagementService
 
         $subscriptionUrl = trim((string) $service->getSubscriptionUrl());
         if ('' === $subscriptionUrl) {
-            $this->showPopupOrMessage($chatId, $callbackId, 'اطلاعات اتصال کامل نیست. لطفاً با پشتیبانی تماس بگیرید.', 'missing_subscription_url');
+            $this->showPopupOrMessage($chatId, $callbackId, 'لینک اشتراک برای این سرویس موجود نیست.', 'missing_subscription_url');
+            $configLinks = $this->collectConfigLinks($service);
+            if ([] !== $configLinks) {
+                $this->telegramApiClient->sendMessage(
+                    $chatId,
+                    "لینک اشتراک موجود نیست، ولی کانفیگ‌ها در دسترس است:\n".implode("\n", $configLinks)
+                );
+            }
 
             return;
         }
 
         $this->acknowledgeCallback($callbackId);
-        $this->telegramApiClient->sendMessage($chatId, "لینک اشتراک سرویس #{$serviceId}:\n{$subscriptionUrl}");
+        $this->telegramApiClient->sendMessage($chatId, "🔗 لینک اشتراک شما:\n{$subscriptionUrl}");
         $this->debugLog(sprintf('service_subscription_sent service_id=%d user_id=%d', $serviceId, $account->getUser()->getId()));
     }
 
@@ -209,13 +218,20 @@ class ServiceManagementService
 
         $subscriptionUrl = trim((string) ($service->getSubscriptionUrl() ?? ''));
         if ('' === $subscriptionUrl) {
-            $this->showPopupOrMessage($chatId, $callbackId, 'اطلاعات اتصال کامل نیست. لطفاً با پشتیبانی تماس بگیرید.', 'missing_subscription_qr');
+            $this->showPopupOrMessage($chatId, $callbackId, 'لینک اشتراک برای ساخت QR موجود نیست.', 'missing_subscription_qr');
+
+            return;
+        }
+
+        $qrPath = $this->createSubscriptionQrTempFile($subscriptionUrl, (int) ($service->getId() ?? 0));
+        if (null === $qrPath) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'ساخت QR انجام نشد. لطفاً دوباره تلاش کنید.', 'subscription_qr_create_failed');
 
             return;
         }
 
         $this->acknowledgeCallback($callbackId);
-        $this->telegramApiClient->sendMessage($chatId, "QR لینک اشتراک (متن لینک):\n{$subscriptionUrl}");
+        $this->telegramApiClient->sendPhotoFile($chatId, $qrPath, 'QR لینک اشتراک سرویس شما');
     }
 
     public function sendConfigLinks(TelegramAccount $account, int $serviceId, string $chatId, string $callbackId): void
@@ -723,5 +739,47 @@ class ServiceManagementService
         $panel = $service->getPanel();
 
         return null !== $panel && 'sanaei_3xui' === $panel->getType();
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function collectConfigLinks(VpnService $service): array
+    {
+        $configLinks = $service->getConfigLinks();
+        if (!is_array($configLinks)) {
+            return [];
+        }
+
+        return array_values(array_filter(array_map(
+            static fn (mixed $link): string => trim((string) $link),
+            $configLinks
+        ), static fn (string $link): bool => '' !== $link));
+    }
+
+    private function createSubscriptionQrTempFile(string $subscriptionUrl, int $serviceId): ?string
+    {
+        $tmpDir = '/tmp/amoobot-qr';
+        if (!is_dir($tmpDir)) {
+            @mkdir($tmpDir, 0775, true);
+        }
+        if (!is_dir($tmpDir)) {
+            return null;
+        }
+
+        $targetPath = sprintf('%s/service-subscription-%d-%d.png', $tmpDir, $serviceId, time());
+        try {
+            $writer = new PngWriter();
+            $qrCode = QrCode::create($subscriptionUrl)
+                ->setSize(420)
+                ->setMargin(12);
+            $writer->write($qrCode)->saveToFile($targetPath);
+        } catch (\Throwable $e) {
+            $this->debugLog(sprintf('subscription_qr_generation_failed service_id=%d message="%s"', $serviceId, $e->getMessage()));
+
+            return null;
+        }
+
+        return is_file($targetPath) ? $targetPath : null;
     }
 }

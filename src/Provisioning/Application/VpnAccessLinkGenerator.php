@@ -7,11 +7,13 @@ namespace App\Provisioning\Application;
 use App\Entity\VpnPanel;
 use App\Entity\VpnService;
 use App\Provisioning\Infrastructure\Sanaei3xui\Sanaei3xuiConfigGenerator;
+use App\Provisioning\Infrastructure\Sanaei3xui\Sanaei3xuiRemoteIdParser;
 
 final class VpnAccessLinkGenerator
 {
     public function __construct(
         private readonly Sanaei3xuiConfigGenerator $sanaei3xuiConfigGenerator,
+        private readonly Sanaei3xuiRemoteIdParser $remoteIdParser,
     ) {
     }
 
@@ -277,6 +279,14 @@ final class VpnAccessLinkGenerator
 
         $subId = trim((string) ($service->getSubId() ?? ''));
         if ('' === $subId) {
+            $parsedRemote = $this->remoteIdParser->parse((string) ($service->getRemoteId() ?? ''));
+            $subId = trim((string) ($parsedRemote?->subId ?? ''));
+        }
+        if ('' === $subId) {
+            error_log(sprintf(
+                '[VpnAccessLinkGenerator] subscription_url_skipped reason="missing_sub_id" service_id=%d',
+                $service->getId() ?? 0
+            ));
             return null;
         }
 
@@ -320,9 +330,20 @@ final class VpnAccessLinkGenerator
         }
 
         if ('' === $base) {
+            error_log(sprintf(
+                '[VpnAccessLinkGenerator] subscription_url_skipped reason="missing_base_url" service_id=%d panel_id=%d',
+                $service->getId() ?? 0,
+                $panel->getId() ?? 0
+            ));
             return null;
         }
         if (false === filter_var($base, FILTER_VALIDATE_URL)) {
+            error_log(sprintf(
+                '[VpnAccessLinkGenerator] subscription_url_skipped reason="invalid_base_url" service_id=%d panel_id=%d base="%s"',
+                $service->getId() ?? 0,
+                $panel->getId() ?? 0,
+                $base
+            ));
             return null;
         }
 

@@ -6,6 +6,7 @@ namespace App\Command;
 
 use App\Entity\VpnService;
 use App\Provisioning\Application\VpnAccessLinkGenerator;
+use App\Provisioning\Infrastructure\Sanaei3xui\Sanaei3xuiRemoteIdParser;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
@@ -14,12 +15,13 @@ use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Style\SymfonyStyle;
 
-#[AsCommand(name: 'app:service:regenerate-config', description: 'Regenerate configText and configLinks for an existing VpnService from its inbound externalProxy data')]
+#[AsCommand(name: 'app:service:regenerate-config', description: 'Regenerate configText/configLinks/subscriptionUrl for an existing VpnService')]
 final class ServiceRegenerateConfigCommand extends Command
 {
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
         private readonly VpnAccessLinkGenerator $vpnAccessLinkGenerator,
+        private readonly Sanaei3xuiRemoteIdParser $remoteIdParser,
     ) {
         parent::__construct();
     }
@@ -64,6 +66,12 @@ final class ServiceRegenerateConfigCommand extends Command
 
         $config = is_array($inbound?->getConfig()) ? $inbound->getConfig() : [];
         $externalProxyList = $config['externalProxyList'] ?? [];
+        $remoteRef = $this->remoteIdParser->parse((string) ($service->getRemoteId() ?? ''));
+        $currentSubId = trim((string) ($service->getSubId() ?? ''));
+        if (null !== $remoteRef && '' === $currentSubId && null !== $remoteRef->subId && '' !== trim($remoteRef->subId)) {
+            $service->setSubId(trim($remoteRef->subId));
+            $io->writeln(sprintf('subId recovered from remoteId: %s', trim($remoteRef->subId)));
+        }
         $io->listing([
             sprintf('externalProxyList count: %d', is_array($externalProxyList) ? count($externalProxyList) : 0),
         ]);

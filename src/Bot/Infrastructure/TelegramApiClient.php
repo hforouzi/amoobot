@@ -6,6 +6,8 @@ namespace App\Bot\Infrastructure;
 
 use App\Bot\Application\BotMessageLogger;
 use App\Bot\Domain\BotMessageDirection;
+use Symfony\Component\Mime\Part\DataPart;
+use Symfony\Component\Mime\Part\Multipart\FormDataPart;
 use Symfony\Contracts\HttpClient\Exception\TransportExceptionInterface;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 
@@ -73,6 +75,59 @@ class TelegramApiClient
         } catch (\Throwable) {
         }
         $this->botMessageLogger->log(BotMessageDirection::OUTGOING, ['method' => 'sendPhoto', 'payload' => $payload], $chatId, 'photo');
+    }
+
+    public function sendPhotoFile(string $chatId, string $filePath, string $caption = '', ?array $replyMarkup = null): void
+    {
+        if (!is_file($filePath)) {
+            return;
+        }
+
+        $payload = [
+            'chat_id' => $chatId,
+            'photo' => DataPart::fromPath($filePath),
+        ];
+
+        if ('' !== trim($caption)) {
+            $payload['caption'] = $caption;
+        }
+
+        if (null !== $replyMarkup) {
+            $payload['reply_markup'] = json_encode($replyMarkup, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        }
+
+        $formData = new FormDataPart($payload);
+        $options = [
+            'headers' => $formData->getPreparedHeaders()->toArray(),
+            'body' => $formData->bodyToIterable(),
+        ];
+
+        $proxy = trim($this->telegramProxy);
+        if ('' !== $proxy) {
+            $options['proxy'] = $proxy;
+        }
+
+        try {
+            $response = $this->httpClient->request(
+                'POST',
+                sprintf('https://api.telegram.org/bot%s/%s', $this->botToken, 'sendPhoto'),
+                $options
+            );
+            $data = $response->toArray(false);
+            if (!is_array($data) || true !== ($data['ok'] ?? false)) {
+                throw new \RuntimeException('Telegram sendPhoto file request returned non-ok response.');
+            }
+        } catch (\Throwable) {
+        }
+
+        $this->botMessageLogger->log(BotMessageDirection::OUTGOING, [
+            'method' => 'sendPhotoFile',
+            'payload' => [
+                'chat_id' => $chatId,
+                'photo_path' => $filePath,
+                'caption' => $caption,
+            ],
+        ], $chatId, 'photo');
     }
 
     public function getUpdates(?int $offset = null, int $limit = 20, int $timeout = 25): array

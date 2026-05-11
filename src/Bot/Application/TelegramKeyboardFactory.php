@@ -344,12 +344,12 @@ class TelegramKeyboardFactory
                     'callback_data' => 'service_subscription:'.$serviceId,
                 ]],
                 [[
-                    'text' => '📱 QR لینک اشتراک',
+                    'text' => '📷 QR لینک اشتراک',
                     'callback_data' => 'service_subscription_qr:'.$serviceId,
                 ]],
                 [[
-                    'text' => '⚙️ کانفیگها',
-                    'callback_data' => 'service_config_links:'.$serviceId,
+                    'text' => '📨 ارسال مجدد کانفیگ',
+                    'callback_data' => 'service_resend_config:'.$serviceId,
                 ]],
                 [[
                     'text' => '🔄 بروزرسانی اطلاعات',

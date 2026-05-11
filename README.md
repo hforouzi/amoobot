@@ -220,6 +220,16 @@ In `/admin` -> Payments, use actions:
     }
     ```
 
+### Subscription URL format
+- Subscription URL is built as:
+  - `subscription_base_url + subscription_path_prefix + "/" + subId`
+- Example:
+  - `https://sub.boodbash.ir:8443/rain/95b2bf45859e2ee1`
+- Required config keys:
+  - `subscription_base_url`
+  - `subscription_path_prefix`
+- If `subscription_base_url` is missing, subscription URL is not generated and a warning is logged.
+
 ### Correct Phase 1.3 setup flow (Admin UX)
 1. Create `VpnPanel`.
 2. In VPN Panels click `تست اتصال`.
@@ -245,6 +255,14 @@ php bin/console app:panel:test-login 1
 php bin/console app:panel:debug-transport 1
 php bin/console app:panel:sync-inbounds 1
 php bin/console app:panel:test-create-client 3
+php bin/console app:service:debug-links 10
+php bin/console app:service:regenerate-config 10
+```
+
+### Regenerate existing service links
+Use this command to regenerate config links and subscription URL for an existing service:
+```bash
+php bin/console app:service:regenerate-config {serviceId}
 ```
 
 ### Known issue
@@ -312,6 +330,8 @@ If `test login` works but provisioning still fails on `addClient`:
 - `app:panel:list-inbounds {panelId}`
 - `app:panel:sync-inbounds {panelId}`
 - `app:panel:test-create-client {inboundId}`
+- `app:service:debug-links {serviceId}`
+- `app:service:regenerate-config {serviceId}`
 
 ## Deployment Guide
 
