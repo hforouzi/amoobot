@@ -48,6 +48,7 @@ class DashboardController extends AbstractDashboardController
         yield MenuItem::linkTo(BotMessageLogCrudController::class, 'Bot Logs', 'fa fa-file-text');
         yield MenuItem::linkTo(SettingCrudController::class, 'Settings', 'fa fa-cog');
         yield MenuItem::linkToRoute('تنظیمات تمدید و قیمتگذاری', 'fa fa-sliders', 'admin_renewal_pricing_settings');
+        yield MenuItem::linkToRoute('تنظیمات اتوماسیون سرویسها', 'fa fa-clock-o', 'admin_automation_settings');
         yield MenuItem::linkToRoute('تغییر گروهی قیمت پلنها', 'fa fa-percent', 'admin_bulk_plan_price_adjustment');
     }
 }
