@@ -168,15 +168,14 @@ In `/admin` -> Payments, use actions:
 ## Service Management (Phase 1.2)
 - Phase 1.2 introduces Telegram service management for users and admins.
 - Service actions are handled with callback-driven action classes (`ServiceActionResolver` + action handlers) to keep update handling modular.
-- All current service operations are **local database operations only**.
-- Real panel synchronization/drivers (x-ui/3x-ui/MikroTik/WG APIs) are intentionally postponed to next phase.
+- Later phases added panel-synced actions for `sanaei_3xui` (usage/expiry/suspend/activate/delete/reset).
 
 ## User Service Actions
 - `my_services`: shows latest non-deleted services as inline buttons.
 - `service_view:{id}`: shows service detail page with status, expiry, traffic, subscription, and config preview.
 - `service_subscription:{id}`: sends subscription link in a separate Telegram message.
 - `service_resend_config:{id}`: re-sends config and service summary.
-- `service_refresh:{id}`: reloads local DB values and re-renders detail page.
+- `service_sync_usage:{id}`: syncs real traffic/expiry from panel and re-renders detail page.
 - Users can access only their own services.
 
 ## Admin Service Actions
@@ -185,6 +184,7 @@ In `/admin` -> Payments, use actions:
 - `service_suspend:{id}` / `service_activate:{id}`
 - `service_delete:{id}` now opens a confirmation step and deletion is finalized by `service_delete_confirm:{id}`.
 - `service_reset_usage:{id}`
+- `service_sync_usage:{id}` (admin can sync any service usage)
 - `service_extend_menu:{id}` -> `service_extend:{id}:{days}`
 - `service_add_traffic_menu:{id}` -> `service_add_traffic:{id}:{gb}`
 - `admin_user_view:{id}`: shows user detail summary for service context.
@@ -265,6 +265,24 @@ Use this command to regenerate config links and subscription URL for an existing
 php bin/console app:service:regenerate-config {serviceId}
 ```
 
+## Phase 1.4.1 Usage Sync
+- Sync real usage from panel and store latest lifecycle fields in `VpnService`.
+- Expiry checker marks `active` services as `expired` when `expiresAt` has passed.
+- `expiresAt = null` means unlimited service and is never auto-expired.
+- Telegram user/admin service detail now shows updated usage/expiry and last usage sync time.
+
+Commands:
+```bash
+php bin/console app:service:sync-usage
+php bin/console app:service:check-expiry
+```
+
+Cron example:
+```bash
+*/10 * * * * php /path/bin/console app:service:sync-usage
+*/15 * * * * php /path/bin/console app:service:check-expiry
+```
+
 ### Known issue
 - Some 3x-ui versions may return empty responses for `addClient`/`updateClient`.
 - The driver logs this safely and handles it as a warning path where applicable.
@@ -332,6 +350,8 @@ If `test login` works but provisioning still fails on `addClient`:
 - `app:panel:test-create-client {inboundId}`
 - `app:service:debug-links {serviceId}`
 - `app:service:regenerate-config {serviceId}`
+- `app:service:sync-usage [--service-id=ID] [--limit=100] [--dry-run]`
+- `app:service:check-expiry [--service-id=ID] [--dry-run]`
 
 ## Deployment Guide
 

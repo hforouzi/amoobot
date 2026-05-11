@@ -352,8 +352,8 @@ class TelegramKeyboardFactory
                     'callback_data' => 'service_resend_config:'.$serviceId,
                 ]],
                 [[
-                    'text' => '🔄 بروزرسانی اطلاعات',
-                    'callback_data' => 'service_refresh:'.$serviceId,
+                    'text' => '🔄 بروزرسانی مصرف',
+                    'callback_data' => 'service_sync_usage:'.$serviceId,
                 ]],
                 [[
                     'text' => '🔙 بازگشت',
@@ -411,6 +411,10 @@ class TelegramKeyboardFactory
                     'text' => '🔄 ریست مصرف',
                     'callback_data' => 'service_reset_usage:'.$serviceId,
                 ], [
+                    'text' => '🔄 بروزرسانی مصرف',
+                    'callback_data' => 'service_sync_usage:'.$serviceId,
+                ]],
+                [[
                     'text' => '📨 ارسال مجدد',
                     'callback_data' => 'service_resend_config:'.$serviceId,
                 ]],

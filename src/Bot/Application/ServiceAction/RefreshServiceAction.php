@@ -15,12 +15,24 @@ final class RefreshServiceAction implements ServiceActionInterface
 
     public function supports(string $callbackData): bool
     {
-        return str_starts_with($callbackData, 'service_refresh:');
+        return str_starts_with($callbackData, 'service_refresh:') || str_starts_with($callbackData, 'service_sync_usage:');
     }
 
     public function handle(ServiceActionContext $context): void
     {
-        $serviceId = (int) str_replace('service_refresh:', '', $context->data);
-        $this->serviceManagementService->refreshUserService($context->account, $serviceId, $context->chatId, $context->callbackId);
+        $serviceId = 0;
+        if (str_starts_with($context->data, 'service_sync_usage:')) {
+            $serviceId = (int) str_replace('service_sync_usage:', '', $context->data);
+        } elseif (str_starts_with($context->data, 'service_refresh:')) {
+            $serviceId = (int) str_replace('service_refresh:', '', $context->data);
+        }
+
+        $this->serviceManagementService->syncServiceUsage(
+            $context->account,
+            $serviceId,
+            $context->chatId,
+            $context->callbackId,
+            $context->isAdmin
+        );
     }
 }

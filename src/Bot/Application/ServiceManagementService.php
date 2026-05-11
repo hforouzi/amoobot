@@ -9,7 +9,7 @@ use App\Entity\Order;
 use App\Entity\TelegramAccount;
 use App\Entity\User;
 use App\Entity\VpnService;
-use App\Provisioning\Application\VpnAccessLinkGenerator;
+use App\Provisioning\Application\ServiceUsageSyncService;
 use App\Provisioning\Domain\Dto\RenewVpnServiceRequest;
 use App\Provisioning\Domain\VpnServiceStatus;
 use App\Provisioning\Infrastructure\VpnPanelDriverRegistry;
@@ -19,12 +19,14 @@ use Endroid\QrCode\Writer\PngWriter;
 
 class ServiceManagementService
 {
+    private const BYTES_PER_GB = 1073741824;
+
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
         private readonly TelegramApiClient $telegramApiClient,
         private readonly TelegramKeyboardFactory $keyboardFactory,
         private readonly VpnPanelDriverRegistry $driverRegistry,
-        private readonly VpnAccessLinkGenerator $vpnAccessLinkGenerator,
+        private readonly ServiceUsageSyncService $serviceUsageSyncService,
     ) {
     }
 
@@ -241,6 +243,11 @@ class ServiceManagementService
 
     public function refreshUserService(TelegramAccount $account, int $serviceId, string $chatId, string $callbackId): void
     {
+        $this->syncServiceUsage($account, $serviceId, $chatId, $callbackId, false);
+    }
+
+    public function syncServiceUsage(TelegramAccount $account, int $serviceId, string $chatId, string $callbackId, bool $adminMode): void
+    {
         $service = $this->entityManager->getRepository(VpnService::class)->find($serviceId);
         if (!$service instanceof VpnService) {
             $this->showPopupOrMessage($chatId, $callbackId, 'سرویس معتبر نیست.', 'invalid_service_refresh_user');
@@ -248,36 +255,44 @@ class ServiceManagementService
             return;
         }
 
-        if ($service->getUser()->getId() !== $account->getUser()->getId()) {
+        if (!$adminMode && $service->getUser()->getId() !== $account->getUser()->getId()) {
             $this->showPopupOrMessage($chatId, $callbackId, 'دسترسی غیرمجاز.', 'unauthorized_service_refresh_user');
 
             return;
         }
 
-        if ($this->shouldSyncWithPanel($service)) {
-            try {
-                $this->syncServiceUsageFromPanel($service);
-            } catch (\Throwable $e) {
-                $this->debugLog(sprintf('service_sync_failure action=refresh service_id=%d message="%s"', $serviceId, $e->getMessage()));
-                $this->showPopupOrMessage($chatId, $callbackId, 'عملیات روی پنل انجام نشد. لاگ را بررسی کنید.', 'panel_refresh_failed');
+        try {
+            $result = $this->serviceUsageSyncService->syncOne($service);
+        } catch (\Throwable $e) {
+            $this->debugLog(sprintf('service_sync_failure action=sync_usage service_id=%d message="%s"', $serviceId, $e->getMessage()));
+            $this->showPopupOrMessage($chatId, $callbackId, 'عملیات روی پنل انجام نشد. لاگ را بررسی کنید.', 'panel_refresh_failed');
 
-                return;
-            }
+            return;
         }
 
-        $links = $this->vpnAccessLinkGenerator->generate($service);
-        $configLinks = $links['configLinks'] ?? [];
-        $service
-            ->setSubscriptionUrl(($links['subscriptionUrl'] ?? $service->getSubscriptionUrl()) ?: $service->getSubscriptionUrl())
-            ->setConfigLinks($configLinks)
-            ->setConfigText(is_array($configLinks) && [] !== $configLinks ? implode("\n", $configLinks) : null)
-            ->setLastAccessInfoSyncedAt(new \DateTimeImmutable())
-            ->setUpdatedAt(new \DateTimeImmutable());
-        $this->entityManager->flush();
+        if ($result->isFailed()) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'عملیات بروزرسانی مصرف انجام نشد.', 'panel_refresh_failed');
+
+            return;
+        }
 
         $this->entityManager->refresh($service);
         $this->acknowledgeCallback($callbackId);
-        $this->telegramApiClient->sendMessage($chatId, $this->formatServiceDetailForUser($service), $this->keyboardFactory->userServiceDetail((int) $service->getId()));
+        if ($adminMode) {
+            $this->telegramApiClient->sendMessage(
+                $chatId,
+                $this->formatServiceDetailForAdmin($service),
+                $this->keyboardFactory->adminServiceDetail((int) $service->getId(), (int) $service->getUser()->getId())
+            );
+
+            return;
+        }
+
+        $this->telegramApiClient->sendMessage(
+            $chatId,
+            $this->formatServiceDetailForUser($service),
+            $this->keyboardFactory->userServiceDetail((int) $service->getId())
+        );
     }
 
     public function suspendService(int $serviceId, string $chatId, string $callbackId): void
@@ -425,6 +440,7 @@ class ServiceManagementService
 
         $service
             ->setTrafficUsedGb(0)
+            ->setTrafficUsedBytes(0)
             ->setUpdatedAt(new \DateTimeImmutable());
         $this->entityManager->flush();
 
@@ -498,8 +514,10 @@ class ServiceManagementService
         }
 
         $currentLimit = $service->getTrafficLimitGb() ?? 0;
+        $newLimitGb = $currentLimit + $trafficGb;
         $service
-            ->setTrafficLimitGb($currentLimit + $trafficGb)
+            ->setTrafficLimitGb($newLimitGb)
+            ->setTrafficLimitBytes($newLimitGb * self::BYTES_PER_GB)
             ->setUpdatedAt(new \DateTimeImmutable());
         $this->entityManager->flush();
 
@@ -620,23 +638,24 @@ class ServiceManagementService
     private function formatServiceDetailForUser(VpnService $service): string
     {
         $inbound = $service->getInbound();
-        $limit = $service->getTrafficLimitGb();
-        $used = $service->getTrafficUsedGb() ?? 0;
-        $remaining = null === $limit ? 'نامحدود' : max($limit - $used, 0).' GB';
+        $limit = $this->formatTrafficLimit($service);
+        $used = $this->formatTrafficUsed($service);
+        $remaining = $this->formatTrafficRemaining($service);
         $ipLimit = $service->getIpLimit();
 
         return sprintf(
-            "سرویس #%d\nوضعیت: %s\nسرور/کشور: %s\nپروتکل/شبکه/امنیت: %s / %s / %s\nتاریخ انقضا: %s\nحجم کل: %s\nمصرف: %s\nباقیمانده: %s\nمحدودیت IP: %s\nلینک اشتراک: %s",
+            "سرویس #%d\nوضعیت: %s\nسرور/کشور: %s\nپروتکل/شبکه/امنیت: %s / %s / %s\nتاریخ انقضا: %s\nحجم کل: %s\nمصرف: %s\nباقیمانده: %s\nآخرین بروزرسانی مصرف: %s\nمحدودیت IP: %s\nلینک اشتراک: %s",
             $service->getId(),
             $this->statusLabel($service->getStatus()),
             sprintf('%s / %s', $inbound?->getHost() ?? '-', $inbound?->getCountry() ?? '-'),
             $inbound?->getProtocol() ?? '-',
             $inbound?->getNetwork() ?? '-',
             $inbound?->getSecurity() ?? '-',
-            $service->getExpiresAt()?->format('Y-m-d H:i:s') ?? '-',
-            null === $limit ? 'نامحدود' : $limit.' GB',
-            $used.' GB',
+            $service->getExpiresAt()?->format('Y-m-d H:i:s') ?? 'نامحدود',
+            $limit,
+            $used,
             $remaining,
+            $service->getLastUsageSyncedAt()?->format('Y-m-d H:i:s') ?? '-',
             null === $ipLimit ? 'پیشفرض/نامحدود' : (string) $ipLimit,
             $service->getSubscriptionUrl() ?: '-'
         );
@@ -644,17 +663,17 @@ class ServiceManagementService
 
     private function formatServiceDetailForAdmin(VpnService $service): string
     {
-        $limit = $service->getTrafficLimitGb();
-        $used = $service->getTrafficUsedGb() ?? 0;
-
         return sprintf(
-            "سرویس #%d\nکاربر: %s\nوضعیت: %s\nانقضا: %s\nترافیک: %s / %s GB\nاشتراک: %s\nپیشنمایش کانفیگ: %s\nایجاد: %s",
+            "سرویس #%d\nکاربر: %s\nوضعیت: %s\nانقضا: %s\nحجم کل: %s\nمصرف: %s\nباقیمانده: %s\nآخرین بروزرسانی مصرف: %s\nآخرین بررسی وضعیت: %s\nاشتراک: %s\nپیشنمایش کانفیگ: %s\nایجاد: %s",
             $service->getId(),
             $this->formatTelegramIdentity($service->getUser()->getTelegramAccount()),
             $this->statusLabel($service->getStatus()),
-            $service->getExpiresAt()?->format('Y-m-d H:i:s') ?? '-',
-            $used,
-            null === $limit ? '∞' : (string) $limit,
+            $service->getExpiresAt()?->format('Y-m-d H:i:s') ?? 'نامحدود',
+            $this->formatTrafficLimit($service),
+            $this->formatTrafficUsed($service),
+            $this->formatTrafficRemaining($service),
+            $service->getLastUsageSyncedAt()?->format('Y-m-d H:i:s') ?? '-',
+            $service->getLastStatusCheckedAt()?->format('Y-m-d H:i:s') ?? '-',
             $this->preview($service->getSubscriptionUrl(), 80),
             $this->preview($service->getConfigText(), 120),
             $service->getCreatedAt()->format('Y-m-d H:i:s')
@@ -722,23 +741,55 @@ class ServiceManagementService
         error_log('[ServiceManagementService] '.$message);
     }
 
-    private function syncServiceUsageFromPanel(VpnService $service): void
-    {
-        $driver = $this->driverRegistry->resolve($service->getPanel());
-        $usage = $driver->getUsage((string) $service->getRemoteId(), $service->getPanel());
-
-        $service
-            ->setTrafficUsedGb($usage->trafficUsedGb ?? $service->getTrafficUsedGb())
-            ->setTrafficLimitGb($usage->trafficLimitGb ?? $service->getTrafficLimitGb())
-            ->setUpdatedAt(new \DateTimeImmutable());
-        $this->entityManager->flush();
-    }
-
     private function shouldSyncWithPanel(VpnService $service): bool
     {
         $panel = $service->getPanel();
 
         return null !== $panel && 'sanaei_3xui' === $panel->getType();
+    }
+
+    private function formatTrafficUsed(VpnService $service): string
+    {
+        if (null !== $service->getTrafficUsedBytes()) {
+            return sprintf('%.2f GB', $service->getTrafficUsedBytes() / self::BYTES_PER_GB);
+        }
+
+        if (null !== $service->getTrafficUsedGb()) {
+            return sprintf('%d GB', $service->getTrafficUsedGb());
+        }
+
+        return '-';
+    }
+
+    private function formatTrafficLimit(VpnService $service): string
+    {
+        if (null !== $service->getTrafficLimitBytes()) {
+            return sprintf('%.2f GB', $service->getTrafficLimitBytes() / self::BYTES_PER_GB);
+        }
+
+        if (null !== $service->getTrafficLimitGb()) {
+            return sprintf('%d GB', $service->getTrafficLimitGb());
+        }
+
+        return 'نامحدود';
+    }
+
+    private function formatTrafficRemaining(VpnService $service): string
+    {
+        if (null !== $service->getTrafficLimitBytes()) {
+            $usedBytes = $service->getTrafficUsedBytes() ?? 0;
+            $remainingBytes = max($service->getTrafficLimitBytes() - $usedBytes, 0);
+
+            return sprintf('%.2f GB', $remainingBytes / self::BYTES_PER_GB);
+        }
+
+        if (null !== $service->getTrafficLimitGb()) {
+            $remainingGb = max($service->getTrafficLimitGb() - ($service->getTrafficUsedGb() ?? 0), 0);
+
+            return sprintf('%d GB', $remainingGb);
+        }
+
+        return 'نامحدود';
     }
 
     /**
