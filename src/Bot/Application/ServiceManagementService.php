@@ -515,6 +515,12 @@ class ServiceManagementService
 
         $currentLimit = $service->getTrafficLimitGb() ?? 0;
         $newLimitGb = $currentLimit + $trafficGb;
+        $maxSupportedGb = intdiv(PHP_INT_MAX, self::BYTES_PER_GB);
+        if ($newLimitGb > $maxSupportedGb) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'حداکثر حجم پشتیبانی‌شده عبور کرده است.', 'traffic_limit_overflow');
+
+            return;
+        }
         $service
             ->setTrafficLimitGb($newLimitGb)
             ->setTrafficLimitBytes($newLimitGb * self::BYTES_PER_GB)

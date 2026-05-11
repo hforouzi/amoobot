@@ -64,8 +64,8 @@ final class ServiceUsageSyncService
             return new SyncResult($serviceId, 'failed', $e->getMessage());
         }
 
-        $usedBytes = $usage->usedBytes ?? (null !== $usage->trafficUsedGb ? $this->gbToBytes($usage->trafficUsedGb) : null);
-        $totalBytes = $usage->totalBytes ?? (null !== $usage->trafficLimitGb ? $this->gbToBytes($usage->trafficLimitGb) : null);
+        $usedBytes = $this->resolveBytesValue($usage->usedBytes, $usage->trafficUsedGb);
+        $totalBytes = $this->resolveBytesValue($usage->totalBytes, $usage->trafficLimitGb);
         $usedGb = null !== $usedBytes ? $this->bytesToGb($usedBytes) : $usage->trafficUsedGb;
         $limitGb = null !== $totalBytes ? $this->bytesToGb($totalBytes) : $usage->trafficLimitGb;
         $expiresAt = $usage->expiresAt ?? $service->getExpiresAt();
@@ -145,7 +145,12 @@ final class ServiceUsageSyncService
 
     private function bytesToGb(int $bytes): int
     {
-        if ($bytes <= 0) {
+        if ($bytes < 0) {
+            $this->log(sprintf('usage_sync_warning reason="negative_bytes_value" value=%d', $bytes));
+            return 0;
+        }
+
+        if (0 === $bytes) {
             return 0;
         }
 
@@ -154,11 +159,29 @@ final class ServiceUsageSyncService
 
     private function gbToBytes(int $gb): int
     {
-        if ($gb <= 0) {
+        if ($gb < 0) {
+            $this->log(sprintf('usage_sync_warning reason="negative_gb_value" value=%d', $gb));
+            return 0;
+        }
+
+        if (0 === $gb) {
             return 0;
         }
 
         return $gb * self::BYTES_PER_GB;
+    }
+
+    private function resolveBytesValue(?int $bytes, ?int $gb): ?int
+    {
+        if (null !== $bytes) {
+            return $bytes;
+        }
+
+        if (null === $gb) {
+            return null;
+        }
+
+        return $this->gbToBytes($gb);
     }
 
     private function log(string $message): void

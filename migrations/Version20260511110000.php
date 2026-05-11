@@ -24,4 +24,3 @@ final class Version20260511110000 extends AbstractMigration
         $this->addSql('ALTER TABLE vpn_service DROP traffic_limit_bytes, DROP traffic_used_bytes, DROP last_usage_synced_at, DROP last_status_checked_at');
     }
 }
-

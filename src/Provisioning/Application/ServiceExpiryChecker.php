@@ -70,6 +70,7 @@ final class ServiceExpiryChecker
         $skipped = 0;
 
         foreach ($services as $service) {
+            ++$checked;
             try {
                 $result = $this->checkOne($service, $dryRun, false);
             } catch (\Throwable $e) {
@@ -77,8 +78,6 @@ final class ServiceExpiryChecker
                 $this->log(sprintf('expiry_check_failed service_id=%d message="%s"', $service->getId() ?? 0, $e->getMessage()));
                 continue;
             }
-
-            ++$checked;
             if ($result->isUpdated()) {
                 ++$updated;
                 continue;

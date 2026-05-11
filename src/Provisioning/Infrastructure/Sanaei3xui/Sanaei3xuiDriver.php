@@ -236,11 +236,11 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
             $this->log(sprintf('usage_sync_warning panel_id=%s email="%s" reason="missing_usage_payload"', $panel->getId() ?? 'null', $ref->email));
         }
 
-        $upBytes = $this->toNullableInt($obj['up'] ?? null);
-        $downBytes = $this->toNullableInt($obj['down'] ?? null);
-        $allTimeBytes = $this->toNullableInt($obj['allTime'] ?? null);
-        $totalBytes = $this->toNullableInt($obj['total'] ?? ($obj['totalGB'] ?? null));
-        $expiryTimeRaw = $this->toNullableInt($obj['expiryTime'] ?? null);
+        $upBytes = $this->toNonNegativeInt($obj['up'] ?? null);
+        $downBytes = $this->toNonNegativeInt($obj['down'] ?? null);
+        $allTimeBytes = $this->toNonNegativeInt($obj['allTime'] ?? null);
+        $totalBytes = $this->toNonNegativeInt($obj['total'] ?? ($obj['totalGB'] ?? null));
+        $expiryTimeRaw = $this->toNonNegativeInt($obj['expiryTime'] ?? null);
         $isEnabled = isset($obj['enable']) ? (bool) $obj['enable'] : null;
 
         $usedBytes = null;
@@ -455,9 +455,13 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
         error_log('[Sanaei3xuiDriver] '.$message);
     }
 
-    private function toNullableInt(mixed $value): ?int
+    private function toNonNegativeInt(mixed $value): ?int
     {
-        if (null === $value || '' === trim((string) $value) || !is_numeric($value)) {
+        if (null === $value) {
+            return null;
+        }
+
+        if (!is_scalar($value) || !is_numeric($value)) {
             return null;
         }
 
