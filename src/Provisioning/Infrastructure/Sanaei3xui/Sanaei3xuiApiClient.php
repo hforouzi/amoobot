@@ -129,16 +129,28 @@ final class Sanaei3xuiApiClient
             $this->formatDiagnosticContext($context)
         ));
 
+        $payload = [
+            'id' => $inboundId,
+            'settings' => json_encode(['clients' => [$client]], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+        ];
+
+        $this->log(sprintf(
+            'update_client_payload_check endpoint="/panel/api/inbounds/updateClient/%s" payload_id_type="%s" payload_id_value="%s" %s',
+            $clientId,
+            gettype($payload['id']),
+            (string) $payload['id'],
+            $this->formatDiagnosticContext($context)
+        ));
+
+        if (!is_int($payload['id'])) {
+            throw new \RuntimeException('Sanaei updateClient payload id must be integer.');
+        }
+
         $result = $this->request(
             $panel,
             'POST',
             '/panel/api/inbounds/updateClient/'.$clientId,
-            [
-                'json' => [
-                    'id' => $inboundId,
-                    'settings' => json_encode(['clients' => [$client]], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
-                ],
-            ]
+            ['json' => $payload]
         );
 
         $this->log(sprintf(
