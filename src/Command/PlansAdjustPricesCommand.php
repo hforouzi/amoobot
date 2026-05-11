@@ -44,17 +44,17 @@ final class PlansAdjustPricesCommand extends Command
         if (!in_array($direction, ['increase', 'decrease'], true)) {
             $io->error('direction must be increase or decrease.');
 
-            return Command::INVALID;
+            return Command::FAILURE;
         }
         if (!in_array($field, ['price', 'pricePerGb', 'pricePerDay', 'all'], true)) {
             $io->error('field must be price|pricePerGb|pricePerDay|all.');
 
-            return Command::INVALID;
+            return Command::FAILURE;
         }
         if ((null === $percentRaw && null === $amountRaw) || (null !== $percentRaw && null !== $amountRaw)) {
             $io->error('Provide exactly one of --percent or --amount.');
 
-            return Command::INVALID;
+            return Command::FAILURE;
         }
 
         $percent = null;
@@ -64,14 +64,14 @@ final class PlansAdjustPricesCommand extends Command
             if ($percent < 0) {
                 $io->error('percent must be >= 0.');
 
-                return Command::INVALID;
+                return Command::FAILURE;
             }
         } else {
             $amount = (int) $amountRaw;
             if ($amount < 0) {
                 $io->error('amount must be >= 0.');
 
-                return Command::INVALID;
+                return Command::FAILURE;
             }
         }
 

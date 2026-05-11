@@ -55,7 +55,10 @@ final class ServiceRenewalService
                     $baseExpires = $now;
                 }
             } else {
-                $baseExpires = $expiredStartFromNow ? $now : $now;
+                if (!$expiredStartFromNow) {
+                    // Safe default for this phase remains renewal start from now.
+                }
+                $baseExpires = $now;
             }
             if (!$baseExpires instanceof \DateTimeImmutable) {
                 $baseExpires = $now;
