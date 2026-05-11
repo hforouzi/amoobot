@@ -26,6 +26,8 @@ class OrderCrudController extends AbstractCrudController
             IdField::new('id')->onlyOnIndex(),
             AssociationField::new('user'),
             AssociationField::new('plan'),
+            AssociationField::new('targetService'),
+            TextField::new('type'),
             IntegerField::new('amount'),
             TextField::new('status'),
             TextareaField::new('metadata')

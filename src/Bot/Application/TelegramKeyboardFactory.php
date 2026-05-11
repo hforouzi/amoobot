@@ -352,8 +352,12 @@ class TelegramKeyboardFactory
                     'callback_data' => 'service_resend_config:'.$serviceId,
                 ]],
                 [[
-                    'text' => '🔄 بروزرسانی اطلاعات',
-                    'callback_data' => 'service_refresh:'.$serviceId,
+                    'text' => '🔄 تمدید سرویس',
+                    'callback_data' => 'service_renew:'.$serviceId,
+                ]],
+                [[
+                    'text' => '🔄 بروزرسانی مصرف',
+                    'callback_data' => 'service_sync_usage:'.$serviceId,
                 ]],
                 [[
                     'text' => '🔙 بازگشت',
@@ -408,9 +412,17 @@ class TelegramKeyboardFactory
                     'callback_data' => 'service_add_traffic_menu:'.$serviceId,
                 ]],
                 [[
+                    'text' => '🔄 تمدید سرویس',
+                    'callback_data' => 'service_renew:'.$serviceId,
+                ]],
+                [[
                     'text' => '🔄 ریست مصرف',
                     'callback_data' => 'service_reset_usage:'.$serviceId,
                 ], [
+                    'text' => '🔄 بروزرسانی مصرف',
+                    'callback_data' => 'service_sync_usage:'.$serviceId,
+                ]],
+                [[
                     'text' => '📨 ارسال مجدد',
                     'callback_data' => 'service_resend_config:'.$serviceId,
                 ]],
@@ -523,6 +535,27 @@ class TelegramKeyboardFactory
                 [[
                     'text' => '❌ انصراف',
                     'callback_data' => 'admin_service_view:'.$serviceId,
+                ]],
+            ],
+        ];
+    }
+
+    /**
+     * @return array<string, array<array<array<string, string>>>>
+     */
+    public function renewalSummary(int $serviceId, bool $adminMode = false): array
+    {
+        $cancelCallback = $adminMode ? 'admin_service_view:'.$serviceId : 'service_view:'.$serviceId;
+
+        return [
+            'inline_keyboard' => [
+                [[
+                    'text' => '✅ تایید و پرداخت تمدید',
+                    'callback_data' => 'renewal_confirm:'.$serviceId,
+                ]],
+                [[
+                    'text' => '❌ انصراف',
+                    'callback_data' => $cancelCallback,
                 ]],
             ],
         ];

@@ -76,6 +76,18 @@ class VpnService
     #[ORM\Column(nullable: true)]
     private ?int $trafficUsedGb = null;
 
+    #[ORM\Column(type: 'bigint', nullable: true)]
+    private ?int $trafficLimitBytes = null;
+
+    #[ORM\Column(type: 'bigint', nullable: true)]
+    private ?int $trafficUsedBytes = null;
+
+    #[ORM\Column(nullable: true)]
+    private ?\DateTimeImmutable $lastUsageSyncedAt = null;
+
+    #[ORM\Column(nullable: true)]
+    private ?\DateTimeImmutable $lastStatusCheckedAt = null;
+
     #[ORM\Column]
     private \DateTimeImmutable $createdAt;
 
@@ -323,6 +335,54 @@ class VpnService
     public function getCreatedAt(): \DateTimeImmutable
     {
         return $this->createdAt;
+    }
+
+    public function getTrafficLimitBytes(): ?int
+    {
+        return $this->trafficLimitBytes;
+    }
+
+    public function setTrafficLimitBytes(?int $trafficLimitBytes): self
+    {
+        $this->trafficLimitBytes = $trafficLimitBytes;
+
+        return $this;
+    }
+
+    public function getTrafficUsedBytes(): ?int
+    {
+        return $this->trafficUsedBytes;
+    }
+
+    public function setTrafficUsedBytes(?int $trafficUsedBytes): self
+    {
+        $this->trafficUsedBytes = $trafficUsedBytes;
+
+        return $this;
+    }
+
+    public function getLastUsageSyncedAt(): ?\DateTimeImmutable
+    {
+        return $this->lastUsageSyncedAt;
+    }
+
+    public function setLastUsageSyncedAt(?\DateTimeImmutable $lastUsageSyncedAt): self
+    {
+        $this->lastUsageSyncedAt = $lastUsageSyncedAt;
+
+        return $this;
+    }
+
+    public function getLastStatusCheckedAt(): ?\DateTimeImmutable
+    {
+        return $this->lastStatusCheckedAt;
+    }
+
+    public function setLastStatusCheckedAt(?\DateTimeImmutable $lastStatusCheckedAt): self
+    {
+        $this->lastStatusCheckedAt = $lastStatusCheckedAt;
+
+        return $this;
     }
 
     public function getUpdatedAt(): ?\DateTimeImmutable

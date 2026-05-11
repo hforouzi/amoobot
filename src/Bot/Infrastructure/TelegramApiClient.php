@@ -39,6 +39,21 @@ class TelegramApiClient
         $this->botMessageLogger->log(BotMessageDirection::OUTGOING, ['method' => 'sendMessage', 'payload' => $payload], $chatId, 'message');
     }
 
+    public function sendMessageStrict(string $chatId, string $text, ?array $replyMarkup = null): void
+    {
+        $payload = [
+            'chat_id' => $chatId,
+            'text' => $text,
+        ];
+
+        if (null !== $replyMarkup) {
+            $payload['reply_markup'] = $replyMarkup;
+        }
+
+        $this->callApi('sendMessage', $payload);
+        $this->botMessageLogger->log(BotMessageDirection::OUTGOING, ['method' => 'sendMessage', 'payload' => $payload], $chatId, 'message');
+    }
+
     public function answerCallbackQuery(string $callbackQueryId, ?string $text = null, bool $showAlert = false): void
     {
         $payload = ['callback_query_id' => $callbackQueryId];

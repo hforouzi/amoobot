@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Entity;
 
 use App\Shop\Domain\OrderStatus;
+use App\Shop\Domain\OrderType;
 use Doctrine\ORM\Mapping as ORM;
 
 #[ORM\Entity]
@@ -24,8 +25,15 @@ class Order
     #[ORM\JoinColumn(nullable: false, onDelete: 'RESTRICT')]
     private Plan $plan;
 
+    #[ORM\ManyToOne]
+    #[ORM\JoinColumn(nullable: true, onDelete: 'SET NULL')]
+    private ?VpnService $targetService = null;
+
     #[ORM\Column]
     private int $amount;
+
+    #[ORM\Column(length: 50)]
+    private string $type = OrderType::NEW_SERVICE;
 
     #[ORM\Column(length: 50)]
     private string $status = OrderStatus::PENDING;
@@ -84,6 +92,30 @@ class Order
     public function setAmount(int $amount): self
     {
         $this->amount = $amount;
+
+        return $this;
+    }
+
+    public function getType(): string
+    {
+        return $this->type;
+    }
+
+    public function setType(string $type): self
+    {
+        $this->type = $type;
+
+        return $this;
+    }
+
+    public function getTargetService(): ?VpnService
+    {
+        return $this->targetService;
+    }
+
+    public function setTargetService(?VpnService $targetService): self
+    {
+        $this->targetService = $targetService;
 
         return $this;
     }

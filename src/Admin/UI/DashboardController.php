@@ -8,6 +8,7 @@ use App\Admin\UI\Crud\BotMessageLogCrudController;
 use App\Admin\UI\Crud\OrderCrudController;
 use App\Admin\UI\Crud\PaymentCrudController;
 use App\Admin\UI\Crud\PlanCrudController;
+use App\Admin\UI\Crud\ServiceNotificationLogCrudController;
 use App\Admin\UI\Crud\SettingCrudController;
 use App\Admin\UI\Crud\TelegramAccountCrudController;
 use App\Admin\UI\Crud\UserCrudController;
@@ -43,7 +44,10 @@ class DashboardController extends AbstractDashboardController
         yield MenuItem::linkTo(OrderCrudController::class, 'Orders', 'fa fa-shopping-cart');
         yield MenuItem::linkTo(PaymentCrudController::class, 'Payments', 'fa fa-credit-card');
         yield MenuItem::linkTo(VpnServiceCrudController::class, 'VPN Services', 'fa fa-link');
+        yield MenuItem::linkTo(ServiceNotificationLogCrudController::class, 'Service Notifications', 'fa fa-bell');
         yield MenuItem::linkTo(BotMessageLogCrudController::class, 'Bot Logs', 'fa fa-file-text');
         yield MenuItem::linkTo(SettingCrudController::class, 'Settings', 'fa fa-cog');
+        yield MenuItem::linkToRoute('تنظیمات تمدید و قیمتگذاری', 'fa fa-sliders', 'admin_renewal_pricing_settings');
+        yield MenuItem::linkToRoute('تغییر گروهی قیمت پلنها', 'fa fa-percent', 'admin_bulk_plan_price_adjustment');
     }
 }

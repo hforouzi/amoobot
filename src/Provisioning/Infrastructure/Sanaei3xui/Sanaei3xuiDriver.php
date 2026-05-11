@@ -191,7 +191,11 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
         $client = $this->fetchClientByReference($panel, $ref);
         $client['enable'] = true;
 
-        if ($request->durationDays > 0) {
+        if ($request->unlimitedDuration) {
+            $client['expiryTime'] = 0;
+        } elseif ($request->expiresAt instanceof \DateTimeImmutable) {
+            $client['expiryTime'] = $request->expiresAt->getTimestamp() * 1000;
+        } elseif ($request->durationDays > 0) {
             $client['expiryTime'] = $this->durationToMs($request->durationDays);
         }
 
@@ -202,6 +206,19 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
         $result = $this->apiClient->updateClient($panel, $ref->inboundId, $ref->clientId, $client);
         $this->assertPanelResult($result, 'updateClient');
         $this->assertPanelBusinessResult($result, 'updateClient', true);
+
+        try {
+            $verifyResult = $this->apiClient->getClientTraffic($panel, $ref->email);
+            $this->assertPanelResult($verifyResult, 'getClientTraffic');
+            $this->assertPanelBusinessResult($verifyResult, 'getClientTraffic');
+        } catch (\Throwable $e) {
+            $this->log(sprintf(
+                'renew_verify_warning panel_id=%s email="%s" message="%s"',
+                $panel->getId() ?? 'null',
+                $ref->email,
+                $this->sanitizeLogPreview($e->getMessage())
+            ));
+        }
     }
 
     public function deleteService(string $remoteId, ?VpnPanel $panel = null): void
@@ -232,14 +249,44 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
 
         $payload = is_array($result['data'] ?? null) ? $result['data'] : [];
         $obj = is_array($payload['obj'] ?? null) ? $payload['obj'] : $payload;
+        if ([] === $obj) {
+            $this->log(sprintf('usage_sync_warning panel_id=%s email="%s" reason="missing_usage_payload"', $panel->getId() ?? 'null', $ref->email));
+        }
 
-        $upBytes = (int) ($obj['up'] ?? 0);
-        $downBytes = (int) ($obj['down'] ?? 0);
-        $totalBytes = (int) ($obj['total'] ?? ($obj['totalGB'] ?? 0));
+        $upBytes = $this->toNonNegativeInt($obj['up'] ?? null);
+        $downBytes = $this->toNonNegativeInt($obj['down'] ?? null);
+        $allTimeBytes = $this->toNonNegativeInt($obj['allTime'] ?? null);
+        $totalBytes = $this->toNonNegativeInt($obj['total'] ?? ($obj['totalGB'] ?? null));
+        $expiryTimeRaw = $this->toNonNegativeInt($obj['expiryTime'] ?? null);
+        $isEnabled = isset($obj['enable']) ? (bool) $obj['enable'] : null;
+
+        $usedBytes = null;
+        if (null !== $allTimeBytes) {
+            $usedBytes = $allTimeBytes;
+        } elseif (null !== $upBytes || null !== $downBytes) {
+            $usedBytes = max(0, (int) (($upBytes ?? 0) + ($downBytes ?? 0)));
+        } else {
+            $this->log(sprintf('usage_sync_warning panel_id=%s email="%s" reason="missing_up_down_all_time"', $panel->getId() ?? 'null', $ref->email));
+        }
+
+        $expiresAt = null;
+        if (null !== $expiryTimeRaw && $expiryTimeRaw > 0) {
+            $expiresAt = (new \DateTimeImmutable())->setTimestamp((int) floor($expiryTimeRaw / 1000));
+        } elseif (array_key_exists('expiryTime', $obj) && (null === $expiryTimeRaw || $expiryTimeRaw <= 0)) {
+            $this->log(sprintf('usage_sync_warning panel_id=%s email="%s" reason="expiry_non_positive"', $panel->getId() ?? 'null', $ref->email));
+        }
+
+        if (null === $totalBytes && !array_key_exists('total', $obj) && !array_key_exists('totalGB', $obj)) {
+            $this->log(sprintf('usage_sync_warning panel_id=%s email="%s" reason="missing_total_bytes"', $panel->getId() ?? 'null', $ref->email));
+        }
 
         return new VpnUsage(
-            trafficUsedGb: (int) floor(($upBytes + $downBytes) / 1073741824),
-            trafficLimitGb: $totalBytes > 0 ? (int) floor($totalBytes / 1073741824) : null,
+            trafficUsedGb: null !== $usedBytes ? $this->bytesToGb($usedBytes) : null,
+            trafficLimitGb: null !== $totalBytes && $totalBytes > 0 ? $this->bytesToGb($totalBytes) : null,
+            usedBytes: $usedBytes,
+            totalBytes: null !== $totalBytes && $totalBytes > 0 ? $totalBytes : null,
+            expiresAt: $expiresAt,
+            isEnabled: $isEnabled,
         );
     }
 
@@ -402,6 +449,15 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
         return $gb * 1073741824;
     }
 
+    private function bytesToGb(int $bytes): int
+    {
+        if ($bytes <= 0) {
+            return 0;
+        }
+
+        return (int) floor($bytes / 1073741824);
+    }
+
     private function durationToMs(int $durationDays): int
     {
         if ($durationDays <= 0) {
@@ -414,6 +470,21 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
     private function log(string $message): void
     {
         error_log('[Sanaei3xuiDriver] '.$message);
+    }
+
+    private function toNonNegativeInt(mixed $value): ?int
+    {
+        if (null === $value) {
+            return null;
+        }
+
+        if (!is_scalar($value) || !is_numeric($value)) {
+            return null;
+        }
+
+        $number = (int) $value;
+
+        return $number >= 0 ? $number : null;
     }
 
     private function sanitizeLogPreview(string $value, int $max = 120): string

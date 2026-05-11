@@ -9,6 +9,8 @@ class RenewVpnServiceRequest
     public function __construct(
         public readonly int $durationDays,
         public readonly ?int $trafficLimitGb = null,
+        public readonly ?\DateTimeImmutable $expiresAt = null,
+        public readonly bool $unlimitedDuration = false,
     ) {
     }
 }

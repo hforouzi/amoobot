@@ -6,25 +6,42 @@ namespace App\Bot\Application;
 
 use App\Bot\Infrastructure\TelegramApiClient;
 use App\Entity\Order;
+use App\Entity\Payment;
+use App\Entity\Plan;
 use App\Entity\TelegramAccount;
 use App\Entity\User;
 use App\Entity\VpnService;
-use App\Provisioning\Application\VpnAccessLinkGenerator;
+use App\Payment\Domain\PaymentStatus;
+use App\Provisioning\Application\RenewalSettingsProvider;
+use App\Provisioning\Application\ServiceUsageSyncService;
 use App\Provisioning\Domain\Dto\RenewVpnServiceRequest;
 use App\Provisioning\Domain\VpnServiceStatus;
 use App\Provisioning\Infrastructure\VpnPanelDriverRegistry;
+use App\Shared\Infrastructure\SettingValueProvider;
+use App\Shop\Application\PlanPricingService;
+use App\Shop\Application\RenewalPriceResult;
+use App\Shop\Domain\OrderStatus;
+use App\Shop\Domain\OrderType;
 use Doctrine\ORM\EntityManagerInterface;
 use Endroid\QrCode\QrCode;
 use Endroid\QrCode\Writer\PngWriter;
 
 class ServiceManagementService
 {
+    private const BYTES_PER_GB = 1073741824;
+
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
         private readonly TelegramApiClient $telegramApiClient,
         private readonly TelegramKeyboardFactory $keyboardFactory,
         private readonly VpnPanelDriverRegistry $driverRegistry,
-        private readonly VpnAccessLinkGenerator $vpnAccessLinkGenerator,
+        private readonly ServiceUsageSyncService $serviceUsageSyncService,
+        private readonly SettingValueProvider $settingValueProvider,
+        private readonly RenewalSettingsProvider $renewalSettingsProvider,
+        private readonly PlanPricingService $planPricingService,
+        private readonly string $paymentCardNumber = '',
+        private readonly string $paymentCardHolder = '',
+        private readonly ?string $paymentDescription = null,
     ) {
     }
 
@@ -241,6 +258,11 @@ class ServiceManagementService
 
     public function refreshUserService(TelegramAccount $account, int $serviceId, string $chatId, string $callbackId): void
     {
+        $this->syncServiceUsage($account, $serviceId, $chatId, $callbackId, false);
+    }
+
+    public function syncServiceUsage(TelegramAccount $account, int $serviceId, string $chatId, string $callbackId, bool $adminMode): void
+    {
         $service = $this->entityManager->getRepository(VpnService::class)->find($serviceId);
         if (!$service instanceof VpnService) {
             $this->showPopupOrMessage($chatId, $callbackId, 'سرویس معتبر نیست.', 'invalid_service_refresh_user');
@@ -248,36 +270,185 @@ class ServiceManagementService
             return;
         }
 
-        if ($service->getUser()->getId() !== $account->getUser()->getId()) {
+        if (!$adminMode && $service->getUser()->getId() !== $account->getUser()->getId()) {
             $this->showPopupOrMessage($chatId, $callbackId, 'دسترسی غیرمجاز.', 'unauthorized_service_refresh_user');
 
             return;
         }
 
-        if ($this->shouldSyncWithPanel($service)) {
-            try {
-                $this->syncServiceUsageFromPanel($service);
-            } catch (\Throwable $e) {
-                $this->debugLog(sprintf('service_sync_failure action=refresh service_id=%d message="%s"', $serviceId, $e->getMessage()));
-                $this->showPopupOrMessage($chatId, $callbackId, 'عملیات روی پنل انجام نشد. لاگ را بررسی کنید.', 'panel_refresh_failed');
+        try {
+            $result = $this->serviceUsageSyncService->syncOne($service);
+        } catch (\Throwable $e) {
+            $this->debugLog(sprintf('service_sync_failure action=sync_usage service_id=%d message="%s"', $serviceId, $e->getMessage()));
+            $this->showPopupOrMessage($chatId, $callbackId, 'عملیات روی پنل انجام نشد. لاگ را بررسی کنید.', 'panel_refresh_failed');
 
-                return;
-            }
+            return;
         }
 
-        $links = $this->vpnAccessLinkGenerator->generate($service);
-        $configLinks = $links['configLinks'] ?? [];
-        $service
-            ->setSubscriptionUrl(($links['subscriptionUrl'] ?? $service->getSubscriptionUrl()) ?: $service->getSubscriptionUrl())
-            ->setConfigLinks($configLinks)
-            ->setConfigText(is_array($configLinks) && [] !== $configLinks ? implode("\n", $configLinks) : null)
-            ->setLastAccessInfoSyncedAt(new \DateTimeImmutable())
-            ->setUpdatedAt(new \DateTimeImmutable());
-        $this->entityManager->flush();
+        if ($result->isFailed()) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'عملیات بروزرسانی مصرف انجام نشد.', 'panel_refresh_failed');
+
+            return;
+        }
 
         $this->entityManager->refresh($service);
         $this->acknowledgeCallback($callbackId);
-        $this->telegramApiClient->sendMessage($chatId, $this->formatServiceDetailForUser($service), $this->keyboardFactory->userServiceDetail((int) $service->getId()));
+        if ($adminMode) {
+            $this->telegramApiClient->sendMessage(
+                $chatId,
+                $this->formatServiceDetailForAdmin($service),
+                $this->keyboardFactory->adminServiceDetail((int) $service->getId(), (int) $service->getUser()->getId())
+            );
+
+            return;
+        }
+
+        $this->telegramApiClient->sendMessage(
+            $chatId,
+            $this->formatServiceDetailForUser($service),
+            $this->keyboardFactory->userServiceDetail((int) $service->getId())
+        );
+    }
+
+    public function showRenewalSummary(TelegramAccount $account, int $serviceId, string $chatId, string $callbackId, bool $adminMode): void
+    {
+        $service = $this->findServiceOrPopup($serviceId, $chatId, $callbackId, 'invalid_service_renew');
+        if (!$service instanceof VpnService) {
+            return;
+        }
+
+        if (!$adminMode && $service->getUser()->getId() !== $account->getUser()->getId()) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'دسترسی غیرمجاز.', 'unauthorized_service_renew');
+
+            return;
+        }
+
+        if (VpnServiceStatus::DELETED === $service->getStatus()) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'امکان تمدید این سرویس وجود ندارد.', 'invalid_service_renew_deleted');
+
+            return;
+        }
+
+        $package = $this->resolveRenewalPackage($service);
+        if (null === $package) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'امکان تمدید خودکار برای این سرویس وجود ندارد. لطفاً با پشتیبانی تماس بگیرید.', 'renewal_package_missing');
+
+            return;
+        }
+
+        $durationText = $package['unlimitedDuration'] ? 'نامحدود' : ((string) $package['durationDays'].' روز');
+        $carryTrafficText = $package['carryRemainingTraffic'] ? 'بله' : 'خیر';
+        $carryDaysText = $package['carryRemainingDays'] ? 'بله' : 'خیر';
+        $summary = sprintf(
+            "تمدید سرویس #%d\nحجم تمدید: %d گیگ\nمدت تمدید: %s\nحفظ حجم باقیمانده: %s\nحفظ روزهای باقیمانده: %s\nمبلغ پایه: %d تومان\nتخفیف: %d%%\nمبلغ تخفیف: %d تومان\nمبلغ نهایی: %d تومان",
+            $serviceId,
+            $package['trafficGb'],
+            $durationText,
+            $carryTrafficText,
+            $carryDaysText,
+            $package['baseAmount'],
+            $package['discountPercent'],
+            $package['discountAmount'],
+            $package['amount']
+        );
+
+        $this->acknowledgeCallback($callbackId);
+        $this->telegramApiClient->sendMessage(
+            $chatId,
+            $summary,
+            $this->keyboardFactory->renewalSummary($serviceId, $adminMode)
+        );
+    }
+
+    public function confirmRenewal(TelegramAccount $account, int $serviceId, string $chatId, string $callbackId, bool $adminMode): void
+    {
+        $service = $this->findServiceOrPopup($serviceId, $chatId, $callbackId, 'invalid_service_renew_confirm');
+        if (!$service instanceof VpnService) {
+            return;
+        }
+
+        if (!$adminMode && $service->getUser()->getId() !== $account->getUser()->getId()) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'دسترسی غیرمجاز.', 'unauthorized_service_renew_confirm');
+
+            return;
+        }
+
+        if (VpnServiceStatus::DELETED === $service->getStatus()) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'امکان تمدید این سرویس وجود ندارد.', 'invalid_service_renew_confirm_deleted');
+
+            return;
+        }
+
+        $package = $this->resolveRenewalPackage($service);
+        if (null === $package) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'امکان تمدید خودکار برای این سرویس وجود ندارد. لطفاً با پشتیبانی تماس بگیرید.', 'renewal_confirm_package_missing');
+
+            return;
+        }
+
+        /** @var Plan $plan */
+        $plan = $package['plan'];
+        $metadata = [
+            'renewal' => true,
+            'targetServiceId' => $service->getId(),
+            'trafficGb' => $package['trafficGb'],
+            'durationDays' => $package['durationDays'],
+            'unlimitedDuration' => $package['unlimitedDuration'],
+            'priceSnapshot' => [
+                'baseAmount' => $package['baseAmount'],
+                'discountPercent' => $package['discountPercent'],
+                'discountAmount' => $package['discountAmount'],
+                'finalAmount' => $package['amount'],
+                'planPriceSource' => 'current_plan',
+            ],
+            'renewalPolicy' => [
+                'carryRemainingTraffic' => $package['carryRemainingTraffic'],
+                'carryRemainingDays' => $package['carryRemainingDays'],
+            ],
+        ];
+
+        $order = (new Order())
+            ->setUser($service->getUser())
+            ->setPlan($plan)
+            ->setTargetService($service)
+            ->setType(OrderType::RENEWAL)
+            ->setAmount($package['amount'])
+            ->setMetadata($metadata)
+            ->setStatus(OrderStatus::WAITING_PAYMENT);
+
+        $payment = (new Payment())
+            ->setOrder($order)
+            ->setMethod('manual_card')
+            ->setAmount($package['amount'])
+            ->setStatus(PaymentStatus::PENDING);
+
+        $this->entityManager->persist($order);
+        $this->entityManager->persist($payment);
+        $this->entityManager->flush();
+
+        $cardNumber = $this->settingValueProvider->get('payment.card_number', $this->paymentCardNumber);
+        $cardHolder = $this->settingValueProvider->get('payment.card_holder', $this->paymentCardHolder);
+        $description = $this->settingValueProvider->get('payment.description', $this->paymentDescription);
+        $durationText = $package['unlimitedDuration'] ? 'نامحدود' : ((string) $package['durationDays'].' روز');
+
+        $message = sprintf(
+            "تمدید سرویس #%d\nحجم تمدید: %d گیگ\nمدت تمدید: %s\nحفظ حجم باقیمانده: %s\nحفظ روزهای باقیمانده: %s\nمبلغ پایه: %d تومان\nتخفیف: %d%%\nمبلغ تخفیف: %d تومان\nمبلغ نهایی: %d تومان\nشماره کارت: %s\nبه نام: %s\n%s\n\nبرای ارسال رسید روی «✅ تایید و ارسال رسید» بزنید.",
+            $serviceId,
+            $package['trafficGb'],
+            $durationText,
+            $package['carryRemainingTraffic'] ? 'بله' : 'خیر',
+            $package['carryRemainingDays'] ? 'بله' : 'خیر',
+            $package['baseAmount'],
+            $package['discountPercent'],
+            $package['discountAmount'],
+            $package['amount'],
+            $cardNumber ?: '-',
+            $cardHolder ?: '-',
+            $description ? 'توضیحات: '.$description : ''
+        );
+
+        $this->acknowledgeCallback($callbackId);
+        $this->telegramApiClient->sendMessage($chatId, trim($message), $this->keyboardFactory->paymentActionMenu((int) $payment->getId()));
     }
 
     public function suspendService(int $serviceId, string $chatId, string $callbackId): void
@@ -425,6 +596,7 @@ class ServiceManagementService
 
         $service
             ->setTrafficUsedGb(0)
+            ->setTrafficUsedBytes(0)
             ->setUpdatedAt(new \DateTimeImmutable());
         $this->entityManager->flush();
 
@@ -498,8 +670,16 @@ class ServiceManagementService
         }
 
         $currentLimit = $service->getTrafficLimitGb() ?? 0;
+        $newLimitGb = $currentLimit + $trafficGb;
+        $maxSafeGbForBytes = intdiv(PHP_INT_MAX, self::BYTES_PER_GB);
+        if ($newLimitGb > $maxSafeGbForBytes) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'حداکثر حجم پشتیبانی‌شده عبور کرده است.', 'traffic_limit_overflow');
+
+            return;
+        }
         $service
-            ->setTrafficLimitGb($currentLimit + $trafficGb)
+            ->setTrafficLimitGb($newLimitGb)
+            ->setTrafficLimitBytes($newLimitGb * self::BYTES_PER_GB)
             ->setUpdatedAt(new \DateTimeImmutable());
         $this->entityManager->flush();
 
@@ -605,6 +785,45 @@ class ServiceManagementService
         $this->telegramApiClient->sendMessage($chatId, implode("\n", $lines), $this->keyboardFactory->adminUserDetail($userId, $backServiceId));
     }
 
+    /**
+     * @return array{plan: Plan, amount: int, trafficGb: int, durationDays: int, unlimitedDuration: bool, baseAmount: int, discountPercent: int, discountAmount: int, carryRemainingTraffic: bool, carryRemainingDays: bool}|null
+     */
+    private function resolveRenewalPackage(VpnService $service): ?array
+    {
+        $sourceOrder = $service->getOrder();
+        if (!$sourceOrder instanceof Order) {
+            return null;
+        }
+
+        $plan = $sourceOrder->getPlan();
+        if (!$plan instanceof Plan) {
+            return null;
+        }
+
+        $priceResult = $this->planPricingService->calculateRenewalAmount($service, $plan);
+        if (!$priceResult instanceof RenewalPriceResult) {
+            return null;
+        }
+        if ($priceResult->finalAmount <= 0) {
+            return null;
+        }
+        $carryRemainingTraffic = $this->renewalSettingsProvider->carryRemainingTraffic();
+        $carryRemainingDays = $this->renewalSettingsProvider->carryRemainingDays();
+
+        return [
+            'plan' => $plan,
+            'amount' => $priceResult->finalAmount,
+            'trafficGb' => $priceResult->trafficGb,
+            'durationDays' => $priceResult->durationDays,
+            'unlimitedDuration' => $priceResult->unlimitedDuration,
+            'baseAmount' => $priceResult->baseAmount,
+            'discountPercent' => $priceResult->discountPercent,
+            'discountAmount' => $priceResult->discountAmount,
+            'carryRemainingTraffic' => $carryRemainingTraffic,
+            'carryRemainingDays' => $carryRemainingDays,
+        ];
+    }
+
     private function findServiceOrPopup(int $serviceId, string $chatId, ?string $callbackId, string $logKey): ?VpnService
     {
         $service = $this->entityManager->getRepository(VpnService::class)->find($serviceId);
@@ -620,23 +839,24 @@ class ServiceManagementService
     private function formatServiceDetailForUser(VpnService $service): string
     {
         $inbound = $service->getInbound();
-        $limit = $service->getTrafficLimitGb();
-        $used = $service->getTrafficUsedGb() ?? 0;
-        $remaining = null === $limit ? 'نامحدود' : max($limit - $used, 0).' GB';
+        $limit = $this->formatTrafficLimit($service);
+        $used = $this->formatTrafficUsed($service);
+        $remaining = $this->formatTrafficRemaining($service);
         $ipLimit = $service->getIpLimit();
 
         return sprintf(
-            "سرویس #%d\nوضعیت: %s\nسرور/کشور: %s\nپروتکل/شبکه/امنیت: %s / %s / %s\nتاریخ انقضا: %s\nحجم کل: %s\nمصرف: %s\nباقیمانده: %s\nمحدودیت IP: %s\nلینک اشتراک: %s",
+            "سرویس #%d\nوضعیت: %s\nسرور/کشور: %s\nپروتکل/شبکه/امنیت: %s / %s / %s\nتاریخ انقضا: %s\nحجم کل: %s\nمصرف: %s\nباقیمانده: %s\nآخرین بروزرسانی مصرف: %s\nمحدودیت IP: %s\nلینک اشتراک: %s",
             $service->getId(),
             $this->statusLabel($service->getStatus()),
             sprintf('%s / %s', $inbound?->getHost() ?? '-', $inbound?->getCountry() ?? '-'),
             $inbound?->getProtocol() ?? '-',
             $inbound?->getNetwork() ?? '-',
             $inbound?->getSecurity() ?? '-',
-            $service->getExpiresAt()?->format('Y-m-d H:i:s') ?? '-',
-            null === $limit ? 'نامحدود' : $limit.' GB',
-            $used.' GB',
+            $service->getExpiresAt()?->format('Y-m-d H:i:s') ?? 'نامحدود',
+            $limit,
+            $used,
             $remaining,
+            $service->getLastUsageSyncedAt()?->format('Y-m-d H:i:s') ?? '-',
             null === $ipLimit ? 'پیشفرض/نامحدود' : (string) $ipLimit,
             $service->getSubscriptionUrl() ?: '-'
         );
@@ -644,17 +864,17 @@ class ServiceManagementService
 
     private function formatServiceDetailForAdmin(VpnService $service): string
     {
-        $limit = $service->getTrafficLimitGb();
-        $used = $service->getTrafficUsedGb() ?? 0;
-
         return sprintf(
-            "سرویس #%d\nکاربر: %s\nوضعیت: %s\nانقضا: %s\nترافیک: %s / %s GB\nاشتراک: %s\nپیشنمایش کانفیگ: %s\nایجاد: %s",
+            "سرویس #%d\nکاربر: %s\nوضعیت: %s\nانقضا: %s\nحجم کل: %s\nمصرف: %s\nباقیمانده: %s\nآخرین بروزرسانی مصرف: %s\nآخرین بررسی وضعیت: %s\nاشتراک: %s\nپیشنمایش کانفیگ: %s\nایجاد: %s",
             $service->getId(),
             $this->formatTelegramIdentity($service->getUser()->getTelegramAccount()),
             $this->statusLabel($service->getStatus()),
-            $service->getExpiresAt()?->format('Y-m-d H:i:s') ?? '-',
-            $used,
-            null === $limit ? '∞' : (string) $limit,
+            $service->getExpiresAt()?->format('Y-m-d H:i:s') ?? 'نامحدود',
+            $this->formatTrafficLimit($service),
+            $this->formatTrafficUsed($service),
+            $this->formatTrafficRemaining($service),
+            $service->getLastUsageSyncedAt()?->format('Y-m-d H:i:s') ?? '-',
+            $service->getLastStatusCheckedAt()?->format('Y-m-d H:i:s') ?? '-',
             $this->preview($service->getSubscriptionUrl(), 80),
             $this->preview($service->getConfigText(), 120),
             $service->getCreatedAt()->format('Y-m-d H:i:s')
@@ -722,23 +942,55 @@ class ServiceManagementService
         error_log('[ServiceManagementService] '.$message);
     }
 
-    private function syncServiceUsageFromPanel(VpnService $service): void
-    {
-        $driver = $this->driverRegistry->resolve($service->getPanel());
-        $usage = $driver->getUsage((string) $service->getRemoteId(), $service->getPanel());
-
-        $service
-            ->setTrafficUsedGb($usage->trafficUsedGb ?? $service->getTrafficUsedGb())
-            ->setTrafficLimitGb($usage->trafficLimitGb ?? $service->getTrafficLimitGb())
-            ->setUpdatedAt(new \DateTimeImmutable());
-        $this->entityManager->flush();
-    }
-
     private function shouldSyncWithPanel(VpnService $service): bool
     {
         $panel = $service->getPanel();
 
         return null !== $panel && 'sanaei_3xui' === $panel->getType();
+    }
+
+    private function formatTrafficUsed(VpnService $service): string
+    {
+        if (null !== $service->getTrafficUsedBytes()) {
+            return sprintf('%.2f GB', $service->getTrafficUsedBytes() / self::BYTES_PER_GB);
+        }
+
+        if (null !== $service->getTrafficUsedGb()) {
+            return sprintf('%d GB', $service->getTrafficUsedGb());
+        }
+
+        return '-';
+    }
+
+    private function formatTrafficLimit(VpnService $service): string
+    {
+        if (null !== $service->getTrafficLimitBytes()) {
+            return sprintf('%.2f GB', $service->getTrafficLimitBytes() / self::BYTES_PER_GB);
+        }
+
+        if (null !== $service->getTrafficLimitGb()) {
+            return sprintf('%d GB', $service->getTrafficLimitGb());
+        }
+
+        return 'نامحدود';
+    }
+
+    private function formatTrafficRemaining(VpnService $service): string
+    {
+        if (null !== $service->getTrafficLimitBytes()) {
+            $usedBytes = $service->getTrafficUsedBytes() ?? 0;
+            $remainingBytes = max($service->getTrafficLimitBytes() - $usedBytes, 0);
+
+            return sprintf('%.2f GB', $remainingBytes / self::BYTES_PER_GB);
+        }
+
+        if (null !== $service->getTrafficLimitGb()) {
+            $remainingGb = max($service->getTrafficLimitGb() - ($service->getTrafficUsedGb() ?? 0), 0);
+
+            return sprintf('%d GB', $remainingGb);
+        }
+
+        return 'نامحدود';
     }
 
     /**

@@ -16,6 +16,8 @@ use Doctrine\ORM\EntityManagerInterface;
 
 class VpnProvisioningService
 {
+    private const BYTES_PER_GB = 1073741824;
+
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
         private readonly VpnPanelDriverRegistry $driverRegistry,
@@ -95,7 +97,9 @@ class VpnProvisioningService
             ->setStartsAt(new \DateTimeImmutable())
             ->setExpiresAt($unlimitedDuration ? null : (new \DateTimeImmutable())->modify('+'.$durationDays.' days'))
             ->setTrafficLimitGb($trafficLimitValue)
-            ->setTrafficUsedGb(0);
+            ->setTrafficUsedGb(0)
+            ->setTrafficLimitBytes(null === $trafficLimitValue ? null : ($trafficLimitValue * self::BYTES_PER_GB))
+            ->setTrafficUsedBytes(0);
 
         $panelType = strtolower(trim((string) ($panel?->getType() ?? '')));
         $createdConfigText = trim((string) ($created->configText ?? ''));

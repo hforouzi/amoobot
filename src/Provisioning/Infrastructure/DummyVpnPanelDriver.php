@@ -53,6 +53,6 @@ class DummyVpnPanelDriver implements VpnPanelDriverInterface
 
     public function getUsage(string $remoteId, ?VpnPanel $panel = null): VpnUsage
     {
-        return new VpnUsage(trafficUsedGb: 0, trafficLimitGb: null);
+        return new VpnUsage(trafficUsedGb: 0, trafficLimitGb: null, usedBytes: 0, totalBytes: null);
     }
 }

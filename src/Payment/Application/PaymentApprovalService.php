@@ -7,8 +7,10 @@ namespace App\Payment\Application;
 use App\Entity\Payment;
 use App\Entity\VpnService;
 use App\Payment\Domain\PaymentStatus;
+use App\Provisioning\Application\ServiceRenewalService;
 use App\Provisioning\Application\VpnProvisioningService;
 use App\Shop\Domain\OrderStatus;
+use App\Shop\Domain\OrderType;
 use Doctrine\ORM\EntityManagerInterface;
 
 class PaymentApprovalService
@@ -16,6 +18,7 @@ class PaymentApprovalService
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
         private readonly VpnProvisioningService $vpnProvisioningService,
+        private readonly ServiceRenewalService $serviceRenewalService,
     ) {
     }
 
@@ -25,7 +28,8 @@ class PaymentApprovalService
         $plan = $order->getPlan();
         $inbound = $plan->getInbound();
         $panel = $inbound?->getPanel();
-        $existingService = $this->entityManager->getRepository(VpnService::class)->findOneBy(['order' => $order]);
+        $isRenewal = OrderType::RENEWAL === $order->getType();
+        $existingService = $isRenewal ? null : $this->entityManager->getRepository(VpnService::class)->findOneBy(['order' => $order]);
 
         error_log(sprintf(
             '[PaymentApprovalService] confirm_start source=%s payment_id=%d order_id=%d plan_id=%d plan_inbound_id=%d panel_id=%d panel_type="%s"',
@@ -63,6 +67,9 @@ class PaymentApprovalService
         if (PaymentStatus::REJECTED === $payment->getStatus()) {
             return PaymentApprovalResult::alreadyProcessed('Payment was already rejected.');
         }
+        if (PaymentStatus::CONFIRMED === $payment->getStatus() || OrderStatus::PROVISIONED === $order->getStatus()) {
+            return PaymentApprovalResult::alreadyProcessed('Payment was already processed.');
+        }
 
         $payment
             ->setStatus(PaymentStatus::CONFIRMED)
@@ -72,6 +79,36 @@ class PaymentApprovalService
             $order
                 ->setStatus(OrderStatus::PAID)
                 ->setPaidAt($order->getPaidAt() ?? new \DateTimeImmutable());
+        }
+
+        if ($isRenewal) {
+            $targetService = $order->getTargetService();
+            if (!$targetService instanceof VpnService) {
+                return new PaymentApprovalResult(false, false, 'سرویس هدف برای تمدید پیدا نشد.');
+            }
+
+            try {
+                $this->serviceRenewalService->renew($targetService, $order);
+            } catch (\Throwable $e) {
+                error_log(sprintf(
+                    '[PaymentApprovalService] renewal_failed source=%s payment_id=%d order_id=%d service_id=%d message="%s"',
+                    $source,
+                    $payment->getId() ?? 0,
+                    $order->getId() ?? 0,
+                    $targetService->getId() ?? 0,
+                    $e->getMessage()
+                ));
+
+                return new PaymentApprovalResult(false, false, 'تمدید سرویس در پنل انجام نشد. لاگ را بررسی کنید.');
+            }
+
+            $order
+                ->setStatus(OrderStatus::PROVISIONED)
+                ->setProvisionedAt($order->getProvisionedAt() ?? new \DateTimeImmutable());
+
+            $this->entityManager->flush();
+
+            return PaymentApprovalResult::processed('Payment confirmed and service renewed.', $targetService);
         }
 
         try {
@@ -107,7 +144,8 @@ class PaymentApprovalService
     public function reject(Payment $payment, ?string $reason = null): PaymentApprovalResult
     {
         $order = $payment->getOrder();
-        $existingService = $this->entityManager->getRepository(VpnService::class)->findOneBy(['order' => $order]);
+        $isRenewal = OrderType::RENEWAL === $order->getType();
+        $existingService = $isRenewal ? null : $this->entityManager->getRepository(VpnService::class)->findOneBy(['order' => $order]);
 
         if ($existingService instanceof VpnService || PaymentStatus::CONFIRMED === $payment->getStatus() || OrderStatus::PROVISIONED === $order->getStatus()) {
             return PaymentApprovalResult::alreadyProcessed('Payment has already been confirmed/provisioned.');
