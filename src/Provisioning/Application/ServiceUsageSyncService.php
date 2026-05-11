@@ -195,6 +195,7 @@ final class ServiceUsageSyncService
         $safe = trim($message);
         $safe = preg_replace('/https?:\/\/\S+/i', '[url-redacted]', $safe) ?? $safe;
         $safe = preg_replace('/("?(?:password|passwd|token|cookie|session|authorization|secret|api[_-]?key)"?\s*[:=]\s*)"[^"]*"/i', '$1"[redacted]"', $safe) ?? $safe;
+        $safe = preg_replace('/("?(?:password|passwd|token|cookie|session|authorization|secret|api[_-]?key)"?\s*[:=]\s*)([^\s"&]+)/i', '$1[redacted]', $safe) ?? $safe;
         $safe = preg_replace('/\s+/', ' ', $safe) ?? $safe;
 
         return mb_substr($safe, 0, 300);

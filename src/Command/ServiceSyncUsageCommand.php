@@ -164,7 +164,7 @@ final class ServiceSyncUsageCommand extends Command
         return sprintf(
             'ok(inbound=%s,uuid=%s,email=%s,panel=%s,localInbound=%s)',
             $parsed->inboundId,
-            $this->truncate($parsed->clientId, 16),
+            $this->truncate($parsed->clientId, 32),
             $parsed->email,
             null !== $parsed->panelId ? (string) $parsed->panelId : 'null',
             null !== $parsed->localInboundId ? (string) $parsed->localInboundId : 'null'
