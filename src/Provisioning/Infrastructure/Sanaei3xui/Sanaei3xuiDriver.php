@@ -15,6 +15,8 @@ use Symfony\Component\Uid\Uuid;
 
 final class Sanaei3xuiDriver implements VpnPanelDriverInterface
 {
+    private const BYTES_PER_GB = 1073741824;
+
     public function __construct(
         private readonly Sanaei3xuiApiClient $apiClient,
         private readonly Sanaei3xuiRemoteIdParser $remoteIdParser,
@@ -285,7 +287,7 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
             $obj = is_array($payload['obj'] ?? null) ? $payload['obj'] : [];
             $remoteTotal = $this->toNonNegativeInt($obj['total'] ?? ($obj['totalGB'] ?? null));
             $expectedTotal = $this->gbToBytes($trafficLimitGb);
-            if (null !== $remoteTotal && abs($remoteTotal - $expectedTotal) > 1073741824) {
+            if (null !== $remoteTotal && abs($remoteTotal - $expectedTotal) > self::BYTES_PER_GB) {
                 $this->log(sprintf(
                     'add_traffic_verify_warning panel_id=%s email="%s" expected_total=%d remote_total=%d',
                     $panel->getId() ?? 'null',
@@ -531,7 +533,7 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
             return 0;
         }
 
-        return $gb * 1073741824;
+        return $gb * self::BYTES_PER_GB;
     }
 
     private function bytesToGb(int $bytes): int
@@ -540,7 +542,7 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
             return 0;
         }
 
-        return (int) floor($bytes / 1073741824);
+        return (int) floor($bytes / self::BYTES_PER_GB);
     }
 
     private function durationToMs(int $durationDays): int

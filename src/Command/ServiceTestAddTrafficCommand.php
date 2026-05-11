@@ -38,7 +38,7 @@ final class ServiceTestAddTrafficCommand extends Command
     {
         $io = new SymfonyStyle($input, $output);
         $serviceId = (int) $input->getArgument('serviceId');
-        $trafficGb = max(0, (int) $input->getOption('traffic-gb'));
+        $trafficGb = (int) $input->getOption('traffic-gb');
 
         if ($serviceId <= 0 || $trafficGb <= 0) {
             $io->error('serviceId and traffic-gb must be greater than zero.');
