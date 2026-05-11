@@ -335,36 +335,40 @@ class TelegramKeyboardFactory
     /**
      * @return array<string, array<array<array<string, string>>>>
      */
-    public function userServiceDetail(int $serviceId): array
+    public function userServiceDetail(int $serviceId, bool $canRenew = true): array
     {
-        return [
-            'inline_keyboard' => [
-                [[
-                    'text' => '🔗 لینک اشتراک',
-                    'callback_data' => 'service_subscription:'.$serviceId,
-                ]],
-                [[
-                    'text' => '📷 QR لینک اشتراک',
-                    'callback_data' => 'service_subscription_qr:'.$serviceId,
-                ]],
-                [[
-                    'text' => '📨 ارسال مجدد کانفیگ',
-                    'callback_data' => 'service_resend_config:'.$serviceId,
-                ]],
-                [[
-                    'text' => '🔄 تمدید سرویس',
-                    'callback_data' => 'service_renew:'.$serviceId,
-                ]],
-                [[
-                    'text' => '🔄 بروزرسانی مصرف',
-                    'callback_data' => 'service_sync_usage:'.$serviceId,
-                ]],
-                [[
-                    'text' => '🔙 بازگشت',
-                    'callback_data' => 'my_services',
-                ]],
-            ],
+        $rows = [
+            [[
+                'text' => '🔗 لینک اشتراک',
+                'callback_data' => 'service_subscription:'.$serviceId,
+            ]],
+            [[
+                'text' => '📷 QR لینک اشتراک',
+                'callback_data' => 'service_subscription_qr:'.$serviceId,
+            ]],
+            [[
+                'text' => '📨 ارسال مجدد کانفیگ',
+                'callback_data' => 'service_resend_config:'.$serviceId,
+            ]],
         ];
+
+        if ($canRenew) {
+            $rows[] = [[
+                'text' => '🔄 تمدید سرویس',
+                'callback_data' => 'service_renew:'.$serviceId,
+            ]];
+        }
+
+        $rows[] = [[
+            'text' => '🔄 بروزرسانی مصرف',
+            'callback_data' => 'service_sync_usage:'.$serviceId,
+        ]];
+        $rows[] = [[
+            'text' => '🔙 بازگشت',
+            'callback_data' => 'my_services',
+        ]];
+
+        return ['inline_keyboard' => $rows];
     }
 
     /**
