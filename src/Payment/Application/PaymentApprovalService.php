@@ -7,6 +7,7 @@ namespace App\Payment\Application;
 use App\Entity\Payment;
 use App\Entity\VpnService;
 use App\Payment\Domain\PaymentStatus;
+use App\Provisioning\Application\ServiceTrafficAddonService;
 use App\Provisioning\Application\ServiceRenewalService;
 use App\Provisioning\Application\VpnProvisioningService;
 use App\Shop\Domain\OrderStatus;
@@ -19,6 +20,7 @@ class PaymentApprovalService
         private readonly EntityManagerInterface $entityManager,
         private readonly VpnProvisioningService $vpnProvisioningService,
         private readonly ServiceRenewalService $serviceRenewalService,
+        private readonly ServiceTrafficAddonService $serviceTrafficAddonService,
     ) {
     }
 
@@ -29,7 +31,8 @@ class PaymentApprovalService
         $inbound = $plan->getInbound();
         $panel = $inbound?->getPanel();
         $isRenewal = OrderType::RENEWAL === $order->getType();
-        $existingService = $isRenewal ? null : $this->entityManager->getRepository(VpnService::class)->findOneBy(['order' => $order]);
+        $isAddTraffic = OrderType::ADD_TRAFFIC === $order->getType();
+        $existingService = ($isRenewal || $isAddTraffic) ? null : $this->entityManager->getRepository(VpnService::class)->findOneBy(['order' => $order]);
 
         error_log(sprintf(
             '[PaymentApprovalService] confirm_start source=%s payment_id=%d order_id=%d plan_id=%d plan_inbound_id=%d panel_id=%d panel_type="%s"',
@@ -111,6 +114,42 @@ class PaymentApprovalService
             return PaymentApprovalResult::processed('Payment confirmed and service renewed.', $targetService);
         }
 
+        if ($isAddTraffic) {
+            $targetService = $order->getTargetService();
+            if (!$targetService instanceof VpnService) {
+                return new PaymentApprovalResult(false, false, 'سرویس هدف برای خرید حجم اضافه پیدا نشد.');
+            }
+
+            $metadata = is_array($order->getMetadata()) ? $order->getMetadata() : [];
+            $trafficGb = (int) ($metadata['trafficGb'] ?? 0);
+            if ($trafficGb <= 0) {
+                return new PaymentApprovalResult(false, false, 'حجم درخواستی برای خرید حجم اضافه معتبر نیست.');
+            }
+
+            try {
+                $this->serviceTrafficAddonService->addTraffic($targetService, $trafficGb, $order);
+            } catch (\Throwable $e) {
+                error_log(sprintf(
+                    '[PaymentApprovalService] add_traffic_failed source=%s payment_id=%d order_id=%d service_id=%d message="%s"',
+                    $source,
+                    $payment->getId() ?? 0,
+                    $order->getId() ?? 0,
+                    $targetService->getId() ?? 0,
+                    $e->getMessage()
+                ));
+
+                return new PaymentApprovalResult(false, false, 'افزایش حجم سرویس در پنل انجام نشد. لاگ را بررسی کنید.');
+            }
+
+            $order
+                ->setStatus(OrderStatus::PROVISIONED)
+                ->setProvisionedAt($order->getProvisionedAt() ?? new \DateTimeImmutable());
+
+            $this->entityManager->flush();
+
+            return PaymentApprovalResult::processed('Payment confirmed and service traffic updated.', $targetService);
+        }
+
         try {
             $vpnService = $this->vpnProvisioningService->provisionOrder($order, [
                 'source' => $source,
@@ -145,7 +184,8 @@ class PaymentApprovalService
     {
         $order = $payment->getOrder();
         $isRenewal = OrderType::RENEWAL === $order->getType();
-        $existingService = $isRenewal ? null : $this->entityManager->getRepository(VpnService::class)->findOneBy(['order' => $order]);
+        $isAddTraffic = OrderType::ADD_TRAFFIC === $order->getType();
+        $existingService = ($isRenewal || $isAddTraffic) ? null : $this->entityManager->getRepository(VpnService::class)->findOneBy(['order' => $order]);
 
         if ($existingService instanceof VpnService || PaymentStatus::CONFIRMED === $payment->getStatus() || OrderStatus::PROVISIONED === $order->getStatus()) {
             return PaymentApprovalResult::alreadyProcessed('Payment has already been confirmed/provisioned.');

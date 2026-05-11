@@ -28,9 +28,15 @@ class PaymentConfirmationService
             $telegramAccount = $this->entityManager->getRepository(TelegramAccount::class)->findOneBy(['user' => $payment->getOrder()->getUser()]);
             if ($telegramAccount instanceof TelegramAccount) {
                 $vpnService = $result->vpnService;
-                $messages = OrderType::RENEWAL === $payment->getOrder()->getType()
-                    ? $this->buildRenewalConfirmedMessages($vpnService)
-                    : $this->buildPaymentConfirmedMessages($vpnService);
+                $orderType = $payment->getOrder()->getType();
+                if (OrderType::RENEWAL === $orderType) {
+                    $messages = $this->buildRenewalConfirmedMessages($vpnService);
+                } elseif (OrderType::ADD_TRAFFIC === $orderType) {
+                    $metadata = is_array($payment->getOrder()->getMetadata()) ? $payment->getOrder()->getMetadata() : [];
+                    $messages = $this->buildAddTrafficConfirmedMessages($vpnService, (int) ($metadata['trafficGb'] ?? 0));
+                } else {
+                    $messages = $this->buildPaymentConfirmedMessages($vpnService);
+                }
                 foreach ($messages as $message) {
                     $this->telegramApiClient->sendMessage($telegramAccount->getTelegramId(), $message);
                 }
@@ -118,6 +124,40 @@ class PaymentConfirmationService
             '✅ سرویس شما با موفقیت تمدید شد.',
             sprintf('شناسه سرویس: %d', $vpnService->getId() ?? 0),
             sprintf('تاریخ انقضای جدید: %s', $vpnService->getExpiresAt()?->format('Y-m-d H:i:s') ?? 'نامحدود'),
+            sprintf('حجم کل جدید: %s', null === $vpnService->getTrafficLimitGb() ? 'نامحدود' : ((string) $vpnService->getTrafficLimitGb().' گیگ')),
+            sprintf('لینک اشتراک: %s', $vpnService->getSubscriptionUrl() ?: '-'),
+        ];
+
+        $configLinks = [];
+        foreach ((array) ($vpnService->getConfigLinks() ?? []) as $link) {
+            $candidate = trim((string) $link);
+            if ('' !== $candidate) {
+                $configLinks[] = $candidate;
+            }
+        }
+        if ([] !== $configLinks) {
+            $lines[] = 'لینکهای اتصال:';
+            foreach ($configLinks as $index => $link) {
+                $lines[] = sprintf('%d. %s', $index + 1, $link);
+            }
+        }
+
+        return $this->splitLongMessage(implode("\n", $lines));
+    }
+
+    /**
+     * @return string[]
+     */
+    private function buildAddTrafficConfirmedMessages(?VpnService $vpnService, int $addedTrafficGb): array
+    {
+        if (!$vpnService instanceof VpnService) {
+            return ['✅ حجم اضافه با موفقیت به سرویس شما اضافه شد.'];
+        }
+
+        $lines = [
+            '✅ حجم اضافه با موفقیت به سرویس شما اضافه شد.',
+            sprintf('شناسه سرویس: %d', $vpnService->getId() ?? 0),
+            sprintf('حجم افزوده: %d گیگ', max(0, $addedTrafficGb)),
             sprintf('حجم کل جدید: %s', null === $vpnService->getTrafficLimitGb() ? 'نامحدود' : ((string) $vpnService->getTrafficLimitGb().' گیگ')),
             sprintf('لینک اشتراک: %s', $vpnService->getSubscriptionUrl() ?: '-'),
         ];

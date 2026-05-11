@@ -116,6 +116,12 @@ class TelegramUpdateHandler
 
         $activeDraft = $this->findActiveOrderDraft($account);
         if ('' !== $text && $activeDraft instanceof OrderDraft) {
+            if (ServiceManagementService::STEP_WAITING_ADD_TRAFFIC_AMOUNT === $activeDraft->getStep()) {
+                $this->serviceManagementService->handleAddTrafficDraftAmountInput($account, $activeDraft, $text, $chatId);
+
+                return;
+            }
+
             $this->handleCustomOrderDraftTextInput($account, $activeDraft, $text, $chatId);
 
             return;
@@ -867,6 +873,7 @@ class TelegramUpdateHandler
             $tracking = $payment->getTrackingCode() ?: '-';
             $meta = is_array($order->getMetadata()) ? $order->getMetadata() : [];
             $isRenewal = OrderType::RENEWAL === $order->getType();
+            $isAddTraffic = OrderType::ADD_TRAFFIC === $order->getType();
             $renewalSuffix = '';
             if ($isRenewal) {
                 $duration = true === ($meta['unlimitedDuration'] ?? false)
@@ -879,8 +886,16 @@ class TelegramUpdateHandler
                     $duration
                 );
             }
+            $addTrafficSuffix = '';
+            if ($isAddTraffic) {
+                $addTrafficSuffix = sprintf(
+                    "\nپرداخت خرید حجم اضافه | سرویس #%s | حجم درخواستی: %sGB",
+                    (string) ($meta['targetServiceId'] ?? ($order->getTargetService()?->getId() ?? '-')),
+                    (string) ($meta['trafficGb'] ?? '-')
+                );
+            }
             $lines[] = sprintf(
-                "#%d | سفارش #%d\nکاربر: %s\nنوع سفارش: %s\nپلن: %s\nمبلغ: %d\nوضعیت: %s\nکد پیگیری: %s%s\n",
+                "#%d | سفارش #%d\nکاربر: %s\nنوع سفارش: %s\nپلن: %s\nمبلغ: %d\nوضعیت: %s\nکد پیگیری: %s%s%s\n",
                 $payment->getId(),
                 $order->getId(),
                 $this->formatTelegramIdentity($telegramAccount),
@@ -889,7 +904,8 @@ class TelegramUpdateHandler
                 $payment->getAmount(),
                 $payment->getStatus(),
                 $tracking,
-                $renewalSuffix
+                $renewalSuffix,
+                $addTrafficSuffix
             );
         }
 
@@ -912,6 +928,7 @@ class TelegramUpdateHandler
         $telegramAccount = $order->getUser()->getTelegramAccount();
         $customMeta = is_array($order->getMetadata()) ? $order->getMetadata() : [];
         $isRenewal = OrderType::RENEWAL === $order->getType();
+        $isAddTraffic = OrderType::ADD_TRAFFIC === $order->getType();
         $durationText = true === ($customMeta['unlimitedDuration'] ?? false)
             ? 'نامحدود'
             : (string) ($customMeta['durationDays'] ?? '-');
@@ -924,7 +941,27 @@ class TelegramUpdateHandler
                 (string) ($customMeta['calculatedAmount'] ?? '-')
             )
             : "Custom: no";
-        if ($isRenewal) {
+        if ($isAddTraffic) {
+            $priceSnapshot = is_array($customMeta['priceSnapshot'] ?? null) ? $customMeta['priceSnapshot'] : [];
+            $detail = sprintf(
+                "پرداخت خرید حجم اضافه\nOrder type: add_traffic\nPayment ID: %d\nOrder ID: %d\nService ID: %s\nUser: %s\nRequested traffic: %s GB\nAmount: %d تومان\nBase amount: %s\nDiscount: %s%%\nDiscount amount: %s\nFinal amount: %s\nStatus: %s\nTracking: %s\nReceipt message: %s\nCreated: %s\nSubmitted: %s",
+                $payment->getId(),
+                $order->getId(),
+                (string) ($customMeta['targetServiceId'] ?? ($order->getTargetService()?->getId() ?? '-')),
+                $this->formatTelegramIdentity($telegramAccount),
+                (string) ($customMeta['trafficGb'] ?? '-'),
+                $payment->getAmount(),
+                (string) ($priceSnapshot['baseAmount'] ?? '-'),
+                (string) ($priceSnapshot['discountPercent'] ?? 0),
+                (string) ($priceSnapshot['discountAmount'] ?? 0),
+                (string) ($priceSnapshot['finalAmount'] ?? $payment->getAmount()),
+                $payment->getStatus(),
+                $payment->getTrackingCode() ?: '-',
+                $payment->getReceiptMessage() ?: '-',
+                $payment->getCreatedAt()->format('Y-m-d H:i:s'),
+                $payment->getSubmittedAt()?->format('Y-m-d H:i:s') ?? '-'
+            );
+        } elseif ($isRenewal) {
             $priceSnapshot = is_array($customMeta['priceSnapshot'] ?? null) ? $customMeta['priceSnapshot'] : [];
             $renewalPolicy = is_array($customMeta['renewalPolicy'] ?? null) ? $customMeta['renewalPolicy'] : [];
             $detail = sprintf(
@@ -974,7 +1011,17 @@ class TelegramUpdateHandler
             return;
         }
 
-        $caption = $isRenewal
+        $caption = $isAddTraffic
+            ? sprintf(
+                "رسید پرداخت خرید حجم اضافه\nPayment ID: %d\nOrder ID: %d\nService ID: %s\nUser: %s\nRequested traffic: %s GB\nAmount: %d تومان",
+                $payment->getId(),
+                $order->getId(),
+                (string) ($customMeta['targetServiceId'] ?? ($order->getTargetService()?->getId() ?? '-')),
+                $this->formatTelegramIdentity($telegramAccount),
+                (string) ($customMeta['trafficGb'] ?? '-'),
+                $payment->getAmount()
+            )
+            : ($isRenewal
             ? sprintf(
                 "رسید پرداخت تمدید سرویس\nPayment ID: %d\nOrder ID: %d\nService ID: %s\nUser: %s\nAmount: %d تومان",
                 $payment->getId(),
@@ -990,7 +1037,7 @@ class TelegramUpdateHandler
                 $this->formatTelegramIdentity($telegramAccount),
                 $order->getPlan()->getTitle(),
                 $payment->getAmount()
-            );
+            ));
 
         $this->telegramApiClient->sendPhoto($chatId, $receiptFileId, $caption, $this->keyboardFactory->adminPaymentActions((int) $payment->getId()));
         $this->debugLog(sprintf('admin_view_payment_sent_receipt_photo payment_id=%d', $paymentId));
@@ -1314,13 +1361,31 @@ class TelegramUpdateHandler
         $telegramAccount = $this->entityManager->getRepository(TelegramAccount::class)->findOneBy(['user' => $order->getUser()]);
         $meta = is_array($order->getMetadata()) ? $order->getMetadata() : [];
         $isRenewal = OrderType::RENEWAL === $order->getType();
+        $isAddTraffic = OrderType::ADD_TRAFFIC === $order->getType();
         $durationText = true === ($meta['unlimitedDuration'] ?? false)
             ? 'نامحدود'
             : sprintf('%s روز', (string) ($meta['durationDays'] ?? '-'));
         $customSummary = true === ($meta['custom'] ?? false)
             ? sprintf("Custom: yes\nUsername: %s\nTraffic: %s GB\nDuration: %s\nCalculated amount: %s\n", (string) ($meta['finalUsername'] ?? '-'), (string) ($meta['trafficGb'] ?? '-'), $durationText, (string) ($meta['calculatedAmount'] ?? '-'))
             : "Custom: no\n";
-        if ($isRenewal) {
+        if ($isAddTraffic) {
+            $priceSnapshot = is_array($meta['priceSnapshot'] ?? null) ? $meta['priceSnapshot'] : [];
+            $message = sprintf(
+                "پرداخت خرید حجم اضافه\n\nOrder type: add_traffic\nPayment ID: %d\nOrder ID: %d\nService ID: %s\nUser: %s\nRequested traffic: %s GB\nAmount: %d تومان\nBase amount: %s\nDiscount: %s%%\nDiscount amount: %s\nFinal amount: %s\nTracking: %s\nReceipt message: %s",
+                $payment->getId(),
+                $order->getId(),
+                (string) ($meta['targetServiceId'] ?? ($order->getTargetService()?->getId() ?? '-')),
+                $this->formatTelegramIdentity($telegramAccount),
+                (string) ($meta['trafficGb'] ?? '-'),
+                $payment->getAmount(),
+                (string) ($priceSnapshot['baseAmount'] ?? '-'),
+                (string) ($priceSnapshot['discountPercent'] ?? 0),
+                (string) ($priceSnapshot['discountAmount'] ?? 0),
+                (string) ($priceSnapshot['finalAmount'] ?? $payment->getAmount()),
+                $payment->getTrackingCode() ?: '-',
+                $payment->getReceiptMessage() ?: '-'
+            );
+        } elseif ($isRenewal) {
             $priceSnapshot = is_array($meta['priceSnapshot'] ?? null) ? $meta['priceSnapshot'] : [];
             $renewalPolicy = is_array($meta['renewalPolicy'] ?? null) ? $meta['renewalPolicy'] : [];
             $message = sprintf(

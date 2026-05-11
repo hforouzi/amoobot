@@ -23,6 +23,10 @@ class CreateDefaultSettingsCommand extends Command
         private readonly string $renewalCarryRemainingDays = 'true',
         private readonly string $renewalExpiredStartFromNow = 'true',
         private readonly string $pricingGlobalDiscountPercent = '0',
+        private readonly string $trafficAddonEnabled = 'true',
+        private readonly string $trafficAddonMinGb = '1',
+        private readonly string $trafficAddonMaxGb = '100',
+        private readonly string $trafficAddonPricePerGb = '0',
     ) {
         parent::__construct();
     }
@@ -45,6 +49,10 @@ class CreateDefaultSettingsCommand extends Command
             'renewal.carry_remaining_days' => $this->renewalCarryRemainingDays,
             'renewal.expired_start_from_now' => $this->renewalExpiredStartFromNow,
             'pricing.global_discount_percent' => $this->pricingGlobalDiscountPercent,
+            'traffic_addon.enabled' => $this->trafficAddonEnabled,
+            'traffic_addon.min_gb' => $this->trafficAddonMinGb,
+            'traffic_addon.max_gb' => $this->trafficAddonMaxGb,
+            'traffic_addon.price_per_gb' => $this->trafficAddonPricePerGb,
         ];
         $types = [
             'automation.sync_usage_enabled' => 'boolean',
@@ -57,6 +65,10 @@ class CreateDefaultSettingsCommand extends Command
             'renewal.carry_remaining_days' => 'boolean',
             'renewal.expired_start_from_now' => 'boolean',
             'pricing.global_discount_percent' => 'number',
+            'traffic_addon.enabled' => 'boolean',
+            'traffic_addon.min_gb' => 'number',
+            'traffic_addon.max_gb' => 'number',
+            'traffic_addon.price_per_gb' => 'number',
         ];
 
         foreach ($defaults as $key => $value) {

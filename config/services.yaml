@@ -16,6 +16,10 @@ parameters:
     default_renewal_carry_remaining_days: 'true'
     default_renewal_expired_start_from_now: 'true'
     default_pricing_global_discount_percent: '0'
+    default_traffic_addon_enabled: 'true'
+    default_traffic_addon_min_gb: '1'
+    default_traffic_addon_max_gb: '100'
+    default_traffic_addon_price_per_gb: '0'
 
 services:
     _instanceof:
@@ -46,6 +50,10 @@ services:
             string $renewalCarryRemainingDays: '%env(default:default_renewal_carry_remaining_days:RENEWAL_CARRY_REMAINING_DAYS)%'
             string $renewalExpiredStartFromNow: '%env(default:default_renewal_expired_start_from_now:RENEWAL_EXPIRED_START_FROM_NOW)%'
             string $pricingGlobalDiscountPercent: '%env(default:default_pricing_global_discount_percent:PRICING_GLOBAL_DISCOUNT_PERCENT)%'
+            string $trafficAddonEnabled: '%env(default:default_traffic_addon_enabled:TRAFFIC_ADDON_ENABLED)%'
+            string $trafficAddonMinGb: '%env(default:default_traffic_addon_min_gb:TRAFFIC_ADDON_MIN_GB)%'
+            string $trafficAddonMaxGb: '%env(default:default_traffic_addon_max_gb:TRAFFIC_ADDON_MAX_GB)%'
+            string $trafficAddonPricePerGb: '%env(default:default_traffic_addon_price_per_gb:TRAFFIC_ADDON_PRICE_PER_GB)%'
             string $paymentCardNumber: '%env(PAYMENT_CARD_NUMBER)%'
             string $paymentCardHolder: '%env(PAYMENT_CARD_HOLDER)%'
             $paymentDescription: '%env(default::PAYMENT_DESCRIPTION)%'

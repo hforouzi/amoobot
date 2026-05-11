@@ -335,7 +335,7 @@ class TelegramKeyboardFactory
     /**
      * @return array<string, array<array<array<string, string>>>>
      */
-    public function userServiceDetail(int $serviceId, bool $canRenew = true): array
+    public function userServiceDetail(int $serviceId, bool $canRenew = true, bool $canAddTraffic = true): array
     {
         $rows = [
             [[
@@ -356,6 +356,13 @@ class TelegramKeyboardFactory
             $rows[] = [[
                 'text' => '🔄 تمدید سرویس',
                 'callback_data' => 'service_renew:'.$serviceId,
+            ]];
+        }
+
+        if ($canAddTraffic) {
+            $rows[] = [[
+                'text' => '➕ خرید حجم اضافه',
+                'callback_data' => 'service_add_traffic_order:'.$serviceId,
             ]];
         }
 
@@ -560,6 +567,25 @@ class TelegramKeyboardFactory
                 [[
                     'text' => '❌ انصراف',
                     'callback_data' => $cancelCallback,
+                ]],
+            ],
+        ];
+    }
+
+    /**
+     * @return array<string, array<array<array<string, string>>>>
+     */
+    public function addTrafficSummary(int $draftId, int $serviceId): array
+    {
+        return [
+            'inline_keyboard' => [
+                [[
+                    'text' => '✅ تایید و پرداخت',
+                    'callback_data' => 'add_traffic_confirm:'.$draftId,
+                ]],
+                [[
+                    'text' => '❌ انصراف',
+                    'callback_data' => 'service_view:'.$serviceId,
                 ]],
             ],
         ];
