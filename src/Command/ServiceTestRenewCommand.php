@@ -99,6 +99,8 @@ final class ServiceTestRenewCommand extends Command
             sprintf('before_traffic_limit_gb: %s', $beforeTraffic),
             sprintf('after_traffic_limit_gb: %s', (string) ($result->newTrafficLimitGb ?? 0)),
             sprintf('added_traffic_gb: %d', $result->addedTrafficGb),
+            sprintf('carry_remaining_traffic: %s', $result->carryRemainingTraffic ? 'yes' : 'no'),
+            sprintf('carry_remaining_days: %s', $result->carryRemainingDays ? 'yes' : 'no'),
         ]);
 
         return Command::SUCCESS;

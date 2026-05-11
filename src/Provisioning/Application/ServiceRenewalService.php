@@ -9,6 +9,7 @@ use App\Entity\VpnService;
 use App\Provisioning\Domain\Dto\RenewVpnServiceRequest;
 use App\Provisioning\Domain\VpnServiceStatus;
 use App\Provisioning\Infrastructure\VpnPanelDriverRegistry;
+use App\Shared\Infrastructure\SettingValueProvider;
 
 final class ServiceRenewalService
 {
@@ -16,6 +17,10 @@ final class ServiceRenewalService
 
     public function __construct(
         private readonly VpnPanelDriverRegistry $driverRegistry,
+        private readonly SettingValueProvider $settingValueProvider,
+        private readonly string $renewalCarryRemainingTraffic = 'true',
+        private readonly string $renewalCarryRemainingDays = 'true',
+        private readonly string $renewalExpiredStartFromNow = 'true',
     ) {
     }
 
@@ -28,9 +33,13 @@ final class ServiceRenewalService
         $metadata = is_array($order->getMetadata()) ? $order->getMetadata() : [];
         $unlimitedDuration = true === ($metadata['unlimitedDuration'] ?? false);
         $durationDays = (int) ($metadata['durationDays'] ?? 0);
-        $addedTrafficGb = (int) ($metadata['trafficGb'] ?? 0);
+        $renewalTrafficGb = (int) ($metadata['trafficGb'] ?? 0);
+        $policy = is_array($metadata['renewalPolicy'] ?? null) ? $metadata['renewalPolicy'] : [];
+        $carryRemainingTraffic = (bool) ($policy['carryRemainingTraffic'] ?? $this->settingValueProvider->getBool('renewal.carry_remaining_traffic', $this->toBool($this->renewalCarryRemainingTraffic)));
+        $carryRemainingDays = (bool) ($policy['carryRemainingDays'] ?? $this->settingValueProvider->getBool('renewal.carry_remaining_days', $this->toBool($this->renewalCarryRemainingDays)));
+        $expiredStartFromNow = $this->settingValueProvider->getBool('renewal.expired_start_from_now', $this->toBool($this->renewalExpiredStartFromNow));
 
-        if ($addedTrafficGb <= 0) {
+        if ($renewalTrafficGb <= 0) {
             throw new \RuntimeException('Renewal traffic value is invalid.');
         }
         if (!$unlimitedDuration && $durationDays <= 0) {
@@ -41,19 +50,29 @@ final class ServiceRenewalService
         $newExpiresAt = null;
         if (!$unlimitedDuration) {
             $baseExpires = $service->getExpiresAt();
-            if (!$baseExpires instanceof \DateTimeImmutable || $baseExpires < $now) {
+            if ($baseExpires instanceof \DateTimeImmutable && $baseExpires > $now) {
+                if (!$carryRemainingDays) {
+                    $baseExpires = $now;
+                }
+            } else {
+                $baseExpires = $expiredStartFromNow ? $now : $now;
+            }
+            if (!$baseExpires instanceof \DateTimeImmutable) {
                 $baseExpires = $now;
             }
             $newExpiresAt = $baseExpires->modify(sprintf('+%d days', $durationDays));
         }
 
-        $currentLimitGb = $service->getTrafficLimitGb() ?? 0;
-        $newTrafficLimitGb = $currentLimitGb + $addedTrafficGb;
+        $currentLimitGb = max(0, (int) ($service->getTrafficLimitGb() ?? 0));
+        $newTrafficLimitGb = $carryRemainingTraffic ? ($currentLimitGb + $renewalTrafficGb) : $renewalTrafficGb;
         if ($newTrafficLimitGb <= 0) {
             throw new \RuntimeException('Renewal traffic limit result is invalid.');
         }
 
         $driver = $this->driverRegistry->resolve($service->getPanel());
+        if (!$carryRemainingTraffic) {
+            $driver->resetUsage((string) ($service->getRemoteId() ?? ''), $service->getPanel());
+        }
         $driver->renewService(
             (string) ($service->getRemoteId() ?? ''),
             new RenewVpnServiceRequest(
@@ -64,11 +83,16 @@ final class ServiceRenewalService
             ),
             $service->getPanel()
         );
+        if (!$carryRemainingTraffic) {
+            $driver->resetUsage((string) ($service->getRemoteId() ?? ''), $service->getPanel());
+        }
 
         $service
             ->setExpiresAt($newExpiresAt)
             ->setTrafficLimitGb($newTrafficLimitGb)
             ->setTrafficLimitBytes($newTrafficLimitGb * self::BYTES_PER_GB)
+            ->setTrafficUsedGb($carryRemainingTraffic ? $service->getTrafficUsedGb() : 0)
+            ->setTrafficUsedBytes($carryRemainingTraffic ? $service->getTrafficUsedBytes() : 0)
             ->setStatus(VpnServiceStatus::ACTIVE)
             ->setLastUsageSyncedAt(null)
             ->setUpdatedAt(new \DateTimeImmutable());
@@ -77,8 +101,15 @@ final class ServiceRenewalService
             service: $service,
             newExpiresAt: $newExpiresAt,
             newTrafficLimitGb: $newTrafficLimitGb,
-            addedTrafficGb: $addedTrafficGb,
+            addedTrafficGb: $renewalTrafficGb,
             unlimitedDuration: $unlimitedDuration,
+            carryRemainingTraffic: $carryRemainingTraffic,
+            carryRemainingDays: $carryRemainingDays,
         );
+    }
+
+    private function toBool(string $value): bool
+    {
+        return in_array(strtolower(trim($value)), ['1', 'true', 'yes', 'on'], true);
     }
 }

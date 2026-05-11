@@ -14,6 +14,8 @@ final class RenewalResult
         public readonly ?int $newTrafficLimitGb,
         public readonly int $addedTrafficGb,
         public readonly bool $unlimitedDuration,
+        public readonly bool $carryRemainingTraffic,
+        public readonly bool $carryRemainingDays,
     ) {
     }
 }

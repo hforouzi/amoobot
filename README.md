@@ -294,11 +294,26 @@ Cron example:
   - existing service is updated (not duplicated),
   - panel renew API is called,
   - local `expiresAt`/`trafficLimitGb` is updated.
-- Traffic rule in this phase: renewal traffic is **added** to current traffic limit.
-- Expiry rule in this phase:
-  - if current expiry is in future: extend from current expiry,
-  - otherwise: extend from now,
-  - unlimited renewal keeps expiry unlimited.
+- Renewal policies are configurable via `Setting`:
+  - `renewal.carry_remaining_traffic` (default `true`)
+  - `renewal.carry_remaining_days` (default `true`)
+  - `renewal.expired_start_from_now` (default `true`)
+  - env fallback: `RENEWAL_CARRY_REMAINING_TRAFFIC`, `RENEWAL_CARRY_REMAINING_DAYS`, `RENEWAL_EXPIRED_START_FROM_NOW`
+- Traffic rule:
+  - if carry remaining traffic = `true`, renewal traffic is added to existing limit
+  - if carry remaining traffic = `false`, limit is replaced by renewal package traffic and usage is reset
+- Expiry rule:
+  - if current expiry is in future and carry remaining days = `true`, extend from current expiry
+  - if current expiry is in future and carry remaining days = `false`, start from now
+  - if expired, renewal starts from now
+  - unlimited renewal keeps expiry unlimited
+- Renewal pricing uses **current plan pricing**, not old order amount.
+- Global discount setting:
+  - `pricing.global_discount_percent` (default `0`)
+  - env fallback: `PRICING_GLOBAL_DISCOUNT_PERCENT`
+- Renewal order metadata includes:
+  - `priceSnapshot` (`baseAmount`, `discountPercent`, `finalAmount`, `planPriceSource`)
+  - `renewalPolicy` (`carryRemainingTraffic`, `carryRemainingDays`)
 
 ### Known issue
 - Some 3x-ui versions may return empty responses for `addClient`/`updateClient`.
@@ -371,6 +386,7 @@ If `test login` works but provisioning still fails on `addClient`:
 - `app:service:check-expiry [--service-id=ID] [--dry-run]`
 - `app:service:send-notifications [--dry-run] [--type=expiry|traffic|expired|all] [--limit=100]`
 - `app:service:test-renew {serviceId} [--days=30] [--traffic-gb=10]`
+- `app:plans:adjust-prices [--percent=10|--amount=50000] [--direction=increase|decrease] [--field=price|pricePerGb|pricePerDay|all] [--dry-run]`
 
 ## Deployment Guide
 

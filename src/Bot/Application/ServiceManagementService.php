@@ -17,6 +17,8 @@ use App\Provisioning\Domain\Dto\RenewVpnServiceRequest;
 use App\Provisioning\Domain\VpnServiceStatus;
 use App\Provisioning\Infrastructure\VpnPanelDriverRegistry;
 use App\Shared\Infrastructure\SettingValueProvider;
+use App\Shop\Application\PlanPricingService;
+use App\Shop\Application\RenewalPriceResult;
 use App\Shop\Domain\OrderStatus;
 use App\Shop\Domain\OrderType;
 use Doctrine\ORM\EntityManagerInterface;
@@ -34,6 +36,9 @@ class ServiceManagementService
         private readonly VpnPanelDriverRegistry $driverRegistry,
         private readonly ServiceUsageSyncService $serviceUsageSyncService,
         private readonly SettingValueProvider $settingValueProvider,
+        private readonly PlanPricingService $planPricingService,
+        private readonly string $renewalCarryRemainingTraffic = 'true',
+        private readonly string $renewalCarryRemainingDays = 'true',
         private readonly string $paymentCardNumber = '',
         private readonly string $paymentCardHolder = '',
         private readonly ?string $paymentDescription = null,
@@ -332,11 +337,19 @@ class ServiceManagementService
         }
 
         $durationText = $package['unlimitedDuration'] ? 'نامحدود' : ((string) $package['durationDays'].' روز');
+        $carryTrafficText = $package['carryRemainingTraffic'] ? 'حفظ میشود' : 'ریست میشود';
+        $carryDaysText = $package['carryRemainingDays'] ? 'حفظ میشود' : 'از الان شروع میشود';
+        $discountLine = $package['discountPercent'] > 0
+            ? sprintf("\nتخفیف: %d%% (مبلغ پایه: %d تومان)", $package['discountPercent'], $package['baseAmount'])
+            : '';
         $summary = sprintf(
-            "تمدید سرویس #%d\nحجم تمدید: %d گیگ\nمدت تمدید: %s\nمبلغ قابل پرداخت: %d تومان",
+            "تمدید سرویس #%d\nحجم تمدید: %d گیگ\nمدت تمدید: %s\nحجم باقیمانده: %s\nروزهای باقیمانده: %s%s\nمبلغ: %d تومان",
             $serviceId,
             $package['trafficGb'],
             $durationText,
+            $carryTrafficText,
+            $carryDaysText,
+            $discountLine,
             $package['amount']
         );
 
@@ -382,6 +395,16 @@ class ServiceManagementService
             'trafficGb' => $package['trafficGb'],
             'durationDays' => $package['durationDays'],
             'unlimitedDuration' => $package['unlimitedDuration'],
+            'priceSnapshot' => [
+                'baseAmount' => $package['baseAmount'],
+                'discountPercent' => $package['discountPercent'],
+                'finalAmount' => $package['amount'],
+                'planPriceSource' => 'current_plan',
+            ],
+            'renewalPolicy' => [
+                'carryRemainingTraffic' => $package['carryRemainingTraffic'],
+                'carryRemainingDays' => $package['carryRemainingDays'],
+            ],
         ];
 
         $order = (new Order())
@@ -408,11 +431,17 @@ class ServiceManagementService
         $description = $this->settingValueProvider->get('payment.description', $this->paymentDescription);
         $durationText = $package['unlimitedDuration'] ? 'نامحدود' : ((string) $package['durationDays'].' روز');
 
+        $discountLine = $package['discountPercent'] > 0
+            ? sprintf("\nمبلغ پایه: %d تومان\nتخفیف: %d%%", $package['baseAmount'], $package['discountPercent'])
+            : '';
         $message = sprintf(
-            "تمدید سرویس #%d\nحجم تمدید: %d گیگ\nمدت تمدید: %s\nمبلغ: %d تومان\nشماره کارت: %s\nبه نام: %s\n%s\n\nبرای ارسال رسید روی «✅ تایید و ارسال رسید» بزنید.",
+            "تمدید سرویس #%d\nحجم تمدید: %d گیگ\nمدت تمدید: %s\nحجم باقیمانده: %s\nروزهای باقیمانده: %s%s\nمبلغ: %d تومان\nشماره کارت: %s\nبه نام: %s\n%s\n\nبرای ارسال رسید روی «✅ تایید و ارسال رسید» بزنید.",
             $serviceId,
             $package['trafficGb'],
             $durationText,
+            $package['carryRemainingTraffic'] ? 'حفظ میشود' : 'ریست میشود',
+            $package['carryRemainingDays'] ? 'حفظ میشود' : 'از الان شروع میشود',
+            $discountLine,
             $package['amount'],
             $cardNumber ?: '-',
             $cardHolder ?: '-',
@@ -758,7 +787,7 @@ class ServiceManagementService
     }
 
     /**
-     * @return array{plan: Plan, amount: int, trafficGb: int, durationDays: int, unlimitedDuration: bool}|null
+     * @return array{plan: Plan, amount: int, trafficGb: int, durationDays: int, unlimitedDuration: bool, baseAmount: int, discountPercent: int, carryRemainingTraffic: bool, carryRemainingDays: bool}|null
      */
     private function resolveRenewalPackage(VpnService $service): ?array
     {
@@ -772,41 +801,32 @@ class ServiceManagementService
             return null;
         }
 
-        $metadata = is_array($sourceOrder->getMetadata()) ? $sourceOrder->getMetadata() : [];
-        $isCustom = true === ($metadata['custom'] ?? false);
-
-        $trafficGb = (int) ($metadata['trafficGb'] ?? 0);
-        if ($trafficGb <= 0) {
-            $trafficGb = (int) ($plan->getTrafficGb() ?? 0);
-        }
-        if ($trafficGb <= 0) {
+        $priceResult = $this->planPricingService->calculateRenewalAmount($service, $plan);
+        if (!$priceResult instanceof RenewalPriceResult) {
             return null;
         }
-
-        $unlimitedDuration = true === ($metadata['unlimitedDuration'] ?? false) || $plan->isUnlimitedDuration();
-        $durationDays = 0;
-        if (!$unlimitedDuration) {
-            $durationDays = (int) ($metadata['durationDays'] ?? 0);
-            if ($durationDays <= 0) {
-                $durationDays = (int) $plan->getDurationDays();
-            }
-            if ($durationDays <= 0) {
-                return null;
-            }
-        }
-
-        $amount = $isCustom ? (int) ($metadata['calculatedAmount'] ?? 0) : $plan->getPrice();
-        if ($amount <= 0) {
+        if ($priceResult->finalAmount <= 0) {
             return null;
         }
+        $carryRemainingTraffic = $this->settingValueProvider->getBool('renewal.carry_remaining_traffic', $this->toBool($this->renewalCarryRemainingTraffic));
+        $carryRemainingDays = $this->settingValueProvider->getBool('renewal.carry_remaining_days', $this->toBool($this->renewalCarryRemainingDays));
 
         return [
             'plan' => $plan,
-            'amount' => $amount,
-            'trafficGb' => $trafficGb,
-            'durationDays' => $durationDays,
-            'unlimitedDuration' => $unlimitedDuration,
+            'amount' => $priceResult->finalAmount,
+            'trafficGb' => $priceResult->trafficGb,
+            'durationDays' => $priceResult->durationDays,
+            'unlimitedDuration' => $priceResult->unlimitedDuration,
+            'baseAmount' => $priceResult->baseAmount,
+            'discountPercent' => $priceResult->discountPercent,
+            'carryRemainingTraffic' => $carryRemainingTraffic,
+            'carryRemainingDays' => $carryRemainingDays,
         ];
+    }
+
+    private function toBool(string $value): bool
+    {
+        return in_array(strtolower(trim($value)), ['1', 'true', 'yes', 'on'], true);
     }
 
     private function findServiceOrPopup(int $serviceId, string $chatId, ?string $callbackId, string $logKey): ?VpnService

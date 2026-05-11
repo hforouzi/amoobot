@@ -19,6 +19,10 @@ class CreateDefaultSettingsCommand extends Command
         private readonly string $paymentCardNumber,
         private readonly string $paymentCardHolder,
         private readonly ?string $paymentDescription,
+        private readonly string $renewalCarryRemainingTraffic = 'true',
+        private readonly string $renewalCarryRemainingDays = 'true',
+        private readonly string $renewalExpiredStartFromNow = 'true',
+        private readonly string $pricingGlobalDiscountPercent = '0',
     ) {
         parent::__construct();
     }
@@ -31,6 +35,10 @@ class CreateDefaultSettingsCommand extends Command
             'payment.description' => $this->paymentDescription ?? '',
             'service.notify.expiry_days' => '3,1',
             'service.notify.traffic_thresholds' => '80,95,100',
+            'renewal.carry_remaining_traffic' => $this->renewalCarryRemainingTraffic,
+            'renewal.carry_remaining_days' => $this->renewalCarryRemainingDays,
+            'renewal.expired_start_from_now' => $this->renewalExpiredStartFromNow,
+            'pricing.global_discount_percent' => $this->pricingGlobalDiscountPercent,
         ];
 
         foreach ($defaults as $key => $value) {

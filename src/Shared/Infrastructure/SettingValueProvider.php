@@ -23,4 +23,12 @@ class SettingValueProvider
 
         return $setting->getValue();
     }
+
+    public function getBool(string $key, bool $fallback): bool
+    {
+        $value = $this->get($key, $fallback ? 'true' : 'false');
+        $normalized = strtolower(trim((string) $value));
+
+        return in_array($normalized, ['1', 'true', 'yes', 'on'], true);
+    }
 }

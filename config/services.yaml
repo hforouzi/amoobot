@@ -12,6 +12,10 @@ parameters:
     default_panel_proxy_timeout: ''
     default_service_notify_expiry_days: '3,1'
     default_service_notify_traffic_thresholds: '80,95,100'
+    default_renewal_carry_remaining_traffic: 'true'
+    default_renewal_carry_remaining_days: 'true'
+    default_renewal_expired_start_from_now: 'true'
+    default_pricing_global_discount_percent: '0'
 
 services:
     _instanceof:
@@ -38,6 +42,10 @@ services:
             string $panelProxyTimeout: '%env(default:default_panel_proxy_timeout:PANEL_PROXY_TIMEOUT)%'
             string $serviceNotifyExpiryDays: '%env(default:default_service_notify_expiry_days:SERVICE_NOTIFY_EXPIRY_DAYS)%'
             string $serviceNotifyTrafficThresholds: '%env(default:default_service_notify_traffic_thresholds:SERVICE_NOTIFY_TRAFFIC_THRESHOLDS)%'
+            string $renewalCarryRemainingTraffic: '%env(default:default_renewal_carry_remaining_traffic:RENEWAL_CARRY_REMAINING_TRAFFIC)%'
+            string $renewalCarryRemainingDays: '%env(default:default_renewal_carry_remaining_days:RENEWAL_CARRY_REMAINING_DAYS)%'
+            string $renewalExpiredStartFromNow: '%env(default:default_renewal_expired_start_from_now:RENEWAL_EXPIRED_START_FROM_NOW)%'
+            string $pricingGlobalDiscountPercent: '%env(default:default_pricing_global_discount_percent:PRICING_GLOBAL_DISCOUNT_PERCENT)%'
             string $paymentCardNumber: '%env(PAYMENT_CARD_NUMBER)%'
             string $paymentCardHolder: '%env(PAYMENT_CARD_HOLDER)%'
             $paymentDescription: '%env(default::PAYMENT_DESCRIPTION)%'
