@@ -28,4 +28,3 @@ final class Version20260511120000 extends AbstractMigration
         $this->addSql('DROP TABLE service_notification_log');
     }
 }
-

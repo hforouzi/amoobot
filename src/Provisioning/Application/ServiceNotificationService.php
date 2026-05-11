@@ -55,9 +55,7 @@ final class ServiceNotificationService
         foreach ($services as $service) {
             ++$checked;
 
-            if (VpnServiceStatus::DELETED === $service->getStatus()
-                || VpnServiceStatus::SUSPENDED === $service->getStatus()
-                || VpnServiceStatus::ACTIVE !== $service->getStatus()) {
+            if (VpnServiceStatus::ACTIVE !== $service->getStatus()) {
                 ++$skipped;
                 continue;
             }
@@ -99,10 +97,6 @@ final class ServiceNotificationService
                         'inline_keyboard' => [
                             [[
                                 'text' => '📦 مشاهده سرویس',
-                                'callback_data' => 'service_view:'.((int) $service->getId()),
-                            ]],
-                            [[
-                                'text' => '🔄 تمدید سرویس',
                                 'callback_data' => 'service_view:'.((int) $service->getId()),
                             ]],
                         ],
@@ -399,4 +393,3 @@ final class ServiceNotificationService
         error_log('[ServiceNotificationService] '.$message);
     }
 }
-

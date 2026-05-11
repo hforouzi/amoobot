@@ -84,4 +84,3 @@ final class ServiceSendNotificationsCommand extends Command
         return $total->failed > 0 ? Command::FAILURE : Command::SUCCESS;
     }
 }
-

@@ -114,4 +114,3 @@ class ServiceNotificationLog
         return $this;
     }
 }
-
