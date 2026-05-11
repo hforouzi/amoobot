@@ -299,6 +299,11 @@ Cron example:
   - `renewal.carry_remaining_days` (default `true`)
   - `renewal.expired_start_from_now` (default `true`)
   - env fallback: `RENEWAL_CARRY_REMAINING_TRAFFIC`, `RENEWAL_CARRY_REMAINING_DAYS`, `RENEWAL_EXPIRED_START_FROM_NOW`
+- EasyAdmin page `/admin/settings/renewal-pricing` (menu: `تنظیمات تمدید و قیمتگذاری`) lets admin edit:
+  - حفظ حجم باقیمانده هنگام تمدید
+  - حفظ روزهای باقیمانده هنگام تمدید
+  - تمدید سرویس منقضیشده از امروز شروع شود
+  - درصد تخفیف سراسری (0..100)
 - Traffic rule:
   - if carry remaining traffic = `true`, renewal traffic is added to existing limit
   - if carry remaining traffic = `false`, limit is replaced by renewal package traffic and usage is reset
@@ -311,8 +316,11 @@ Cron example:
 - Global discount setting:
   - `pricing.global_discount_percent` (default `0`)
   - env fallback: `PRICING_GLOBAL_DISCOUNT_PERCENT`
+- Bulk plan pricing:
+  - CLI: `app:plans:adjust-prices`
+  - EasyAdmin page `/admin/plans/bulk-adjust-prices` (menu: `تغییر گروهی قیمت پلنها`) with preview (dry-run) and confirm+apply
 - Renewal order metadata includes:
-  - `priceSnapshot` (`baseAmount`, `discountPercent`, `finalAmount`, `planPriceSource`)
+  - `priceSnapshot` (`baseAmount`, `discountPercent`, `discountAmount`, `finalAmount`, `planPriceSource`)
   - `renewalPolicy` (`carryRemainingTraffic`, `carryRemainingDays`)
 
 ### Known issue

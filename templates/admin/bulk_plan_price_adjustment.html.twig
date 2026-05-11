@@ -1,0 +1,73 @@
+{% extends '@EasyAdmin/page/content.html.twig' %}
+
+{% block content_title %}تغییر گروهی قیمت پلنها{% endblock %}
+
+{% block main %}
+    <form method="post" class="content-panel mb-4">
+        <div class="row g-3">
+            <div class="col-md-3">
+                <label class="form-label">نوع تغییر</label>
+                <select class="form-select" name="adjustmentType">
+                    <option value="percent" {% if input.adjustmentType == 'percent' %}selected{% endif %}>درصد</option>
+                    <option value="amount" {% if input.adjustmentType == 'amount' %}selected{% endif %}>مبلغ ثابت</option>
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">مقدار</label>
+                <input class="form-control" type="number" min="0" step="0.01" name="value" value="{{ input.value }}">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">جهت</label>
+                <select class="form-select" name="direction">
+                    <option value="increase" {% if input.direction == 'increase' %}selected{% endif %}>افزایش</option>
+                    <option value="decrease" {% if input.direction == 'decrease' %}selected{% endif %}>کاهش</option>
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">فیلد هدف</label>
+                <select class="form-select" name="field">
+                    <option value="price" {% if input.field == 'price' %}selected{% endif %}>price</option>
+                    <option value="pricePerGb" {% if input.field == 'pricePerGb' %}selected{% endif %}>pricePerGb</option>
+                    <option value="pricePerDay" {% if input.field == 'pricePerDay' %}selected{% endif %}>pricePerDay</option>
+                    <option value="all" {% if input.field == 'all' %}selected{% endif %}>all</option>
+                </select>
+            </div>
+        </div>
+        <div class="mt-3 d-flex gap-2">
+            <button type="submit" name="mode" value="preview" class="btn btn-secondary">پیش‌نمایش (dry-run)</button>
+            <button type="submit" name="mode" value="apply" class="btn btn-danger">اعمال نهایی</button>
+        </div>
+        <div class="mt-3 form-check">
+            <input class="form-check-input" type="checkbox" id="confirm_apply" name="confirm_apply">
+            <label class="form-check-label" for="confirm_apply">برای اعمال نهایی تایید میکنم</label>
+        </div>
+    </form>
+
+    {% if changes is not empty %}
+        <div class="content-panel">
+            <h5>پیش‌نمایش تغییرات</h5>
+            <table class="table">
+                <thead>
+                <tr>
+                    <th>Plan ID</th>
+                    <th>Plan</th>
+                    <th>Field</th>
+                    <th>Before</th>
+                    <th>After</th>
+                </tr>
+                </thead>
+                <tbody>
+                {% for change in changes %}
+                    <tr>
+                        <td>{{ change.plan.id }}</td>
+                        <td>{{ change.plan.title }}</td>
+                        <td>{{ change.field }}</td>
+                        <td>{{ change.before }}</td>
+                        <td>{{ change.after }}</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% endif %}
+{% endblock %}

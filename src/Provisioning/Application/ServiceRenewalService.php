@@ -9,7 +9,6 @@ use App\Entity\VpnService;
 use App\Provisioning\Domain\Dto\RenewVpnServiceRequest;
 use App\Provisioning\Domain\VpnServiceStatus;
 use App\Provisioning\Infrastructure\VpnPanelDriverRegistry;
-use App\Shared\Infrastructure\SettingValueProvider;
 
 final class ServiceRenewalService
 {
@@ -17,10 +16,7 @@ final class ServiceRenewalService
 
     public function __construct(
         private readonly VpnPanelDriverRegistry $driverRegistry,
-        private readonly SettingValueProvider $settingValueProvider,
-        private readonly string $renewalCarryRemainingTraffic = 'true',
-        private readonly string $renewalCarryRemainingDays = 'true',
-        private readonly string $renewalExpiredStartFromNow = 'true',
+        private readonly RenewalSettingsProvider $renewalSettingsProvider,
     ) {
     }
 
@@ -35,9 +31,9 @@ final class ServiceRenewalService
         $durationDays = (int) ($metadata['durationDays'] ?? 0);
         $renewalTrafficGb = (int) ($metadata['trafficGb'] ?? 0);
         $policy = is_array($metadata['renewalPolicy'] ?? null) ? $metadata['renewalPolicy'] : [];
-        $carryRemainingTraffic = (bool) ($policy['carryRemainingTraffic'] ?? $this->settingValueProvider->getBool('renewal.carry_remaining_traffic', $this->toBool($this->renewalCarryRemainingTraffic)));
-        $carryRemainingDays = (bool) ($policy['carryRemainingDays'] ?? $this->settingValueProvider->getBool('renewal.carry_remaining_days', $this->toBool($this->renewalCarryRemainingDays)));
-        $expiredStartFromNow = $this->settingValueProvider->getBool('renewal.expired_start_from_now', $this->toBool($this->renewalExpiredStartFromNow));
+        $carryRemainingTraffic = (bool) ($policy['carryRemainingTraffic'] ?? $this->renewalSettingsProvider->carryRemainingTraffic());
+        $carryRemainingDays = (bool) ($policy['carryRemainingDays'] ?? $this->renewalSettingsProvider->carryRemainingDays());
+        $expiredStartFromNow = $this->renewalSettingsProvider->expiredStartFromNow();
 
         if ($renewalTrafficGb <= 0) {
             throw new \RuntimeException('Renewal traffic value is invalid.');
@@ -55,10 +51,9 @@ final class ServiceRenewalService
                     $baseExpires = $now;
                 }
             } else {
-                if (!$expiredStartFromNow) {
-                    // Safe default for this phase remains renewal start from now.
+                if ($expiredStartFromNow || !$baseExpires instanceof \DateTimeImmutable) {
+                    $baseExpires = $now;
                 }
-                $baseExpires = $now;
             }
             if (!$baseExpires instanceof \DateTimeImmutable) {
                 $baseExpires = $now;
@@ -109,10 +104,5 @@ final class ServiceRenewalService
             carryRemainingTraffic: $carryRemainingTraffic,
             carryRemainingDays: $carryRemainingDays,
         );
-    }
-
-    private function toBool(string $value): bool
-    {
-        return in_array(strtolower(trim($value)), ['1', 'true', 'yes', 'on'], true);
     }
 }

@@ -533,7 +533,7 @@ class TelegramUpdateHandler
             ? 'نامحدود'
             : sprintf('%d روز', (int) $draft->getDurationDays());
         $discountLine = $price->discountPercent > 0
-            ? sprintf("\nمبلغ پایه: %d تومان\nتخفیف: %d%%", $price->baseAmount, $price->discountPercent)
+            ? sprintf("\nمبلغ پایه: %d تومان\nتخفیف: %d%%\nمبلغ تخفیف: %d تومان", $price->baseAmount, $price->discountPercent, $price->discountAmount)
             : '';
         $summary = sprintf(
             "خلاصه سفارش:\nنام اکانت: %s\nنام نهایی: %s\nحجم: %s گیگ\nمدت: %s%s\nمبلغ قابل پرداخت: %d تومان",
@@ -639,6 +639,7 @@ class TelegramUpdateHandler
             'priceSnapshot' => [
                 'baseAmount' => $price->baseAmount,
                 'discountPercent' => $price->discountPercent,
+                'discountAmount' => $price->discountAmount,
                 'finalAmount' => $price->finalAmount,
                 'planPriceSource' => 'current_plan',
             ],
@@ -673,7 +674,7 @@ class TelegramUpdateHandler
         $description = $this->settingValueProvider->get('payment.description', $this->paymentDescription);
 
         $discountLine = $price->discountPercent > 0
-            ? sprintf("\nمبلغ پایه: %d تومان\nتخفیف: %d%%", $price->baseAmount, $price->discountPercent)
+            ? sprintf("\nمبلغ پایه: %d تومان\nتخفیف: %d%%\nمبلغ تخفیف: %d تومان", $price->baseAmount, $price->discountPercent, $price->discountAmount)
             : '';
         $message = sprintf(
             "پلن: %s\nنام کاربری: %s\nحجم: %s گیگ\nمدت: %s%s\nمبلغ: %d تومان\nشماره کارت: %s\nبه نام: %s\n%s\n\nبرای ارسال رسید روی «✅ تایید و ارسال رسید» بزنید.",
@@ -722,6 +723,7 @@ class TelegramUpdateHandler
             'priceSnapshot' => [
                 'baseAmount' => $price->baseAmount,
                 'discountPercent' => $price->discountPercent,
+                'discountAmount' => $price->discountAmount,
                 'finalAmount' => $price->finalAmount,
                 'planPriceSource' => 'current_plan',
             ],
@@ -750,7 +752,7 @@ class TelegramUpdateHandler
         $description = $this->settingValueProvider->get('payment.description', $this->paymentDescription);
 
         $discountLine = $price->discountPercent > 0
-            ? sprintf("\nمبلغ پایه: %d تومان\nتخفیف: %d%%", $price->baseAmount, $price->discountPercent)
+            ? sprintf("\nمبلغ پایه: %d تومان\nتخفیف: %d%%\nمبلغ تخفیف: %d تومان", $price->baseAmount, $price->discountPercent, $price->discountAmount)
             : '';
         $message = sprintf(
             "پلن: %s%s\nمبلغ: %d تومان\nشماره کارت: %s\nبه نام: %s\n%s\n\nبرای ارسال رسید روی «✅ تایید و ارسال رسید» بزنید.",
@@ -926,7 +928,7 @@ class TelegramUpdateHandler
             $priceSnapshot = is_array($customMeta['priceSnapshot'] ?? null) ? $customMeta['priceSnapshot'] : [];
             $renewalPolicy = is_array($customMeta['renewalPolicy'] ?? null) ? $customMeta['renewalPolicy'] : [];
             $detail = sprintf(
-                "پرداخت تمدید سرویس\nPayment ID: %d\nOrder ID: %d\nService ID: %s\nUser: %s\nAmount: %d تومان\nDuration: %s\nTraffic: %s GB\nPolicy traffic carry: %s\nPolicy days carry: %s\nPrice source: %s\nBase amount: %s\nDiscount: %s%%\nFinal amount: %s\nStatus: %s\nTracking: %s\nReceipt message: %s\nCreated: %s\nSubmitted: %s",
+                "پرداخت تمدید سرویس\nOrder type: renewal\nPayment ID: %d\nOrder ID: %d\nService ID: %s\nUser: %s\nAmount: %d تومان\nDuration: %s\nTraffic: %s GB\nPolicy traffic carry: %s\nPolicy days carry: %s\nPrice source: %s\nBase amount: %s\nDiscount: %s%%\nDiscount amount: %s\nFinal amount: %s\nStatus: %s\nTracking: %s\nReceipt message: %s\nCreated: %s\nSubmitted: %s",
                 $payment->getId(),
                 $order->getId(),
                 (string) ($customMeta['targetServiceId'] ?? ($order->getTargetService()?->getId() ?? '-')),
@@ -939,6 +941,7 @@ class TelegramUpdateHandler
                 (string) ($priceSnapshot['planPriceSource'] ?? 'current_plan'),
                 (string) ($priceSnapshot['baseAmount'] ?? '-'),
                 (string) ($priceSnapshot['discountPercent'] ?? 0),
+                (string) ($priceSnapshot['discountAmount'] ?? 0),
                 (string) ($priceSnapshot['finalAmount'] ?? $payment->getAmount()),
                 $payment->getStatus(),
                 $payment->getTrackingCode() ?: '-',
@@ -1321,7 +1324,7 @@ class TelegramUpdateHandler
             $priceSnapshot = is_array($meta['priceSnapshot'] ?? null) ? $meta['priceSnapshot'] : [];
             $renewalPolicy = is_array($meta['renewalPolicy'] ?? null) ? $meta['renewalPolicy'] : [];
             $message = sprintf(
-                "پرداخت تمدید سرویس\n\nPayment ID: %d\nOrder ID: %d\nService ID: %s\nUser: %s\nAmount: %d تومان\nRenewal duration: %s\nRenewal traffic: %s GB\nPolicy traffic carry: %s\nPolicy days carry: %s\nPrice source: %s\nBase amount: %s\nDiscount: %s%%\nFinal amount: %s\nTracking: %s\nReceipt message: %s",
+                "پرداخت تمدید سرویس\n\nOrder type: renewal\nPayment ID: %d\nOrder ID: %d\nService ID: %s\nUser: %s\nAmount: %d تومان\nRenewal duration: %s\nRenewal traffic: %s GB\nPolicy traffic carry: %s\nPolicy days carry: %s\nPrice source: %s\nBase amount: %s\nDiscount: %s%%\nDiscount amount: %s\nFinal amount: %s\nTracking: %s\nReceipt message: %s",
                 $payment->getId(),
                 $order->getId(),
                 (string) ($meta['targetServiceId'] ?? ($order->getTargetService()?->getId() ?? '-')),
@@ -1334,6 +1337,7 @@ class TelegramUpdateHandler
                 (string) ($priceSnapshot['planPriceSource'] ?? 'current_plan'),
                 (string) ($priceSnapshot['baseAmount'] ?? '-'),
                 (string) ($priceSnapshot['discountPercent'] ?? 0),
+                (string) ($priceSnapshot['discountAmount'] ?? 0),
                 (string) ($priceSnapshot['finalAmount'] ?? $payment->getAmount()),
                 $payment->getTrackingCode() ?: '-',
                 $payment->getReceiptMessage() ?: '-'

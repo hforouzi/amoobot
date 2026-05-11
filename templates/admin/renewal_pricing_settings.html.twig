@@ -1,0 +1,26 @@
+{% extends '@EasyAdmin/page/content.html.twig' %}
+
+{% block content_title %}تنظیمات تمدید و قیمتگذاری{% endblock %}
+
+{% block main %}
+    <form method="post" class="content-panel">
+        <div class="mb-3 form-check">
+            <input class="form-check-input" type="checkbox" id="renewal_carry_remaining_traffic" name="renewal_carry_remaining_traffic" {% if values.renewal_carry_remaining_traffic %}checked{% endif %}>
+            <label class="form-check-label" for="renewal_carry_remaining_traffic">حفظ حجم باقیمانده هنگام تمدید</label>
+        </div>
+        <div class="mb-3 form-check">
+            <input class="form-check-input" type="checkbox" id="renewal_carry_remaining_days" name="renewal_carry_remaining_days" {% if values.renewal_carry_remaining_days %}checked{% endif %}>
+            <label class="form-check-label" for="renewal_carry_remaining_days">حفظ روزهای باقیمانده هنگام تمدید</label>
+        </div>
+        <div class="mb-3 form-check">
+            <input class="form-check-input" type="checkbox" id="renewal_expired_start_from_now" name="renewal_expired_start_from_now" {% if values.renewal_expired_start_from_now %}checked{% endif %}>
+            <label class="form-check-label" for="renewal_expired_start_from_now">تمدید سرویس منقضیشده از امروز شروع شود</label>
+        </div>
+        <div class="mb-3">
+            <label class="form-label" for="pricing_global_discount_percent">درصد تخفیف سراسری</label>
+            <input class="form-control" type="number" min="0" max="100" step="1" id="pricing_global_discount_percent" name="pricing_global_discount_percent" value="{{ values.pricing_global_discount_percent }}">
+            <div class="form-text">مقدار مجاز بین ۰ تا ۱۰۰.</div>
+        </div>
+        <button type="submit" class="btn btn-primary">ذخیره تنظیمات</button>
+    </form>
+{% endblock %}

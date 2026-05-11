@@ -6,13 +6,12 @@ namespace App\Shop\Application;
 
 use App\Entity\Plan;
 use App\Entity\VpnService;
-use App\Shared\Infrastructure\SettingValueProvider;
+use App\Provisioning\Application\RenewalSettingsProvider;
 
 final class PlanPricingService
 {
     public function __construct(
-        private readonly SettingValueProvider $settingValueProvider,
-        private readonly string $pricingGlobalDiscountPercent = '0',
+        private readonly RenewalSettingsProvider $renewalSettingsProvider,
     ) {
     }
 
@@ -33,12 +32,16 @@ final class PlanPricingService
         $durationDays = isset($options['durationDays']) ? (int) $options['durationDays'] : null;
         $baseAmount = $this->calculatePlanBaseAmount($plan, $trafficGb, $durationDays);
         $discountPercent = $this->resolveGlobalDiscountPercent();
-        $finalAmount = $this->applyDiscount($baseAmount, $discountPercent);
+        $discountAmount = $this->calculateDiscountAmount($baseAmount, $discountPercent);
+        $finalAmount = max(0, $baseAmount - $discountAmount);
 
         return new PriceCalculationResult(
             baseAmount: $baseAmount,
             discountPercent: $discountPercent,
-            finalAmount: $finalAmount
+            discountAmount: $discountAmount,
+            finalAmount: $finalAmount,
+            source: 'current_plan',
+            explanation: $plan->isCustomizable() ? 'custom_plan_current_price' : 'fixed_plan_current_price',
         );
     }
 
@@ -81,8 +84,10 @@ final class PlanPricingService
             unlimitedDuration: $unlimitedDuration,
             baseAmount: $price->baseAmount,
             discountPercent: $price->discountPercent,
+            discountAmount: $price->discountAmount,
             finalAmount: $price->finalAmount,
-            planPriceSource: 'current_plan'
+            planPriceSource: 'current_plan',
+            explanation: 'renewal_uses_current_plan_price'
         );
     }
 
@@ -111,21 +116,18 @@ final class PlanPricingService
 
     private function resolveGlobalDiscountPercent(): int
     {
-        $value = $this->settingValueProvider->get('pricing.global_discount_percent', $this->pricingGlobalDiscountPercent);
-        $percent = is_string($value) ? (int) floor((float) trim($value)) : 0;
+        $percent = (int) floor($this->renewalSettingsProvider->globalDiscountPercent());
 
         return max(0, min(100, $percent));
     }
 
-    private function applyDiscount(int $baseAmount, int $discountPercent): int
+    private function calculateDiscountAmount(int $baseAmount, int $discountPercent): int
     {
         $baseAmount = max(0, $baseAmount);
         if ($discountPercent <= 0) {
-            return $baseAmount;
+            return 0;
         }
 
-        $discountValue = (int) floor(($baseAmount * $discountPercent) / 100);
-
-        return max(0, $baseAmount - $discountValue);
+        return (int) floor(($baseAmount * $discountPercent) / 100);
     }
 }

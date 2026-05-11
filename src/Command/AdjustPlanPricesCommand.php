@@ -4,8 +4,7 @@ declare(strict_types=1);
 
 namespace App\Command;
 
-use App\Entity\Plan;
-use Doctrine\ORM\EntityManagerInterface;
+use App\Shop\Application\PlanPriceAdjustmentService;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -14,10 +13,10 @@ use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Style\SymfonyStyle;
 
 #[AsCommand(name: 'app:plans:adjust-prices', description: 'Bulk adjust plan prices with percent/amount delta')]
-final class PlansAdjustPricesCommand extends Command
+final class AdjustPlanPricesCommand extends Command
 {
     public function __construct(
-        private readonly EntityManagerInterface $entityManager,
+        private readonly PlanPriceAdjustmentService $planPriceAdjustmentService,
     ) {
         parent::__construct();
     }
@@ -75,34 +74,8 @@ final class PlansAdjustPricesCommand extends Command
             }
         }
 
-        /** @var list<Plan> $plans */
-        $plans = $this->entityManager->getRepository(Plan::class)->findBy([], ['id' => 'ASC']);
-        if ([] === $plans) {
-            $io->warning('No plans found.');
-
-            return Command::SUCCESS;
-        }
-
-        $fields = 'all' === $field ? ['price', 'pricePerGb', 'pricePerDay'] : [$field];
-        $changes = [];
-        foreach ($plans as $plan) {
-            foreach ($fields as $targetField) {
-                $before = $this->readField($plan, $targetField);
-                if (null === $before) {
-                    continue;
-                }
-                $after = $this->calculateAdjustedValue($before, $direction, $percent, $amount);
-                if ($after === $before) {
-                    continue;
-                }
-                $changes[] = [
-                    'plan' => $plan,
-                    'field' => $targetField,
-                    'before' => $before,
-                    'after' => $after,
-                ];
-            }
-        }
+        $preview = $this->planPriceAdjustmentService->preview($direction, $field, $percent, $amount);
+        $changes = $preview['changes'];
 
         if ([] === $changes) {
             $io->success('No price changes to apply.');
@@ -137,12 +110,9 @@ final class PlansAdjustPricesCommand extends Command
         }
 
         foreach ($changes as $change) {
-            /** @var Plan $plan */
             $plan = $change['plan'];
-            $this->writeField($plan, (string) $change['field'], (int) $change['after']);
-            $plan->setUpdatedAt(new \DateTimeImmutable());
             error_log(sprintf(
-                '[PlansAdjustPricesCommand] plan_id=%d field=%s before=%d after=%d',
+                '[AdjustPlanPricesCommand] plan_id=%d field=%s before=%d after=%d',
                 $plan->getId() ?? 0,
                 (string) $change['field'],
                 (int) $change['before'],
@@ -150,40 +120,9 @@ final class PlansAdjustPricesCommand extends Command
             ));
         }
 
-        $this->entityManager->flush();
+        $this->planPriceAdjustmentService->apply($changes);
         $io->success(sprintf('Applied %d change(s).', count($changes)));
 
         return Command::SUCCESS;
-    }
-
-    private function calculateAdjustedValue(int $before, string $direction, ?float $percent, ?int $amount): int
-    {
-        $delta = null !== $percent
-            ? (int) floor(($before * $percent) / 100)
-            : max(0, (int) ($amount ?? 0));
-
-        $after = 'increase' === $direction ? ($before + $delta) : ($before - $delta);
-
-        return max(0, $after);
-    }
-
-    private function readField(Plan $plan, string $field): ?int
-    {
-        return match ($field) {
-            'price' => $plan->getPrice(),
-            'pricePerGb' => $plan->getPricePerGb(),
-            'pricePerDay' => $plan->getPricePerDay(),
-            default => null,
-        };
-    }
-
-    private function writeField(Plan $plan, string $field, int $value): void
-    {
-        match ($field) {
-            'price' => $plan->setPrice($value),
-            'pricePerGb' => $plan->setPricePerGb($value),
-            'pricePerDay' => $plan->setPricePerDay($value),
-            default => null,
-        };
     }
 }

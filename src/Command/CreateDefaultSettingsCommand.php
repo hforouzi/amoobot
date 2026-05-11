@@ -40,6 +40,12 @@ class CreateDefaultSettingsCommand extends Command
             'renewal.expired_start_from_now' => $this->renewalExpiredStartFromNow,
             'pricing.global_discount_percent' => $this->pricingGlobalDiscountPercent,
         ];
+        $types = [
+            'renewal.carry_remaining_traffic' => 'boolean',
+            'renewal.carry_remaining_days' => 'boolean',
+            'renewal.expired_start_from_now' => 'boolean',
+            'pricing.global_discount_percent' => 'number',
+        ];
 
         foreach ($defaults as $key => $value) {
             $existing = $this->entityManager->getRepository(Setting::class)->findOneBy(['keyName' => $key]);
@@ -50,7 +56,7 @@ class CreateDefaultSettingsCommand extends Command
             $setting = (new Setting())
                 ->setKeyName($key)
                 ->setValue($value)
-                ->setType('string');
+                ->setType($types[$key] ?? 'string');
             $this->entityManager->persist($setting);
         }
 
