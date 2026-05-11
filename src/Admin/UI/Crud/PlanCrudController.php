@@ -41,6 +41,9 @@ class PlanCrudController extends AbstractCrudController
             IntegerField::new('maxDurationDays', 'حداکثر مدت (روز)')->hideOnIndex(),
             IntegerField::new('pricePerDay', 'قیمت هر روز')->hideOnIndex(),
             BooleanField::new('allowCustomUsername', 'اجازه نام کاربری دلخواه')->hideOnIndex(),
+            BooleanField::new('isUnlimitedDuration', 'مدت نامحدود')
+                ->setHelp('اگر فعال باشد انقضا نامحدود است و در خرید، مدت روز پرسیده نمی‌شود.')
+                ->hideOnIndex(),
             AssociationField::new('inbound', 'اینباند / سرور'),
             BooleanField::new('isActive'),
             DateTimeField::new('createdAt')->hideOnForm(),

@@ -41,11 +41,12 @@ class VpnProvisioningService
         $telegram = $this->entityManager->getRepository(TelegramAccount::class)->findOneBy(['user' => $order->getUser()]);
         $telegramId = $telegram?->getTelegramId() ?? (string) $order->getUser()->getId();
         $orderMeta = is_array($order->getMetadata()) ? $order->getMetadata() : [];
-        $isCustomOrder = true === ($orderMeta['custom'] ?? false);
-        $customFinalUsername = $isCustomOrder ? trim((string) ($orderMeta['finalUsername'] ?? '')) : '';
-        $durationDays = $isCustomOrder ? (int) ($orderMeta['durationDays'] ?? 0) : 0;
-        $trafficLimitGb = $isCustomOrder ? (int) ($orderMeta['trafficGb'] ?? 0) : 0;
-        if ($durationDays <= 0) {
+        $isCustomOrder = true === ($orderMeta['custom'] ?? false) || array_key_exists('finalUsername', $orderMeta);
+        $customFinalUsername = trim((string) ($orderMeta['finalUsername'] ?? ''));
+        $unlimitedDuration = true === ($orderMeta['unlimitedDuration'] ?? false) || $order->getPlan()->isUnlimitedDuration();
+        $durationDays = $unlimitedDuration ? 0 : (int) ($orderMeta['durationDays'] ?? 0);
+        $trafficLimitGb = (int) ($orderMeta['trafficGb'] ?? 0);
+        if (!$unlimitedDuration && $durationDays <= 0) {
             $durationDays = $order->getPlan()->getDurationDays();
         }
         if ($trafficLimitGb <= 0) {
@@ -92,7 +93,7 @@ class VpnProvisioningService
             ->setConfigText($created->configText)
             ->setStatus(VpnServiceStatus::ACTIVE)
             ->setStartsAt(new \DateTimeImmutable())
-            ->setExpiresAt((new \DateTimeImmutable())->modify('+'.$durationDays.' days'))
+            ->setExpiresAt($unlimitedDuration ? null : (new \DateTimeImmutable())->modify('+'.$durationDays.' days'))
             ->setTrafficLimitGb($trafficLimitValue)
             ->setTrafficUsedGb(0);
 

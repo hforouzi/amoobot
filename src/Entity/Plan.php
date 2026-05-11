@@ -59,6 +59,9 @@ class Plan
     #[ORM\Column]
     private bool $allowCustomUsername = true;
 
+    #[ORM\Column]
+    private bool $isUnlimitedDuration = false;
+
     #[ORM\ManyToOne]
     #[ORM\JoinColumn(nullable: true, onDelete: 'SET NULL')]
     private ?VpnInbound $inbound = null;
@@ -255,6 +258,18 @@ class Plan
     public function setAllowCustomUsername(bool $allowCustomUsername): self
     {
         $this->allowCustomUsername = $allowCustomUsername;
+
+        return $this;
+    }
+
+    public function isUnlimitedDuration(): bool
+    {
+        return $this->isUnlimitedDuration;
+    }
+
+    public function setIsUnlimitedDuration(bool $isUnlimitedDuration): self
+    {
+        $this->isUnlimitedDuration = $isUnlimitedDuration;
 
         return $this;
     }
