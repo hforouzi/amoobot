@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Admin\UI;
 
 use App\Entity\Setting;
+use App\Provisioning\Application\AutomationSettingsProvider;
 use App\Provisioning\Application\RenewalSettingsProvider;
 use App\Shop\Application\PlanPriceAdjustmentService;
 use Doctrine\ORM\EntityManagerInterface;
@@ -19,6 +20,7 @@ final class RenewalPricingAdminController extends AbstractController
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
         private readonly RenewalSettingsProvider $renewalSettingsProvider,
+        private readonly AutomationSettingsProvider $automationSettingsProvider,
         private readonly PlanPriceAdjustmentService $planPriceAdjustmentService,
     ) {
     }
@@ -99,6 +101,38 @@ final class RenewalPricingAdminController extends AbstractController
         return $this->render('admin/bulk_plan_price_adjustment.html.twig', [
             'input' => $input,
             'changes' => $changes,
+        ]);
+    }
+
+    #[Route('/settings/automation', name: 'admin_automation_settings', methods: ['GET', 'POST'])]
+    public function automationSettings(Request $request): Response
+    {
+        if ($request->isMethod('POST')) {
+            $batchLimitRaw = trim((string) $request->request->get('automation_batch_limit', '100'));
+            $batchLimit = is_numeric($batchLimitRaw) ? (int) $batchLimitRaw : 0;
+            if ($batchLimit <= 0) {
+                $this->addFlash('danger', 'مقدار batch limit باید بزرگتر از صفر باشد.');
+            } else {
+                $this->upsertSetting('automation.sync_usage_enabled', $request->request->has('automation_sync_usage_enabled') ? 'true' : 'false', 'boolean');
+                $this->upsertSetting('automation.check_expiry_enabled', $request->request->has('automation_check_expiry_enabled') ? 'true' : 'false', 'boolean');
+                $this->upsertSetting('automation.send_notifications_enabled', $request->request->has('automation_send_notifications_enabled') ? 'true' : 'false', 'boolean');
+                $this->upsertSetting('automation.auto_suspend_expired_enabled', $request->request->has('automation_auto_suspend_expired_enabled') ? 'true' : 'false', 'boolean');
+                $this->upsertSetting('automation.auto_suspend_traffic_exhausted_enabled', $request->request->has('automation_auto_suspend_traffic_exhausted_enabled') ? 'true' : 'false', 'boolean');
+                $this->upsertSetting('automation.batch_limit', (string) $batchLimit, 'number');
+                $this->entityManager->flush();
+                $this->addFlash('success', 'تنظیمات اتوماسیون بروزرسانی شد.');
+            }
+        }
+
+        return $this->render('admin/automation_settings.html.twig', [
+            'values' => [
+                'automation_sync_usage_enabled' => $this->automationSettingsProvider->syncUsageEnabled(),
+                'automation_check_expiry_enabled' => $this->automationSettingsProvider->checkExpiryEnabled(),
+                'automation_send_notifications_enabled' => $this->automationSettingsProvider->sendNotificationsEnabled(),
+                'automation_auto_suspend_expired_enabled' => $this->automationSettingsProvider->autoSuspendExpiredEnabled(),
+                'automation_auto_suspend_traffic_exhausted_enabled' => $this->automationSettingsProvider->autoSuspendTrafficExhaustedEnabled(),
+                'automation_batch_limit' => $this->automationSettingsProvider->batchLimit(),
+            ],
         ]);
     }
 

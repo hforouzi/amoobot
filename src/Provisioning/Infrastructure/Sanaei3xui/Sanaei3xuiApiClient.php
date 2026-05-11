@@ -116,23 +116,56 @@ final class Sanaei3xuiApiClient
         return $result;
     }
 
-    public function updateClient(VpnPanel $panel, string $inboundId, string $clientId, array $client): array
+    public function updateClient(VpnPanel $panel, int $inboundId, string $clientId, array $client, array $context = []): array
     {
         if (!$this->ensureLogin($panel)) {
             return $this->errorResult('login_failed');
         }
 
-        return $this->request(
+        $this->log(sprintf(
+            'update_client_request panel_id=%s inbound_id="%s" %s',
+            $panel->getId() ?? 'null',
+            $inboundId,
+            $this->formatDiagnosticContext($context)
+        ));
+
+        $payload = [
+            'id' => $inboundId,
+            'settings' => json_encode(['clients' => [$client]], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+        ];
+
+        $this->log(sprintf(
+            'update_client_payload_check endpoint="/panel/api/inbounds/updateClient/%s" payload_id_type="%s" payload_id_value="%s" %s',
+            $clientId,
+            gettype($payload['id']),
+            (string) $payload['id'],
+            $this->formatDiagnosticContext($context)
+        ));
+
+        if (!is_int($payload['id'])) {
+            throw new \RuntimeException('Sanaei updateClient payload id must be integer.');
+        }
+
+        $result = $this->request(
             $panel,
             'POST',
             '/panel/api/inbounds/updateClient/'.$clientId,
-            [
-                'json' => [
-                    'id' => $inboundId,
-                    'settings' => json_encode(['clients' => [$client]], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
-                ],
-            ]
+            ['json' => $payload]
         );
+
+        $this->log(sprintf(
+            'update_client_response panel_id=%s inbound_id="%s" status=%s ok=%s success=%s empty=%s error="%s" body_preview="%s"',
+            $panel->getId() ?? 'null',
+            $inboundId,
+            (string) ($result['status'] ?? 'null'),
+            (($result['ok'] ?? false) === true) ? 'true' : 'false',
+            (($result['success'] ?? false) === true) ? 'true' : 'false',
+            (($result['empty'] ?? false) === true) ? 'true' : 'false',
+            (string) ($result['error'] ?? ''),
+            (string) ($result['bodyPreview'] ?? '')
+        ));
+
+        return $result;
     }
 
     public function deleteClient(VpnPanel $panel, string $inboundId, string $clientId): array
@@ -356,6 +389,8 @@ final class Sanaei3xuiApiClient
             'security',
             'clientUuid',
             'email',
+            'serviceId',
+            'orderId',
             'totalGB',
             'expiryTime',
             'subId',

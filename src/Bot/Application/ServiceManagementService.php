@@ -125,7 +125,11 @@ class ServiceManagementService
         }
 
         $this->acknowledgeCallback($callbackId);
-        $this->telegramApiClient->sendMessage($chatId, $this->formatServiceDetailForUser($service), $this->keyboardFactory->userServiceDetail((int) $service->getId()));
+        $this->telegramApiClient->sendMessage(
+            $chatId,
+            $this->formatServiceDetailForUser($service),
+            $this->keyboardFactory->userServiceDetail((int) $service->getId(), VpnServiceStatus::DELETED !== $service->getStatus())
+        );
     }
 
     public function showAdminServiceDetail(int $serviceId, string $chatId, ?string $callbackId): void
@@ -306,7 +310,7 @@ class ServiceManagementService
         $this->telegramApiClient->sendMessage(
             $chatId,
             $this->formatServiceDetailForUser($service),
-            $this->keyboardFactory->userServiceDetail((int) $service->getId())
+            $this->keyboardFactory->userServiceDetail((int) $service->getId(), VpnServiceStatus::DELETED !== $service->getStatus())
         );
     }
 
@@ -517,6 +521,7 @@ class ServiceManagementService
                 $driver->renewService((string) $service->getRemoteId(), new RenewVpnServiceRequest(
                     durationDays: 0,
                     trafficLimitGb: $service->getTrafficLimitGb(),
+                    serviceId: (int) ($service->getId() ?? 0),
                 ), $service->getPanel());
             } catch (\Throwable $e) {
                 $this->debugLog(sprintf('service_sync_failure action=activate service_id=%d message="%s"', $serviceId, $e->getMessage()));
@@ -898,10 +903,10 @@ class ServiceManagementService
     private function statusLabel(string $status): string
     {
         return match ($status) {
-            VpnServiceStatus::ACTIVE => '🟢 active',
-            VpnServiceStatus::SUSPENDED => '⏸ suspended',
-            VpnServiceStatus::EXPIRED => '🔴 expired',
-            VpnServiceStatus::DELETED => '🗑 deleted',
+            VpnServiceStatus::ACTIVE => '🟢 فعال',
+            VpnServiceStatus::SUSPENDED => '⏸ غیرفعال',
+            VpnServiceStatus::EXPIRED => '🔴 منقضیشده',
+            VpnServiceStatus::DELETED => '🗑 حذفشده',
             default => '❓ '.$status,
         };
     }

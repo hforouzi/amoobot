@@ -278,13 +278,19 @@ Commands:
 php bin/console app:service:sync-usage
 php bin/console app:service:check-expiry
 php bin/console app:service:send-notifications
+php bin/console app:automation:run --limit=100
 ```
 
-Cron example:
+Old split cron example:
 ```bash
 */10 * * * * php /path/bin/console app:service:sync-usage
 */15 * * * * php /path/bin/console app:service:check-expiry
 */20 * * * * php /path/bin/console app:service:send-notifications
+```
+
+Safe single-command cron example:
+```bash
+*/10 * * * * cd /path/to/project && php bin/console app:automation:run --limit=100 > var/log/automation.log 2>&1
 ```
 
 ## Phase 1.4.3 Renewal Flow
@@ -393,6 +399,7 @@ If `test login` works but provisioning still fails on `addClient`:
 - `app:service:sync-usage [--service-id=ID] [--limit=100] [--dry-run]`
 - `app:service:check-expiry [--service-id=ID] [--dry-run]`
 - `app:service:send-notifications [--dry-run] [--type=expiry|traffic|expired|all] [--limit=100]`
+- `app:automation:run [--dry-run] [--limit=100] [--only=sync|expiry|notifications|suspend|all]`
 - `app:service:test-renew {serviceId} [--days=30] [--traffic-gb=10]`
 - `app:plans:adjust-prices [--percent=10|--amount=50000] [--direction=increase|decrease] [--field=price|pricePerGb|pricePerDay|all] [--dry-run]`
 
