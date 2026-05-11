@@ -210,28 +210,36 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
 
         $inboundIdRaw = trim($ref->inboundId);
         $inboundIdInt = $this->toInboundIdIntOrFail($inboundIdRaw);
-        $serviceId = $request->serviceId ?? 0;
-        $orderId = $request->orderId ?? 0;
+        $serviceId = $request->serviceId;
+        $orderId = $request->orderId;
+        $serviceIdLabel = null === $serviceId ? '-' : (string) $serviceId;
+        $orderIdLabel = null === $orderId ? '-' : (string) $orderId;
 
         $this->log(sprintf(
-            'renew_update_client_context panel_id=%s remote_inbound_id_raw="%s" remote_inbound_id_int=%d client_uuid="%s" email="%s" service_id=%d order_id=%d',
+            'renew_update_client_context panel_id=%s remote_inbound_id_raw="%s" remote_inbound_id_int=%d client_uuid="%s" email="%s" service_id=%s order_id=%s',
             $panel->getId() ?? 'null',
             $inboundIdRaw,
             $inboundIdInt,
             $ref->clientId,
             $ref->email,
-            $serviceId,
-            $orderId
+            $serviceIdLabel,
+            $orderIdLabel
         ));
 
-        $result = $this->apiClient->updateClient($panel, $inboundIdInt, $ref->clientId, $client, [
+        $context = [
             'remoteInboundIdRaw' => $inboundIdRaw,
             'remoteInboundIdInt' => (string) $inboundIdInt,
             'clientUuid' => $ref->clientId,
             'email' => $ref->email,
-            'serviceId' => (string) $serviceId,
-            'orderId' => (string) $orderId,
-        ]);
+        ];
+        if (null !== $serviceId) {
+            $context['serviceId'] = (string) $serviceId;
+        }
+        if (null !== $orderId) {
+            $context['orderId'] = (string) $orderId;
+        }
+
+        $result = $this->apiClient->updateClient($panel, $inboundIdInt, $ref->clientId, $client, $context);
         $this->assertPanelResult($result, 'updateClient');
         $this->assertPanelBusinessResult($result, 'updateClient', true);
 
