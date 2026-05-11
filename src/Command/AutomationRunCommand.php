@@ -47,7 +47,7 @@ final class AutomationRunCommand extends Command
         $onlyOptions = ['sync', 'expiry', 'notifications', 'suspend', 'all'];
 
         if (!in_array($only, $onlyOptions, true)) {
-            $io->error('only must be one of: sync, expiry, notifications, suspend, all.');
+            $io->error('--only option must be one of: sync, expiry, notifications, suspend, all.');
 
             return Command::FAILURE;
         }
@@ -138,7 +138,7 @@ final class AutomationRunCommand extends Command
         ]);
 
         if ($dryRun) {
-            $io->note('Dry-run mode: no data was saved and no notifications were sent.');
+            $io->note('Dry-run mode: no data was saved and no notifications were sent (counters show simulated actions).');
         }
 
         return $failed > 0 ? Command::FAILURE : Command::SUCCESS;
@@ -149,4 +149,3 @@ final class AutomationRunCommand extends Command
         return 'all' === $only || $only === $task;
     }
 }
-

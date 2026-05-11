@@ -109,7 +109,7 @@ final class RenewalPricingAdminController extends AbstractController
     {
         if ($request->isMethod('POST')) {
             $batchLimitRaw = trim((string) $request->request->get('automation_batch_limit', '100'));
-            $batchLimit = is_numeric($batchLimitRaw) ? (int) floor((float) $batchLimitRaw) : 0;
+            $batchLimit = is_numeric($batchLimitRaw) ? (int) $batchLimitRaw : 0;
             if ($batchLimit <= 0) {
                 $this->addFlash('danger', 'مقدار batch limit باید بزرگتر از صفر باشد.');
             } else {
