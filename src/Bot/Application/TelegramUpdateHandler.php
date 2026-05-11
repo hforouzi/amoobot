@@ -17,6 +17,7 @@ use App\Payment\Domain\PaymentStatus;
 use App\Shared\Infrastructure\SettingValueProvider;
 use App\Shop\Domain\OrderDraftStatus;
 use App\Shop\Domain\OrderStatus;
+use App\Shop\Domain\OrderType;
 use Doctrine\ORM\EntityManagerInterface;
 
 class TelegramUpdateHandler
@@ -619,6 +620,7 @@ class TelegramUpdateHandler
             ->setUser($account->getUser())
             ->setPlan($plan)
             ->setAmount($amount)
+            ->setType(OrderType::NEW_SERVICE)
             ->setMetadata($metadata)
             ->setStatus(OrderStatus::WAITING_PAYMENT);
 
@@ -686,6 +688,7 @@ class TelegramUpdateHandler
             ->setUser($account->getUser())
             ->setPlan($plan)
             ->setAmount($plan->getPrice())
+            ->setType(OrderType::NEW_SERVICE)
             ->setStatus(OrderStatus::WAITING_PAYMENT);
 
         $payment = (new Payment())
@@ -812,15 +815,31 @@ class TelegramUpdateHandler
             $order = $payment->getOrder();
             $telegramAccount = $order->getUser()->getTelegramAccount();
             $tracking = $payment->getTrackingCode() ?: '-';
+            $meta = is_array($order->getMetadata()) ? $order->getMetadata() : [];
+            $isRenewal = OrderType::RENEWAL === $order->getType();
+            $renewalSuffix = '';
+            if ($isRenewal) {
+                $duration = true === ($meta['unlimitedDuration'] ?? false)
+                    ? 'نامحدود'
+                    : ((string) ($meta['durationDays'] ?? '-').' روز');
+                $renewalSuffix = sprintf(
+                    "\nتمدید سرویس #%s | حجم: %sGB | مدت: %s",
+                    (string) ($meta['targetServiceId'] ?? ($order->getTargetService()?->getId() ?? '-')),
+                    (string) ($meta['trafficGb'] ?? '-'),
+                    $duration
+                );
+            }
             $lines[] = sprintf(
-                "#%d | سفارش #%d\nکاربر: %s\nپلن: %s\nمبلغ: %d\nوضعیت: %s\nکد پیگیری: %s\n",
+                "#%d | سفارش #%d\nکاربر: %s\nنوع سفارش: %s\nپلن: %s\nمبلغ: %d\nوضعیت: %s\nکد پیگیری: %s%s\n",
                 $payment->getId(),
                 $order->getId(),
                 $this->formatTelegramIdentity($telegramAccount),
+                $order->getType(),
                 $order->getPlan()->getTitle(),
                 $payment->getAmount(),
                 $payment->getStatus(),
-                $tracking
+                $tracking,
+                $renewalSuffix
             );
         }
 
@@ -842,6 +861,7 @@ class TelegramUpdateHandler
         $order = $payment->getOrder();
         $telegramAccount = $order->getUser()->getTelegramAccount();
         $customMeta = is_array($order->getMetadata()) ? $order->getMetadata() : [];
+        $isRenewal = OrderType::RENEWAL === $order->getType();
         $durationText = true === ($customMeta['unlimitedDuration'] ?? false)
             ? 'نامحدود'
             : (string) ($customMeta['durationDays'] ?? '-');
@@ -854,20 +874,38 @@ class TelegramUpdateHandler
                 (string) ($customMeta['calculatedAmount'] ?? '-')
             )
             : "Custom: no";
-        $detail = sprintf(
-            "Payment ID: %d\nOrder ID: %d\nUser: %s\nPlan: %s\nAmount: %d تومان\nStatus: %s\n%s\nTracking: %s\nReceipt message: %s\nCreated: %s\nSubmitted: %s",
-            $payment->getId(),
-            $order->getId(),
-            $this->formatTelegramIdentity($telegramAccount),
-            $order->getPlan()->getTitle(),
-            $payment->getAmount(),
-            $payment->getStatus(),
-            $customSummary,
-            $payment->getTrackingCode() ?: '-',
-            $payment->getReceiptMessage() ?: '-',
-            $payment->getCreatedAt()->format('Y-m-d H:i:s'),
-            $payment->getSubmittedAt()?->format('Y-m-d H:i:s') ?? '-'
-        );
+        if ($isRenewal) {
+            $detail = sprintf(
+                "پرداخت تمدید سرویس\nPayment ID: %d\nOrder ID: %d\nService ID: %s\nUser: %s\nAmount: %d تومان\nDuration: %s\nTraffic: %s GB\nStatus: %s\nTracking: %s\nReceipt message: %s\nCreated: %s\nSubmitted: %s",
+                $payment->getId(),
+                $order->getId(),
+                (string) ($customMeta['targetServiceId'] ?? ($order->getTargetService()?->getId() ?? '-')),
+                $this->formatTelegramIdentity($telegramAccount),
+                $payment->getAmount(),
+                $durationText,
+                (string) ($customMeta['trafficGb'] ?? '-'),
+                $payment->getStatus(),
+                $payment->getTrackingCode() ?: '-',
+                $payment->getReceiptMessage() ?: '-',
+                $payment->getCreatedAt()->format('Y-m-d H:i:s'),
+                $payment->getSubmittedAt()?->format('Y-m-d H:i:s') ?? '-'
+            );
+        } else {
+            $detail = sprintf(
+                "Payment ID: %d\nOrder ID: %d\nUser: %s\nPlan: %s\nAmount: %d تومان\nStatus: %s\n%s\nTracking: %s\nReceipt message: %s\nCreated: %s\nSubmitted: %s",
+                $payment->getId(),
+                $order->getId(),
+                $this->formatTelegramIdentity($telegramAccount),
+                $order->getPlan()->getTitle(),
+                $payment->getAmount(),
+                $payment->getStatus(),
+                $customSummary,
+                $payment->getTrackingCode() ?: '-',
+                $payment->getReceiptMessage() ?: '-',
+                $payment->getCreatedAt()->format('Y-m-d H:i:s'),
+                $payment->getSubmittedAt()?->format('Y-m-d H:i:s') ?? '-'
+            );
+        }
         $this->telegramApiClient->sendMessage($chatId, $detail, $this->keyboardFactory->adminPaymentActions((int) $payment->getId()));
 
         $receiptFileId = (string) ($payment->getReceiptFileId() ?? '');
@@ -877,14 +915,23 @@ class TelegramUpdateHandler
             return;
         }
 
-        $caption = sprintf(
-            "رسید پرداخت\nPayment ID: %d\nOrder ID: %d\nUser: %s\nPlan: %s\nAmount: %d تومان",
-            $payment->getId(),
-            $order->getId(),
-            $this->formatTelegramIdentity($telegramAccount),
-            $order->getPlan()->getTitle(),
-            $payment->getAmount()
-        );
+        $caption = $isRenewal
+            ? sprintf(
+                "رسید پرداخت تمدید سرویس\nPayment ID: %d\nOrder ID: %d\nService ID: %s\nUser: %s\nAmount: %d تومان",
+                $payment->getId(),
+                $order->getId(),
+                (string) ($customMeta['targetServiceId'] ?? ($order->getTargetService()?->getId() ?? '-')),
+                $this->formatTelegramIdentity($telegramAccount),
+                $payment->getAmount()
+            )
+            : sprintf(
+                "رسید پرداخت\nPayment ID: %d\nOrder ID: %d\nUser: %s\nPlan: %s\nAmount: %d تومان",
+                $payment->getId(),
+                $order->getId(),
+                $this->formatTelegramIdentity($telegramAccount),
+                $order->getPlan()->getTitle(),
+                $payment->getAmount()
+            );
 
         $this->telegramApiClient->sendPhoto($chatId, $receiptFileId, $caption, $this->keyboardFactory->adminPaymentActions((int) $payment->getId()));
         $this->debugLog(sprintf('admin_view_payment_sent_receipt_photo payment_id=%d', $paymentId));
@@ -915,7 +962,7 @@ class TelegramUpdateHandler
         }
 
         if (!$result->processed) {
-            $this->showPopupOrMessage($chatId, $callbackId, 'ساخت سرویس در پنل انجام نشد. لاگ را بررسی کنید.', 'popup_payment_confirm_panel_failed');
+            $this->showPopupOrMessage($chatId, $callbackId, $result->message, 'popup_payment_confirm_panel_failed');
 
             return;
         }
@@ -1228,23 +1275,39 @@ class TelegramUpdateHandler
         $order = $payment->getOrder();
         $telegramAccount = $this->entityManager->getRepository(TelegramAccount::class)->findOneBy(['user' => $order->getUser()]);
         $meta = is_array($order->getMetadata()) ? $order->getMetadata() : [];
+        $isRenewal = OrderType::RENEWAL === $order->getType();
         $durationText = true === ($meta['unlimitedDuration'] ?? false)
             ? 'نامحدود'
             : sprintf('%s روز', (string) ($meta['durationDays'] ?? '-'));
         $customSummary = true === ($meta['custom'] ?? false)
             ? sprintf("Custom: yes\nUsername: %s\nTraffic: %s GB\nDuration: %s\nCalculated amount: %s\n", (string) ($meta['finalUsername'] ?? '-'), (string) ($meta['trafficGb'] ?? '-'), $durationText, (string) ($meta['calculatedAmount'] ?? '-'))
             : "Custom: no\n";
-        $message = sprintf(
-            "پرداخت جدید ثبت شد\n\nPayment ID: %d\nOrder ID: %d\nUser: %s\nPlan: %s\nAmount: %d تومان\n%sTracking: %s\nReceipt message: %s",
-            $payment->getId(),
-            $order->getId(),
-            $this->formatTelegramIdentity($telegramAccount),
-            $order->getPlan()->getTitle(),
-            $payment->getAmount(),
-            $customSummary,
-            $payment->getTrackingCode() ?: '-',
-            $payment->getReceiptMessage() ?: '-'
-        );
+        if ($isRenewal) {
+            $message = sprintf(
+                "پرداخت تمدید سرویس\n\nPayment ID: %d\nOrder ID: %d\nService ID: %s\nUser: %s\nAmount: %d تومان\nRenewal duration: %s\nRenewal traffic: %s GB\nTracking: %s\nReceipt message: %s",
+                $payment->getId(),
+                $order->getId(),
+                (string) ($meta['targetServiceId'] ?? ($order->getTargetService()?->getId() ?? '-')),
+                $this->formatTelegramIdentity($telegramAccount),
+                $payment->getAmount(),
+                $durationText,
+                (string) ($meta['trafficGb'] ?? '-'),
+                $payment->getTrackingCode() ?: '-',
+                $payment->getReceiptMessage() ?: '-'
+            );
+        } else {
+            $message = sprintf(
+                "پرداخت جدید ثبت شد\n\nPayment ID: %d\nOrder ID: %d\nUser: %s\nPlan: %s\nAmount: %d تومان\n%sTracking: %s\nReceipt message: %s",
+                $payment->getId(),
+                $order->getId(),
+                $this->formatTelegramIdentity($telegramAccount),
+                $order->getPlan()->getTitle(),
+                $payment->getAmount(),
+                $customSummary,
+                $payment->getTrackingCode() ?: '-',
+                $payment->getReceiptMessage() ?: '-'
+            );
+        }
 
         if ('receipt_photo' === $kind) {
             $receiptFileId = (string) ($payment->getReceiptFileId() ?? '');

@@ -191,7 +191,11 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
         $client = $this->fetchClientByReference($panel, $ref);
         $client['enable'] = true;
 
-        if ($request->durationDays > 0) {
+        if ($request->unlimitedDuration) {
+            $client['expiryTime'] = 0;
+        } elseif ($request->expiresAt instanceof \DateTimeImmutable) {
+            $client['expiryTime'] = $request->expiresAt->getTimestamp() * 1000;
+        } elseif ($request->durationDays > 0) {
             $client['expiryTime'] = $this->durationToMs($request->durationDays);
         }
 
@@ -202,6 +206,19 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
         $result = $this->apiClient->updateClient($panel, $ref->inboundId, $ref->clientId, $client);
         $this->assertPanelResult($result, 'updateClient');
         $this->assertPanelBusinessResult($result, 'updateClient', true);
+
+        try {
+            $verifyResult = $this->apiClient->getClientTraffic($panel, $ref->email);
+            $this->assertPanelResult($verifyResult, 'getClientTraffics');
+            $this->assertPanelBusinessResult($verifyResult, 'getClientTraffics');
+        } catch (\Throwable $e) {
+            $this->log(sprintf(
+                'renew_verify_warning panel_id=%s email="%s" message="%s"',
+                $panel->getId() ?? 'null',
+                $ref->email,
+                $this->sanitizeLogPreview($e->getMessage())
+            ));
+        }
     }
 
     public function deleteService(string $remoteId, ?VpnPanel $panel = null): void

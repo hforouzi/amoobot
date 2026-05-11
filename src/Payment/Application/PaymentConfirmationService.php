@@ -10,6 +10,7 @@ use App\Bot\Infrastructure\TelegramApiClient;
 use App\Entity\Payment;
 use App\Entity\TelegramAccount;
 use Doctrine\ORM\EntityManagerInterface;
+use App\Shop\Domain\OrderType;
 
 class PaymentConfirmationService
 {
@@ -27,7 +28,10 @@ class PaymentConfirmationService
             $telegramAccount = $this->entityManager->getRepository(TelegramAccount::class)->findOneBy(['user' => $payment->getOrder()->getUser()]);
             if ($telegramAccount instanceof TelegramAccount) {
                 $vpnService = $result->vpnService;
-                foreach ($this->buildPaymentConfirmedMessages($vpnService) as $message) {
+                $messages = OrderType::RENEWAL === $payment->getOrder()->getType()
+                    ? $this->buildRenewalConfirmedMessages($vpnService)
+                    : $this->buildPaymentConfirmedMessages($vpnService);
+                foreach ($messages as $message) {
                     $this->telegramApiClient->sendMessage($telegramAccount->getTelegramId(), $message);
                 }
             }
@@ -96,6 +100,40 @@ class PaymentConfirmationService
         if ([] === $allConfigLinks && '' === $subscriptionUrl && '' !== $configText) {
             $lines[] = '';
             $lines[] = $configText;
+        }
+
+        return $this->splitLongMessage(implode("\n", $lines));
+    }
+
+    /**
+     * @return string[]
+     */
+    private function buildRenewalConfirmedMessages(?VpnService $vpnService): array
+    {
+        if (!$vpnService instanceof VpnService) {
+            return ['✅ سرویس شما با موفقیت تمدید شد.'];
+        }
+
+        $lines = [
+            '✅ سرویس شما با موفقیت تمدید شد.',
+            sprintf('شناسه سرویس: %d', $vpnService->getId() ?? 0),
+            sprintf('تاریخ انقضای جدید: %s', $vpnService->getExpiresAt()?->format('Y-m-d H:i:s') ?? 'نامحدود'),
+            sprintf('حجم کل جدید: %s', null === $vpnService->getTrafficLimitGb() ? 'نامحدود' : ((string) $vpnService->getTrafficLimitGb().' گیگ')),
+            sprintf('لینک اشتراک: %s', $vpnService->getSubscriptionUrl() ?: '-'),
+        ];
+
+        $configLinks = [];
+        foreach ((array) ($vpnService->getConfigLinks() ?? []) as $link) {
+            $candidate = trim((string) $link);
+            if ('' !== $candidate) {
+                $configLinks[] = $candidate;
+            }
+        }
+        if ([] !== $configLinks) {
+            $lines[] = 'لینکهای اتصال:';
+            foreach ($configLinks as $index => $link) {
+                $lines[] = sprintf('%d. %s', $index + 1, $link);
+            }
         }
 
         return $this->splitLongMessage(implode("\n", $lines));

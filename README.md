@@ -287,6 +287,19 @@ Cron example:
 */20 * * * * php /path/bin/console app:service:send-notifications
 ```
 
+## Phase 1.4.3 Renewal Flow
+- User can renew an existing service directly from service detail (`🔄 تمدید سرویس`).
+- Renewal creates `Order(type=renewal)` + `Payment(manual_card)` and reuses receipt/admin approval flow.
+- On admin confirmation:
+  - existing service is updated (not duplicated),
+  - panel renew API is called,
+  - local `expiresAt`/`trafficLimitGb` is updated.
+- Traffic rule in this phase: renewal traffic is **added** to current traffic limit.
+- Expiry rule in this phase:
+  - if current expiry is in future: extend from current expiry,
+  - otherwise: extend from now,
+  - unlimited renewal keeps expiry unlimited.
+
 ### Known issue
 - Some 3x-ui versions may return empty responses for `addClient`/`updateClient`.
 - The driver logs this safely and handles it as a warning path where applicable.
@@ -357,6 +370,7 @@ If `test login` works but provisioning still fails on `addClient`:
 - `app:service:sync-usage [--service-id=ID] [--limit=100] [--dry-run]`
 - `app:service:check-expiry [--service-id=ID] [--dry-run]`
 - `app:service:send-notifications [--dry-run] [--type=expiry|traffic|expired|all] [--limit=100]`
+- `app:service:test-renew {serviceId} [--days=30] [--traffic-gb=10]`
 
 ## Deployment Guide
 

@@ -6,13 +6,19 @@ namespace App\Bot\Application;
 
 use App\Bot\Infrastructure\TelegramApiClient;
 use App\Entity\Order;
+use App\Entity\Payment;
+use App\Entity\Plan;
 use App\Entity\TelegramAccount;
 use App\Entity\User;
 use App\Entity\VpnService;
+use App\Payment\Domain\PaymentStatus;
 use App\Provisioning\Application\ServiceUsageSyncService;
 use App\Provisioning\Domain\Dto\RenewVpnServiceRequest;
 use App\Provisioning\Domain\VpnServiceStatus;
 use App\Provisioning\Infrastructure\VpnPanelDriverRegistry;
+use App\Shared\Infrastructure\SettingValueProvider;
+use App\Shop\Domain\OrderStatus;
+use App\Shop\Domain\OrderType;
 use Doctrine\ORM\EntityManagerInterface;
 use Endroid\QrCode\QrCode;
 use Endroid\QrCode\Writer\PngWriter;
@@ -27,6 +33,10 @@ class ServiceManagementService
         private readonly TelegramKeyboardFactory $keyboardFactory,
         private readonly VpnPanelDriverRegistry $driverRegistry,
         private readonly ServiceUsageSyncService $serviceUsageSyncService,
+        private readonly SettingValueProvider $settingValueProvider,
+        private readonly string $paymentCardNumber = '',
+        private readonly string $paymentCardHolder = '',
+        private readonly ?string $paymentDescription = null,
     ) {
     }
 
@@ -293,6 +303,124 @@ class ServiceManagementService
             $this->formatServiceDetailForUser($service),
             $this->keyboardFactory->userServiceDetail((int) $service->getId())
         );
+    }
+
+    public function showRenewalSummary(TelegramAccount $account, int $serviceId, string $chatId, string $callbackId, bool $adminMode): void
+    {
+        $service = $this->findServiceOrPopup($serviceId, $chatId, $callbackId, 'invalid_service_renew');
+        if (!$service instanceof VpnService) {
+            return;
+        }
+
+        if (!$adminMode && $service->getUser()->getId() !== $account->getUser()->getId()) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'دسترسی غیرمجاز.', 'unauthorized_service_renew');
+
+            return;
+        }
+
+        if (VpnServiceStatus::DELETED === $service->getStatus()) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'امکان تمدید این سرویس وجود ندارد.', 'invalid_service_renew_deleted');
+
+            return;
+        }
+
+        $package = $this->resolveRenewalPackage($service);
+        if (null === $package) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'امکان تمدید خودکار برای این سرویس وجود ندارد. لطفاً با پشتیبانی تماس بگیرید.', 'renewal_package_missing');
+
+            return;
+        }
+
+        $durationText = $package['unlimitedDuration'] ? 'نامحدود' : ((string) $package['durationDays'].' روز');
+        $summary = sprintf(
+            "تمدید سرویس #%d\nحجم تمدید: %d گیگ\nمدت تمدید: %s\nمبلغ قابل پرداخت: %d تومان",
+            $serviceId,
+            $package['trafficGb'],
+            $durationText,
+            $package['amount']
+        );
+
+        $this->acknowledgeCallback($callbackId);
+        $this->telegramApiClient->sendMessage(
+            $chatId,
+            $summary,
+            $this->keyboardFactory->renewalSummary($serviceId, $adminMode)
+        );
+    }
+
+    public function confirmRenewal(TelegramAccount $account, int $serviceId, string $chatId, string $callbackId, bool $adminMode): void
+    {
+        $service = $this->findServiceOrPopup($serviceId, $chatId, $callbackId, 'invalid_service_renew_confirm');
+        if (!$service instanceof VpnService) {
+            return;
+        }
+
+        if (!$adminMode && $service->getUser()->getId() !== $account->getUser()->getId()) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'دسترسی غیرمجاز.', 'unauthorized_service_renew_confirm');
+
+            return;
+        }
+
+        if (VpnServiceStatus::DELETED === $service->getStatus()) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'امکان تمدید این سرویس وجود ندارد.', 'invalid_service_renew_confirm_deleted');
+
+            return;
+        }
+
+        $package = $this->resolveRenewalPackage($service);
+        if (null === $package) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'امکان تمدید خودکار برای این سرویس وجود ندارد. لطفاً با پشتیبانی تماس بگیرید.', 'renewal_confirm_package_missing');
+
+            return;
+        }
+
+        /** @var Plan $plan */
+        $plan = $package['plan'];
+        $metadata = [
+            'renewal' => true,
+            'targetServiceId' => $service->getId(),
+            'trafficGb' => $package['trafficGb'],
+            'durationDays' => $package['durationDays'],
+            'unlimitedDuration' => $package['unlimitedDuration'],
+        ];
+
+        $order = (new Order())
+            ->setUser($service->getUser())
+            ->setPlan($plan)
+            ->setTargetService($service)
+            ->setType(OrderType::RENEWAL)
+            ->setAmount($package['amount'])
+            ->setMetadata($metadata)
+            ->setStatus(OrderStatus::WAITING_PAYMENT);
+
+        $payment = (new Payment())
+            ->setOrder($order)
+            ->setMethod('manual_card')
+            ->setAmount($package['amount'])
+            ->setStatus(PaymentStatus::PENDING);
+
+        $this->entityManager->persist($order);
+        $this->entityManager->persist($payment);
+        $this->entityManager->flush();
+
+        $cardNumber = $this->settingValueProvider->get('payment.card_number', $this->paymentCardNumber);
+        $cardHolder = $this->settingValueProvider->get('payment.card_holder', $this->paymentCardHolder);
+        $description = $this->settingValueProvider->get('payment.description', $this->paymentDescription);
+        $durationText = $package['unlimitedDuration'] ? 'نامحدود' : ((string) $package['durationDays'].' روز');
+
+        $message = sprintf(
+            "تمدید سرویس #%d\nحجم تمدید: %d گیگ\nمدت تمدید: %s\nمبلغ: %d تومان\nشماره کارت: %s\nبه نام: %s\n%s\n\nبرای ارسال رسید روی «✅ تایید و ارسال رسید» بزنید.",
+            $serviceId,
+            $package['trafficGb'],
+            $durationText,
+            $package['amount'],
+            $cardNumber ?: '-',
+            $cardHolder ?: '-',
+            $description ? 'توضیحات: '.$description : ''
+        );
+
+        $this->acknowledgeCallback($callbackId);
+        $this->telegramApiClient->sendMessage($chatId, trim($message), $this->keyboardFactory->paymentActionMenu((int) $payment->getId()));
     }
 
     public function suspendService(int $serviceId, string $chatId, string $callbackId): void
@@ -627,6 +755,58 @@ class ServiceManagementService
 
         $this->acknowledgeCallback($callbackId);
         $this->telegramApiClient->sendMessage($chatId, implode("\n", $lines), $this->keyboardFactory->adminUserDetail($userId, $backServiceId));
+    }
+
+    /**
+     * @return array{plan: Plan, amount: int, trafficGb: int, durationDays: int, unlimitedDuration: bool}|null
+     */
+    private function resolveRenewalPackage(VpnService $service): ?array
+    {
+        $sourceOrder = $service->getOrder();
+        if (!$sourceOrder instanceof Order) {
+            return null;
+        }
+
+        $plan = $sourceOrder->getPlan();
+        if (!$plan instanceof Plan) {
+            return null;
+        }
+
+        $metadata = is_array($sourceOrder->getMetadata()) ? $sourceOrder->getMetadata() : [];
+        $isCustom = true === ($metadata['custom'] ?? false);
+
+        $trafficGb = (int) ($metadata['trafficGb'] ?? 0);
+        if ($trafficGb <= 0) {
+            $trafficGb = (int) ($plan->getTrafficGb() ?? 0);
+        }
+        if ($trafficGb <= 0) {
+            return null;
+        }
+
+        $unlimitedDuration = true === ($metadata['unlimitedDuration'] ?? false) || $plan->isUnlimitedDuration();
+        $durationDays = 0;
+        if (!$unlimitedDuration) {
+            $durationDays = (int) ($metadata['durationDays'] ?? 0);
+            if ($durationDays <= 0) {
+                $durationDays = (int) $plan->getDurationDays();
+            }
+            if ($durationDays <= 0) {
+                return null;
+            }
+        }
+
+        $amount = $isCustom ? (int) ($metadata['calculatedAmount'] ?? 0) : $plan->getPrice();
+        if ($amount <= 0) {
+            return null;
+        }
+
+        return [
+            'plan' => $plan,
+            'amount' => $amount,
+            'trafficGb' => $trafficGb,
+            'durationDays' => $durationDays,
+            'unlimitedDuration' => $unlimitedDuration,
+        ];
     }
 
     private function findServiceOrPopup(int $serviceId, string $chatId, ?string $callbackId, string $logKey): ?VpnService
