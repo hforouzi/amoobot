@@ -43,10 +43,7 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
         if ('' === $inboundIdRaw) {
             throw new \RuntimeException('Sanaei provisioning requires a valid remote inbound id.');
         }
-        if (!preg_match('/^\d+$/', $inboundIdRaw)) {
-            throw new \RuntimeException('Remote inbound id must be numeric for Sanaei/3x-ui.');
-        }
-        $inboundIdInt = (int) $inboundIdRaw;
+        $inboundIdInt = $this->toInboundIdIntOrFail($inboundIdRaw);
 
         $email = trim((string) $request->username);
         if ('' === $email) {
@@ -179,7 +176,15 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
         $client = $this->fetchClientByReference($panel, $ref);
         $client['enable'] = false;
 
-        $result = $this->apiClient->updateClient($panel, $ref->inboundId, $ref->clientId, $client);
+        $inboundIdRaw = trim($ref->inboundId);
+        $inboundIdInt = $this->toInboundIdIntOrFail($inboundIdRaw);
+
+        $result = $this->apiClient->updateClient($panel, $inboundIdInt, $ref->clientId, $client, [
+            'remoteInboundIdRaw' => $inboundIdRaw,
+            'remoteInboundIdInt' => (string) $inboundIdInt,
+            'clientUuid' => $ref->clientId,
+            'email' => $ref->email,
+        ]);
         $this->assertPanelResult($result, 'updateClient');
         $this->assertPanelBusinessResult($result, 'updateClient', true);
     }
@@ -203,7 +208,30 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
             $client['totalGB'] = $this->gbToBytes($request->trafficLimitGb);
         }
 
-        $result = $this->apiClient->updateClient($panel, $ref->inboundId, $ref->clientId, $client);
+        $inboundIdRaw = trim($ref->inboundId);
+        $inboundIdInt = $this->toInboundIdIntOrFail($inboundIdRaw);
+        $serviceId = max(0, $request->serviceId ?? 0);
+        $orderId = max(0, $request->orderId ?? 0);
+
+        $this->log(sprintf(
+            'renew_update_client_context panel_id=%s remote_inbound_id_raw="%s" remote_inbound_id_int=%d client_uuid="%s" email="%s" service_id=%d order_id=%d',
+            $panel->getId() ?? 'null',
+            $inboundIdRaw,
+            $inboundIdInt,
+            $ref->clientId,
+            $ref->email,
+            $serviceId,
+            $orderId
+        ));
+
+        $result = $this->apiClient->updateClient($panel, $inboundIdInt, $ref->clientId, $client, [
+            'remoteInboundIdRaw' => $inboundIdRaw,
+            'remoteInboundIdInt' => (string) $inboundIdInt,
+            'clientUuid' => $ref->clientId,
+            'email' => $ref->email,
+            'serviceId' => (string) $serviceId,
+            'orderId' => (string) $orderId,
+        ]);
         $this->assertPanelResult($result, 'updateClient');
         $this->assertPanelBusinessResult($result, 'updateClient', true);
 
@@ -225,7 +253,8 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
     {
         $panel = $this->requireSupportedPanel($panel);
         $ref = $this->parseRemoteIdOrFail($remoteId);
-        $result = $this->apiClient->deleteClient($panel, $ref->inboundId, $ref->clientId);
+        $inboundIdInt = $this->toInboundIdIntOrFail($ref->inboundId);
+        $result = $this->apiClient->deleteClient($panel, (string) $inboundIdInt, $ref->clientId);
         $this->assertPanelResult($result, 'delClient');
         $this->assertPanelBusinessResult($result, 'delClient');
     }
@@ -234,7 +263,8 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
     {
         $panel = $this->requireSupportedPanel($panel);
         $ref = $this->parseRemoteIdOrFail($remoteId);
-        $result = $this->apiClient->resetClientTraffic($panel, $ref->inboundId, $ref->email);
+        $inboundIdInt = $this->toInboundIdIntOrFail($ref->inboundId);
+        $result = $this->apiClient->resetClientTraffic($panel, (string) $inboundIdInt, $ref->email);
         $this->assertPanelResult($result, 'resetClientTraffic');
         $this->assertPanelBusinessResult($result, 'resetClientTraffic');
     }
@@ -485,6 +515,16 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
         $number = (int) $value;
 
         return $number >= 0 ? $number : null;
+    }
+
+    private function toInboundIdIntOrFail(string $inboundIdRaw): int
+    {
+        $trimmed = trim($inboundIdRaw);
+        if ('' === $trimmed || !preg_match('/^\d+$/', $trimmed)) {
+            throw new \RuntimeException('Remote inbound id must be numeric for Sanaei/3x-ui.');
+        }
+
+        return (int) $trimmed;
     }
 
     private function sanitizeLogPreview(string $value, int $max = 120): string

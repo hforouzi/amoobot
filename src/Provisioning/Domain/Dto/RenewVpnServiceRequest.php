@@ -11,6 +11,8 @@ class RenewVpnServiceRequest
         public readonly ?int $trafficLimitGb = null,
         public readonly ?\DateTimeImmutable $expiresAt = null,
         public readonly bool $unlimitedDuration = false,
+        public readonly ?int $serviceId = null,
+        public readonly ?int $orderId = null,
     ) {
     }
 }
