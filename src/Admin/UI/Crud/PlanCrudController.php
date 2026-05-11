@@ -32,6 +32,15 @@ class PlanCrudController extends AbstractCrudController
             IntegerField::new('ipLimit')
                 ->setHelp('Maximum simultaneous IPs/devices. Empty means panel/default/unlimited.'),
             IntegerField::new('price'),
+            BooleanField::new('isCustomizable', 'پلن سفارشی')
+                ->setHelp('اگر فعال باشد، قیمت = (حجم × قیمت هر گیگ) + (روز × قیمت هر روز).'),
+            IntegerField::new('minTrafficGb', 'حداقل حجم (GB)')->hideOnIndex(),
+            IntegerField::new('maxTrafficGb', 'حداکثر حجم (GB)')->hideOnIndex(),
+            IntegerField::new('pricePerGb', 'قیمت هر گیگ')->hideOnIndex(),
+            IntegerField::new('minDurationDays', 'حداقل مدت (روز)')->hideOnIndex(),
+            IntegerField::new('maxDurationDays', 'حداکثر مدت (روز)')->hideOnIndex(),
+            IntegerField::new('pricePerDay', 'قیمت هر روز')->hideOnIndex(),
+            BooleanField::new('allowCustomUsername', 'اجازه نام کاربری دلخواه')->hideOnIndex(),
             AssociationField::new('inbound', 'اینباند / سرور'),
             BooleanField::new('isActive'),
             DateTimeField::new('createdAt')->hideOnForm(),

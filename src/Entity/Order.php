@@ -30,6 +30,9 @@ class Order
     #[ORM\Column(length: 50)]
     private string $status = OrderStatus::PENDING;
 
+    #[ORM\Column(type: 'json', nullable: true)]
+    private ?array $metadata = null;
+
     #[ORM\Column]
     private \DateTimeImmutable $createdAt;
 
@@ -95,6 +98,23 @@ class Order
         $this->status = $status;
 
         return $this;
+    }
+
+    public function getMetadata(): ?array
+    {
+        return $this->metadata;
+    }
+
+    public function setMetadata(?array $metadata): self
+    {
+        $this->metadata = $metadata;
+
+        return $this;
+    }
+
+    public function isCustomOrder(): bool
+    {
+        return true === ($this->metadata['custom'] ?? false);
     }
 
     public function getCreatedAt(): \DateTimeImmutable

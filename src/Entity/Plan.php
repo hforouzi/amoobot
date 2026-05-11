@@ -35,6 +35,30 @@ class Plan
     #[ORM\Column]
     private bool $isActive = true;
 
+    #[ORM\Column]
+    private bool $isCustomizable = false;
+
+    #[ORM\Column(nullable: true)]
+    private ?int $minTrafficGb = null;
+
+    #[ORM\Column(nullable: true)]
+    private ?int $maxTrafficGb = null;
+
+    #[ORM\Column(nullable: true)]
+    private ?int $pricePerGb = null;
+
+    #[ORM\Column(nullable: true)]
+    private ?int $minDurationDays = null;
+
+    #[ORM\Column(nullable: true)]
+    private ?int $maxDurationDays = null;
+
+    #[ORM\Column(nullable: true)]
+    private ?int $pricePerDay = null;
+
+    #[ORM\Column]
+    private bool $allowCustomUsername = true;
+
     #[ORM\ManyToOne]
     #[ORM\JoinColumn(nullable: true, onDelete: 'SET NULL')]
     private ?VpnInbound $inbound = null;
@@ -137,6 +161,127 @@ class Plan
         $this->isActive = $isActive;
 
         return $this;
+    }
+
+    public function isCustomizable(): bool
+    {
+        return $this->isCustomizable;
+    }
+
+    public function setIsCustomizable(bool $isCustomizable): self
+    {
+        $this->isCustomizable = $isCustomizable;
+
+        return $this;
+    }
+
+    public function getMinTrafficGb(): ?int
+    {
+        return $this->minTrafficGb;
+    }
+
+    public function setMinTrafficGb(?int $minTrafficGb): self
+    {
+        $this->minTrafficGb = $minTrafficGb;
+
+        return $this;
+    }
+
+    public function getMaxTrafficGb(): ?int
+    {
+        return $this->maxTrafficGb;
+    }
+
+    public function setMaxTrafficGb(?int $maxTrafficGb): self
+    {
+        $this->maxTrafficGb = $maxTrafficGb;
+
+        return $this;
+    }
+
+    public function getPricePerGb(): ?int
+    {
+        return $this->pricePerGb;
+    }
+
+    public function setPricePerGb(?int $pricePerGb): self
+    {
+        $this->pricePerGb = $pricePerGb;
+
+        return $this;
+    }
+
+    public function getMinDurationDays(): ?int
+    {
+        return $this->minDurationDays;
+    }
+
+    public function setMinDurationDays(?int $minDurationDays): self
+    {
+        $this->minDurationDays = $minDurationDays;
+
+        return $this;
+    }
+
+    public function getMaxDurationDays(): ?int
+    {
+        return $this->maxDurationDays;
+    }
+
+    public function setMaxDurationDays(?int $maxDurationDays): self
+    {
+        $this->maxDurationDays = $maxDurationDays;
+
+        return $this;
+    }
+
+    public function getPricePerDay(): ?int
+    {
+        return $this->pricePerDay;
+    }
+
+    public function setPricePerDay(?int $pricePerDay): self
+    {
+        $this->pricePerDay = $pricePerDay;
+
+        return $this;
+    }
+
+    public function isAllowCustomUsername(): bool
+    {
+        return $this->allowCustomUsername;
+    }
+
+    public function setAllowCustomUsername(bool $allowCustomUsername): self
+    {
+        $this->allowCustomUsername = $allowCustomUsername;
+
+        return $this;
+    }
+
+    public function isFixedDurationCustomPlan(): bool
+    {
+        return null !== $this->minDurationDays
+            && null !== $this->maxDurationDays
+            && $this->minDurationDays === $this->maxDurationDays;
+    }
+
+    public function calculateCustomPrice(int $trafficGb, int $durationDays): int
+    {
+        $pricePerGb = max(0, (int) ($this->pricePerGb ?? 0));
+        $pricePerDay = max(0, (int) ($this->pricePerDay ?? 0));
+
+        if (0 === $pricePerGb && 0 === $pricePerDay) {
+            return 0;
+        }
+        if (0 === $pricePerDay) {
+            return $trafficGb * $pricePerGb;
+        }
+        if (0 === $pricePerGb) {
+            return $durationDays * $pricePerDay;
+        }
+
+        return ($trafficGb * $pricePerGb) + ($durationDays * $pricePerDay);
     }
 
     public function getInbound(): ?VpnInbound

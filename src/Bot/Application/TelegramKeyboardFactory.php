@@ -80,8 +80,11 @@ class TelegramKeyboardFactory
         $rows = [];
 
         foreach ($plans as $plan) {
+            $planPriceLabel = $plan->isCustomizable()
+                ? 'سفارشی'
+                : sprintf('%d تومان', $plan->getPrice());
             $rows[] = [[
-                'text' => sprintf('%s - %d تومان', $plan->getTitle(), $plan->getPrice()),
+                'text' => sprintf('%s - %s', $plan->getTitle(), $planPriceLabel),
                 'callback_data' => 'select_plan:'.$plan->getId(),
             ]];
         }
@@ -137,6 +140,63 @@ class TelegramKeyboardFactory
                 [[
                     'text' => '🔙 بازگشت به پلنها',
                     'callback_data' => 'buy_service',
+                ]],
+            ],
+        ];
+    }
+
+    /**
+     * @return array<string, array<array<array<string, string>>>>
+     */
+    public function paymentMethodSelectionForDraftMenu(int $draftId): array
+    {
+        return [
+            'inline_keyboard' => [
+                [[
+                    'text' => '💳 کارت به کارت',
+                    'callback_data' => 'select_payment_method_draft:'.$draftId.':manual_card',
+                ]],
+                [[
+                    'text' => '❌ انصراف',
+                    'callback_data' => 'custom_order_cancel:'.$draftId,
+                ]],
+            ],
+        ];
+    }
+
+    /**
+     * @return array<string, array<array<array<string, string>>>>
+     */
+    public function customOrderSummaryMenu(int $draftId): array
+    {
+        return [
+            'inline_keyboard' => [
+                [[
+                    'text' => '✅ تایید و انتخاب روش پرداخت',
+                    'callback_data' => 'custom_order_confirm:'.$draftId,
+                ]],
+                [[
+                    'text' => '❌ انصراف',
+                    'callback_data' => 'custom_order_cancel:'.$draftId,
+                ]],
+            ],
+        ];
+    }
+
+    /**
+     * @return array<string, array<array<array<string, string>>>>
+     */
+    public function customOrderInputMenu(int $draftId): array
+    {
+        return [
+            'inline_keyboard' => [
+                [[
+                    'text' => '🔙 بازگشت',
+                    'callback_data' => 'buy_service',
+                ]],
+                [[
+                    'text' => '❌ انصراف',
+                    'callback_data' => 'custom_order_cancel:'.$draftId,
                 ]],
             ],
         ];

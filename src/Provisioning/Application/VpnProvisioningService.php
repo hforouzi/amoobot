@@ -40,13 +40,28 @@ class VpnProvisioningService
 
         $telegram = $this->entityManager->getRepository(TelegramAccount::class)->findOneBy(['user' => $order->getUser()]);
         $telegramId = $telegram?->getTelegramId() ?? (string) $order->getUser()->getId();
+        $orderMeta = is_array($order->getMetadata()) ? $order->getMetadata() : [];
+        $isCustomOrder = true === ($orderMeta['custom'] ?? false);
+        $customFinalUsername = $isCustomOrder ? trim((string) ($orderMeta['finalUsername'] ?? '')) : '';
+        $durationDays = $isCustomOrder ? (int) ($orderMeta['durationDays'] ?? 0) : 0;
+        $trafficLimitGb = $isCustomOrder ? (int) ($orderMeta['trafficGb'] ?? 0) : 0;
+        if ($durationDays <= 0) {
+            $durationDays = $order->getPlan()->getDurationDays();
+        }
+        if ($trafficLimitGb <= 0) {
+            $trafficLimitGb = (int) ($order->getPlan()->getTrafficGb() ?? 0);
+        }
+        $trafficLimitValue = $trafficLimitGb > 0 ? $trafficLimitGb : null;
+        $username = '' !== $customFinalUsername
+            ? $customFinalUsername
+            : sprintf('tg_%s_order_%d', $telegramId, $order->getId());
 
         $driver = $this->driverRegistry->resolve($panel);
         $driverType = $panel?->getType() ?? 'dummy';
         $created = $driver->createService(new CreateVpnServiceRequest(
-            username: sprintf('tg_%s_order_%d', $telegramId, $order->getId()),
-            durationDays: $order->getPlan()->getDurationDays(),
-            trafficLimitGb: $order->getPlan()->getTrafficGb(),
+            username: $username,
+            durationDays: $durationDays,
+            trafficLimitGb: $trafficLimitValue,
             ipLimit: $order->getPlan()->getIpLimit(),
             inbound: $planInbound,
             remoteInboundId: $planInbound?->getRemoteInboundId(),
@@ -57,6 +72,7 @@ class VpnProvisioningService
                 'planInboundId' => $planInbound?->getId(),
                 'panelId' => $panel?->getId(),
                 'driverType' => $driverType,
+                'customOrder' => $isCustomOrder ? 1 : 0,
             ], $meta),
         ), $panel);
 
@@ -76,8 +92,8 @@ class VpnProvisioningService
             ->setConfigText($created->configText)
             ->setStatus(VpnServiceStatus::ACTIVE)
             ->setStartsAt(new \DateTimeImmutable())
-            ->setExpiresAt((new \DateTimeImmutable())->modify('+'.$order->getPlan()->getDurationDays().' days'))
-            ->setTrafficLimitGb($order->getPlan()->getTrafficGb())
+            ->setExpiresAt((new \DateTimeImmutable())->modify('+'.$durationDays.' days'))
+            ->setTrafficLimitGb($trafficLimitValue)
             ->setTrafficUsedGb(0);
 
         $panelType = strtolower(trim((string) ($panel?->getType() ?? '')));
@@ -118,7 +134,11 @@ class VpnProvisioningService
             generatedConfigLinkCount: count($configLinks),
             configTextEmpty: '' === trim((string) ($finalConfigText ?? '')),
             subscriptionUrl: (string) ($finalSubscriptionUrl ?? ''),
-            configTextPreview: (string) ($finalConfigText ?? '')
+            configTextPreview: (string) ($finalConfigText ?? ''),
+            customOrder: $isCustomOrder,
+            finalUsername: $username,
+            trafficLimitGb: (int) ($trafficLimitValue ?? 0),
+            durationDays: $durationDays
         );
 
         $order
@@ -139,10 +159,14 @@ class VpnProvisioningService
         int $generatedConfigLinkCount,
         bool $configTextEmpty,
         string $subscriptionUrl,
-        string $configTextPreview
+        string $configTextPreview,
+        bool $customOrder,
+        string $finalUsername,
+        int $trafficLimitGb,
+        int $durationDays
     ): void {
         error_log(sprintf(
-            '[VpnProvisioningService] provisioning_config source="%s" service_id=%d inbound_id=%d uuid="%s" sub_id="%s" generated_config_link_count=%d config_text_empty=%s subscription_url="%s" config_text_preview="%s"',
+            '[VpnProvisioningService] provisioning_config source="%s" service_id=%d inbound_id=%d uuid="%s" sub_id="%s" generated_config_link_count=%d config_text_empty=%s subscription_url="%s" custom_order=%s final_username="%s" traffic_limit_gb=%d duration_days=%d config_text_preview="%s"',
             $source,
             $serviceId ?? 0,
             $inboundId ?? 0,
@@ -151,6 +175,10 @@ class VpnProvisioningService
             $generatedConfigLinkCount,
             $configTextEmpty ? 'yes' : 'no',
             $subscriptionUrl,
+            $customOrder ? 'yes' : 'no',
+            $finalUsername,
+            $trafficLimitGb,
+            $durationDays,
             $this->sanitizeLogPreview($configTextPreview)
         ));
     }

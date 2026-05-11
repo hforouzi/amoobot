@@ -8,12 +8,14 @@ use App\Bot\Application\ServiceAction\ServiceActionContext;
 use App\Bot\Application\ServiceAction\ServiceActionResolver;
 use App\Bot\Infrastructure\TelegramApiClient;
 use App\Entity\Order;
+use App\Entity\OrderDraft;
 use App\Entity\Payment;
 use App\Entity\Plan;
 use App\Entity\TelegramAccount;
 use App\Payment\Application\PaymentConfirmationService;
 use App\Payment\Domain\PaymentStatus;
 use App\Shared\Infrastructure\SettingValueProvider;
+use App\Shop\Domain\OrderDraftStatus;
 use App\Shop\Domain\OrderStatus;
 use Doctrine\ORM\EntityManagerInterface;
 
@@ -23,6 +25,9 @@ class TelegramUpdateHandler
     private const BUTTON_MY_SERVICES = '📦 سرویسهای من';
     private const BUTTON_SUPPORT = '🎧 پشتیبانی';
     private const BUTTON_ADMIN_MENU = '🛠 مدیریت';
+    private const STEP_WAITING_CUSTOM_USERNAME = 'waiting_custom_username';
+    private const STEP_WAITING_CUSTOM_TRAFFIC = 'waiting_custom_traffic';
+    private const STEP_WAITING_CUSTOM_DURATION = 'waiting_custom_duration';
 
     public function __construct(
         private readonly TelegramUserResolver $telegramUserResolver,
@@ -102,6 +107,13 @@ class TelegramUpdateHandler
             }
 
             $this->handleAdminMenu($chatId);
+
+            return;
+        }
+
+        $activeDraft = $this->findActiveOrderDraft($account);
+        if ('' !== $text && $activeDraft instanceof OrderDraft) {
+            $this->handleCustomOrderDraftTextInput($account, $activeDraft, $text, $chatId);
 
             return;
         }
@@ -231,8 +243,26 @@ class TelegramUpdateHandler
             return;
         }
 
+        if (str_starts_with($data, 'custom_order_confirm:')) {
+            $this->handleCustomOrderConfirm($account, $chatId, (int) str_replace('custom_order_confirm:', '', $data), $callbackId);
+
+            return;
+        }
+
+        if (str_starts_with($data, 'custom_order_cancel:')) {
+            $this->handleCustomOrderCancel($account, $chatId, (int) str_replace('custom_order_cancel:', '', $data), $callbackId);
+
+            return;
+        }
+
         if (str_starts_with($data, 'select_payment_method:')) {
             $this->handleSelectPaymentMethod($account, $chatId, $data, $callbackId);
+
+            return;
+        }
+
+        if (str_starts_with($data, 'select_payment_method_draft:')) {
+            $this->handleSelectPaymentMethodFromDraft($account, $chatId, $data, $callbackId);
 
             return;
         }
@@ -297,8 +327,330 @@ class TelegramUpdateHandler
             return;
         }
 
+        if ($plan->isCustomizable()) {
+            $this->startCustomOrderDraft($account, $plan, $chatId, $callbackId);
+
+            return;
+        }
+
         $this->acknowledgeCallback($callbackId);
         $this->telegramApiClient->sendMessage($chatId, 'لطفاً روش پرداخت را انتخاب کنید:', $this->keyboardFactory->paymentMethodSelectionMenu($planId));
+    }
+
+    private function startCustomOrderDraft(TelegramAccount $account, Plan $plan, string $chatId, ?string $callbackId = null): void
+    {
+        if (null === $plan->getMinTrafficGb() || null === $plan->getMaxTrafficGb() || null === $plan->getMinDurationDays() || null === $plan->getMaxDurationDays()) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'تنظیمات پلن سفارشی کامل نیست. لطفاً با پشتیبانی تماس بگیرید.', 'popup_custom_plan_invalid_config');
+
+            return;
+        }
+
+        $this->expireUserDrafts($account);
+
+        $draft = $this->findActiveOrderDraft($account);
+        if (!$draft instanceof OrderDraft || $draft->getPlan()->getId() !== $plan->getId()) {
+            $draft = (new OrderDraft())
+                ->setUser($account->getUser())
+                ->setPlan($plan)
+                ->setStatus(OrderDraftStatus::PENDING)
+                ->setStep(self::STEP_WAITING_CUSTOM_USERNAME)
+                ->setExpiresAt((new \DateTimeImmutable())->modify('+1 hour'));
+            $this->entityManager->persist($draft);
+        }
+        $this->debugLog(sprintf('custom_order_draft_start user_id=%d plan_id=%d draft_id=%d', $account->getUser()->getId() ?? 0, $plan->getId() ?? 0, $draft->getId() ?? 0));
+
+        if (!$plan->isAllowCustomUsername()) {
+            $autoPrefix = sprintf('user%s', $account->getUser()->getId() ?? 0);
+            $draft
+                ->setCustomUsernamePrefix($autoPrefix)
+                ->setFinalUsername($this->buildFinalUsername($autoPrefix))
+                ->setStep(self::STEP_WAITING_CUSTOM_TRAFFIC)
+                ->setUpdatedAt(new \DateTimeImmutable());
+            $this->entityManager->flush();
+            $this->acknowledgeCallback($callbackId);
+            $this->sendCustomDraftTrafficPrompt($chatId, $draft);
+
+            return;
+        }
+
+        $draft
+            ->setStep(self::STEP_WAITING_CUSTOM_USERNAME)
+            ->setUpdatedAt(new \DateTimeImmutable());
+
+        $this->entityManager->flush();
+        $this->acknowledgeCallback($callbackId);
+        $this->telegramApiClient->sendMessage(
+            $chatId,
+            'لطفاً نام دلخواه اکانت را وارد کنید. فقط حروف انگلیسی، عدد و _ مجاز است.',
+            $this->keyboardFactory->customOrderInputMenu((int) ($draft->getId() ?? 0))
+        );
+    }
+
+    private function handleCustomOrderDraftTextInput(TelegramAccount $account, OrderDraft $draft, string $text, string $chatId): void
+    {
+        $plan = $draft->getPlan();
+        if (!$plan->isCustomizable() || OrderDraftStatus::PENDING !== $draft->getStatus()) {
+            return;
+        }
+        if ($draft->getUser()->getId() !== $account->getUser()->getId()) {
+            return;
+        }
+        if (null !== $draft->getExpiresAt() && $draft->getExpiresAt() < new \DateTimeImmutable()) {
+            $draft->setStatus(OrderDraftStatus::EXPIRED)->setUpdatedAt(new \DateTimeImmutable());
+            $this->entityManager->flush();
+            $this->telegramApiClient->sendMessage($chatId, 'این درخواست منقضی شده است. دوباره از بخش خرید شروع کنید.');
+
+            return;
+        }
+
+        if (self::STEP_WAITING_CUSTOM_USERNAME === $draft->getStep()) {
+            $prefix = $this->normalizeUsernamePrefix($text);
+            if (null === $prefix) {
+                $this->telegramApiClient->sendMessage($chatId, 'نام نامعتبر است. فقط a-z, 0-9 و _ با طول 3 تا 24 مجاز است.');
+
+                return;
+            }
+
+            $draft
+                ->setCustomUsernamePrefix($prefix)
+                ->setFinalUsername($this->buildFinalUsername($prefix))
+                ->setStep(self::STEP_WAITING_CUSTOM_TRAFFIC)
+                ->setUpdatedAt(new \DateTimeImmutable());
+            $this->entityManager->flush();
+            $this->debugLog(sprintf('custom_order_username_set draft_id=%d prefix="%s" final="%s"', $draft->getId() ?? 0, $prefix, (string) $draft->getFinalUsername()));
+
+            $this->sendCustomDraftTrafficPrompt($chatId, $draft);
+
+            return;
+        }
+
+        if (self::STEP_WAITING_CUSTOM_TRAFFIC === $draft->getStep()) {
+            $traffic = $this->parsePositiveInt($text);
+            $minTraffic = $plan->getMinTrafficGb();
+            $maxTraffic = $plan->getMaxTrafficGb();
+            if (null === $traffic || null === $minTraffic || null === $maxTraffic || $traffic < $minTraffic || $traffic > $maxTraffic) {
+                $this->telegramApiClient->sendMessage($chatId, sprintf('حجم نامعتبر است. عدد صحیح بین %d تا %d وارد کنید.', (int) ($minTraffic ?? 0), (int) ($maxTraffic ?? 0)));
+
+                return;
+            }
+
+            $draft->setTrafficGb($traffic)->setUpdatedAt(new \DateTimeImmutable());
+            $this->debugLog(sprintf('custom_order_traffic_set draft_id=%d traffic=%d', $draft->getId() ?? 0, $traffic));
+
+            if ($plan->isFixedDurationCustomPlan()) {
+                $duration = (int) ($plan->getMinDurationDays() ?? 0);
+                $amount = $plan->calculateCustomPrice($traffic, $duration);
+                if ($amount <= 0) {
+                    $this->telegramApiClient->sendMessage($chatId, 'قیمت این پلن سفارشی به‌درستی تنظیم نشده است. با پشتیبانی تماس بگیرید.');
+
+                    return;
+                }
+                $draft
+                    ->setDurationDays($duration)
+                    ->setCalculatedAmount($amount);
+                $this->entityManager->flush();
+                $this->debugLog(sprintf('custom_order_duration_fixed draft_id=%d duration=%d amount=%d', $draft->getId() ?? 0, $duration, $amount));
+                $this->sendCustomDraftSummary($chatId, $draft);
+
+                return;
+            }
+
+            $draft->setStep(self::STEP_WAITING_CUSTOM_DURATION);
+            $this->entityManager->flush();
+            $this->sendCustomDraftDurationPrompt($chatId, $draft);
+
+            return;
+        }
+
+        if (self::STEP_WAITING_CUSTOM_DURATION === $draft->getStep()) {
+            $duration = $this->parsePositiveInt($text);
+            $minDuration = $plan->getMinDurationDays();
+            $maxDuration = $plan->getMaxDurationDays();
+            if (null === $duration || null === $minDuration || null === $maxDuration || $duration < $minDuration || $duration > $maxDuration) {
+                $this->telegramApiClient->sendMessage($chatId, sprintf('مدت نامعتبر است. عدد صحیح بین %d تا %d وارد کنید.', (int) ($minDuration ?? 0), (int) ($maxDuration ?? 0)));
+
+                return;
+            }
+            $traffic = (int) ($draft->getTrafficGb() ?? 0);
+            if ($traffic <= 0) {
+                $draft->setStep(self::STEP_WAITING_CUSTOM_TRAFFIC)->setUpdatedAt(new \DateTimeImmutable());
+                $this->entityManager->flush();
+                $this->sendCustomDraftTrafficPrompt($chatId, $draft);
+
+                return;
+            }
+
+            $amount = $plan->calculateCustomPrice($traffic, $duration);
+            if ($amount <= 0) {
+                $this->telegramApiClient->sendMessage($chatId, 'قیمت این پلن سفارشی به‌درستی تنظیم نشده است. با پشتیبانی تماس بگیرید.');
+
+                return;
+            }
+            $draft
+                ->setDurationDays($duration)
+                ->setCalculatedAmount($amount)
+                ->setUpdatedAt(new \DateTimeImmutable());
+            $this->entityManager->flush();
+            $this->debugLog(sprintf('custom_order_duration_set draft_id=%d duration=%d amount=%d', $draft->getId() ?? 0, $duration, $amount));
+            $this->sendCustomDraftSummary($chatId, $draft);
+        }
+    }
+
+    private function sendCustomDraftTrafficPrompt(string $chatId, OrderDraft $draft): void
+    {
+        $plan = $draft->getPlan();
+        $this->telegramApiClient->sendMessage(
+            $chatId,
+            sprintf('حجم موردنظر را وارد کنید. حداقل %d گیگ و حداکثر %d گیگ.', (int) ($plan->getMinTrafficGb() ?? 0), (int) ($plan->getMaxTrafficGb() ?? 0)),
+            $this->keyboardFactory->customOrderInputMenu((int) ($draft->getId() ?? 0))
+        );
+    }
+
+    private function sendCustomDraftDurationPrompt(string $chatId, OrderDraft $draft): void
+    {
+        $plan = $draft->getPlan();
+        $this->telegramApiClient->sendMessage(
+            $chatId,
+            sprintf('مدت زمان موردنظر را وارد کنید. حداقل %d روز و حداکثر %d روز.', (int) ($plan->getMinDurationDays() ?? 0), (int) ($plan->getMaxDurationDays() ?? 0)),
+            $this->keyboardFactory->customOrderInputMenu((int) ($draft->getId() ?? 0))
+        );
+    }
+
+    private function sendCustomDraftSummary(string $chatId, OrderDraft $draft): void
+    {
+        $plan = $draft->getPlan();
+        $summary = sprintf(
+            "خلاصه سفارش سفارشی\n\nپلن: %s\nنام دلخواه: %s\nنام نهایی: %s\nحجم: %d گیگ\nمدت: %d روز\nمبلغ: %d تومان",
+            $plan->getTitle(),
+            (string) ($draft->getCustomUsernamePrefix() ?? '-'),
+            (string) ($draft->getFinalUsername() ?? '-'),
+            (int) ($draft->getTrafficGb() ?? 0),
+            (int) ($draft->getDurationDays() ?? 0),
+            (int) ($draft->getCalculatedAmount() ?? 0)
+        );
+        $this->telegramApiClient->sendMessage($chatId, $summary, $this->keyboardFactory->customOrderSummaryMenu((int) ($draft->getId() ?? 0)));
+    }
+
+    private function handleCustomOrderConfirm(TelegramAccount $account, string $chatId, int $draftId, ?string $callbackId = null): void
+    {
+        $draft = $this->entityManager->getRepository(OrderDraft::class)->find($draftId);
+        if (!$draft instanceof OrderDraft || $draft->getUser()->getId() !== $account->getUser()->getId() || OrderDraftStatus::PENDING !== $draft->getStatus()) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'درخواست نامعتبر است.', 'popup_custom_order_confirm_invalid');
+
+            return;
+        }
+
+        if (null !== $draft->getExpiresAt() && $draft->getExpiresAt() < new \DateTimeImmutable()) {
+            $draft->setStatus(OrderDraftStatus::EXPIRED)->setUpdatedAt(new \DateTimeImmutable());
+            $this->entityManager->flush();
+            $this->showPopupOrMessage($chatId, $callbackId, 'این درخواست منقضی شده است.', 'popup_custom_order_confirm_expired');
+
+            return;
+        }
+
+        if (null === $draft->getCalculatedAmount() || $draft->getCalculatedAmount() <= 0 || null === $draft->getTrafficGb() || null === $draft->getDurationDays() || null === $draft->getFinalUsername()) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'اطلاعات سفارش ناقص است.', 'popup_custom_order_confirm_incomplete');
+
+            return;
+        }
+
+        $this->acknowledgeCallback($callbackId);
+        $this->telegramApiClient->sendMessage($chatId, 'لطفاً روش پرداخت را انتخاب کنید:', $this->keyboardFactory->paymentMethodSelectionForDraftMenu($draftId));
+    }
+
+    private function handleCustomOrderCancel(TelegramAccount $account, string $chatId, int $draftId, ?string $callbackId = null): void
+    {
+        $draft = $this->entityManager->getRepository(OrderDraft::class)->find($draftId);
+        if ($draft instanceof OrderDraft && $draft->getUser()->getId() === $account->getUser()->getId()) {
+            $draft->setStatus(OrderDraftStatus::CANCELLED)->setUpdatedAt(new \DateTimeImmutable());
+            $this->entityManager->flush();
+        }
+
+        $this->acknowledgeCallback($callbackId);
+        $this->telegramApiClient->sendMessage($chatId, 'سفارش سفارشی لغو شد.', $this->keyboardFactory->mainReplyKeyboard(false));
+    }
+
+    private function handleSelectPaymentMethodFromDraft(TelegramAccount $account, string $chatId, string $data, ?string $callbackId = null): void
+    {
+        $parts = explode(':', $data);
+        if (3 !== count($parts)) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'روش پرداخت نامعتبر است.', 'popup_invalid_payment_method_draft_callback');
+
+            return;
+        }
+
+        $draftId = (int) $parts[1];
+        $paymentMethod = $parts[2];
+        if ('manual_card' !== $paymentMethod) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'روش پرداخت نامعتبر است.', 'popup_invalid_payment_method_draft');
+
+            return;
+        }
+
+        $draft = $this->entityManager->getRepository(OrderDraft::class)->find($draftId);
+        if (!$draft instanceof OrderDraft || $draft->getUser()->getId() !== $account->getUser()->getId() || OrderDraftStatus::PENDING !== $draft->getStatus()) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'پیش‌نویس سفارش نامعتبر است.', 'popup_invalid_custom_draft_for_payment');
+
+            return;
+        }
+
+        $plan = $draft->getPlan();
+        if (!$plan->isActive()) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'این پلن دیگر فعال نیست یا وجود ندارد.', 'popup_invalid_plan_select_payment_method_draft');
+
+            return;
+        }
+
+        $amount = (int) ($draft->getCalculatedAmount() ?? 0);
+        $metadata = [
+            'custom' => true,
+            'customUsernamePrefix' => $draft->getCustomUsernamePrefix(),
+            'finalUsername' => $draft->getFinalUsername(),
+            'trafficGb' => $draft->getTrafficGb(),
+            'durationDays' => $draft->getDurationDays(),
+            'orderDraftId' => $draft->getId(),
+        ];
+
+        $order = (new Order())
+            ->setUser($account->getUser())
+            ->setPlan($plan)
+            ->setAmount($amount)
+            ->setMetadata($metadata)
+            ->setStatus(OrderStatus::WAITING_PAYMENT);
+
+        $payment = (new Payment())
+            ->setOrder($order)
+            ->setMethod($paymentMethod)
+            ->setAmount($amount)
+            ->setStatus(PaymentStatus::PENDING);
+
+        $draft
+            ->setStatus(OrderDraftStatus::CONFIRMED)
+            ->setUpdatedAt(new \DateTimeImmutable());
+
+        $this->entityManager->persist($order);
+        $this->entityManager->persist($payment);
+        $this->entityManager->flush();
+        $this->debugLog(sprintf('custom_order_confirmed draft_id=%d order_id=%d payment_id=%d amount=%d', $draft->getId() ?? 0, $order->getId() ?? 0, $payment->getId() ?? 0, $amount));
+
+        $cardNumber = $this->settingValueProvider->get('payment.card_number', $this->paymentCardNumber);
+        $cardHolder = $this->settingValueProvider->get('payment.card_holder', $this->paymentCardHolder);
+        $description = $this->settingValueProvider->get('payment.description', $this->paymentDescription);
+
+        $message = sprintf(
+            "پلن: %s\nنام کاربری: %s\nحجم: %d گیگ\nمدت: %d روز\nمبلغ: %d تومان\nشماره کارت: %s\nبه نام: %s\n%s\n\nبرای ارسال رسید روی «✅ تایید و ارسال رسید» بزنید.",
+            $plan->getTitle(),
+            (string) ($draft->getFinalUsername() ?? '-'),
+            (int) ($draft->getTrafficGb() ?? 0),
+            (int) ($draft->getDurationDays() ?? 0),
+            $amount,
+            $cardNumber ?: '-',
+            $cardHolder ?: '-',
+            $description ? 'توضیحات: '.$description : ''
+        );
+
+        $this->acknowledgeCallback($callbackId);
+        $this->telegramApiClient->sendMessage($chatId, trim($message), $this->keyboardFactory->paymentActionMenu((int) $payment->getId()));
     }
 
     private function handleSelectPaymentMethod(TelegramAccount $account, string $chatId, string $data, ?string $callbackId = null): void
@@ -485,14 +837,24 @@ class TelegramUpdateHandler
 
         $order = $payment->getOrder();
         $telegramAccount = $order->getUser()->getTelegramAccount();
+        $customMeta = is_array($order->getMetadata()) ? $order->getMetadata() : [];
+        $customSummary = true === ($customMeta['custom'] ?? false)
+            ? sprintf(
+                "Custom: yes\nUsername: %s\nTraffic: %s GB\nDuration: %s روز",
+                (string) ($customMeta['finalUsername'] ?? '-'),
+                (string) ($customMeta['trafficGb'] ?? '-'),
+                (string) ($customMeta['durationDays'] ?? '-')
+            )
+            : "Custom: no";
         $detail = sprintf(
-            "Payment ID: %d\nOrder ID: %d\nUser: %s\nPlan: %s\nAmount: %d تومان\nStatus: %s\nTracking: %s\nReceipt message: %s\nCreated: %s\nSubmitted: %s",
+            "Payment ID: %d\nOrder ID: %d\nUser: %s\nPlan: %s\nAmount: %d تومان\nStatus: %s\n%s\nTracking: %s\nReceipt message: %s\nCreated: %s\nSubmitted: %s",
             $payment->getId(),
             $order->getId(),
             $this->formatTelegramIdentity($telegramAccount),
             $order->getPlan()->getTitle(),
             $payment->getAmount(),
             $payment->getStatus(),
+            $customSummary,
             $payment->getTrackingCode() ?: '-',
             $payment->getReceiptMessage() ?: '-',
             $payment->getCreatedAt()->format('Y-m-d H:i:s'),
@@ -648,13 +1010,23 @@ class TelegramUpdateHandler
 
         $lines = ["آخرین سفارشها:\n"];
         foreach ($orders as $order) {
+            $meta = is_array($order->getMetadata()) ? $order->getMetadata() : [];
+            $customInfo = true === ($meta['custom'] ?? false)
+                ? sprintf(
+                    " | custom: yes | username: %s | traffic: %sGB | duration: %s",
+                    (string) ($meta['finalUsername'] ?? '-'),
+                    (string) ($meta['trafficGb'] ?? '-'),
+                    (string) ($meta['durationDays'] ?? '-')
+                )
+                : ' | custom: no';
             $lines[] = sprintf(
-                "Order ID: %d\nUser: %s\nPlan: %s\nAmount: %d\nStatus: %s\nCreated at: %s\n",
+                "Order ID: %d\nUser: %s\nPlan: %s\nAmount: %d\nStatus: %s%s\nCreated at: %s\n",
                 $order->getId(),
                 $this->formatTelegramIdentity($order->getUser()->getTelegramAccount()),
                 $order->getPlan()->getTitle(),
                 $order->getAmount(),
                 $order->getStatus(),
+                $customInfo,
                 $order->getCreatedAt()->format('Y-m-d H:i:s')
             );
         }
@@ -693,6 +1065,76 @@ class TelegramUpdateHandler
             ->getOneOrNullResult();
     }
 
+    private function findActiveOrderDraft(TelegramAccount $account): ?OrderDraft
+    {
+        $this->expireUserDrafts($account);
+
+        return $this->entityManager->getRepository(OrderDraft::class)
+            ->createQueryBuilder('d')
+            ->where('d.user = :user')
+            ->andWhere('d.status = :status')
+            ->andWhere('d.expiresAt IS NULL OR d.expiresAt > :now')
+            ->setParameter('user', $account->getUser())
+            ->setParameter('status', OrderDraftStatus::PENDING)
+            ->setParameter('now', new \DateTimeImmutable())
+            ->orderBy('d.id', 'DESC')
+            ->setMaxResults(1)
+            ->getQuery()
+            ->getOneOrNullResult();
+    }
+
+    private function expireUserDrafts(TelegramAccount $account): void
+    {
+        $drafts = $this->entityManager->getRepository(OrderDraft::class)
+            ->createQueryBuilder('d')
+            ->where('d.user = :user')
+            ->andWhere('d.status = :status')
+            ->andWhere('d.expiresAt IS NOT NULL AND d.expiresAt <= :now')
+            ->setParameter('user', $account->getUser())
+            ->setParameter('status', OrderDraftStatus::PENDING)
+            ->setParameter('now', new \DateTimeImmutable())
+            ->getQuery()
+            ->getResult();
+
+        if ([] === $drafts) {
+            return;
+        }
+
+        foreach ($drafts as $draft) {
+            if ($draft instanceof OrderDraft) {
+                $draft->setStatus(OrderDraftStatus::EXPIRED)->setUpdatedAt(new \DateTimeImmutable());
+            }
+        }
+        $this->entityManager->flush();
+    }
+
+    private function parsePositiveInt(string $text): ?int
+    {
+        $value = trim($text);
+        if (!preg_match('/^\d+$/', $value)) {
+            return null;
+        }
+        $int = (int) $value;
+
+        return $int > 0 ? $int : null;
+    }
+
+    private function normalizeUsernamePrefix(string $value): ?string
+    {
+        $normalized = strtolower(trim($value));
+        $normalized = preg_replace('/[^a-z0-9_]/', '', $normalized) ?? '';
+        if (!preg_match('/^[a-z0-9_]{3,24}$/', $normalized)) {
+            return null;
+        }
+
+        return $normalized;
+    }
+
+    private function buildFinalUsername(string $prefix): string
+    {
+        return sprintf('%s_%d', $prefix, random_int(10000, 99999));
+    }
+
     private function notifyAdmin(Payment $payment, string $kind): void
     {
         if (null === $this->adminChatId || '' === trim($this->adminChatId)) {
@@ -701,13 +1143,18 @@ class TelegramUpdateHandler
 
         $order = $payment->getOrder();
         $telegramAccount = $this->entityManager->getRepository(TelegramAccount::class)->findOneBy(['user' => $order->getUser()]);
+        $meta = is_array($order->getMetadata()) ? $order->getMetadata() : [];
+        $customSummary = true === ($meta['custom'] ?? false)
+            ? sprintf("Custom: yes\nUsername: %s\nTraffic: %s GB\nDuration: %s روز\n", (string) ($meta['finalUsername'] ?? '-'), (string) ($meta['trafficGb'] ?? '-'), (string) ($meta['durationDays'] ?? '-'))
+            : "Custom: no\n";
         $message = sprintf(
-            "پرداخت جدید ثبت شد\n\nPayment ID: %d\nOrder ID: %d\nUser: %s\nPlan: %s\nAmount: %d تومان\nTracking: %s\nReceipt message: %s",
+            "پرداخت جدید ثبت شد\n\nPayment ID: %d\nOrder ID: %d\nUser: %s\nPlan: %s\nAmount: %d تومان\n%sTracking: %s\nReceipt message: %s",
             $payment->getId(),
             $order->getId(),
             $this->formatTelegramIdentity($telegramAccount),
             $order->getPlan()->getTitle(),
             $payment->getAmount(),
+            $customSummary,
             $payment->getTrackingCode() ?: '-',
             $payment->getReceiptMessage() ?: '-'
         );
