@@ -210,8 +210,8 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
 
         $inboundIdRaw = trim($ref->inboundId);
         $inboundIdInt = $this->toInboundIdIntOrFail($inboundIdRaw);
-        $serviceId = max(0, $request->serviceId ?? 0);
-        $orderId = max(0, $request->orderId ?? 0);
+        $serviceId = $request->serviceId ?? 0;
+        $orderId = $request->orderId ?? 0;
 
         $this->log(sprintf(
             'renew_update_client_context panel_id=%s remote_inbound_id_raw="%s" remote_inbound_id_int=%d client_uuid="%s" email="%s" service_id=%d order_id=%d',

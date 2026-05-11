@@ -75,8 +75,8 @@ final class ServiceRenewalService
                 trafficLimitGb: $newTrafficLimitGb,
                 expiresAt: $newExpiresAt,
                 unlimitedDuration: $unlimitedDuration,
-                serviceId: (int) ($service->getId() ?? 0),
-                orderId: (int) ($order->getId() ?? 0),
+                serviceId: $service->getId() ?? 0,
+                orderId: $order->getId() ?? 0,
             ),
             $service->getPanel()
         );
