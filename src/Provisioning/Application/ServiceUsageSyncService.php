@@ -53,15 +53,16 @@ final class ServiceUsageSyncService
             $driver = $this->driverRegistry->resolve($panel);
             $usage = $driver->getUsage($remoteId, $panel);
         } catch (\Throwable $e) {
+            $safeError = $this->sanitizeMessage($e->getMessage());
             $this->log(sprintf(
                 'sync_failed service_id=%d panel_type="%s" email="%s" error="%s"',
                 $serviceId,
                 (string) $panel->getType(),
                 $email,
-                $e->getMessage()
+                $safeError
             ));
 
-            return new SyncResult($serviceId, 'failed', $e->getMessage());
+            return new SyncResult($serviceId, 'failed', $safeError);
         }
 
         $usedBytes = $this->resolveBytesValue($usage->usedBytes, $usage->trafficUsedGb);
@@ -187,5 +188,15 @@ final class ServiceUsageSyncService
     private function log(string $message): void
     {
         error_log('[ServiceUsageSyncService] '.$message);
+    }
+
+    private function sanitizeMessage(string $message): string
+    {
+        $safe = trim($message);
+        $safe = preg_replace('/https?:\/\/\S+/i', '[url-redacted]', $safe) ?? $safe;
+        $safe = preg_replace('/("?(?:password|passwd|token|cookie|session|authorization|secret|api[_-]?key)"?\s*[:=]\s*)"[^"]*"/i', '$1"[redacted]"', $safe) ?? $safe;
+        $safe = preg_replace('/\s+/', ' ', $safe) ?? $safe;
+
+        return mb_substr($safe, 0, 300);
     }
 }
