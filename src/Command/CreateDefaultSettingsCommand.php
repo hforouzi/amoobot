@@ -29,6 +29,8 @@ class CreateDefaultSettingsCommand extends Command
             'payment.card_number' => $this->paymentCardNumber,
             'payment.card_holder' => $this->paymentCardHolder,
             'payment.description' => $this->paymentDescription ?? '',
+            'service.notify.expiry_days' => '3,1',
+            'service.notify.traffic_thresholds' => '80,95,100',
         ];
 
         foreach ($defaults as $key => $value) {

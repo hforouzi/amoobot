@@ -42,6 +42,8 @@ Optional:
 - `PANEL_PROXY_USERNAME`
 - `PANEL_PROXY_PASSWORD`
 - `PANEL_PROXY_TIMEOUT` (default: `30`)
+- `SERVICE_NOTIFY_EXPIRY_DAYS` (default: `3,1`)
+- `SERVICE_NOTIFY_TRAFFIC_THRESHOLDS` (default: `80,95,100`)
 
 ## Database Migration
 ```bash
@@ -275,12 +277,14 @@ Commands:
 ```bash
 php bin/console app:service:sync-usage
 php bin/console app:service:check-expiry
+php bin/console app:service:send-notifications
 ```
 
 Cron example:
 ```bash
 */10 * * * * php /path/bin/console app:service:sync-usage
 */15 * * * * php /path/bin/console app:service:check-expiry
+*/20 * * * * php /path/bin/console app:service:send-notifications
 ```
 
 ### Known issue
@@ -352,6 +356,7 @@ If `test login` works but provisioning still fails on `addClient`:
 - `app:service:regenerate-config {serviceId}`
 - `app:service:sync-usage [--service-id=ID] [--limit=100] [--dry-run]`
 - `app:service:check-expiry [--service-id=ID] [--dry-run]`
+- `app:service:send-notifications [--dry-run] [--type=expiry|traffic|expired|all] [--limit=100]`
 
 ## Deployment Guide
 
