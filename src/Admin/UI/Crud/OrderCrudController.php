@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Admin\UI\Crud;
 
 use App\Entity\Order;
+use App\Shop\Domain\OrderStatus;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Crud;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Filters;
 use EasyCorp\Bundle\EasyAdminBundle\Controller\AbstractCrudController;
@@ -35,12 +36,17 @@ class OrderCrudController extends AbstractCrudController
             ->add(EntityFilter::new('user'))
             ->add(EntityFilter::new('plan'))
             ->add(ChoiceFilter::new('status')->setChoices([
-                'waiting_payment' => 'waiting_payment',
-                'payment_pending' => 'payment_pending',
-                'cancelled' => 'cancelled',
-                'expired' => 'expired',
-                'paid' => 'paid',
-                'provisioned' => 'provisioned',
+                OrderStatus::DRAFT => OrderStatus::DRAFT,
+                OrderStatus::PENDING => OrderStatus::PENDING,
+                OrderStatus::WAITING_PAYMENT => OrderStatus::WAITING_PAYMENT,
+                OrderStatus::PAYMENT_PENDING => OrderStatus::PAYMENT_PENDING,
+                OrderStatus::PAID => OrderStatus::PAID,
+                OrderStatus::PROCESSING => OrderStatus::PROCESSING,
+                OrderStatus::COMPLETED => OrderStatus::COMPLETED,
+                OrderStatus::PROVISIONED => OrderStatus::PROVISIONED,
+                OrderStatus::CANCELLED => OrderStatus::CANCELLED,
+                OrderStatus::EXPIRED => OrderStatus::EXPIRED,
+                OrderStatus::FAILED => OrderStatus::FAILED,
             ]));
     }
 

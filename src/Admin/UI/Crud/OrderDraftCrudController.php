@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Admin\UI\Crud;
 
 use App\Entity\OrderDraft;
+use App\Shop\Domain\OrderDraftStatus;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Crud;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Filters;
 use EasyCorp\Bundle\EasyAdminBundle\Controller\AbstractCrudController;
@@ -35,10 +36,16 @@ final class OrderDraftCrudController extends AbstractCrudController
             ->add(EntityFilter::new('user'))
             ->add(EntityFilter::new('plan'))
             ->add(ChoiceFilter::new('status')->setChoices([
-                'pending' => 'pending',
-                'confirmed' => 'confirmed',
-                'cancelled' => 'cancelled',
-                'expired' => 'expired',
+                OrderDraftStatus::PENDING => OrderDraftStatus::PENDING,
+                OrderDraftStatus::AWAITING_USERNAME => OrderDraftStatus::AWAITING_USERNAME,
+                OrderDraftStatus::AWAITING_TRAFFIC => OrderDraftStatus::AWAITING_TRAFFIC,
+                OrderDraftStatus::AWAITING_DURATION => OrderDraftStatus::AWAITING_DURATION,
+                OrderDraftStatus::AWAITING_DISCOUNT_CHOICE => OrderDraftStatus::AWAITING_DISCOUNT_CHOICE,
+                OrderDraftStatus::AWAITING_DISCOUNT_CODE => OrderDraftStatus::AWAITING_DISCOUNT_CODE,
+                OrderDraftStatus::AWAITING_PAYMENT_METHOD => OrderDraftStatus::AWAITING_PAYMENT_METHOD,
+                OrderDraftStatus::CONFIRMED => OrderDraftStatus::CONFIRMED,
+                OrderDraftStatus::CANCELLED => OrderDraftStatus::CANCELLED,
+                OrderDraftStatus::EXPIRED => OrderDraftStatus::EXPIRED,
             ]));
     }
 

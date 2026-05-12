@@ -40,9 +40,17 @@ final class IncompleteOrderExpiryService
 
         $drafts = $this->entityManager->getRepository(OrderDraft::class)
             ->createQueryBuilder('d')
-            ->where('d.status = :status')
+            ->where('d.status IN (:statuses)')
             ->andWhere('COALESCE(d.updatedAt, d.createdAt) <= :cutoff')
-            ->setParameter('status', OrderDraftStatus::PENDING)
+            ->setParameter('statuses', [
+                OrderDraftStatus::PENDING,
+                OrderDraftStatus::AWAITING_USERNAME,
+                OrderDraftStatus::AWAITING_TRAFFIC,
+                OrderDraftStatus::AWAITING_DURATION,
+                OrderDraftStatus::AWAITING_DISCOUNT_CHOICE,
+                OrderDraftStatus::AWAITING_DISCOUNT_CODE,
+                OrderDraftStatus::AWAITING_PAYMENT_METHOD,
+            ])
             ->setParameter('cutoff', $cutoff)
             ->orderBy('d.id', 'ASC')
             ->setMaxResults($limit)
