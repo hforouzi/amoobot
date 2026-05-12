@@ -114,7 +114,8 @@ final class DiscountCodeService
         if ($context instanceof OrderDraft) {
             $data = is_array($context->getData()) ? $context->getData() : [];
             $orderType = (string) ($data['orderType'] ?? 'new_service');
-            $amount = (int) ($context->getFinalAmount() ?? $context->getCalculatedAmount() ?? 0);
+            $priceSnapshot = is_array($context->getPriceSnapshot()) ? $context->getPriceSnapshot() : [];
+            $amount = (int) ($priceSnapshot['afterGlobalDiscountAmount'] ?? $context->getCalculatedAmount() ?? 0);
             $validation = $this->validateCode($code, $context->getUser(), $orderType, $context->getPlan(), $amount);
             if (!$validation->valid || !$validation->discountCode instanceof DiscountCode) {
                 return DiscountResult::failed($validation->message, $amount);

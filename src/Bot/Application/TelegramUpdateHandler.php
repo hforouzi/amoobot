@@ -126,7 +126,7 @@ class TelegramUpdateHandler
                 return;
             }
 
-             if (ServiceManagementService::STEP_WAITING_DISCOUNT_CODE === $activeDraft->getStep()) {
+            if (ServiceManagementService::STEP_WAITING_DISCOUNT_CODE === $activeDraft->getStep()) {
                 $data = is_array($activeDraft->getData()) ? $activeDraft->getData() : [];
                 $draftType = (string) ($data['draftType'] ?? '');
                 if (in_array($draftType, ['renewal', 'add_traffic'], true)) {
