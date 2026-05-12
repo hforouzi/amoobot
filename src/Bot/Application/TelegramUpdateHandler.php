@@ -1023,7 +1023,7 @@ class TelegramUpdateHandler
             $payment->setAdminNote($requestResult->message);
         }
         $this->entityManager->flush();
-        $this->debugLog(sprintf('order_gateway_selected order_id=%d payment_id=%d amount=%d', $order->getId() ?? 0, $payment->getId() ?? 0, $finalAmount));
+        $this->debugLog(sprintf('payment_gateway_selected order_id=%d payment_id=%d amount=%d', $order->getId() ?? 0, $payment->getId() ?? 0, $finalAmount));
 
         if (PaymentGatewayType::ZIBAL === $gateway->getType()) {
             if (!$requestResult->success || null === $payment->getPaymentUrl()) {

@@ -12,6 +12,8 @@ use Symfony\Component\Validator\Constraints as Assert;
 #[ORM\Entity]
 class PaymentGateway
 {
+    private const JSON_FLAGS = JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES;
+
     #[ORM\Id]
     #[ORM\GeneratedValue]
     #[ORM\Column]
@@ -160,7 +162,7 @@ class PaymentGateway
             return '';
         }
 
-        $encoded = json_encode($this->config, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        $encoded = json_encode($this->config, self::JSON_FLAGS);
         if (false === $encoded) {
             error_log('[PaymentGateway] config_json_encode_failed id='.(string) ($this->id ?? 0));
 
