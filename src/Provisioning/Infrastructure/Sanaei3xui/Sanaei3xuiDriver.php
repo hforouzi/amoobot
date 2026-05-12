@@ -15,6 +15,8 @@ use Symfony\Component\Uid\Uuid;
 
 final class Sanaei3xuiDriver implements VpnPanelDriverInterface
 {
+    private const BYTES_PER_GB = 1073741824;
+
     public function __construct(
         private readonly Sanaei3xuiApiClient $apiClient,
         private readonly Sanaei3xuiRemoteIdParser $remoteIdParser,
@@ -257,6 +259,53 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
         }
     }
 
+    public function addTrafficLimit(string $remoteId, int $trafficLimitGb, ?VpnPanel $panel = null): void
+    {
+        $panel = $this->requireSupportedPanel($panel);
+        $ref = $this->parseRemoteIdOrFail($remoteId);
+        $client = $this->fetchClientByReference($panel, $ref);
+        $client['totalGB'] = $this->gbToBytes($trafficLimitGb);
+
+        $inboundIdRaw = trim($ref->inboundId);
+        $inboundIdInt = $this->toInboundIdIntOrFail($inboundIdRaw);
+        $result = $this->apiClient->updateClient($panel, $inboundIdInt, $ref->clientId, $client, [
+            'remoteInboundIdRaw' => $inboundIdRaw,
+            'remoteInboundIdInt' => (string) $inboundIdInt,
+            'clientUuid' => $ref->clientId,
+            'email' => $ref->email,
+            'mode' => 'add_traffic',
+        ]);
+        $this->assertPanelResult($result, 'updateClient');
+        $this->assertPanelBusinessResult($result, 'updateClient', true);
+
+        try {
+            $verifyResult = $this->apiClient->getClientTraffic($panel, $ref->email);
+            $this->assertPanelResult($verifyResult, 'getClientTraffic');
+            $this->assertPanelBusinessResult($verifyResult, 'getClientTraffic');
+
+            $payload = is_array($verifyResult['data'] ?? null) ? $verifyResult['data'] : [];
+            $obj = is_array($payload['obj'] ?? null) ? $payload['obj'] : [];
+            $remoteTotal = $this->toNonNegativeInt($obj['total'] ?? ($obj['totalGB'] ?? null));
+            $expectedTotal = $this->gbToBytes($trafficLimitGb);
+            if (null !== $remoteTotal && abs($remoteTotal - $expectedTotal) > self::BYTES_PER_GB) {
+                $this->log(sprintf(
+                    'add_traffic_verify_warning panel_id=%s email="%s" expected_total=%d remote_total=%d',
+                    $panel->getId() ?? 'null',
+                    $ref->email,
+                    $expectedTotal,
+                    $remoteTotal
+                ));
+            }
+        } catch (\Throwable $e) {
+            $this->log(sprintf(
+                'add_traffic_verify_warning panel_id=%s email="%s" message="%s"',
+                $panel->getId() ?? 'null',
+                $ref->email,
+                $this->sanitizeLogPreview($e->getMessage())
+            ));
+        }
+    }
+
     public function deleteService(string $remoteId, ?VpnPanel $panel = null): void
     {
         $panel = $this->requireSupportedPanel($panel);
@@ -484,7 +533,7 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
             return 0;
         }
 
-        return $gb * 1073741824;
+        return $gb * self::BYTES_PER_GB;
     }
 
     private function bytesToGb(int $bytes): int
@@ -493,7 +542,7 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
             return 0;
         }
 
-        return (int) floor($bytes / 1073741824);
+        return (int) floor($bytes / self::BYTES_PER_GB);
     }
 
     private function durationToMs(int $durationDays): int

@@ -21,6 +21,23 @@
             <input class="form-control" type="number" min="0" max="100" step="1" id="pricing_global_discount_percent" name="pricing_global_discount_percent" value="{{ values.pricing_global_discount_percent }}">
             <div class="form-text">مقدار مجاز بین ۰ تا ۱۰۰.</div>
         </div>
+        <hr>
+        <div class="mb-3 form-check">
+            <input class="form-check-input" type="checkbox" id="traffic_addon_enabled" name="traffic_addon_enabled" {% if values.traffic_addon_enabled %}checked{% endif %}>
+            <label class="form-check-label" for="traffic_addon_enabled">فعال بودن خرید حجم اضافه</label>
+        </div>
+        <div class="mb-3">
+            <label class="form-label" for="traffic_addon_min_gb">حداقل حجم اضافه</label>
+            <input class="form-control" type="number" min="1" step="1" id="traffic_addon_min_gb" name="traffic_addon_min_gb" value="{{ values.traffic_addon_min_gb }}">
+        </div>
+        <div class="mb-3">
+            <label class="form-label" for="traffic_addon_max_gb">حداکثر حجم اضافه</label>
+            <input class="form-control" type="number" min="1" step="1" id="traffic_addon_max_gb" name="traffic_addon_max_gb" value="{{ values.traffic_addon_max_gb }}">
+        </div>
+        <div class="mb-3">
+            <label class="form-label" for="traffic_addon_price_per_gb">قیمت هر گیگ حجم اضافه</label>
+            <input class="form-control" type="number" min="0" step="1" id="traffic_addon_price_per_gb" name="traffic_addon_price_per_gb" value="{{ values.traffic_addon_price_per_gb }}">
+        </div>
         <button type="submit" class="btn btn-primary">ذخیره تنظیمات</button>
     </form>
 {% endblock %}

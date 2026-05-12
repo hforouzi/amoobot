@@ -7,6 +7,7 @@ namespace App\Admin\UI;
 use App\Entity\Setting;
 use App\Provisioning\Application\AutomationSettingsProvider;
 use App\Provisioning\Application\RenewalSettingsProvider;
+use App\Provisioning\Application\TrafficAddonSettingsProvider;
 use App\Shop\Application\PlanPriceAdjustmentService;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
@@ -21,6 +22,7 @@ final class RenewalPricingAdminController extends AbstractController
         private readonly EntityManagerInterface $entityManager,
         private readonly RenewalSettingsProvider $renewalSettingsProvider,
         private readonly AutomationSettingsProvider $automationSettingsProvider,
+        private readonly TrafficAddonSettingsProvider $trafficAddonSettingsProvider,
         private readonly PlanPriceAdjustmentService $planPriceAdjustmentService,
     ) {
     }
@@ -31,13 +33,28 @@ final class RenewalPricingAdminController extends AbstractController
         if ($request->isMethod('POST')) {
             $discountRaw = trim((string) $request->request->get('pricing_global_discount_percent', '0'));
             $discountPercent = is_numeric($discountRaw) ? (float) $discountRaw : -1;
+            $trafficMinRaw = trim((string) $request->request->get('traffic_addon_min_gb', '1'));
+            $trafficMaxRaw = trim((string) $request->request->get('traffic_addon_max_gb', '100'));
+            $trafficPriceRaw = trim((string) $request->request->get('traffic_addon_price_per_gb', '0'));
+            $trafficMinGb = is_numeric($trafficMinRaw) ? (int) floor((float) $trafficMinRaw) : 0;
+            $trafficMaxGb = is_numeric($trafficMaxRaw) ? (int) floor((float) $trafficMaxRaw) : 0;
+            $trafficPricePerGb = is_numeric($trafficPriceRaw) ? (int) floor((float) $trafficPriceRaw) : -1;
+
             if ($discountPercent < 0 || $discountPercent > 100) {
                 $this->addFlash('danger', 'درصد تخفیف باید بین ۰ تا ۱۰۰ باشد.');
+            } elseif ($trafficMinGb <= 0 || $trafficMaxGb <= 0 || $trafficMaxGb < $trafficMinGb) {
+                $this->addFlash('danger', 'حداقل و حداکثر حجم اضافه معتبر نیست.');
+            } elseif ($trafficPricePerGb < 0) {
+                $this->addFlash('danger', 'قیمت هر گیگ حجم اضافه معتبر نیست.');
             } else {
                 $this->upsertSetting('renewal.carry_remaining_traffic', $request->request->has('renewal_carry_remaining_traffic') ? 'true' : 'false', 'boolean');
                 $this->upsertSetting('renewal.carry_remaining_days', $request->request->has('renewal_carry_remaining_days') ? 'true' : 'false', 'boolean');
                 $this->upsertSetting('renewal.expired_start_from_now', $request->request->has('renewal_expired_start_from_now') ? 'true' : 'false', 'boolean');
                 $this->upsertSetting('pricing.global_discount_percent', (string) floor($discountPercent), 'number');
+                $this->upsertSetting('traffic_addon.enabled', $request->request->has('traffic_addon_enabled') ? 'true' : 'false', 'boolean');
+                $this->upsertSetting('traffic_addon.min_gb', (string) $trafficMinGb, 'number');
+                $this->upsertSetting('traffic_addon.max_gb', (string) $trafficMaxGb, 'number');
+                $this->upsertSetting('traffic_addon.price_per_gb', (string) $trafficPricePerGb, 'number');
                 $this->entityManager->flush();
                 $this->addFlash('success', 'تنظیمات تمدید و قیمتگذاری بروزرسانی شد.');
             }
@@ -49,6 +66,10 @@ final class RenewalPricingAdminController extends AbstractController
                 'renewal_carry_remaining_days' => $this->renewalSettingsProvider->carryRemainingDays(),
                 'renewal_expired_start_from_now' => $this->renewalSettingsProvider->expiredStartFromNow(),
                 'pricing_global_discount_percent' => $this->renewalSettingsProvider->globalDiscountPercent(),
+                'traffic_addon_enabled' => $this->trafficAddonSettingsProvider->enabled(),
+                'traffic_addon_min_gb' => $this->trafficAddonSettingsProvider->minGb(),
+                'traffic_addon_max_gb' => $this->trafficAddonSettingsProvider->maxGb(),
+                'traffic_addon_price_per_gb' => $this->trafficAddonSettingsProvider->pricePerGb(),
             ],
         ]);
     }

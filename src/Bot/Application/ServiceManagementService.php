@@ -6,6 +6,7 @@ namespace App\Bot\Application;
 
 use App\Bot\Infrastructure\TelegramApiClient;
 use App\Entity\Order;
+use App\Entity\OrderDraft;
 use App\Entity\Payment;
 use App\Entity\Plan;
 use App\Entity\TelegramAccount;
@@ -14,12 +15,15 @@ use App\Entity\VpnService;
 use App\Payment\Domain\PaymentStatus;
 use App\Provisioning\Application\RenewalSettingsProvider;
 use App\Provisioning\Application\ServiceUsageSyncService;
+use App\Provisioning\Application\TrafficAddonSettingsProvider;
 use App\Provisioning\Domain\Dto\RenewVpnServiceRequest;
 use App\Provisioning\Domain\VpnServiceStatus;
 use App\Provisioning\Infrastructure\VpnPanelDriverRegistry;
 use App\Shared\Infrastructure\SettingValueProvider;
 use App\Shop\Application\PlanPricingService;
 use App\Shop\Application\RenewalPriceResult;
+use App\Shop\Application\TrafficAddonPricingService;
+use App\Shop\Domain\OrderDraftStatus;
 use App\Shop\Domain\OrderStatus;
 use App\Shop\Domain\OrderType;
 use Doctrine\ORM\EntityManagerInterface;
@@ -29,6 +33,7 @@ use Endroid\QrCode\Writer\PngWriter;
 class ServiceManagementService
 {
     private const BYTES_PER_GB = 1073741824;
+    public const STEP_WAITING_ADD_TRAFFIC_AMOUNT = 'waiting_add_traffic_amount';
 
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
@@ -38,7 +43,9 @@ class ServiceManagementService
         private readonly ServiceUsageSyncService $serviceUsageSyncService,
         private readonly SettingValueProvider $settingValueProvider,
         private readonly RenewalSettingsProvider $renewalSettingsProvider,
+        private readonly TrafficAddonSettingsProvider $trafficAddonSettingsProvider,
         private readonly PlanPricingService $planPricingService,
+        private readonly TrafficAddonPricingService $trafficAddonPricingService,
         private readonly string $paymentCardNumber = '',
         private readonly string $paymentCardHolder = '',
         private readonly ?string $paymentDescription = null,
@@ -128,7 +135,11 @@ class ServiceManagementService
         $this->telegramApiClient->sendMessage(
             $chatId,
             $this->formatServiceDetailForUser($service),
-            $this->keyboardFactory->userServiceDetail((int) $service->getId(), VpnServiceStatus::DELETED !== $service->getStatus())
+            $this->keyboardFactory->userServiceDetail(
+                (int) $service->getId(),
+                VpnServiceStatus::DELETED !== $service->getStatus(),
+                VpnServiceStatus::DELETED !== $service->getStatus()
+            )
         );
     }
 
@@ -310,7 +321,11 @@ class ServiceManagementService
         $this->telegramApiClient->sendMessage(
             $chatId,
             $this->formatServiceDetailForUser($service),
-            $this->keyboardFactory->userServiceDetail((int) $service->getId(), VpnServiceStatus::DELETED !== $service->getStatus())
+            $this->keyboardFactory->userServiceDetail(
+                (int) $service->getId(),
+                VpnServiceStatus::DELETED !== $service->getStatus(),
+                VpnServiceStatus::DELETED !== $service->getStatus()
+            )
         );
     }
 
@@ -446,6 +461,274 @@ class ServiceManagementService
             $package['discountPercent'],
             $package['discountAmount'],
             $package['amount'],
+            $cardNumber ?: '-',
+            $cardHolder ?: '-',
+            $description ? 'توضیحات: '.$description : ''
+        );
+
+        $this->acknowledgeCallback($callbackId);
+        $this->telegramApiClient->sendMessage($chatId, trim($message), $this->keyboardFactory->paymentActionMenu((int) $payment->getId()));
+    }
+
+    public function startAddTrafficOrder(TelegramAccount $account, int $serviceId, string $chatId, string $callbackId): void
+    {
+        $service = $this->findServiceOrPopup($serviceId, $chatId, $callbackId, 'invalid_service_add_traffic_order');
+        if (!$service instanceof VpnService) {
+            return;
+        }
+
+        if ($service->getUser()->getId() !== $account->getUser()->getId()) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'دسترسی غیرمجاز.', 'unauthorized_service_add_traffic_order');
+
+            return;
+        }
+
+        if (VpnServiceStatus::DELETED === $service->getStatus()) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'سرویس معتبر نیست.', 'deleted_service_add_traffic_order');
+
+            return;
+        }
+
+        if (!$this->trafficAddonSettingsProvider->canPurchase()) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'خرید حجم اضافه فعال نیست.', 'traffic_addon_disabled');
+
+            return;
+        }
+
+        $sourceOrder = $service->getOrder();
+        $plan = $sourceOrder?->getPlan();
+        if (!$plan instanceof Plan) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'امکان خرید حجم اضافه برای این سرویس وجود ندارد.', 'traffic_addon_missing_plan');
+
+            return;
+        }
+
+        $draft = (new OrderDraft())
+            ->setUser($account->getUser())
+            ->setPlan($plan)
+            ->setStatus(OrderDraftStatus::PENDING)
+            ->setStep(self::STEP_WAITING_ADD_TRAFFIC_AMOUNT)
+            ->setTrafficGb(null)
+            ->setCalculatedAmount(null)
+            ->setData([
+                'draftType' => 'add_traffic',
+                'targetServiceId' => $serviceId,
+            ])
+            ->setExpiresAt((new \DateTimeImmutable())->modify('+1 hour'))
+            ->setUpdatedAt(new \DateTimeImmutable());
+
+        $this->entityManager->persist($draft);
+        $this->entityManager->flush();
+
+        $this->acknowledgeCallback($callbackId);
+        $this->telegramApiClient->sendMessage(
+            $chatId,
+            sprintf(
+                'چند گیگ حجم اضافه میخواهید؟ حداقل %d و حداکثر %d گیگ.',
+                $this->trafficAddonSettingsProvider->minGb(),
+                $this->trafficAddonSettingsProvider->maxGb()
+            ),
+            $this->keyboardFactory->customOrderInputMenu((int) ($draft->getId() ?? 0))
+        );
+    }
+
+    public function handleAddTrafficDraftAmountInput(TelegramAccount $account, OrderDraft $draft, string $text, string $chatId): void
+    {
+        if (OrderDraftStatus::PENDING !== $draft->getStatus() || $draft->getUser()->getId() !== $account->getUser()->getId()) {
+            return;
+        }
+
+        if (null !== $draft->getExpiresAt() && $draft->getExpiresAt() < new \DateTimeImmutable()) {
+            $draft->setStatus(OrderDraftStatus::EXPIRED)->setUpdatedAt(new \DateTimeImmutable());
+            $this->entityManager->flush();
+            $this->telegramApiClient->sendMessage($chatId, 'این درخواست منقضی شده است. دوباره از صفحه سرویس شروع کنید.');
+
+            return;
+        }
+
+        $data = is_array($draft->getData()) ? $draft->getData() : [];
+        if ('add_traffic' !== ($data['draftType'] ?? '')) {
+            return;
+        }
+
+        if (!$this->trafficAddonSettingsProvider->canPurchase()) {
+            $this->telegramApiClient->sendMessage($chatId, 'خرید حجم اضافه فعال نیست.');
+
+            return;
+        }
+
+        $serviceId = (int) ($data['targetServiceId'] ?? 0);
+        $service = $this->entityManager->getRepository(VpnService::class)->find($serviceId);
+        if (!$service instanceof VpnService || $service->getUser()->getId() !== $account->getUser()->getId() || VpnServiceStatus::DELETED === $service->getStatus()) {
+            $draft->setStatus(OrderDraftStatus::CANCELLED)->setUpdatedAt(new \DateTimeImmutable());
+            $this->entityManager->flush();
+            $this->telegramApiClient->sendMessage($chatId, 'این سرویس معتبر نیست.');
+
+            return;
+        }
+
+        $trafficGb = $this->parsePositiveInt($text);
+        $minGb = $this->trafficAddonSettingsProvider->minGb();
+        $maxGb = $this->trafficAddonSettingsProvider->maxGb();
+        if (null === $trafficGb || $trafficGb < $minGb || $trafficGb > $maxGb) {
+            $this->telegramApiClient->sendMessage($chatId, sprintf('عدد صحیح بین %d تا %d وارد کنید.', $minGb, $maxGb));
+
+            return;
+        }
+
+        $price = $this->trafficAddonPricingService->calculate($trafficGb);
+        if ($price->finalAmount <= 0) {
+            $this->telegramApiClient->sendMessage($chatId, 'خرید حجم اضافه فعال نیست.');
+
+            return;
+        }
+
+        $priceSnapshot = [
+            'baseAmount' => $price->baseAmount,
+            'discountPercent' => $price->discountPercent,
+            'discountAmount' => $price->discountAmount,
+            'finalAmount' => $price->finalAmount,
+        ];
+
+        $draft
+            ->setTrafficGb($trafficGb)
+            ->setCalculatedAmount($price->finalAmount)
+            ->setData(array_merge($data, ['priceSnapshot' => $priceSnapshot]))
+            ->setUpdatedAt(new \DateTimeImmutable());
+        $this->entityManager->flush();
+
+        $summary = sprintf(
+            "خلاصه خرید حجم اضافه\nشناسه سرویس: %d\nحجم کل فعلی: %s\nمصرف فعلی: %s\nحجم درخواستی: %d گیگ\nقیمت هر گیگ: %d تومان\nمبلغ پایه: %d تومان\nتخفیف: %d%%\nمبلغ تخفیف: %d تومان\nمبلغ نهایی: %d تومان",
+            $serviceId,
+            $this->formatTrafficLimit($service),
+            $this->formatTrafficUsed($service),
+            $trafficGb,
+            $this->trafficAddonSettingsProvider->pricePerGb(),
+            $price->baseAmount,
+            $price->discountPercent,
+            $price->discountAmount,
+            $price->finalAmount
+        );
+
+        $this->telegramApiClient->sendMessage(
+            $chatId,
+            $summary,
+            $this->keyboardFactory->addTrafficSummary((int) ($draft->getId() ?? 0), $serviceId)
+        );
+    }
+
+    public function confirmAddTrafficOrder(TelegramAccount $account, int $draftId, string $chatId, string $callbackId): void
+    {
+        $draft = $this->entityManager->getRepository(OrderDraft::class)->find($draftId);
+        if (!$draft instanceof OrderDraft || $draft->getUser()->getId() !== $account->getUser()->getId() || OrderDraftStatus::PENDING !== $draft->getStatus()) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'درخواست نامعتبر است.', 'invalid_add_traffic_draft');
+
+            return;
+        }
+
+        if ($draft->getStep() !== self::STEP_WAITING_ADD_TRAFFIC_AMOUNT) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'درخواست نامعتبر است.', 'invalid_add_traffic_step');
+
+            return;
+        }
+
+        if (null !== $draft->getExpiresAt() && $draft->getExpiresAt() < new \DateTimeImmutable()) {
+            $draft->setStatus(OrderDraftStatus::EXPIRED)->setUpdatedAt(new \DateTimeImmutable());
+            $this->entityManager->flush();
+            $this->showPopupOrMessage($chatId, $callbackId, 'این درخواست منقضی شده است.', 'expired_add_traffic_draft');
+
+            return;
+        }
+
+        if (!$this->trafficAddonSettingsProvider->canPurchase()) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'خرید حجم اضافه فعال نیست.', 'traffic_addon_disabled_confirm');
+
+            return;
+        }
+
+        $data = is_array($draft->getData()) ? $draft->getData() : [];
+        $serviceId = (int) ($data['targetServiceId'] ?? 0);
+        $service = $this->entityManager->getRepository(VpnService::class)->find($serviceId);
+        if (!$service instanceof VpnService || $service->getUser()->getId() !== $account->getUser()->getId() || VpnServiceStatus::DELETED === $service->getStatus()) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'سرویس معتبر نیست.', 'invalid_add_traffic_service_confirm');
+
+            return;
+        }
+
+        $sourceOrder = $service->getOrder();
+        $plan = $sourceOrder?->getPlan();
+        if (!$plan instanceof Plan) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'امکان خرید حجم اضافه برای این سرویس وجود ندارد.', 'invalid_add_traffic_plan_confirm');
+
+            return;
+        }
+
+        $trafficGb = (int) ($draft->getTrafficGb() ?? 0);
+        $minGb = $this->trafficAddonSettingsProvider->minGb();
+        $maxGb = $this->trafficAddonSettingsProvider->maxGb();
+        if ($trafficGb <= 0 || $trafficGb < $minGb || $trafficGb > $maxGb) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'حجم درخواستی معتبر نیست.', 'invalid_add_traffic_amount_confirm');
+
+            return;
+        }
+
+        $price = $this->trafficAddonPricingService->calculate($trafficGb);
+        if ($price->finalAmount <= 0) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'خرید حجم اضافه فعال نیست.', 'add_traffic_price_zero_confirm');
+
+            return;
+        }
+
+        $metadata = [
+            'addTraffic' => true,
+            'targetServiceId' => $service->getId(),
+            'trafficGb' => $trafficGb,
+            'priceSnapshot' => [
+                'baseAmount' => $price->baseAmount,
+                'discountPercent' => $price->discountPercent,
+                'discountAmount' => $price->discountAmount,
+                'finalAmount' => $price->finalAmount,
+            ],
+            'orderDraftId' => $draft->getId(),
+        ];
+
+        $order = (new Order())
+            ->setUser($account->getUser())
+            ->setPlan($plan)
+            ->setTargetService($service)
+            ->setType(OrderType::ADD_TRAFFIC)
+            ->setAmount($price->finalAmount)
+            ->setMetadata($metadata)
+            ->setStatus(OrderStatus::WAITING_PAYMENT);
+
+        $payment = (new Payment())
+            ->setOrder($order)
+            ->setMethod('manual_card')
+            ->setAmount($price->finalAmount)
+            ->setStatus(PaymentStatus::PENDING);
+
+        $draft
+            ->setStatus(OrderDraftStatus::CONFIRMED)
+            ->setCalculatedAmount($price->finalAmount)
+            ->setUpdatedAt(new \DateTimeImmutable());
+
+        $this->entityManager->persist($order);
+        $this->entityManager->persist($payment);
+        $this->entityManager->flush();
+
+        $cardNumber = $this->settingValueProvider->get('payment.card_number', $this->paymentCardNumber);
+        $cardHolder = $this->settingValueProvider->get('payment.card_holder', $this->paymentCardHolder);
+        $description = $this->settingValueProvider->get('payment.description', $this->paymentDescription);
+
+        $message = sprintf(
+            "خرید حجم اضافه برای سرویس #%d\nحجم درخواستی: %d گیگ\nقیمت هر گیگ: %d تومان\nمبلغ پایه: %d تومان\nتخفیف: %d%%\nمبلغ تخفیف: %d تومان\nمبلغ نهایی: %d تومان\nشماره کارت: %s\nبه نام: %s\n%s\n\nبرای ارسال رسید روی «✅ تایید و ارسال رسید» بزنید.",
+            $serviceId,
+            $trafficGb,
+            $this->trafficAddonSettingsProvider->pricePerGb(),
+            $price->baseAmount,
+            $price->discountPercent,
+            $price->discountAmount,
+            $price->finalAmount,
             $cardNumber ?: '-',
             $cardHolder ?: '-',
             $description ? 'توضیحات: '.$description : ''
@@ -952,6 +1235,18 @@ class ServiceManagementService
         $panel = $service->getPanel();
 
         return null !== $panel && 'sanaei_3xui' === $panel->getType();
+    }
+
+    private function parsePositiveInt(string $text): ?int
+    {
+        $value = trim($text);
+        if (!preg_match('/^\d+$/', $value)) {
+            return null;
+        }
+
+        $int = (int) $value;
+
+        return $int > 0 ? $int : null;
     }
 
     private function formatTrafficUsed(VpnService $service): string

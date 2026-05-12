@@ -329,6 +329,30 @@ Safe single-command cron example:
   - `priceSnapshot` (`baseAmount`, `discountPercent`, `discountAmount`, `finalAmount`, `planPriceSource`)
   - `renewalPolicy` (`carryRemainingTraffic`, `carryRemainingDays`)
 
+## Phase 1.5 Add Traffic
+- User can buy extra traffic directly from service detail via `➕ خرید حجم اضافه`.
+- Flow:
+  - `service_add_traffic_order:{serviceId}` opens add-traffic request.
+  - User enters traffic amount between configured minimum/maximum.
+  - Bot shows summary and creates `Order(type=add_traffic)` + `Payment(method=manual_card)` only after user confirms.
+  - User submits receipt, admin approves/rejects as usual.
+- On approval:
+  - existing service is updated (no new service is created),
+  - expiry time does **not** change,
+  - traffic limit increases and panel `updateClient` is called (Sanaei/3x-ui supported),
+  - duplicate confirm does not add traffic twice.
+- Traffic add-on settings in `/admin/settings/renewal-pricing`:
+  - `traffic_addon.enabled`
+  - `traffic_addon.min_gb`
+  - `traffic_addon.max_gb`
+  - `traffic_addon.price_per_gb`
+- If add-traffic price is zero (or disabled), user sees: `خرید حجم اضافه فعال نیست.`
+
+Test command:
+```bash
+php bin/console app:service:test-add-traffic {serviceId} --traffic-gb=1
+```
+
 ### Known issue
 - Some 3x-ui versions may return empty responses for `addClient`/`updateClient`.
 - The driver logs this safely and handles it as a warning path where applicable.
@@ -401,6 +425,7 @@ If `test login` works but provisioning still fails on `addClient`:
 - `app:service:send-notifications [--dry-run] [--type=expiry|traffic|expired|all] [--limit=100]`
 - `app:automation:run [--dry-run] [--limit=100] [--only=sync|expiry|notifications|suspend|all]`
 - `app:service:test-renew {serviceId} [--days=30] [--traffic-gb=10]`
+- `app:service:test-add-traffic {serviceId} [--traffic-gb=1]`
 - `app:plans:adjust-prices [--percent=10|--amount=50000] [--direction=increase|decrease] [--field=price|pricePerGb|pricePerDay|all] [--dry-run]`
 
 ## Deployment Guide
