@@ -219,8 +219,19 @@ class PaymentGateway
         return match ($this->type) {
             PaymentGatewayType::MANUAL_CARD => null !== $this->getManualCardNumber() && null !== $this->getManualCardHolder(),
             PaymentGatewayType::ZIBAL => null !== $this->getZibalCallbackBaseUrl() && null !== $this->getZibalMerchant(),
+            PaymentGatewayType::CUSTOM_API => $this->isCustomApiConfigured(),
             default => false,
         };
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function getCustomApiConfig(): array
+    {
+        $config = $this->getConfig();
+
+        return is_array($config) ? $config : [];
     }
 
     public function getManualCardNumber(): ?string
@@ -390,5 +401,14 @@ class PaymentGateway
         $this->config = $config;
 
         return $this;
+    }
+
+    private function isCustomApiConfigured(): bool
+    {
+        $config = $this->getCustomApiConfig();
+        $createUrl = trim((string) ($config['create']['url'] ?? ''));
+        $verifyUrl = trim((string) ($config['verify']['url'] ?? ''));
+
+        return '' !== $createUrl && '' !== $verifyUrl;
     }
 }
