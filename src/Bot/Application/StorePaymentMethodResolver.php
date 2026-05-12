@@ -6,6 +6,7 @@ namespace App\Bot\Application;
 
 use App\Entity\Order;
 use App\Entity\StorePaymentMethod;
+use App\Shop\Domain\OrderStatus;
 use Doctrine\ORM\EntityManagerInterface;
 
 final class StorePaymentMethodResolver
@@ -122,7 +123,7 @@ final class StorePaymentMethodResolver
         }
         if (
             (int) ($order->getId() ?? 0) > 0
-            && $order->getStatus() !== \App\Shop\Domain\OrderStatus::WAITING_PAYMENT
+            && $order->getStatus() !== OrderStatus::WAITING_PAYMENT
         ) {
             $reasons[] = 'order_not_waiting_payment';
         }
