@@ -5,7 +5,11 @@ declare(strict_types=1);
 namespace App\Bot\Application;
 
 use App\Entity\Order;
+use App\Entity\PaymentGateway;
 use App\Entity\StorePaymentMethod;
+use App\Payment\Domain\PaymentGatewayType;
+use App\Payment\Infrastructure\PaymentGatewayRegistry;
+use App\Shared\Infrastructure\SettingValueProvider;
 use App\Shop\Domain\OrderStatus;
 use Doctrine\ORM\EntityManagerInterface;
 
@@ -13,6 +17,10 @@ final class StorePaymentMethodResolver
 {
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
+        private readonly PaymentGatewayRegistry $paymentGatewayRegistry,
+        private readonly SettingValueProvider $settingValueProvider,
+        private readonly string $paymentCardNumber = '',
+        private readonly string $paymentCardHolder = '',
     ) {
     }
 
@@ -21,18 +29,16 @@ final class StorePaymentMethodResolver
      */
     public function getAvailableMethods(Order $order): array
     {
-        $currency = $this->resolveCurrency($order);
-        $amount = $this->resolvePayableAmount($order);
-        $methods = $this->activeMethodsForCurrency($currency);
+        $evaluations = $this->evaluateMethods($order);
         $available = [];
 
-        foreach ($methods as $method) {
-            if (!$method instanceof StorePaymentMethod) {
+        foreach ($evaluations as $evaluation) {
+            if (true !== ($evaluation['accepted'] ?? false)) {
                 continue;
             }
 
-            $skipReasons = $this->methodSkipReasons($method, $order, $amount, $currency);
-            if ($skipReasons !== []) {
+            $method = $evaluation['method'] ?? null;
+            if (!$method instanceof StorePaymentMethod) {
                 continue;
             }
 
@@ -49,26 +55,38 @@ final class StorePaymentMethodResolver
      *     payableAmount: int,
      *     currency: string,
      *     activeStorePaymentMethodCount: int,
-     *     skippedReasons: list<string>
+     *     skippedReasons: list<string>,
+     *     methods: list<array<string, mixed>>
      * }
      */
     public function getDiagnostics(Order $order): array
     {
+        $evaluations = $this->evaluateMethods($order);
         $currency = $this->resolveCurrency($order);
         $amount = max(0, $order->getAmount());
         $payableAmount = $this->resolvePayableAmount($order);
-        $methods = $this->activeMethodsForCurrency($currency);
+        $activeCount = 0;
         $skippedReasons = [];
+        $methods = [];
 
-        foreach ($methods as $method) {
+        foreach ($evaluations as $evaluation) {
+            $method = $evaluation['method'] ?? null;
             if (!$method instanceof StorePaymentMethod) {
                 continue;
             }
-
-            $methodId = (int) ($method->getId() ?? 0);
-            foreach ($this->methodSkipReasons($method, $order, $payableAmount, $currency) as $reason) {
-                $skippedReasons[] = sprintf('method_id=%d reason=%s', $methodId, $reason);
+            if (true === ($evaluation['methodIsActive'] ?? false)) {
+                ++$activeCount;
             }
+            $skipReasons = $evaluation['skipReasons'] ?? [];
+            if (is_array($skipReasons) && [] !== $skipReasons) {
+                $skippedReasons[] = sprintf(
+                    'method_id=%d reasons=%s',
+                    (int) ($method->getId() ?? 0),
+                    implode('|', array_map(static fn (mixed $reason): string => (string) $reason, $skipReasons))
+                );
+            }
+            unset($evaluation['method']);
+            $methods[] = $evaluation;
         }
 
         return [
@@ -76,24 +94,19 @@ final class StorePaymentMethodResolver
             'amount' => $amount,
             'payableAmount' => $payableAmount,
             'currency' => $currency,
-            'activeStorePaymentMethodCount' => count($methods),
+            'activeStorePaymentMethodCount' => $activeCount,
             'skippedReasons' => $skippedReasons,
+            'methods' => $methods,
         ];
     }
 
     /**
      * @return list<StorePaymentMethod>
      */
-    private function activeMethodsForCurrency(string $currency): array
+    private function allMethods(): array
     {
         $qb = $this->entityManager->getRepository(StorePaymentMethod::class)->createQueryBuilder('m');
-        $qb->join('m.gateway', 'g')
-            ->where('m.isActive = :active')
-            ->andWhere('g.isActive = :gatewayActive')
-            ->andWhere('m.currency = :currency')
-            ->setParameter('active', true)
-            ->setParameter('gatewayActive', true)
-            ->setParameter('currency', $currency)
+        $qb->leftJoin('m.gateway', 'g')
             ->orderBy('m.sortOrder', 'ASC')
             ->addOrderBy('m.id', 'ASC');
 
@@ -106,46 +119,168 @@ final class StorePaymentMethodResolver
     }
 
     /**
-     * @return list<string>
+     * @return list<array{
+     *   method: StorePaymentMethod,
+     *   accepted: bool,
+     *   methodId: int,
+     *   methodTitle: string,
+     *   methodIsActive: bool,
+     *   methodCurrency: string,
+     *   methodMinAmount: ?int,
+     *   methodMaxAmount: ?int,
+     *   gatewayId: int,
+     *   gatewayType: string,
+     *   gatewayTitle: string,
+     *   gatewayIsActive: bool,
+     *   gatewayConfigured: bool,
+     *   hasDriver: bool,
+     *   orderAmount: int,
+     *   orderPayableAmount: int,
+     *   orderCurrency: string,
+     *   skipReason: string,
+     *   skipReasons: list<string>
+     * }>
      */
-    private function methodSkipReasons(StorePaymentMethod $method, Order $order, int $payableAmount, string $currency): array
+    private function evaluateMethods(Order $order): array
     {
-        $reasons = [];
-        $gateway = $method->getGateway();
+        $orderAmount = max(0, $order->getAmount());
+        $orderPayableAmount = $this->resolvePayableAmount($order);
+        $orderCurrency = $this->resolveCurrency($order);
+        $results = [];
 
-        if (!$gateway->isConfigured()) {
-            $reasons[] = 'gateway_not_configured';
-        }
-        if (strtoupper($gateway->getCurrency()) !== $currency) {
-            $reasons[] = 'gateway_currency_mismatch';
-        }
-        if (!$method->isAmountAllowed($payableAmount)) {
-            $reasons[] = 'amount_out_of_range';
-        }
-        if (
-            (int) ($order->getId() ?? 0) > 0
-            && $order->getStatus() !== OrderStatus::WAITING_PAYMENT
-        ) {
-            $reasons[] = 'order_not_waiting_payment';
+        foreach ($this->allMethods() as $method) {
+            $skipReasons = [];
+            $gateway = $method->getGateway();
+            $gatewayType = trim((string) $gateway->getType());
+            $methodCurrency = $this->normalizeCurrency($method->getCurrency());
+
+            if (!$method->isActive()) {
+                $skipReasons[] = 'method_inactive';
+            }
+            if (!$gateway->isActive()) {
+                $skipReasons[] = 'gateway_inactive';
+            }
+
+            $hasDriver = $this->hasDriver($gatewayType);
+            if (!$hasDriver) {
+                $skipReasons[] = 'gateway_driver_missing';
+            }
+
+            $gatewayConfigured = $this->isGatewayConfiguredForResolver($gateway);
+            if (!$gatewayConfigured) {
+                $skipReasons[] = PaymentGatewayType::MANUAL_CARD === $gatewayType
+                    ? 'gateway_not_configured_manual_card_missing_card_config'
+                    : 'gateway_not_configured';
+            }
+
+            if ($methodCurrency !== $orderCurrency) {
+                $skipReasons[] = 'currency_mismatch';
+            }
+
+            if (!$method->isAmountAllowed($orderPayableAmount)) {
+                $skipReasons[] = 'amount_out_of_range';
+            }
+
+            if (
+                (int) ($order->getId() ?? 0) > 0
+                && $order->getStatus() !== OrderStatus::WAITING_PAYMENT
+            ) {
+                $skipReasons[] = 'order_not_waiting_payment';
+            }
+
+            $results[] = [
+                'method' => $method,
+                'accepted' => [] === $skipReasons,
+                'methodId' => (int) ($method->getId() ?? 0),
+                'methodTitle' => $method->getTitle(),
+                'methodIsActive' => $method->isActive(),
+                'methodCurrency' => $methodCurrency,
+                'methodMinAmount' => $method->getMinAmount(),
+                'methodMaxAmount' => $method->getMaxAmount(),
+                'gatewayId' => (int) ($gateway->getId() ?? 0),
+                'gatewayType' => $gatewayType,
+                'gatewayTitle' => $gateway->getTitle(),
+                'gatewayIsActive' => $gateway->isActive(),
+                'gatewayConfigured' => $gatewayConfigured,
+                'hasDriver' => $hasDriver,
+                'orderAmount' => $orderAmount,
+                'orderPayableAmount' => $orderPayableAmount,
+                'orderCurrency' => $orderCurrency,
+                'skipReason' => [] === $skipReasons ? 'accepted' : implode('|', $skipReasons),
+                'skipReasons' => $skipReasons,
+            ];
         }
 
-        return $reasons;
+        return $results;
+    }
+
+    private function hasDriver(string $gatewayType): bool
+    {
+        if ('' === $gatewayType) {
+            return false;
+        }
+
+        try {
+            $this->paymentGatewayRegistry->resolveByType($gatewayType);
+
+            return true;
+        } catch (\Throwable) {
+            return false;
+        }
+    }
+
+    private function isGatewayConfiguredForResolver(PaymentGateway $gateway): bool
+    {
+        return match ($gateway->getType()) {
+            PaymentGatewayType::MANUAL_CARD => $this->isManualCardConfiguredForResolver($gateway),
+            PaymentGatewayType::ZIBAL => $this->isZibalConfigured($gateway),
+            PaymentGatewayType::CUSTOM_API => $gateway->isConfigured(),
+            default => false,
+        };
+    }
+
+    private function isManualCardConfiguredForResolver(PaymentGateway $gateway): bool
+    {
+        $cardNumber = trim((string) ($gateway->getManualCardNumber() ?? ''));
+        $cardHolder = trim((string) ($gateway->getManualCardHolder() ?? ''));
+        if ('' !== $cardNumber && '' !== $cardHolder) {
+            return true;
+        }
+
+        $legacyCardNumber = trim((string) ($this->settingValueProvider->get('payment.card_number', $this->paymentCardNumber) ?? ''));
+        $legacyCardHolder = trim((string) ($this->settingValueProvider->get('payment.card_holder', $this->paymentCardHolder) ?? ''));
+
+        return '' !== $legacyCardNumber && '' !== $legacyCardHolder;
+    }
+
+    private function isZibalConfigured(PaymentGateway $gateway): bool
+    {
+        $merchant = trim((string) ($gateway->getZibalMerchant() ?? ''));
+        $callbackBaseUrl = trim((string) ($gateway->getZibalCallbackBaseUrl() ?? ''));
+
+        return '' !== $merchant && '' !== $callbackBaseUrl;
     }
 
     private function resolveCurrency(Order $order): string
     {
         $metadata = is_array($order->getMetadata()) ? $order->getMetadata() : [];
-        $currency = strtoupper(trim((string) ($metadata['currency'] ?? 'IRR')));
 
-        return '' === $currency ? 'IRR' : $currency;
+        return $this->normalizeCurrency((string) ($metadata['currency'] ?? 'IRR'));
     }
 
     private function resolvePayableAmount(Order $order): int
     {
         $metadata = is_array($order->getMetadata()) ? $order->getMetadata() : [];
-        $priceSnapshot = is_array($metadata['priceSnapshot'] ?? null) ? $metadata['priceSnapshot'] : [];
-        $value = (int) ($priceSnapshot['finalAmount'] ?? $order->getAmount());
+        $payable = $metadata['payableAmount'] ?? null;
+        $value = is_numeric($payable) ? (int) $payable : $order->getAmount();
 
         return max(0, $value);
+    }
+
+    private function normalizeCurrency(?string $currency): string
+    {
+        $normalized = strtoupper(trim((string) $currency));
+
+        return '' === $normalized ? 'IRR' : $normalized;
     }
 }

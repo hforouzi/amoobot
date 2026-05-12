@@ -1232,14 +1232,16 @@ class TelegramUpdateHandler
         if ([] === $methods) {
             $diagnostics = $this->storePaymentMethodResolver->getDiagnostics($order);
             $encodedReasons = json_encode($diagnostics['skippedReasons'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            $encodedMethods = json_encode($diagnostics['methods'] ?? [], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
             $this->debugLog(sprintf(
-                'no_store_payment_methods order_id=%d amount=%d payable_amount=%d currency=%s active_count=%d skipped_reasons=%s',
+                'no_store_payment_methods order_id=%d amount=%d payable_amount=%d currency=%s active_count=%d skipped_reasons=%s methods=%s',
                 (int) ($diagnostics['orderId'] ?? 0),
                 (int) ($diagnostics['amount'] ?? 0),
                 (int) ($diagnostics['payableAmount'] ?? 0),
                 (string) ($diagnostics['currency'] ?? 'IRR'),
                 (int) ($diagnostics['activeStorePaymentMethodCount'] ?? 0),
-                false === $encodedReasons ? '[]' : $encodedReasons
+                false === $encodedReasons ? '[]' : $encodedReasons,
+                false === $encodedMethods ? '[]' : $encodedMethods
             ));
             $this->showPopupOrMessage($chatId, $callbackId, 'در حال حاضر روش پرداخت فعالی وجود ندارد.', 'no_active_store_payment_method_new_service');
 
