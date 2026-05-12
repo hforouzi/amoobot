@@ -1208,7 +1208,7 @@ class ServiceManagementService
     }
 
     /**
-     * @return array{plan: Plan, amount: int, trafficGb: int, durationDays: int, unlimitedDuration: bool, baseAmount: int, globalDiscountPercent: int, globalDiscountAmount: int, carryRemainingTraffic: bool, carryRemainingDays: bool}|null
+     * @return array{plan: Plan, amount: int, trafficGb: int, durationDays: int, unlimitedDuration: bool, baseAmount: int, globalDiscountPercent: int, globalDiscountAmount: int, afterGlobalDiscountAmount: int, carryRemainingTraffic: bool, carryRemainingDays: bool}|null
      */
     private function resolveRenewalPackage(VpnService $service): ?array
     {
@@ -1241,6 +1241,7 @@ class ServiceManagementService
             'baseAmount' => $priceResult->baseAmount,
             'globalDiscountPercent' => $priceResult->globalDiscountPercent,
             'globalDiscountAmount' => $priceResult->globalDiscountAmount,
+            'afterGlobalDiscountAmount' => $priceResult->afterGlobalDiscountAmount,
             'carryRemainingTraffic' => $carryRemainingTraffic,
             'carryRemainingDays' => $carryRemainingDays,
         ];

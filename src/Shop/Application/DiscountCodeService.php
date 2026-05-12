@@ -22,6 +22,9 @@ final class DiscountCodeService
     ) {
     }
 
+    /**
+     * Validate discount code against an order context where $amount is the amount after global discount.
+     */
     public function validateCode(string $code, User $user, string $orderType, ?Plan $plan, int $amount): ValidationResult
     {
         $normalizedCode = strtoupper(trim($code));
@@ -109,6 +112,9 @@ final class DiscountCodeService
         return ValidationResult::valid($discountCode, $discountAmount, $finalAmount);
     }
 
+    /**
+     * Validate and apply discount code for either draft or persisted order context.
+     */
     public function applyCode(string $code, OrderDraft|Order $context): DiscountResult
     {
         if ($context instanceof OrderDraft) {
