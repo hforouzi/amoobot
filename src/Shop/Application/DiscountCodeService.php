@@ -174,10 +174,10 @@ final class DiscountCodeService
 
     public function calculateDiscountAmount(DiscountCode $code, int $amount): int
     {
-        if ($amount <= 0) {
+        $safeAmount = max(0, $amount);
+        if ($safeAmount <= 0) {
             return 0;
         }
-        $safeAmount = max(0, $amount);
 
         if (DiscountCode::TYPE_PERCENT === $code->getType()) {
             return (int) floor(($safeAmount * max(0, min(100, $code->getValue()))) / 100);
