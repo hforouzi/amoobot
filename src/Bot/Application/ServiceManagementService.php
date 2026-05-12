@@ -8,11 +8,15 @@ use App\Bot\Infrastructure\TelegramApiClient;
 use App\Entity\Order;
 use App\Entity\OrderDraft;
 use App\Entity\Payment;
+use App\Entity\PaymentGateway;
 use App\Entity\Plan;
+use App\Entity\StorePaymentMethod;
 use App\Entity\TelegramAccount;
 use App\Entity\User;
 use App\Entity\VpnService;
 use App\Payment\Domain\PaymentStatus;
+use App\Payment\Domain\PaymentGatewayType;
+use App\Payment\Infrastructure\PaymentGatewayRegistry;
 use App\Provisioning\Application\RenewalSettingsProvider;
 use App\Provisioning\Application\ServiceUsageSyncService;
 use App\Provisioning\Application\TrafficAddonSettingsProvider;
@@ -50,6 +54,7 @@ class ServiceManagementService
         private readonly PlanPricingService $planPricingService,
         private readonly TrafficAddonPricingService $trafficAddonPricingService,
         private readonly DiscountCodeService $discountCodeService,
+        private readonly PaymentGatewayRegistry $paymentGatewayRegistry,
         private readonly string $paymentCardNumber = '',
         private readonly string $paymentCardHolder = '',
         private readonly ?string $paymentDescription = null,
@@ -742,7 +747,7 @@ class ServiceManagementService
             ->setUpdatedAt(new \DateTimeImmutable());
         $this->entityManager->flush();
 
-        $this->finalizeDraftPayment($draft, $chatId, $callbackId);
+        $this->sendPaymentGatewaySelection($draft, $chatId, $callbackId);
     }
 
     public function handleDiscountCodeInput(TelegramAccount $account, OrderDraft $draft, string $codeInput, string $chatId): void
@@ -786,21 +791,169 @@ class ServiceManagementService
             ->setUpdatedAt(new \DateTimeImmutable());
         $this->entityManager->flush();
 
-        $this->finalizeDraftPayment($draft, $chatId, null);
+        $this->sendPaymentGatewaySelection($draft, $chatId, null);
     }
 
-    private function finalizeDraftPayment(OrderDraft $draft, string $chatId, ?string $callbackId): void
+    public function handleSelectStorePaymentMethodForOrder(TelegramAccount $account, int $orderId, int $storePaymentMethodId, string $chatId, ?string $callbackId = null): bool
+    {
+        $order = $this->entityManager->getRepository(Order::class)->find($orderId);
+        if (
+            !$order instanceof Order
+            || $order->getUser()->getId() !== $account->getUser()->getId()
+            || !in_array($order->getType(), [OrderType::RENEWAL, OrderType::ADD_TRAFFIC], true)
+            || OrderStatus::WAITING_PAYMENT !== $order->getStatus()
+        ) {
+            return false;
+        }
+
+        $method = $this->findStorePaymentMethodForOrder($order, $storePaymentMethodId);
+        if (!$method instanceof StorePaymentMethod) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'روش پرداخت نامعتبر است.', 'invalid_store_payment_method_order');
+
+            return true;
+        }
+
+        $gateway = $method->getGateway();
+        if (!$gateway->isActive() || !$gateway->isConfigured()) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'درگاه پرداخت نامعتبر است.', 'invalid_payment_gateway_order');
+
+            return true;
+        }
+
+        $this->createOrReuseOrderPayment($order, $gateway, $method, $chatId, $callbackId);
+
+        return true;
+    }
+
+    public function handleSelectPaymentGatewayForOrder(TelegramAccount $account, int $orderId, int $gatewayId, string $chatId, ?string $callbackId = null): bool
+    {
+        $order = $this->entityManager->getRepository(Order::class)->find($orderId);
+        if (
+            !$order instanceof Order
+            || $order->getUser()->getId() !== $account->getUser()->getId()
+            || !in_array($order->getType(), [OrderType::RENEWAL, OrderType::ADD_TRAFFIC], true)
+            || OrderStatus::WAITING_PAYMENT !== $order->getStatus()
+        ) {
+            return false;
+        }
+
+        $method = $this->findStorePaymentMethodByGatewayForOrder($order, $gatewayId);
+        if (!$method instanceof StorePaymentMethod) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'روش پرداخت نامعتبر است.', 'invalid_store_payment_method_legacy_gateway');
+
+            return true;
+        }
+
+        return $this->handleSelectStorePaymentMethodForOrder($account, $orderId, (int) ($method->getId() ?? 0), $chatId, $callbackId);
+    }
+
+    private function sendPaymentGatewaySelection(OrderDraft $draft, string $chatId, ?string $callbackId): void
+    {
+        $order = $this->createOrderFromDraft($draft);
+        if (!$order instanceof Order) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'سفارش نامعتبر است.', 'invalid_order_from_draft');
+
+            return;
+        }
+
+        $methods = $this->findAvailableStorePaymentMethods($order);
+        if ([] === $methods) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'در حال حاضر درگاه پرداخت فعالی وجود ندارد.', 'no_active_payment_gateway');
+
+            return;
+        }
+
+        $cancelCallback = $this->resolveCancelCallbackForDraft($draft);
+        $this->acknowledgeCallback($callbackId);
+        $this->telegramApiClient->sendMessage(
+            $chatId,
+            'روش پرداخت را انتخاب کنید:',
+            $this->keyboardFactory->paymentGatewaySelectionMenu((int) ($order->getId() ?? 0), $methods, $cancelCallback)
+        );
+    }
+
+    /**
+     * @return list<StorePaymentMethod>
+     */
+    private function findAvailableStorePaymentMethods(Order $order): array
+    {
+        $amount = $order->getAmount();
+        $qb = $this->entityManager->getRepository(StorePaymentMethod::class)->createQueryBuilder('m');
+        $qb->join('m.gateway', 'g')
+            ->where('m.isActive = :active')
+            ->andWhere('g.isActive = :gatewayActive')
+            ->andWhere('m.currency = :currency')
+            ->andWhere('g.currency = :currency')
+            ->andWhere('(m.minAmount IS NULL OR m.minAmount <= :amount)')
+            ->andWhere('(m.maxAmount IS NULL OR m.maxAmount >= :amount)')
+            ->setParameter('active', true)
+            ->setParameter('gatewayActive', true)
+            ->setParameter('currency', 'IRR')
+            ->setParameter('amount', $amount)
+            ->orderBy('m.sortOrder', 'ASC')
+            ->addOrderBy('m.id', 'ASC');
+
+        $methods = $qb->getQuery()->getResult();
+
+        return array_values(array_filter(
+            is_array($methods) ? $methods : [],
+            static fn (mixed $item): bool => $item instanceof StorePaymentMethod && $item->getGateway()->isConfigured()
+        ));
+    }
+
+    private function findStorePaymentMethodForOrder(Order $order, int $storePaymentMethodId): ?StorePaymentMethod
+    {
+        foreach ($this->findAvailableStorePaymentMethods($order) as $method) {
+            if ((int) ($method->getId() ?? 0) === $storePaymentMethodId) {
+                return $method;
+            }
+        }
+
+        return null;
+    }
+
+    private function findStorePaymentMethodByGatewayForOrder(Order $order, int $gatewayId): ?StorePaymentMethod
+    {
+        foreach ($this->findAvailableStorePaymentMethods($order) as $method) {
+            if ((int) ($method->getGateway()->getId() ?? 0) === $gatewayId) {
+                return $method;
+            }
+        }
+
+        return null;
+    }
+
+    private function resolveCancelCallbackForDraft(OrderDraft $draft): string
+    {
+        $data = is_array($draft->getData()) ? $draft->getData() : [];
+        $draftType = (string) ($data['draftType'] ?? '');
+        $targetServiceId = (int) ($data['targetServiceId'] ?? 0);
+
+        if ('renewal' === $draftType) {
+            return true === ($data['adminMode'] ?? false)
+                ? 'admin_service_view:'.$targetServiceId
+                : 'service_view:'.$targetServiceId;
+        }
+
+        if ('add_traffic' === $draftType) {
+            return 'service_view:'.$targetServiceId;
+        }
+
+        return 'main_menu';
+    }
+
+    private function createOrderFromDraft(OrderDraft $draft): ?Order
     {
         $data = is_array($draft->getData()) ? $draft->getData() : [];
         $draftType = (string) ($data['draftType'] ?? '');
         if (!in_array($draftType, ['renewal', 'add_traffic'], true)) {
-            return;
+            return null;
         }
 
         $targetServiceId = (int) ($data['targetServiceId'] ?? 0);
         $targetService = $targetServiceId > 0 ? $this->entityManager->getRepository(VpnService::class)->find($targetServiceId) : null;
         if (!$targetService instanceof VpnService) {
-            return;
+            return null;
         }
 
         $priceSnapshot = is_array($draft->getPriceSnapshot()) ? $draft->getPriceSnapshot() : [];
@@ -840,36 +993,106 @@ class ServiceManagementService
             ->setMetadata($metadata)
             ->setStatus(OrderStatus::WAITING_PAYMENT);
 
-        $payment = (new Payment())
-            ->setOrder($order)
-            ->setMethod('manual_card')
-            ->setAmount($finalAmount)
-            ->setStatus(PaymentStatus::PENDING);
-
         $draft->setStatus(OrderDraftStatus::CONFIRMED)->setUpdatedAt(new \DateTimeImmutable());
-
         $this->entityManager->persist($order);
-        $this->entityManager->persist($payment);
         $this->entityManager->flush();
 
-        $cardNumber = $this->settingValueProvider->get('payment.card_number', $this->paymentCardNumber);
-        $cardHolder = $this->settingValueProvider->get('payment.card_holder', $this->paymentCardHolder);
-        $description = $this->settingValueProvider->get('payment.description', $this->paymentDescription);
+        return $order;
+    }
+
+    private function createOrReuseOrderPayment(Order $order, PaymentGateway $gateway, StorePaymentMethod $storePaymentMethod, string $chatId, ?string $callbackId): void
+    {
+        $payment = $this->entityManager->getRepository(Payment::class)
+            ->createQueryBuilder('p')
+            ->where('p.order = :order')
+            ->andWhere('p.status IN (:statuses)')
+            ->setParameter('order', $order)
+            ->setParameter('statuses', [PaymentStatus::PENDING, PaymentStatus::SUBMITTED])
+            ->orderBy('p.id', 'DESC')
+            ->setMaxResults(1)
+            ->getQuery()
+            ->getOneOrNullResult();
+
+        if (!$payment instanceof Payment) {
+            $payment = (new Payment())
+                ->setOrder($order)
+                ->setGateway($gateway)
+                ->setStorePaymentMethod($storePaymentMethod)
+                ->setGatewayType($gateway->getType())
+                ->setMethod($gateway->getType())
+                ->setCurrency($gateway->getCurrency())
+                ->setAmount($order->getAmount())
+                ->setPayableAmount($order->getAmount())
+                ->setStatus(PaymentStatus::PENDING);
+            $this->entityManager->persist($payment);
+            $this->entityManager->flush();
+        } else {
+            $payment
+                ->setGateway($gateway)
+                ->setStorePaymentMethod($storePaymentMethod)
+                ->setGatewayType($gateway->getType())
+                ->setMethod($gateway->getType())
+                ->setCurrency($gateway->getCurrency());
+        }
+
+        $requestResult = $this->paymentGatewayRegistry
+            ->resolve($gateway)
+            ->createPayment($payment, $order);
+
+        if ($requestResult->rawResponse !== null) {
+            $payment->setRequestPayload($requestResult->rawResponse);
+        }
+        if ($requestResult->transactionId) {
+            $payment->setGatewayTransactionId($requestResult->transactionId);
+        }
+        if ($requestResult->authority) {
+            $payment->setAuthority($requestResult->authority);
+        }
+        if ($requestResult->paymentUrl) {
+            $payment->setPaymentUrl($requestResult->paymentUrl);
+        }
+        if (!$requestResult->success) {
+            $payment->setAdminNote($requestResult->message);
+        }
+        $this->entityManager->flush();
+
+        if (PaymentGatewayType::ZIBAL === $gateway->getType()) {
+            if (!$requestResult->success || null === $payment->getPaymentUrl()) {
+                $this->showPopupOrMessage($chatId, $callbackId, $requestResult->message ?: 'ایجاد لینک پرداخت آنلاین انجام نشد.', 'zibal_request_failed');
+
+                return;
+            }
+
+            $this->acknowledgeCallback($callbackId);
+            $this->telegramApiClient->sendMessage(
+                $chatId,
+                'برای پرداخت آنلاین روی دکمه زیر بزنید.',
+                $this->keyboardFactory->paymentOnlineActionMenu((int) ($payment->getId() ?? 0), (string) $payment->getPaymentUrl())
+            );
+
+            return;
+        }
+
+        $metadata = is_array($order->getMetadata()) ? $order->getMetadata() : [];
+        $priceSnapshot = is_array($metadata['priceSnapshot'] ?? null) ? $metadata['priceSnapshot'] : [];
+        $cardNumber = $gateway->getManualCardNumber() ?? $this->settingValueProvider->get('payment.card_number', $this->paymentCardNumber);
+        $cardHolder = $gateway->getManualCardHolder() ?? $this->settingValueProvider->get('payment.card_holder', $this->paymentCardHolder);
+        $description = $gateway->getManualInstructions() ?? $this->settingValueProvider->get('payment.description', $this->paymentDescription);
         $message = sprintf(
             "شناسه سرویس: %d\nمبلغ پایه: %d تومان\nتخفیف سراسری: %d تومان\nکد تخفیف: %s (%d تومان)\nمبلغ نهایی: %d تومان\nشماره کارت: %s\nبه نام: %s\n%s\n\nبرای ارسال رسید روی «✅ تایید و ارسال رسید» بزنید.",
-            $targetServiceId,
-            (int) ($metadata['priceSnapshot']['baseAmount'] ?? 0),
-            (int) ($metadata['priceSnapshot']['globalDiscountAmount'] ?? 0),
-            (string) ($draft->getDiscountCode() ?? '-'),
-            (int) ($metadata['priceSnapshot']['discountCodeAmount'] ?? 0),
-            $finalAmount,
+            (int) ($metadata['targetServiceId'] ?? 0),
+            (int) ($priceSnapshot['baseAmount'] ?? 0),
+            (int) ($priceSnapshot['globalDiscountAmount'] ?? 0),
+            (string) ($priceSnapshot['discountCode'] ?? '-'),
+            (int) ($priceSnapshot['discountCodeAmount'] ?? 0),
+            (int) ($priceSnapshot['finalAmount'] ?? $order->getAmount()),
             $cardNumber ?: '-',
             $cardHolder ?: '-',
             $description ? 'توضیحات: '.$description : ''
         );
 
         $this->acknowledgeCallback($callbackId);
-        $this->telegramApiClient->sendMessage($chatId, trim($message), $this->keyboardFactory->paymentActionMenu((int) $payment->getId()));
+        $this->telegramApiClient->sendMessage($chatId, trim($message), $this->keyboardFactory->paymentActionMenu((int) ($payment->getId() ?? 0)));
     }
 
     public function suspendService(int $serviceId, string $chatId, string $callbackId): void

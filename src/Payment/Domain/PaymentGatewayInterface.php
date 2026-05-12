@@ -11,7 +11,9 @@ use App\Payment\Domain\Dto\PaymentVerificationResult;
 
 interface PaymentGatewayInterface
 {
-    public function createPayment(Order $order): PaymentRequestResult;
+    public function getType(): string;
 
-    public function verifyPayment(Payment $payment, array $payload): PaymentVerificationResult;
+    public function createPayment(Payment $payment, Order $order): PaymentRequestResult;
+
+    public function verifyPayment(Payment $payment, array $payload = []): PaymentVerificationResult;
 }

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Bot\Application;
 
+use App\Entity\StorePaymentMethod;
+use App\Payment\Domain\PaymentGatewayType;
 use App\Entity\Plan;
 
 class TelegramKeyboardFactory
@@ -165,6 +167,40 @@ class TelegramKeyboardFactory
     }
 
     /**
+     * @param list<StorePaymentMethod> $methods
+     *
+     * @return array<string, array<array<array<string, string>>>>
+     */
+    public function paymentGatewaySelectionMenu(int $orderId, array $methods, string $cancelCallback): array
+    {
+        $rows = [];
+        foreach ($methods as $method) {
+            if (!$method instanceof StorePaymentMethod) {
+                continue;
+            }
+
+            $gateway = $method->getGateway();
+            $text = '' !== trim($method->getTitle()) ? $method->getTitle() : match ($gateway->getType()) {
+                PaymentGatewayType::MANUAL_CARD => '💳 کارت به کارت',
+                PaymentGatewayType::ZIBAL => '🌐 پرداخت آنلاین (زیبال)',
+                default => $gateway->getTitle(),
+            };
+
+            $rows[] = [[
+                'text' => $text,
+                'callback_data' => 'select_store_payment_method:'.$orderId.':'.$method->getId(),
+            ]];
+        }
+
+        $rows[] = [[
+            'text' => '❌ انصراف',
+            'callback_data' => $cancelCallback,
+        ]];
+
+        return ['inline_keyboard' => $rows];
+    }
+
+    /**
      * @return array<string, array<array<array<string, string>>>>
      */
     public function customOrderSummaryMenu(int $draftId): array
@@ -215,6 +251,29 @@ class TelegramKeyboardFactory
                 ]],
                 [[
                     'text' => '❌ انصراف',
+                    'callback_data' => 'payment_cancel:'.$paymentId,
+                ]],
+            ],
+        ];
+    }
+
+    /**
+     * @return array<string, array<array<array<string, string>>>>
+     */
+    public function paymentOnlineActionMenu(int $paymentId, string $paymentUrl): array
+    {
+        return [
+            'inline_keyboard' => [
+                [[
+                    'text' => 'پرداخت آنلاین',
+                    'url' => $paymentUrl,
+                ]],
+                [[
+                    'text' => 'بررسی پرداخت',
+                    'callback_data' => 'payment_check:'.$paymentId,
+                ]],
+                [[
+                    'text' => 'انصراف',
                     'callback_data' => 'payment_cancel:'.$paymentId,
                 ]],
             ],

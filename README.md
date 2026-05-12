@@ -126,9 +126,9 @@ Webhook endpoint:
 2. Bot auto-registers TelegramAccount/User and shows main menu.
 3. User clicks `🛒 خرید سرویس` and sees active plans.
 4. User selects plan (`select_plan:{id}`).
-5. Bot shows payment method selection (`select_payment_method:{planId}:manual_card`).
-6. User selects `💳 کارت به کارت`; bot creates Order + Payment and sends payment instructions.
-7. User taps `✅ تایید و ارسال رسید` (`payment_submit_receipt:{paymentId}`) and then sends receipt photo or tracking text in chat.
+5. Bot shows payment method selection (`select_store_payment_method:{orderId}:{storePaymentMethodId}`) from active store payment methods.
+6. User selects `manual_card` or `zibal`; bot creates/reuses Payment from selected store method gateway and starts selected flow.
+7. For manual card, user taps `✅ تایید و ارسال رسید` (`payment_submit_receipt:{paymentId}`) and then sends receipt photo or tracking text in chat.
 8. Payment becomes `submitted`, admin sees it in `/admin`.
 9. Admin confirms payment via `Confirm Payment` action.
 10. System provisions via `DummyVpnPanelDriver` and sends subscription/config to user.
@@ -138,6 +138,83 @@ Webhook endpoint:
 In `/admin` -> Payments, use actions:
 - `Confirm Payment` -> marks payment confirmed, order paid/provisioned, creates VPN service, notifies user.
 - `Reject Payment` -> marks payment rejected and notifies user.
+
+## Phase 1.7.1 Payment Gateway Architecture
+
+### PaymentGateway setup (module/account config)
+- Entity: `PaymentGateway` with supported types only:
+  - `manual_card`
+  - `zibal`
+- Manage gateways in `/admin` -> `درگاههای پرداخت`.
+- Type-specific configuration pages:
+  - `کانفیگ کارت به کارت`
+  - `کانفیگ زیبال`
+- Gateway config fields:
+  - `manual_card`: `card_number`, `card_holder`, `bank_name`, `instructions`
+  - `zibal`: `merchant`, `sandbox`, `callback_base_url`, `description`, and optional advanced fields (`mobile`, `allowedCards`, `percentMode`, `feeMode`, `multiplexingAccountNumber`)
+
+### Store Payment Methods setup (bot-visible methods)
+- Entity: `StorePaymentMethod` controls user-visible payment choices in bot.
+- Manage methods in `/admin` -> `روشهای پرداخت فروشگاه`.
+- Each method links to one configured `PaymentGateway`.
+- Only active store methods are shown to users.
+- You can set: `title`, `isActive`, `sortOrder`, `minAmount`, `maxAmount`, `currency`.
+
+### Admin setup flow
+1. Go to `درگاههای پرداخت` and configure gateway credentials/accounts.
+2. Go to `روشهای پرداخت فروشگاه`.
+3. Create method rows pointing to configured gateways.
+4. Activate desired methods.
+5. Bot shows only active store payment methods.
+
+### Zibal setup
+- Create/configure a `zibal` gateway:
+  ```json
+  {
+    "merchant": "zibal",
+    "sandbox": true,
+    "callback_base_url": "https://example.com"
+  }
+  ```
+- Callback URL:
+  - `GET/POST /payment/callback/zibal`
+- Production example:
+  ```json
+  {
+    "merchant": "YOUR_MERCHANT",
+    "sandbox": false,
+    "callback_base_url": "https://your-domain.com",
+    "description": "Amoobot order payment"
+  }
+  ```
+
+### Telegram online payment flow
+- For zibal payments bot sends:
+  - `پرداخت آنلاین` (URL button)
+  - `بررسی پرداخت` (`payment_check:{paymentId}`)
+  - `انصراف` (`payment_cancel:{paymentId}`)
+
+### Commands
+- Create defaults:
+  ```bash
+  php bin/console app:payment:create-default-gateways
+  ```
+- List configured gateways:
+  ```bash
+  php bin/console app:payment:list-gateways
+  ```
+- List store methods:
+  ```bash
+  php bin/console app:payment:list-methods
+  ```
+- Test zibal request:
+  ```bash
+  php bin/console app:payment:test-zibal {gatewayId} --amount=10000
+  ```
+
+### Duplicate callback safety
+- Zibal callback verification is always re-verified with gateway API.
+- Payment confirmation is idempotent through existing approval checks, so repeated callbacks do not double-provision/renew/add-traffic.
 
 ## Admin approval from Telegram
 - Set `TELEGRAM_ADMIN_CHAT_ID` in `.env.local` to the admin Telegram chat ID.
@@ -580,5 +657,5 @@ php bin/console app:telegram:poll --force
 - Reseller/Agent
 - Referral
 - Wallet
-- Online payment gateways
+- Online payment gateways other than `zibal`
 - Additional real panel drivers beyond `sanaei_3xui`
