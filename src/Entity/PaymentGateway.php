@@ -156,7 +156,7 @@ class PaymentGateway
 
     public function getConfigJson(): string
     {
-        if ($this->config === null || [] === $this->config) {
+        if (empty($this->config)) {
             return '';
         }
 

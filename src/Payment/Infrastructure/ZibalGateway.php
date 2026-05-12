@@ -229,7 +229,9 @@ final class ZibalGateway implements PaymentGatewayInterface
 
             $value = $config[$key];
             if ($key === 'allowedCards' && is_string($value)) {
-                $value = array_values(array_filter(array_map('trim', explode(',', $value)), static fn (string $card): bool => '' !== $card));
+                $cards = explode(',', $value);
+                $trimmedCards = array_map('trim', $cards);
+                $value = array_values(array_filter($trimmedCards, static fn (string $card): bool => '' !== $card));
             }
 
             if ($value === null || $value === '' || $value === []) {
