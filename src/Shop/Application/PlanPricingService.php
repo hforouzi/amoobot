@@ -31,14 +31,16 @@ final class PlanPricingService
         $trafficGb = isset($options['trafficGb']) ? (int) $options['trafficGb'] : null;
         $durationDays = isset($options['durationDays']) ? (int) $options['durationDays'] : null;
         $baseAmount = $this->calculatePlanBaseAmount($plan, $trafficGb, $durationDays);
-        $discountPercent = $this->resolveGlobalDiscountPercent();
-        $discountAmount = $this->calculateDiscountAmount($baseAmount, $discountPercent);
-        $finalAmount = max(0, $baseAmount - $discountAmount);
+        $globalDiscountPercent = $this->resolveGlobalDiscountPercent();
+        $globalDiscountAmount = $this->calculateDiscountAmount($baseAmount, $globalDiscountPercent);
+        $afterGlobalDiscountAmount = max(0, $baseAmount - $globalDiscountAmount);
+        $finalAmount = $afterGlobalDiscountAmount;
 
         return new PriceCalculationResult(
             baseAmount: $baseAmount,
-            discountPercent: $discountPercent,
-            discountAmount: $discountAmount,
+            globalDiscountPercent: $globalDiscountPercent,
+            globalDiscountAmount: $globalDiscountAmount,
+            afterGlobalDiscountAmount: $afterGlobalDiscountAmount,
             finalAmount: $finalAmount,
             source: 'current_plan',
             explanation: $plan->isCustomizable() ? 'custom_plan_current_price' : 'fixed_plan_current_price',
@@ -83,8 +85,9 @@ final class PlanPricingService
             durationDays: $durationDays,
             unlimitedDuration: $unlimitedDuration,
             baseAmount: $price->baseAmount,
-            discountPercent: $price->discountPercent,
-            discountAmount: $price->discountAmount,
+            globalDiscountPercent: $price->globalDiscountPercent,
+            globalDiscountAmount: $price->globalDiscountAmount,
+            afterGlobalDiscountAmount: $price->afterGlobalDiscountAmount,
             finalAmount: $price->finalAmount,
             planPriceSource: 'current_plan',
             explanation: 'renewal_uses_current_plan_price'

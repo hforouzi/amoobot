@@ -15,6 +15,7 @@ use App\Entity\TelegramAccount;
 use App\Payment\Application\PaymentConfirmationService;
 use App\Payment\Domain\PaymentStatus;
 use App\Shared\Infrastructure\SettingValueProvider;
+use App\Shop\Application\DiscountCodeService;
 use App\Shop\Application\PlanPricingService;
 use App\Shop\Domain\OrderDraftStatus;
 use App\Shop\Domain\OrderStatus;
@@ -30,6 +31,8 @@ class TelegramUpdateHandler
     private const STEP_WAITING_CUSTOM_USERNAME = 'waiting_custom_username';
     private const STEP_WAITING_CUSTOM_TRAFFIC = 'waiting_custom_traffic';
     private const STEP_WAITING_CUSTOM_DURATION = 'waiting_custom_duration';
+    private const STEP_WAITING_DISCOUNT_DECISION = 'waiting_discount_decision';
+    private const STEP_WAITING_DISCOUNT_CODE = 'waiting_discount_code';
 
     public function __construct(
         private readonly TelegramUserResolver $telegramUserResolver,
@@ -41,6 +44,7 @@ class TelegramUpdateHandler
         private readonly PaymentConfirmationService $paymentConfirmationService,
         private readonly SettingValueProvider $settingValueProvider,
         private readonly PlanPricingService $planPricingService,
+        private readonly DiscountCodeService $discountCodeService,
         private readonly ?string $adminChatId = null,
         private readonly string $paymentCardNumber = '',
         private readonly string $paymentCardHolder = '',
@@ -120,6 +124,16 @@ class TelegramUpdateHandler
                 $this->serviceManagementService->handleAddTrafficDraftAmountInput($account, $activeDraft, $text, $chatId);
 
                 return;
+            }
+
+             if (ServiceManagementService::STEP_WAITING_DISCOUNT_CODE === $activeDraft->getStep()) {
+                $data = is_array($activeDraft->getData()) ? $activeDraft->getData() : [];
+                $draftType = (string) ($data['draftType'] ?? '');
+                if (in_array($draftType, ['renewal', 'add_traffic'], true)) {
+                    $this->serviceManagementService->handleDiscountCodeInput($account, $activeDraft, $text, $chatId);
+
+                    return;
+                }
             }
 
             $this->handleCustomOrderDraftTextInput($account, $activeDraft, $text, $chatId);
@@ -288,6 +302,18 @@ class TelegramUpdateHandler
             return;
         }
 
+        if (str_starts_with($data, 'discount_enter:')) {
+            $this->handleDiscountEnter($account, $chatId, (int) str_replace('discount_enter:', '', $data), $callbackId);
+
+            return;
+        }
+
+        if (str_starts_with($data, 'discount_skip:')) {
+            $this->handleDiscountSkip($account, $chatId, (int) str_replace('discount_skip:', '', $data), $callbackId);
+
+            return;
+        }
+
         if ('support' === $data) {
             $this->handleSupport($chatId, $callbackId);
 
@@ -363,6 +389,10 @@ class TelegramUpdateHandler
             ->setTrafficGb(null)
             ->setDurationDays(null)
             ->setCalculatedAmount(null)
+            ->setDiscountCode(null)
+            ->setDiscountAmount(null)
+            ->setFinalAmount(null)
+            ->setPriceSnapshot(null)
             ->setUpdatedAt(new \DateTimeImmutable());
 
         $this->entityManager->flush();
@@ -387,6 +417,15 @@ class TelegramUpdateHandler
             $draft->setStatus(OrderDraftStatus::EXPIRED)->setUpdatedAt(new \DateTimeImmutable());
             $this->entityManager->flush();
             $this->telegramApiClient->sendMessage($chatId, 'این درخواست منقضی شده است. دوباره از بخش خرید شروع کنید.');
+
+            return;
+        }
+
+        if (self::STEP_WAITING_DISCOUNT_CODE === $draft->getStep()) {
+            $data = is_array($draft->getData()) ? $draft->getData() : [];
+            if ('new_service' === (string) ($data['draftType'] ?? '')) {
+                $this->handleNewServiceDraftDiscountCodeInput($account, $draft, $text, $chatId);
+            }
 
             return;
         }
@@ -538,17 +577,19 @@ class TelegramUpdateHandler
         $durationText = null === $draft->getDurationDays() || $plan->isUnlimitedDuration()
             ? 'نامحدود'
             : sprintf('%d روز', (int) $draft->getDurationDays());
-        $discountLine = $price->discountPercent > 0
-            ? sprintf("\nمبلغ پایه: %d تومان\nتخفیف: %d%%\nمبلغ تخفیف: %d تومان", $price->baseAmount, $price->discountPercent, $price->discountAmount)
-            : '';
+        $discountLine = sprintf(
+            "\nمبلغ پایه: %d تومان\nتخفیف سراسری: %d تومان\nکد تخفیف: -\nمبلغ نهایی: %d تومان",
+            $price->baseAmount,
+            $price->globalDiscountAmount,
+            $price->finalAmount
+        );
         $summary = sprintf(
-            "خلاصه سفارش:\nنام اکانت: %s\nنام نهایی: %s\nحجم: %s گیگ\nمدت: %s%s\nمبلغ قابل پرداخت: %d تومان",
+            "خلاصه سفارش:\nنام اکانت: %s\nنام نهایی: %s\nحجم: %s گیگ\nمدت: %s%s",
             (string) ($draft->getCustomUsernamePrefix() ?? '-'),
             (string) ($draft->getFinalUsername() ?? '-'),
             null === $draft->getTrafficGb() ? '-' : (string) $draft->getTrafficGb(),
             $durationText,
-            $discountLine,
-            (int) ($draft->getCalculatedAmount() ?? 0)
+            $discountLine
         );
         $summary = sprintf(
             "پلن: %s\n%s",
@@ -581,8 +622,39 @@ class TelegramUpdateHandler
             return;
         }
 
+        $price = $this->planPricingService->calculateNewOrderPrice($draft->getPlan(), [
+            'trafficGb' => $draft->getTrafficGb(),
+            'durationDays' => $draft->getDurationDays(),
+        ]);
+        $draft
+            ->setStep(self::STEP_WAITING_DISCOUNT_DECISION)
+            ->setCalculatedAmount($price->afterGlobalDiscountAmount)
+            ->setDiscountCode(null)
+            ->setDiscountAmount(0)
+            ->setFinalAmount($price->afterGlobalDiscountAmount)
+            ->setPriceSnapshot([
+                'baseAmount' => $price->baseAmount,
+                'globalDiscountPercent' => $price->globalDiscountPercent,
+                'globalDiscountAmount' => $price->globalDiscountAmount,
+                'afterGlobalDiscountAmount' => $price->afterGlobalDiscountAmount,
+                'discountCode' => null,
+                'discountCodeAmount' => 0,
+                'finalAmount' => $price->afterGlobalDiscountAmount,
+                'planPriceSource' => 'current_plan',
+            ])
+            ->setData(array_merge((array) ($draft->getData() ?? []), [
+                'draftType' => 'new_service',
+                'orderType' => OrderType::NEW_SERVICE,
+            ]))
+            ->setUpdatedAt(new \DateTimeImmutable());
+        $this->entityManager->flush();
+
         $this->acknowledgeCallback($callbackId);
-        $this->telegramApiClient->sendMessage($chatId, 'لطفاً روش پرداخت را انتخاب کنید:', $this->keyboardFactory->paymentMethodSelectionForDraftMenu($draftId));
+        $this->telegramApiClient->sendMessage(
+            $chatId,
+            "کد تخفیف دارید؟",
+            $this->keyboardFactory->discountCodePrompt($draftId, 'custom_order_cancel:'.$draftId)
+        );
     }
 
     private function handleCustomOrderCancel(TelegramAccount $account, string $chatId, int $draftId, ?string $callbackId = null): void
@@ -632,7 +704,7 @@ class TelegramUpdateHandler
             'trafficGb' => $draft->getTrafficGb(),
             'durationDays' => $draft->getDurationDays(),
         ]);
-        $amount = $price->finalAmount;
+        $amount = $price->afterGlobalDiscountAmount;
         $metadata = [
             'custom' => true,
             'customUsername' => $draft->getCustomUsernamePrefix(),
@@ -644,9 +716,12 @@ class TelegramUpdateHandler
             'calculatedAmount' => $amount,
             'priceSnapshot' => [
                 'baseAmount' => $price->baseAmount,
-                'discountPercent' => $price->discountPercent,
-                'discountAmount' => $price->discountAmount,
-                'finalAmount' => $price->finalAmount,
+                'globalDiscountPercent' => $price->globalDiscountPercent,
+                'globalDiscountAmount' => $price->globalDiscountAmount,
+                'afterGlobalDiscountAmount' => $price->afterGlobalDiscountAmount,
+                'discountCode' => null,
+                'discountCodeAmount' => 0,
+                'finalAmount' => $amount,
                 'planPriceSource' => 'current_plan',
             ],
             'orderDraftId' => $draft->getId(),
@@ -679,9 +754,12 @@ class TelegramUpdateHandler
         $cardHolder = $this->settingValueProvider->get('payment.card_holder', $this->paymentCardHolder);
         $description = $this->settingValueProvider->get('payment.description', $this->paymentDescription);
 
-        $discountLine = $price->discountPercent > 0
-            ? sprintf("\nمبلغ پایه: %d تومان\nتخفیف: %d%%\nمبلغ تخفیف: %d تومان", $price->baseAmount, $price->discountPercent, $price->discountAmount)
-            : '';
+        $discountLine = sprintf(
+            "\nمبلغ پایه: %d تومان\nتخفیف سراسری: %d تومان\nکد تخفیف: -\nمبلغ نهایی: %d تومان",
+            $price->baseAmount,
+            $price->globalDiscountAmount,
+            $amount
+        );
         $message = sprintf(
             "پلن: %s\nنام کاربری: %s\nحجم: %s گیگ\nمدت: %s%s\nمبلغ: %d تومان\nشماره کارت: %s\nبه نام: %s\n%s\n\nبرای ارسال رسید روی «✅ تایید و ارسال رسید» بزنید.",
             $plan->getTitle(),
@@ -726,11 +804,15 @@ class TelegramUpdateHandler
 
         $price = $this->planPricingService->calculateNewOrderPrice($plan);
         $metadata = [
+            'orderType' => OrderType::NEW_SERVICE,
             'priceSnapshot' => [
                 'baseAmount' => $price->baseAmount,
-                'discountPercent' => $price->discountPercent,
-                'discountAmount' => $price->discountAmount,
-                'finalAmount' => $price->finalAmount,
+                'globalDiscountPercent' => $price->globalDiscountPercent,
+                'globalDiscountAmount' => $price->globalDiscountAmount,
+                'afterGlobalDiscountAmount' => $price->afterGlobalDiscountAmount,
+                'discountCode' => null,
+                'discountCodeAmount' => 0,
+                'finalAmount' => $price->afterGlobalDiscountAmount,
                 'planPriceSource' => 'current_plan',
             ],
         ];
@@ -738,7 +820,7 @@ class TelegramUpdateHandler
         $order = (new Order())
             ->setUser($account->getUser())
             ->setPlan($plan)
-            ->setAmount($price->finalAmount)
+            ->setAmount($price->afterGlobalDiscountAmount)
             ->setType(OrderType::NEW_SERVICE)
             ->setMetadata($metadata)
             ->setStatus(OrderStatus::WAITING_PAYMENT);
@@ -746,7 +828,7 @@ class TelegramUpdateHandler
         $payment = (new Payment())
             ->setOrder($order)
             ->setMethod($paymentMethod)
-            ->setAmount($price->finalAmount)
+            ->setAmount($price->afterGlobalDiscountAmount)
             ->setStatus(PaymentStatus::PENDING);
 
         $this->entityManager->persist($order);
@@ -757,14 +839,181 @@ class TelegramUpdateHandler
         $cardHolder = $this->settingValueProvider->get('payment.card_holder', $this->paymentCardHolder);
         $description = $this->settingValueProvider->get('payment.description', $this->paymentDescription);
 
-        $discountLine = $price->discountPercent > 0
-            ? sprintf("\nمبلغ پایه: %d تومان\nتخفیف: %d%%\nمبلغ تخفیف: %d تومان", $price->baseAmount, $price->discountPercent, $price->discountAmount)
-            : '';
+        $discountLine = sprintf(
+            "\nمبلغ پایه: %d تومان\nتخفیف سراسری: %d تومان\nکد تخفیف: -\nمبلغ نهایی: %d تومان",
+            $price->baseAmount,
+            $price->globalDiscountAmount,
+            $price->afterGlobalDiscountAmount
+        );
         $message = sprintf(
-            "پلن: %s%s\nمبلغ: %d تومان\nشماره کارت: %s\nبه نام: %s\n%s\n\nبرای ارسال رسید روی «✅ تایید و ارسال رسید» بزنید.",
+            "پلن: %s%s\nشماره کارت: %s\nبه نام: %s\n%s\n\nبرای ارسال رسید روی «✅ تایید و ارسال رسید» بزنید.",
             $plan->getTitle(),
             $discountLine,
-            $price->finalAmount,
+            $cardNumber ?: '-',
+            $cardHolder ?: '-',
+            $description ? 'توضیحات: '.$description : ''
+        );
+
+        $this->acknowledgeCallback($callbackId);
+        $this->telegramApiClient->sendMessage($chatId, trim($message), $this->keyboardFactory->paymentActionMenu((int) $payment->getId()));
+    }
+
+    private function handleDiscountEnter(TelegramAccount $account, string $chatId, int $draftId, ?string $callbackId = null): void
+    {
+        $draft = $this->entityManager->getRepository(OrderDraft::class)->find($draftId);
+        if (!$draft instanceof OrderDraft || $draft->getUser()->getId() !== $account->getUser()->getId() || OrderDraftStatus::PENDING !== $draft->getStatus()) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'پیش‌نویس سفارش نامعتبر است.', 'invalid_discount_enter_draft');
+
+            return;
+        }
+
+        $data = is_array($draft->getData()) ? $draft->getData() : [];
+        $draftType = (string) ($data['draftType'] ?? '');
+        if ('new_service' !== $draftType) {
+            $this->serviceManagementService->handleDiscountDecision($account, $draftId, true, $chatId, $callbackId);
+
+            return;
+        }
+
+        $draft->setStep(self::STEP_WAITING_DISCOUNT_CODE)->setUpdatedAt(new \DateTimeImmutable());
+        $this->entityManager->flush();
+
+        $this->acknowledgeCallback($callbackId);
+        $this->telegramApiClient->sendMessage($chatId, 'کد تخفیف را ارسال کنید.');
+    }
+
+    private function handleDiscountSkip(TelegramAccount $account, string $chatId, int $draftId, ?string $callbackId = null): void
+    {
+        $draft = $this->entityManager->getRepository(OrderDraft::class)->find($draftId);
+        if (!$draft instanceof OrderDraft || $draft->getUser()->getId() !== $account->getUser()->getId() || OrderDraftStatus::PENDING !== $draft->getStatus()) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'پیش‌نویس سفارش نامعتبر است.', 'invalid_discount_skip_draft');
+
+            return;
+        }
+
+        $data = is_array($draft->getData()) ? $draft->getData() : [];
+        $draftType = (string) ($data['draftType'] ?? '');
+        if ('new_service' !== $draftType) {
+            $this->serviceManagementService->handleDiscountDecision($account, $draftId, false, $chatId, $callbackId);
+
+            return;
+        }
+
+        $draft
+            ->setDiscountCode(null)
+            ->setDiscountAmount(0)
+            ->setFinalAmount((int) ($draft->getCalculatedAmount() ?? 0))
+            ->setUpdatedAt(new \DateTimeImmutable());
+        $this->entityManager->flush();
+
+        $this->finalizeNewServiceDraftPayment($account, $draft, 'manual_card', $chatId, $callbackId);
+    }
+
+    private function handleNewServiceDraftDiscountCodeInput(TelegramAccount $account, OrderDraft $draft, string $codeInput, string $chatId): void
+    {
+        if ($draft->getUser()->getId() !== $account->getUser()->getId() || OrderDraftStatus::PENDING !== $draft->getStatus()) {
+            return;
+        }
+
+        $amountBeforeCode = (int) ($draft->getCalculatedAmount() ?? 0);
+        $result = $this->discountCodeService->validateCode($codeInput, $draft->getUser(), OrderType::NEW_SERVICE, $draft->getPlan(), $amountBeforeCode);
+        if (!$result->valid || !$result->discountCode instanceof \App\Entity\DiscountCode) {
+            $this->telegramApiClient->sendMessage(
+                $chatId,
+                $result->message,
+                $this->keyboardFactory->discountCodePrompt((int) ($draft->getId() ?? 0), 'custom_order_cancel:'.((int) ($draft->getId() ?? 0)))
+            );
+
+            return;
+        }
+
+        $snapshot = is_array($draft->getPriceSnapshot()) ? $draft->getPriceSnapshot() : [];
+        $snapshot['discountCode'] = $result->discountCode->getCode();
+        $snapshot['discountCodeAmount'] = $result->discountAmount;
+        $snapshot['finalAmount'] = $result->finalAmount;
+
+        $draft
+            ->setDiscountCode($result->discountCode->getCode())
+            ->setDiscountAmount($result->discountAmount)
+            ->setFinalAmount($result->finalAmount)
+            ->setPriceSnapshot($snapshot)
+            ->setUpdatedAt(new \DateTimeImmutable());
+        $this->entityManager->flush();
+
+        $this->finalizeNewServiceDraftPayment($account, $draft, 'manual_card', $chatId, null);
+    }
+
+    private function finalizeNewServiceDraftPayment(TelegramAccount $account, OrderDraft $draft, string $paymentMethod, string $chatId, ?string $callbackId = null): void
+    {
+        $plan = $draft->getPlan();
+        if (!$plan->isActive()) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'این پلن دیگر فعال نیست یا وجود ندارد.', 'popup_invalid_plan_select_payment_method_draft');
+
+            return;
+        }
+
+        $finalAmount = max(0, (int) ($draft->getFinalAmount() ?? $draft->getCalculatedAmount() ?? 0));
+        $priceSnapshot = is_array($draft->getPriceSnapshot()) ? $draft->getPriceSnapshot() : [];
+        $metadata = [
+            'custom' => true,
+            'customUsername' => $draft->getCustomUsernamePrefix(),
+            'customUsernamePrefix' => $draft->getCustomUsernamePrefix(),
+            'finalUsername' => $draft->getFinalUsername(),
+            'trafficGb' => $draft->getTrafficGb(),
+            'durationDays' => $draft->getDurationDays(),
+            'unlimitedDuration' => $plan->isUnlimitedDuration() || null === $draft->getDurationDays(),
+            'calculatedAmount' => $finalAmount,
+            'priceSnapshot' => [
+                'baseAmount' => (int) ($priceSnapshot['baseAmount'] ?? 0),
+                'globalDiscountPercent' => (int) ($priceSnapshot['globalDiscountPercent'] ?? 0),
+                'globalDiscountAmount' => (int) ($priceSnapshot['globalDiscountAmount'] ?? 0),
+                'afterGlobalDiscountAmount' => (int) ($priceSnapshot['afterGlobalDiscountAmount'] ?? $draft->getCalculatedAmount() ?? 0),
+                'discountCode' => $draft->getDiscountCode(),
+                'discountCodeAmount' => (int) ($draft->getDiscountAmount() ?? 0),
+                'finalAmount' => $finalAmount,
+                'planPriceSource' => (string) ($priceSnapshot['planPriceSource'] ?? 'current_plan'),
+            ],
+            'orderDraftId' => $draft->getId(),
+            'orderType' => OrderType::NEW_SERVICE,
+        ];
+
+        $order = (new Order())
+            ->setUser($account->getUser())
+            ->setPlan($plan)
+            ->setAmount($finalAmount)
+            ->setType(OrderType::NEW_SERVICE)
+            ->setMetadata($metadata)
+            ->setStatus(OrderStatus::WAITING_PAYMENT);
+
+        $payment = (new Payment())
+            ->setOrder($order)
+            ->setMethod($paymentMethod)
+            ->setAmount($finalAmount)
+            ->setStatus(PaymentStatus::PENDING);
+
+        $draft
+            ->setStatus(OrderDraftStatus::CONFIRMED)
+            ->setUpdatedAt(new \DateTimeImmutable());
+
+        $this->entityManager->persist($order);
+        $this->entityManager->persist($payment);
+        $this->entityManager->flush();
+        $this->debugLog(sprintf('custom_order_confirmed draft_id=%d order_id=%d payment_id=%d amount=%d', $draft->getId() ?? 0, $order->getId() ?? 0, $payment->getId() ?? 0, $finalAmount));
+
+        $cardNumber = $this->settingValueProvider->get('payment.card_number', $this->paymentCardNumber);
+        $cardHolder = $this->settingValueProvider->get('payment.card_holder', $this->paymentCardHolder);
+        $description = $this->settingValueProvider->get('payment.description', $this->paymentDescription);
+        $message = sprintf(
+            "پلن: %s\nنام کاربری: %s\nحجم: %s گیگ\nمدت: %s\nمبلغ پایه: %d تومان\nتخفیف سراسری: %d تومان\nکد تخفیف: %s (%d تومان)\nمبلغ نهایی: %d تومان\nشماره کارت: %s\nبه نام: %s\n%s\n\nبرای ارسال رسید روی «✅ تایید و ارسال رسید» بزنید.",
+            $plan->getTitle(),
+            (string) ($draft->getFinalUsername() ?? '-'),
+            null === $draft->getTrafficGb() ? '-' : (string) $draft->getTrafficGb(),
+            null === $draft->getDurationDays() || $plan->isUnlimitedDuration() ? 'نامحدود' : ((string) $draft->getDurationDays().' روز'),
+            (int) ($metadata['priceSnapshot']['baseAmount'] ?? 0),
+            (int) ($metadata['priceSnapshot']['globalDiscountAmount'] ?? 0),
+            (string) ($draft->getDiscountCode() ?? '-'),
+            (int) ($metadata['priceSnapshot']['discountCodeAmount'] ?? 0),
+            $finalAmount,
             $cardNumber ?: '-',
             $cardHolder ?: '-',
             $description ? 'توضیحات: '.$description : ''
@@ -941,20 +1190,25 @@ class TelegramUpdateHandler
                 (string) ($customMeta['calculatedAmount'] ?? '-')
             )
             : "Custom: no";
+        $priceSnapshot = is_array($customMeta['priceSnapshot'] ?? null) ? $customMeta['priceSnapshot'] : [];
+        $snapshotLines = sprintf(
+            "Base amount: %s\nGlobal discount: %s\nDiscount code: %s\nDiscount code amount: %s\nFinal amount: %s",
+            (string) ($priceSnapshot['baseAmount'] ?? '-'),
+            (string) ($priceSnapshot['globalDiscountAmount'] ?? 0),
+            (string) ($priceSnapshot['discountCode'] ?? '-'),
+            (string) ($priceSnapshot['discountCodeAmount'] ?? 0),
+            (string) ($priceSnapshot['finalAmount'] ?? $payment->getAmount())
+        );
         if ($isAddTraffic) {
-            $priceSnapshot = is_array($customMeta['priceSnapshot'] ?? null) ? $customMeta['priceSnapshot'] : [];
             $detail = sprintf(
-                "پرداخت خرید حجم اضافه\nOrder type: add_traffic\nPayment ID: %d\nOrder ID: %d\nService ID: %s\nUser: %s\nRequested traffic: %s GB\nAmount: %d تومان\nBase amount: %s\nDiscount: %s%%\nDiscount amount: %s\nFinal amount: %s\nStatus: %s\nTracking: %s\nReceipt message: %s\nCreated: %s\nSubmitted: %s",
+                "پرداخت خرید حجم اضافه\nOrder type: add_traffic\nPayment ID: %d\nOrder ID: %d\nService ID: %s\nUser: %s\nRequested traffic: %s GB\nAmount: %d تومان\n%s\nStatus: %s\nTracking: %s\nReceipt message: %s\nCreated: %s\nSubmitted: %s",
                 $payment->getId(),
                 $order->getId(),
                 (string) ($customMeta['targetServiceId'] ?? ($order->getTargetService()?->getId() ?? '-')),
                 $this->formatTelegramIdentity($telegramAccount),
                 (string) ($customMeta['trafficGb'] ?? '-'),
                 $payment->getAmount(),
-                (string) ($priceSnapshot['baseAmount'] ?? '-'),
-                (string) ($priceSnapshot['discountPercent'] ?? 0),
-                (string) ($priceSnapshot['discountAmount'] ?? 0),
-                (string) ($priceSnapshot['finalAmount'] ?? $payment->getAmount()),
+                $snapshotLines,
                 $payment->getStatus(),
                 $payment->getTrackingCode() ?: '-',
                 $payment->getReceiptMessage() ?: '-',
@@ -962,10 +1216,9 @@ class TelegramUpdateHandler
                 $payment->getSubmittedAt()?->format('Y-m-d H:i:s') ?? '-'
             );
         } elseif ($isRenewal) {
-            $priceSnapshot = is_array($customMeta['priceSnapshot'] ?? null) ? $customMeta['priceSnapshot'] : [];
             $renewalPolicy = is_array($customMeta['renewalPolicy'] ?? null) ? $customMeta['renewalPolicy'] : [];
             $detail = sprintf(
-                "پرداخت تمدید سرویس\nOrder type: renewal\nPayment ID: %d\nOrder ID: %d\nService ID: %s\nUser: %s\nAmount: %d تومان\nDuration: %s\nTraffic: %s GB\nPolicy traffic carry: %s\nPolicy days carry: %s\nPrice source: %s\nBase amount: %s\nDiscount: %s%%\nDiscount amount: %s\nFinal amount: %s\nStatus: %s\nTracking: %s\nReceipt message: %s\nCreated: %s\nSubmitted: %s",
+                "پرداخت تمدید سرویس\nOrder type: renewal\nPayment ID: %d\nOrder ID: %d\nService ID: %s\nUser: %s\nAmount: %d تومان\nDuration: %s\nTraffic: %s GB\nPolicy traffic carry: %s\nPolicy days carry: %s\nPrice source: %s\n%s\nStatus: %s\nTracking: %s\nReceipt message: %s\nCreated: %s\nSubmitted: %s",
                 $payment->getId(),
                 $order->getId(),
                 (string) ($customMeta['targetServiceId'] ?? ($order->getTargetService()?->getId() ?? '-')),
@@ -976,10 +1229,7 @@ class TelegramUpdateHandler
                 true === ($renewalPolicy['carryRemainingTraffic'] ?? true) ? 'yes' : 'no',
                 true === ($renewalPolicy['carryRemainingDays'] ?? true) ? 'yes' : 'no',
                 (string) ($priceSnapshot['planPriceSource'] ?? 'current_plan'),
-                (string) ($priceSnapshot['baseAmount'] ?? '-'),
-                (string) ($priceSnapshot['discountPercent'] ?? 0),
-                (string) ($priceSnapshot['discountAmount'] ?? 0),
-                (string) ($priceSnapshot['finalAmount'] ?? $payment->getAmount()),
+                $snapshotLines,
                 $payment->getStatus(),
                 $payment->getTrackingCode() ?: '-',
                 $payment->getReceiptMessage() ?: '-',
@@ -988,7 +1238,7 @@ class TelegramUpdateHandler
             );
         } else {
             $detail = sprintf(
-                "Payment ID: %d\nOrder ID: %d\nUser: %s\nPlan: %s\nAmount: %d تومان\nStatus: %s\n%s\nTracking: %s\nReceipt message: %s\nCreated: %s\nSubmitted: %s",
+                "Payment ID: %d\nOrder ID: %d\nUser: %s\nPlan: %s\nAmount: %d تومان\nStatus: %s\n%s\n%s\nTracking: %s\nReceipt message: %s\nCreated: %s\nSubmitted: %s",
                 $payment->getId(),
                 $order->getId(),
                 $this->formatTelegramIdentity($telegramAccount),
@@ -996,6 +1246,7 @@ class TelegramUpdateHandler
                 $payment->getAmount(),
                 $payment->getStatus(),
                 $customSummary,
+                $snapshotLines,
                 $payment->getTrackingCode() ?: '-',
                 $payment->getReceiptMessage() ?: '-',
                 $payment->getCreatedAt()->format('Y-m-d H:i:s'),
@@ -1368,28 +1619,32 @@ class TelegramUpdateHandler
         $customSummary = true === ($meta['custom'] ?? false)
             ? sprintf("Custom: yes\nUsername: %s\nTraffic: %s GB\nDuration: %s\nCalculated amount: %s\n", (string) ($meta['finalUsername'] ?? '-'), (string) ($meta['trafficGb'] ?? '-'), $durationText, (string) ($meta['calculatedAmount'] ?? '-'))
             : "Custom: no\n";
+        $priceSnapshot = is_array($meta['priceSnapshot'] ?? null) ? $meta['priceSnapshot'] : [];
+        $snapshotLines = sprintf(
+            "Base amount: %s\nGlobal discount: %s\nDiscount code: %s\nDiscount code amount: %s\nFinal amount: %s",
+            (string) ($priceSnapshot['baseAmount'] ?? '-'),
+            (string) ($priceSnapshot['globalDiscountAmount'] ?? 0),
+            (string) ($priceSnapshot['discountCode'] ?? '-'),
+            (string) ($priceSnapshot['discountCodeAmount'] ?? 0),
+            (string) ($priceSnapshot['finalAmount'] ?? $payment->getAmount())
+        );
         if ($isAddTraffic) {
-            $priceSnapshot = is_array($meta['priceSnapshot'] ?? null) ? $meta['priceSnapshot'] : [];
             $message = sprintf(
-                "پرداخت خرید حجم اضافه\n\nOrder type: add_traffic\nPayment ID: %d\nOrder ID: %d\nService ID: %s\nUser: %s\nRequested traffic: %s GB\nAmount: %d تومان\nBase amount: %s\nDiscount: %s%%\nDiscount amount: %s\nFinal amount: %s\nTracking: %s\nReceipt message: %s",
+                "پرداخت خرید حجم اضافه\n\nOrder type: add_traffic\nPayment ID: %d\nOrder ID: %d\nService ID: %s\nUser: %s\nRequested traffic: %s GB\nAmount: %d تومان\n%s\nTracking: %s\nReceipt message: %s",
                 $payment->getId(),
                 $order->getId(),
                 (string) ($meta['targetServiceId'] ?? ($order->getTargetService()?->getId() ?? '-')),
                 $this->formatTelegramIdentity($telegramAccount),
                 (string) ($meta['trafficGb'] ?? '-'),
                 $payment->getAmount(),
-                (string) ($priceSnapshot['baseAmount'] ?? '-'),
-                (string) ($priceSnapshot['discountPercent'] ?? 0),
-                (string) ($priceSnapshot['discountAmount'] ?? 0),
-                (string) ($priceSnapshot['finalAmount'] ?? $payment->getAmount()),
+                $snapshotLines,
                 $payment->getTrackingCode() ?: '-',
                 $payment->getReceiptMessage() ?: '-'
             );
         } elseif ($isRenewal) {
-            $priceSnapshot = is_array($meta['priceSnapshot'] ?? null) ? $meta['priceSnapshot'] : [];
             $renewalPolicy = is_array($meta['renewalPolicy'] ?? null) ? $meta['renewalPolicy'] : [];
             $message = sprintf(
-                "پرداخت تمدید سرویس\n\nOrder type: renewal\nPayment ID: %d\nOrder ID: %d\nService ID: %s\nUser: %s\nAmount: %d تومان\nRenewal duration: %s\nRenewal traffic: %s GB\nPolicy traffic carry: %s\nPolicy days carry: %s\nPrice source: %s\nBase amount: %s\nDiscount: %s%%\nDiscount amount: %s\nFinal amount: %s\nTracking: %s\nReceipt message: %s",
+                "پرداخت تمدید سرویس\n\nOrder type: renewal\nPayment ID: %d\nOrder ID: %d\nService ID: %s\nUser: %s\nAmount: %d تومان\nRenewal duration: %s\nRenewal traffic: %s GB\nPolicy traffic carry: %s\nPolicy days carry: %s\nPrice source: %s\n%s\nTracking: %s\nReceipt message: %s",
                 $payment->getId(),
                 $order->getId(),
                 (string) ($meta['targetServiceId'] ?? ($order->getTargetService()?->getId() ?? '-')),
@@ -1400,22 +1655,20 @@ class TelegramUpdateHandler
                 true === ($renewalPolicy['carryRemainingTraffic'] ?? true) ? 'yes' : 'no',
                 true === ($renewalPolicy['carryRemainingDays'] ?? true) ? 'yes' : 'no',
                 (string) ($priceSnapshot['planPriceSource'] ?? 'current_plan'),
-                (string) ($priceSnapshot['baseAmount'] ?? '-'),
-                (string) ($priceSnapshot['discountPercent'] ?? 0),
-                (string) ($priceSnapshot['discountAmount'] ?? 0),
-                (string) ($priceSnapshot['finalAmount'] ?? $payment->getAmount()),
+                $snapshotLines,
                 $payment->getTrackingCode() ?: '-',
                 $payment->getReceiptMessage() ?: '-'
             );
         } else {
             $message = sprintf(
-                "پرداخت جدید ثبت شد\n\nPayment ID: %d\nOrder ID: %d\nUser: %s\nPlan: %s\nAmount: %d تومان\n%sTracking: %s\nReceipt message: %s",
+                "پرداخت جدید ثبت شد\n\nPayment ID: %d\nOrder ID: %d\nUser: %s\nPlan: %s\nAmount: %d تومان\n%s%s\nTracking: %s\nReceipt message: %s",
                 $payment->getId(),
                 $order->getId(),
                 $this->formatTelegramIdentity($telegramAccount),
                 $order->getPlan()->getTitle(),
                 $payment->getAmount(),
                 $customSummary,
+                $snapshotLines,
                 $payment->getTrackingCode() ?: '-',
                 $payment->getReceiptMessage() ?: '-'
             );

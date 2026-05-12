@@ -20,14 +20,16 @@ final class TrafficAddonPricingService
         $safeTrafficGb = max(0, $trafficGb);
         $pricePerGb = $this->trafficAddonSettingsProvider->pricePerGb();
         $baseAmount = $safeTrafficGb * $pricePerGb;
-        $discountPercent = $this->resolveGlobalDiscountPercent();
-        $discountAmount = $this->calculateDiscountAmount($baseAmount, $discountPercent);
-        $finalAmount = max(0, $baseAmount - $discountAmount);
+        $globalDiscountPercent = $this->resolveGlobalDiscountPercent();
+        $globalDiscountAmount = $this->calculateDiscountAmount($baseAmount, $globalDiscountPercent);
+        $afterGlobalDiscountAmount = max(0, $baseAmount - $globalDiscountAmount);
+        $finalAmount = $afterGlobalDiscountAmount;
 
         return new PriceCalculationResult(
             baseAmount: $baseAmount,
-            discountPercent: $discountPercent,
-            discountAmount: $discountAmount,
+            globalDiscountPercent: $globalDiscountPercent,
+            globalDiscountAmount: $globalDiscountAmount,
+            afterGlobalDiscountAmount: $afterGlobalDiscountAmount,
             finalAmount: $finalAmount,
             source: 'traffic_addon',
             explanation: 'traffic_addon_current_price',
