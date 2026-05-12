@@ -114,4 +114,3 @@ final class PaymentDebugMethodsForOrderCommand extends Command
         return Command::SUCCESS;
     }
 }
-
