@@ -147,4 +147,3 @@ final class StorePaymentMethodResolver
         return max(0, $value);
     }
 }
-
