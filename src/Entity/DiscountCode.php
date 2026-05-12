@@ -21,7 +21,7 @@ class DiscountCode
     #[ORM\Column]
     private ?int $id = null;
 
-    #[ORM\Column(length: 64, unique: true)]
+    #[ORM\Column(length: 64)]
     private string $code;
 
     #[ORM\Column(length: 255, nullable: true)]
