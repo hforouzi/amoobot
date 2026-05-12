@@ -119,7 +119,7 @@ final class ZibalGateway implements PaymentGatewayInterface
 
         $verifyBody = [
             'merchant' => $merchant,
-            'trackId' => (int) $trackId,
+            'trackId' => $trackId,
         ];
 
         $payment
@@ -145,7 +145,12 @@ final class ZibalGateway implements PaymentGatewayInterface
 
         $resultCode = (int) ($raw['result'] ?? -1);
         $message = (string) ($raw['message'] ?? '');
-        $refId = isset($raw['refNumber']) ? (string) $raw['refNumber'] : (isset($raw['refNumberWage']) ? (string) $raw['refNumberWage'] : null);
+        $refId = null;
+        if (isset($raw['refNumber'])) {
+            $refId = (string) $raw['refNumber'];
+        } elseif (isset($raw['refNumberWage'])) {
+            $refId = (string) $raw['refNumberWage'];
+        }
         $paid = in_array($resultCode, [100, 201], true);
 
         if ($paid) {

@@ -160,7 +160,14 @@ class PaymentGateway
             return '';
         }
 
-        return json_encode($this->config, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '';
+        $encoded = json_encode($this->config, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        if (false === $encoded) {
+            error_log('[PaymentGateway] config_json_encode_failed id='.(string) ($this->id ?? 0));
+
+            return '';
+        }
+
+        return $encoded;
     }
 
     public function setConfigJson(?string $json): self
