@@ -183,6 +183,7 @@ class TelegramKeyboardFactory
             $text = '' !== trim($method->getTitle()) ? $method->getTitle() : match ($gateway->getType()) {
                 PaymentGatewayType::MANUAL_CARD => '💳 کارت به کارت',
                 PaymentGatewayType::ZIBAL => '🌐 پرداخت آنلاین (زیبال)',
+                PaymentGatewayType::CUSTOM_API => '🌐 پرداخت آنلاین',
                 default => $gateway->getTitle(),
             };
 

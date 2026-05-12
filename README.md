@@ -139,19 +139,22 @@ In `/admin` -> Payments, use actions:
 - `Confirm Payment` -> marks payment confirmed, order paid/provisioned, creates VPN service, notifies user.
 - `Reject Payment` -> marks payment rejected and notifies user.
 
-## Phase 1.7.1 Payment Gateway Architecture
+## Phase 1.7.2 Payment Gateway Architecture
 
 ### PaymentGateway setup (module/account config)
 - Entity: `PaymentGateway` with supported types only:
   - `manual_card`
   - `zibal`
+  - `custom_api`
 - Manage gateways in `/admin` -> `درگاههای پرداخت`.
 - Type-specific configuration pages:
   - `کانفیگ کارت به کارت`
   - `کانفیگ زیبال`
+  - `کانفیگ Custom API`
 - Gateway config fields:
   - `manual_card`: `card_number`, `card_holder`, `bank_name`, `instructions`
   - `zibal`: `merchant`, `sandbox`, `callback_base_url`, `description`, and optional advanced fields (`mobile`, `allowedCards`, `percentMode`, `feeMode`, `multiplexingAccountNumber`)
+  - `custom_api`: `config_json` using `create`, `verify`, optional `webhook`, and `variables`
 
 ### Store Payment Methods setup (bot-visible methods)
 - Entity: `StorePaymentMethod` controls user-visible payment choices in bot.
@@ -189,10 +192,87 @@ In `/admin` -> Payments, use actions:
   ```
 
 ### Telegram online payment flow
-- For zibal payments bot sends:
+- For `zibal` and `custom_api` payments bot sends:
   - `پرداخت آنلاین` (URL button)
   - `بررسی پرداخت` (`payment_check:{paymentId}`)
   - `انصراف` (`payment_cancel:{paymentId}`)
+
+### Custom API gateway
+- Use `custom_api` for simple HTTP-based gateways with create/verify endpoints.
+- Use native drivers for complex gateways or advanced cryptographic/signature schemes.
+- Internal config shape:
+  ```json
+  {
+    "create": {
+      "method": "POST",
+      "url": "https://gateway.example.com/api/payment/create",
+      "headers": {
+        "Authorization": "Bearer {{api_key}}",
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "amount": "{{amount}}",
+        "order_id": "{{order_id}}",
+        "payment_id": "{{payment_id}}",
+        "callback_url": "{{callback_url}}",
+        "description": "{{description}}",
+        "currency": "{{currency}}"
+      },
+      "response_mapping": {
+        "success": "success",
+        "payment_url": "data.payment_url",
+        "transaction_id": "data.transaction_id",
+        "authority": "data.authority",
+        "message": "message"
+      }
+    },
+    "verify": {
+      "method": "POST",
+      "url": "https://gateway.example.com/api/payment/verify",
+      "headers": {
+        "Authorization": "Bearer {{api_key}}",
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "transaction_id": "{{transaction_id}}",
+        "authority": "{{authority}}",
+        "amount": "{{amount}}",
+        "payment_id": "{{payment_id}}"
+      },
+      "response_mapping": {
+        "success": "success",
+        "paid": "data.paid",
+        "ref_id": "data.ref_id",
+        "transaction_id": "data.transaction_id",
+        "message": "message"
+      }
+    },
+    "webhook": {
+      "enabled": true,
+      "secret_header": "X-Gateway-Signature",
+      "secret": "CHANGE_ME",
+      "payment_lookup": "transaction_id",
+      "status_path": "status",
+      "paid_values": ["paid", "success", "confirmed"]
+    },
+    "variables": {
+      "api_key": "SECRET_VALUE"
+    }
+  }
+  ```
+- Supported placeholders:
+  - `{{amount}}`, `{{payable_amount}}`, `{{order_id}}`, `{{payment_id}}`
+  - `{{callback_url}}`, `{{webhook_url}}`, `{{description}}`
+  - `{{transaction_id}}`, `{{authority}}`, `{{currency}}`
+  - any key from `variables` (for example `{{api_key}}`)
+- Dot-path response mapping is supported (example: `data.payment_url`).
+- Callback URL (per gateway):
+  - `GET/POST /payment/callback/custom-api/{gatewayId}`
+- Webhook URL (per gateway):
+  - `POST /payment/webhook/custom-api/{gatewayId}`
+- Webhook secret limitation:
+  - only static header secret comparison is supported (`hash_equals`)
+  - complex signature verification is intentionally not part of `custom_api`
 
 ### Commands
 - Create defaults:
@@ -210,6 +290,14 @@ In `/admin` -> Payments, use actions:
 - Test zibal request:
   ```bash
   php bin/console app:payment:test-zibal {gatewayId} --amount=10000
+  ```
+- Test custom_api request:
+  ```bash
+  php bin/console app:payment:test-custom-api {gatewayId} --amount=10000
+  ```
+- Debug gateway config safely:
+  ```bash
+  php bin/console app:payment:debug-gateway-config {gatewayId}
   ```
 
 ### Duplicate callback safety
@@ -657,5 +745,5 @@ php bin/console app:telegram:poll --force
 - Reseller/Agent
 - Referral
 - Wallet
-- Online payment gateways other than `zibal`
+- Native online payment gateways other than `zibal` (simple ones can use `custom_api`)
 - Additional real panel drivers beyond `sanaei_3xui`
