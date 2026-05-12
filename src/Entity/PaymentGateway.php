@@ -204,4 +204,173 @@ class PaymentGateway
     {
         return sprintf('%s (%s)', $this->title ?: 'Gateway', $this->type);
     }
+
+    public function getManualCardNumber(): ?string
+    {
+        return $this->configString('card_number');
+    }
+
+    public function setManualCardNumber(?string $value): self
+    {
+        return $this->setConfigString('card_number', $value);
+    }
+
+    public function getManualCardHolder(): ?string
+    {
+        return $this->configString('card_holder');
+    }
+
+    public function setManualCardHolder(?string $value): self
+    {
+        return $this->setConfigString('card_holder', $value);
+    }
+
+    public function getManualBankName(): ?string
+    {
+        return $this->configString('bank_name');
+    }
+
+    public function setManualBankName(?string $value): self
+    {
+        return $this->setConfigString('bank_name', $value);
+    }
+
+    public function getManualInstructions(): ?string
+    {
+        return $this->configString('instructions');
+    }
+
+    public function setManualInstructions(?string $value): self
+    {
+        return $this->setConfigString('instructions', $value);
+    }
+
+    public function getZibalMerchant(): ?string
+    {
+        return $this->configString('merchant');
+    }
+
+    public function setZibalMerchant(?string $value): self
+    {
+        return $this->setConfigString('merchant', $value);
+    }
+
+    public function isZibalSandbox(): bool
+    {
+        return true === ($this->configBool('sandbox'));
+    }
+
+    public function setZibalSandbox(bool $value): self
+    {
+        return $this->setConfigBool('sandbox', $value);
+    }
+
+    public function getZibalCallbackBaseUrl(): ?string
+    {
+        return $this->configString('callback_base_url');
+    }
+
+    public function setZibalCallbackBaseUrl(?string $value): self
+    {
+        return $this->setConfigString('callback_base_url', $value);
+    }
+
+    public function getZibalDescription(): ?string
+    {
+        return $this->configString('description');
+    }
+
+    public function setZibalDescription(?string $value): self
+    {
+        return $this->setConfigString('description', $value);
+    }
+
+    public function getZibalMobile(): ?string
+    {
+        return $this->configString('mobile');
+    }
+
+    public function setZibalMobile(?string $value): self
+    {
+        return $this->setConfigString('mobile', $value);
+    }
+
+    public function getZibalAllowedCards(): ?string
+    {
+        return $this->configString('allowedCards');
+    }
+
+    public function setZibalAllowedCards(?string $value): self
+    {
+        return $this->setConfigString('allowedCards', $value);
+    }
+
+    public function getZibalPercentMode(): ?string
+    {
+        return $this->configString('percentMode');
+    }
+
+    public function setZibalPercentMode(?string $value): self
+    {
+        return $this->setConfigString('percentMode', $value);
+    }
+
+    public function getZibalFeeMode(): ?string
+    {
+        return $this->configString('feeMode');
+    }
+
+    public function setZibalFeeMode(?string $value): self
+    {
+        return $this->setConfigString('feeMode', $value);
+    }
+
+    public function getZibalMultiplexingAccountNumber(): ?string
+    {
+        return $this->configString('multiplexingAccountNumber');
+    }
+
+    public function setZibalMultiplexingAccountNumber(?string $value): self
+    {
+        return $this->setConfigString('multiplexingAccountNumber', $value);
+    }
+
+    private function configString(string $key): ?string
+    {
+        $value = is_array($this->config) ? ($this->config[$key] ?? null) : null;
+        if (!is_scalar($value)) {
+            return null;
+        }
+        $text = trim((string) $value);
+
+        return '' === $text ? null : $text;
+    }
+
+    private function configBool(string $key): bool
+    {
+        return true === (is_array($this->config) ? ($this->config[$key] ?? false) : false);
+    }
+
+    private function setConfigString(string $key, ?string $value): self
+    {
+        $config = is_array($this->config) ? $this->config : [];
+        $text = trim((string) $value);
+        if ('' === $text) {
+            unset($config[$key]);
+        } else {
+            $config[$key] = $text;
+        }
+        $this->config = $config;
+
+        return $this;
+    }
+
+    private function setConfigBool(string $key, bool $value): self
+    {
+        $config = is_array($this->config) ? $this->config : [];
+        $config[$key] = $value;
+        $this->config = $config;
+
+        return $this;
+    }
 }

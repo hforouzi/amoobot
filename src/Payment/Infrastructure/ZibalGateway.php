@@ -50,8 +50,9 @@ final class ZibalGateway implements PaymentGatewayInterface
             'amount' => $amount,
             'callbackUrl' => $callbackUrl,
             'orderId' => (string) ($payment->getId() ?? $order->getId() ?? ''),
-            'description' => sprintf('order_%d_payment_%d', $order->getId() ?? 0, $payment->getId() ?? 0),
+            'description' => trim((string) ($config['description'] ?? sprintf('order_%d_payment_%d', $order->getId() ?? 0, $payment->getId() ?? 0))),
         ];
+        $this->appendOptionalRequestFields($requestBody, $config);
 
         $payment->setRequestPayload($requestBody);
 
@@ -144,7 +145,7 @@ final class ZibalGateway implements PaymentGatewayInterface
 
         $resultCode = (int) ($raw['result'] ?? -1);
         $message = (string) ($raw['message'] ?? '');
-        $refId = isset($raw['refNumber']) ? (string) $raw['refNumber'] : null;
+        $refId = isset($raw['refNumber']) ? (string) $raw['refNumber'] : (isset($raw['refNumberWage']) ? (string) $raw['refNumberWage'] : null);
         $paid = in_array($resultCode, [100, 201], true);
 
         if ($paid) {
@@ -214,5 +215,28 @@ final class ZibalGateway implements PaymentGatewayInterface
         $encoded = json_encode($context, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         error_log(sprintf('[ZibalGateway] %s %s', $event, false === $encoded ? '{}' : $encoded));
     }
-}
 
+    /**
+     * @param array<string, mixed> $requestBody
+     * @param array<string, mixed> $config
+     */
+    private function appendOptionalRequestFields(array &$requestBody, array $config): void
+    {
+        foreach (['mobile', 'allowedCards', 'percentMode', 'feeMode', 'multiplexingAccountNumber'] as $key) {
+            if (!array_key_exists($key, $config)) {
+                continue;
+            }
+
+            $value = $config[$key];
+            if ($key === 'allowedCards' && is_string($value)) {
+                $value = array_values(array_filter(array_map('trim', explode(',', $value)), static fn (string $card): bool => '' !== $card));
+            }
+
+            if ($value === null || $value === '' || $value === []) {
+                continue;
+            }
+
+            $requestBody[$key] = $value;
+        }
+    }
+}

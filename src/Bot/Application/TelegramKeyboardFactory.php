@@ -171,7 +171,7 @@ class TelegramKeyboardFactory
      *
      * @return array<string, array<array<array<string, string>>>>
      */
-    public function paymentGatewaySelectionMenu(int $draftId, array $gateways, string $cancelCallback): array
+    public function paymentGatewaySelectionMenu(int $orderId, array $gateways, string $cancelCallback): array
     {
         $rows = [];
         foreach ($gateways as $gateway) {
@@ -183,7 +183,7 @@ class TelegramKeyboardFactory
 
             $rows[] = [[
                 'text' => $text,
-                'callback_data' => 'select_payment_gateway:'.$draftId.':'.$gateway->getId(),
+                'callback_data' => 'select_payment_gateway:'.$orderId.':'.$gateway->getId(),
             ]];
         }
 

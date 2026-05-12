@@ -36,12 +36,25 @@ final class PaymentGatewayCrudController extends AbstractCrudController
             BooleanField::new('isDefault'),
             IntegerField::new('sortOrder'),
             TextField::new('currency'),
+            TextField::new('manualCardNumber')->setLabel('Manual Card: card_number')->hideOnIndex(),
+            TextField::new('manualCardHolder')->setLabel('Manual Card: card_holder')->hideOnIndex(),
+            TextField::new('manualBankName')->setLabel('Manual Card: bank_name')->hideOnIndex(),
+            TextareaField::new('manualInstructions')->setLabel('Manual Card: instructions')->hideOnIndex(),
+            TextField::new('zibalMerchant')->setLabel('Zibal: merchant')->hideOnIndex(),
+            BooleanField::new('zibalSandbox')->setLabel('Zibal: sandbox')->hideOnIndex(),
+            TextField::new('zibalCallbackBaseUrl')->setLabel('Zibal: callback_base_url')->hideOnIndex(),
+            TextField::new('zibalDescription')->setLabel('Zibal: description')->hideOnIndex(),
+            TextField::new('zibalMobile')->setLabel('Zibal: mobile')->hideOnIndex(),
+            TextField::new('zibalAllowedCards')->setLabel('Zibal: allowedCards')->hideOnIndex(),
+            TextField::new('zibalPercentMode')->setLabel('Zibal: percentMode')->hideOnIndex(),
+            TextField::new('zibalFeeMode')->setLabel('Zibal: feeMode')->hideOnIndex(),
+            TextField::new('zibalMultiplexingAccountNumber')->setLabel('Zibal: multiplexingAccountNumber')->hideOnIndex(),
             TextareaField::new('configJson')
-                ->setHelp('JSON config example: {"merchant":"zibal","sandbox":true,"callback_base_url":"https://example.com"}')
+                ->setHelp('Fallback raw config JSON')
+                ->hideOnForm()
                 ->hideOnIndex(),
             DateTimeField::new('createdAt')->hideOnForm(),
             DateTimeField::new('updatedAt')->hideOnForm(),
         ];
     }
 }
-

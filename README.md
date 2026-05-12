@@ -126,7 +126,7 @@ Webhook endpoint:
 2. Bot auto-registers TelegramAccount/User and shows main menu.
 3. User clicks `🛒 خرید سرویس` and sees active plans.
 4. User selects plan (`select_plan:{id}`).
-5. Bot shows payment gateway selection (`select_payment_gateway:{draftId}:{gatewayId}`) from active gateways.
+5. Bot shows payment gateway selection (`select_payment_gateway:{orderId}:{gatewayId}`) from active gateways.
 6. User selects `manual_card` or `zibal`; bot creates Order + Payment and starts selected gateway flow.
 7. For manual card, user taps `✅ تایید و ارسال رسید` (`payment_submit_receipt:{paymentId}`) and then sends receipt photo or tracking text in chat.
 8. Payment becomes `submitted`, admin sees it in `/admin`.
@@ -147,6 +147,9 @@ In `/admin` -> Payments, use actions:
   - `zibal`
 - Manage gateways in `/admin` -> `Payment Gateways`.
 - You can enable/disable gateways with `isActive` and order them with `sortOrder`.
+- Gateway config fields in admin form:
+  - `manual_card`: `card_number`, `card_holder`, `bank_name`, `instructions`
+  - `zibal`: `merchant`, `sandbox`, `callback_base_url`, `description`, and optional advanced fields (`mobile`, `allowedCards`, `percentMode`, `feeMode`, `multiplexingAccountNumber`)
 
 ### Manual card setup
 - Create (or keep) one active `manual_card` gateway.
@@ -163,6 +166,15 @@ In `/admin` -> Payments, use actions:
   ```
 - Callback URL:
   - `GET/POST /payment/callback/zibal`
+- Production example:
+  ```json
+  {
+    "merchant": "YOUR_MERCHANT",
+    "sandbox": false,
+    "callback_base_url": "https://your-domain.com",
+    "description": "Amoobot order payment"
+  }
+  ```
 
 ### Telegram online payment flow
 - For zibal payments bot sends:

@@ -47,6 +47,7 @@ class PaymentCrudController extends AbstractCrudController
         return [
             IdField::new('id')->onlyOnIndex(),
             AssociationField::new('order'),
+            TextField::new('order.type', 'orderType')->hideOnForm(),
             AssociationField::new('gateway'),
             TextField::new('method'),
             TextField::new('gatewayType'),
@@ -58,6 +59,7 @@ class PaymentCrudController extends AbstractCrudController
             TextField::new('authority')->hideOnIndex(),
             TextField::new('paymentUrl')->hideOnIndex(),
             DateTimeField::new('verifiedAt')->hideOnIndex(),
+            DateTimeField::new('failedAt')->hideOnIndex(),
             TextField::new('trackingCode'),
             TextField::new('receiptFileId'),
             TextareaField::new('receiptMessage')->hideOnIndex(),

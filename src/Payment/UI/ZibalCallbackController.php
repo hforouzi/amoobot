@@ -30,8 +30,9 @@ final class ZibalCallbackController extends AbstractController
         $payload = array_merge($request->query->all(), $request->request->all());
         $trackId = trim((string) ($payload['trackId'] ?? $payload['track_id'] ?? ''));
         $authority = trim((string) ($payload['authority'] ?? $payload['Authority'] ?? ''));
+        $orderId = (int) ($payload['orderId'] ?? $payload['order_id'] ?? 0);
 
-        $payment = $this->findPaymentByCallbackIds($trackId, $authority);
+        $payment = $this->findPaymentByCallbackIds($trackId, $authority, $orderId);
         if (!$payment instanceof Payment) {
             return $this->html('پرداخت یافت نشد.', 404);
         }
@@ -63,7 +64,7 @@ final class ZibalCallbackController extends AbstractController
         return $this->html($result->message, 400);
     }
 
-    private function findPaymentByCallbackIds(string $trackId, string $authority): ?Payment
+    private function findPaymentByCallbackIds(string $trackId, string $authority, int $orderId): ?Payment
     {
         $qb = $this->entityManager->getRepository(Payment::class)->createQueryBuilder('p');
         $qb->where('p.gatewayType = :gatewayType')
@@ -80,6 +81,10 @@ final class ZibalCallbackController extends AbstractController
         } elseif ('' !== $authority) {
             $qb->andWhere('p.authority = :authority')
                 ->setParameter('authority', $authority);
+        } elseif ($orderId > 0) {
+            $qb->join('p.order', 'o')
+                ->andWhere('o.id = :orderId')
+                ->setParameter('orderId', $orderId);
         } else {
             return null;
         }
@@ -95,4 +100,3 @@ final class ZibalCallbackController extends AbstractController
         ), $status);
     }
 }
-

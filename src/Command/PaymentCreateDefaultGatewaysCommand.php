@@ -37,7 +37,12 @@ final class PaymentCreateDefaultGatewaysCommand extends Command
                 ->setIsDefault(true)
                 ->setSortOrder(0)
                 ->setCurrency('IRR')
-                ->setConfig([]);
+                ->setConfig([
+                    'card_number' => '',
+                    'card_holder' => '',
+                    'bank_name' => '',
+                    'instructions' => '',
+                ]);
             $this->entityManager->persist($manual);
             $io->writeln('Created manual_card gateway.');
         } else {
@@ -58,6 +63,7 @@ final class PaymentCreateDefaultGatewaysCommand extends Command
                     'merchant' => 'zibal',
                     'sandbox' => true,
                     'callback_base_url' => '',
+                    'description' => 'Amoobot order payment',
                 ]);
             $this->entityManager->persist($zibal);
             $io->writeln('Created zibal gateway (inactive).');
@@ -71,4 +77,3 @@ final class PaymentCreateDefaultGatewaysCommand extends Command
         return Command::SUCCESS;
     }
 }
-
