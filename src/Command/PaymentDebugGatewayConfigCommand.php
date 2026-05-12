@@ -95,4 +95,3 @@ final class PaymentDebugGatewayConfigCommand extends Command
         return in_array($normalized, ['1', 'true', 'yes', 'on'], true);
     }
 }
-

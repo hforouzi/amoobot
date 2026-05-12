@@ -81,4 +81,3 @@ final class PaymentTestCustomApiCommand extends Command
         return $result->success ? Command::SUCCESS : Command::FAILURE;
     }
 }
-

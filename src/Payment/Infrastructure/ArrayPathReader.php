@@ -29,4 +29,3 @@ final class ArrayPathReader
         return $current;
     }
 }
-

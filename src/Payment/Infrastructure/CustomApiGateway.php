@@ -17,6 +17,7 @@ use Symfony\Contracts\HttpClient\HttpClientInterface;
 final class CustomApiGateway implements PaymentGatewayInterface
 {
     private const REQUEST_TIMEOUT = 20;
+    private const FLOAT_EPSILON = 0.00001;
 
     public function __construct(
         private readonly HttpClientInterface $httpClient,
@@ -241,9 +242,6 @@ final class CustomApiGateway implements PaymentGatewayInterface
             if (!is_scalar($value) && null !== $value) {
                 continue;
             }
-            if (null === $value) {
-                continue;
-            }
             $result[$name] = $this->renderTemplate((string) $value, $context);
         }
 
@@ -326,7 +324,7 @@ final class CustomApiGateway implements PaymentGatewayInterface
             return 1 === $value;
         }
         if (is_float($value)) {
-            return 1.0 === $value;
+            return abs($value - 1.0) < self::FLOAT_EPSILON;
         }
 
         $normalized = strtolower(trim((string) $value));
@@ -349,30 +347,32 @@ final class CustomApiGateway implements PaymentGatewayInterface
      */
     private function sanitize(array $payload): array
     {
+        return $this->sanitizeValue($payload);
+    }
+
+    private function sanitizeValue(mixed $value, ?string $key = null): mixed
+    {
         $sensitiveTokens = ['authorization', 'api_key', 'apikey', 'secret', 'token', 'password', 'signature', 'key'];
-        $sanitizer = function (mixed $value, ?string $key = null) use (&$sanitizer, $sensitiveTokens): mixed {
-            if (is_array($value)) {
-                $result = [];
-                foreach ($value as $nestedKey => $nestedValue) {
-                    $keyText = is_string($nestedKey) ? strtolower($nestedKey) : null;
-                    $result[$nestedKey] = $sanitizer($nestedValue, $keyText);
-                }
 
-                return $result;
+        if (is_array($value)) {
+            $result = [];
+            foreach ($value as $nestedKey => $nestedValue) {
+                $keyText = is_string($nestedKey) ? strtolower($nestedKey) : null;
+                $result[$nestedKey] = $this->sanitizeValue($nestedValue, $keyText);
             }
 
-            if (null !== $key) {
-                foreach ($sensitiveTokens as $token) {
-                    if (str_contains($key, $token)) {
-                        return '***';
-                    }
+            return $result;
+        }
+
+        if (null !== $key) {
+            foreach ($sensitiveTokens as $token) {
+                if (str_contains($key, $token)) {
+                    return '***';
                 }
             }
+        }
 
-            return $value;
-        };
-
-        return $sanitizer($payload);
+        return $value;
     }
 
     private function stringOrNull(mixed $payload): ?string
@@ -425,6 +425,9 @@ final class CustomApiGateway implements PaymentGatewayInterface
 
         foreach ($variables as $key => $value) {
             if (!is_string($key) || '' === trim($key)) {
+                continue;
+            }
+            if (preg_match('/^[a-zA-Z0-9_]+$/', $key) !== 1) {
                 continue;
             }
             if (!is_scalar($value) && null !== $value) {

@@ -31,9 +31,12 @@ final class CustomApiCallbackController extends AbstractController
     #[Route('/payment/callback/custom-api/{gatewayId}', name: 'payment_callback_custom_api', methods: ['GET', 'POST'])]
     public function callback(Request $request, int $gatewayId): Response
     {
-        $gateway = $this->findCustomGateway($gatewayId);
+        $gateway = $this->findGateway($gatewayId);
         if (!$gateway instanceof PaymentGateway) {
-            return $this->html('درگاه نامعتبر است.', 404);
+            return $this->html('درگاه یافت نشد.', 404);
+        }
+        if (PaymentGatewayType::CUSTOM_API !== $gateway->getType()) {
+            return $this->html('نوع درگاه نامعتبر است.', 400);
         }
 
         $payload = $this->buildPayload($request);
@@ -77,9 +80,12 @@ final class CustomApiCallbackController extends AbstractController
     #[Route('/payment/webhook/custom-api/{gatewayId}', name: 'payment_webhook_custom_api', methods: ['POST'])]
     public function webhook(Request $request, int $gatewayId): JsonResponse
     {
-        $gateway = $this->findCustomGateway($gatewayId);
+        $gateway = $this->findGateway($gatewayId);
         if (!$gateway instanceof PaymentGateway) {
-            return $this->json(['ok' => false, 'message' => 'invalid_gateway'], 404);
+            return $this->json(['ok' => false, 'message' => 'gateway_not_found'], 404);
+        }
+        if (PaymentGatewayType::CUSTOM_API !== $gateway->getType()) {
+            return $this->json(['ok' => false, 'message' => 'invalid_gateway_type'], 400);
         }
 
         $config = is_array($gateway->getConfig()) ? $gateway->getConfig() : [];
@@ -134,18 +140,15 @@ final class CustomApiCallbackController extends AbstractController
         return $this->json(['ok' => false, 'message' => $result->message], 400);
     }
 
-    private function findCustomGateway(int $gatewayId): ?PaymentGateway
+    private function findGateway(int $gatewayId): ?PaymentGateway
     {
         if ($gatewayId <= 0) {
             return null;
         }
 
         $gateway = $this->entityManager->getRepository(PaymentGateway::class)->find($gatewayId);
-        if (!$gateway instanceof PaymentGateway || PaymentGatewayType::CUSTOM_API !== $gateway->getType()) {
-            return null;
-        }
 
-        return $gateway;
+        return $gateway instanceof PaymentGateway ? $gateway : null;
     }
 
     /**

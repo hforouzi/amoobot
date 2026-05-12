@@ -6,6 +6,7 @@ namespace App\Admin\UI\Crud;
 
 use App\Entity\PaymentGateway;
 use App\Payment\Domain\PaymentGatewayType;
+use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\ORM\QueryBuilder;
 use EasyCorp\Bundle\EasyAdminBundle\Collection\FieldCollection;
 use EasyCorp\Bundle\EasyAdminBundle\Collection\FilterCollection;
@@ -24,6 +25,7 @@ final class CustomApiPaymentGatewayCrudController extends AbstractCrudController
 {
     private const CONFIG_HELP = <<<'TEXT'
 JSON config example:
+WARNING: Replace placeholder secrets (like CHANGE_ME) before enabling this gateway.
 {
   "create": {
     "method": "POST",
@@ -120,22 +122,18 @@ TEXT;
             ]);
     }
 
-    public function persistEntity(\Doctrine\ORM\EntityManagerInterface $entityManager, $entityInstance): void
+    public function persistEntity(EntityManagerInterface $entityManager, $entityInstance): void
     {
         if ($entityInstance instanceof PaymentGateway) {
-            $entityInstance
-                ->setType(PaymentGatewayType::CUSTOM_API)
-                ->setUpdatedAt(new \DateTimeImmutable());
+            $this->normalizeCustomApiGateway($entityInstance);
         }
         parent::persistEntity($entityManager, $entityInstance);
     }
 
-    public function updateEntity(\Doctrine\ORM\EntityManagerInterface $entityManager, $entityInstance): void
+    public function updateEntity(EntityManagerInterface $entityManager, $entityInstance): void
     {
         if ($entityInstance instanceof PaymentGateway) {
-            $entityInstance
-                ->setType(PaymentGatewayType::CUSTOM_API)
-                ->setUpdatedAt(new \DateTimeImmutable());
+            $this->normalizeCustomApiGateway($entityInstance);
         }
         parent::updateEntity($entityManager, $entityInstance);
     }
@@ -166,5 +164,27 @@ TEXT;
 
         return $qb;
     }
-}
 
+    private function normalizeCustomApiGateway(PaymentGateway $gateway): void
+    {
+        $gateway
+            ->setType(PaymentGatewayType::CUSTOM_API)
+            ->setUpdatedAt(new \DateTimeImmutable());
+
+        $config = $gateway->getConfig();
+        if (!is_array($config)) {
+            return;
+        }
+
+        $webhook = is_array($config['webhook'] ?? null) ? $config['webhook'] : [];
+        $webhookEnabled = true === ($webhook['enabled'] ?? false);
+        if (!$webhookEnabled || !$gateway->isActive()) {
+            return;
+        }
+
+        $secret = strtoupper(trim((string) ($webhook['secret'] ?? '')));
+        if ('' === $secret || 'CHANGE_ME' === $secret) {
+            $gateway->setIsActive(false);
+        }
+    }
+}
