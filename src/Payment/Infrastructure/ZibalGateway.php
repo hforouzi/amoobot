@@ -239,7 +239,7 @@ final class ZibalGateway implements PaymentGatewayInterface
                 $value = array_values(array_filter($trimmedCards, static fn (string $card): bool => '' !== $card));
             }
 
-            if ($value === null || $value === '' || $value === []) {
+            if ($value === null || $value === '' || (is_array($value) && [] === $value)) {
                 continue;
             }
 
