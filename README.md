@@ -612,16 +612,25 @@ If `test login` works but provisioning still fails on `addClient`:
 
 ## Reply Keyboard vs Inline Keyboard
 - **Reply Keyboard (persistent):** used for primary navigation at the bottom of Telegram chat.
-  - `🛒 خرید سرویس`
-  - `📦 سرویسهای من`
-  - `🎧 پشتیبانی`
-  - `🛠 مدیریت` (admin only)
-- **Inline Keyboard (contextual):** used for action-specific flows:
+  - When no incomplete order:
+    - Row 1: `🛒 خرید سرویس` | `📦 سرویسهای من`
+    - Row 2: `🎧 پشتیبانی` (+ `🛠 مدیریت` for admins)
+  - When user has an active incomplete order or draft:
+    - Row 1: `▶️ ادامه سفارش قبلی` | `🗑 حذف سفارش ناتمام`
+    - Row 2: `🛒 خرید سرویس` | `📦 سرویسهای من`
+    - Row 3: `🎧 پشتیبانی` (+ `🛠 مدیریت` for admins)
+  - Pressing `▶️ ادامه سفارش قبلی` resumes the correct draft step or order payment page.
+  - Pressing `🗑 حذف سفارش ناتمام` asks confirmation with inline buttons before cancelling.
+  - Reply keyboard updates (incomplete buttons appear/disappear) at `/start`, `main_menu`, and after order cancel flows.
+- **Inline Keyboard (contextual):** used for action-specific flows. Most multi-option rows use a **two-column layout** to reduce vertical space:
   - plan selection
+  - payment method selection (2 columns where applicable)
+  - discount choice (enter code / skip on same row)
+  - service action buttons (link/QR and resend/sync on same rows)
+  - renew/add traffic action buttons (2 columns)
+  - back+cancel buttons share the same row where possible
+  - incomplete order resume/cancel on same row in the inline prompt
   - admin menu actions
-  - pending payment views
-  - payment confirm/reject
-  - back navigation buttons
 
 ## Popup Alerts
 - Bot uses Telegram popup alerts (`answerCallbackQuery` with `show_alert=true`) for inline callback warnings, including:

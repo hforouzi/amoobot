@@ -33,6 +33,8 @@ class TelegramUpdateHandler
     private const BUTTON_MY_SERVICES = '📦 سرویسهای من';
     private const BUTTON_SUPPORT = '🎧 پشتیبانی';
     private const BUTTON_ADMIN_MENU = '🛠 مدیریت';
+    private const BUTTON_RESUME_ORDER = '▶️ ادامه سفارش قبلی';
+    private const BUTTON_CANCEL_INCOMPLETE = '🗑 حذف سفارش ناتمام';
     private const STEP_WAITING_CUSTOM_USERNAME = 'waiting_custom_username';
     private const STEP_WAITING_CUSTOM_TRAFFIC = 'waiting_custom_traffic';
     private const STEP_WAITING_CUSTOM_DURATION = 'waiting_custom_duration';
@@ -102,6 +104,18 @@ class TelegramUpdateHandler
             return;
         }
 
+        if (self::BUTTON_RESUME_ORDER === $text) {
+            $this->handleResumeIncompleteOrderByText($account, $chatId, $isAdmin);
+
+            return;
+        }
+
+        if (self::BUTTON_CANCEL_INCOMPLETE === $text) {
+            $this->handleCancelIncompleteOrderByText($account, $chatId, $isAdmin);
+
+            return;
+        }
+
         if (self::BUTTON_MY_SERVICES === $text) {
             $this->serviceManagementService->handleMyServices($account, $chatId);
 
@@ -117,7 +131,7 @@ class TelegramUpdateHandler
         if (self::BUTTON_ADMIN_MENU === $text) {
             if (!$isAdmin) {
                 $this->debugLog(sprintf('admin_text_unauthorized actor_id="%s"', $actorId));
-                $this->telegramApiClient->sendMessage($chatId, BotTexts::ADMIN_UNAUTHORIZED, $this->keyboardFactory->mainReplyKeyboard(false));
+                $this->telegramApiClient->sendMessage($chatId, BotTexts::ADMIN_UNAUTHORIZED, $this->keyboardFactory->mainReplyKeyboard(false, $this->hasActiveIncompleteOrder($account)));
 
                 return;
             }
@@ -174,7 +188,7 @@ class TelegramUpdateHandler
         }
 
         if ('' !== $text && !($openPayment instanceof Payment)) {
-            $this->telegramApiClient->sendMessage($chatId, BotTexts::UNKNOWN_COMMAND, $this->keyboardFactory->mainReplyKeyboard($isAdmin));
+            $this->telegramApiClient->sendMessage($chatId, BotTexts::UNKNOWN_COMMAND, $this->keyboardFactory->mainReplyKeyboard($isAdmin, $this->hasActiveIncompleteOrder($account)));
         }
     }
 
@@ -267,7 +281,8 @@ class TelegramUpdateHandler
 
         if ('main_menu' === $data) {
             $this->acknowledgeCallback($callbackId);
-            $this->telegramApiClient->sendMessage($chatId, BotTexts::MAIN_MENU, $this->keyboardFactory->mainReplyKeyboard($isAdmin));
+            $hasIncomplete = $this->hasActiveIncompleteOrder($account);
+            $this->telegramApiClient->sendMessage($chatId, BotTexts::MAIN_MENU, $this->keyboardFactory->mainReplyKeyboard($isAdmin, $hasIncomplete));
             $this->sendIncompleteOrderPromptIfAny($account, $chatId);
 
             return;
@@ -435,6 +450,12 @@ class TelegramUpdateHandler
             return;
         }
 
+        if (str_starts_with($data, 'incomplete_order_cancel_confirm:')) {
+            $this->handleIncompleteOrderCancelConfirm($account, $chatId, (int) str_replace('incomplete_order_cancel_confirm:', '', $data), $callbackId, $isAdmin);
+
+            return;
+        }
+
         if ('start_new_order' === $data) {
             $this->handleBuyService($chatId, $callbackId);
 
@@ -464,7 +485,8 @@ class TelegramUpdateHandler
 
     private function handleStart(TelegramAccount $account, string $chatId, bool $isAdmin): void
     {
-        $this->telegramApiClient->sendMessage($chatId, BotTexts::WELCOME, $this->keyboardFactory->mainReplyKeyboard($isAdmin));
+        $hasIncomplete = $this->hasActiveIncompleteOrder($account);
+        $this->telegramApiClient->sendMessage($chatId, BotTexts::WELCOME, $this->keyboardFactory->mainReplyKeyboard($isAdmin, $hasIncomplete));
         $this->sendIncompleteOrderPromptIfAny($account, $chatId);
     }
 
@@ -834,7 +856,7 @@ class TelegramUpdateHandler
         }
 
         $this->acknowledgeCallback($callbackId);
-        $this->telegramApiClient->sendMessage($chatId, 'سفارش ناتمام حذف شد.', $this->keyboardFactory->mainReplyKeyboard(false));
+        $this->telegramApiClient->sendMessage($chatId, 'سفارش ناتمام حذف شد.', $this->keyboardFactory->mainReplyKeyboard(false, false));
     }
 
     private function handleSelectPaymentMethodFromDraft(TelegramAccount $account, string $chatId, string $data, ?string $callbackId = null): void
@@ -2511,6 +2533,95 @@ class TelegramUpdateHandler
         }
 
         $this->showPopupOrMessage($chatId, $callbackId, 'سفارش ناتمام یافت نشد.', 'cancel_incomplete_not_found');
+    }
+
+    private function hasActiveIncompleteOrder(TelegramAccount $account): bool
+    {
+        if ($this->findLatestIncompleteOrder($account) instanceof Order) {
+            return true;
+        }
+
+        return $this->findActiveOrderDraft($account) instanceof OrderDraft;
+    }
+
+    private function handleResumeIncompleteOrderByText(TelegramAccount $account, string $chatId, bool $isAdmin): void
+    {
+        $order = $this->findLatestIncompleteOrder($account);
+        if ($order instanceof Order) {
+            $this->handleOrderResume($account, $chatId, (int) ($order->getId() ?? 0), null);
+
+            return;
+        }
+
+        $draft = $this->findActiveOrderDraft($account);
+        if ($draft instanceof OrderDraft) {
+            $this->renderDraftStep($account, $draft, $chatId);
+
+            return;
+        }
+
+        $this->telegramApiClient->sendMessage($chatId, 'سفارش ناتمامی وجود ندارد.', $this->keyboardFactory->mainReplyKeyboard($isAdmin, false));
+    }
+
+    private function handleCancelIncompleteOrderByText(TelegramAccount $account, string $chatId, bool $isAdmin): void
+    {
+        $order = $this->findLatestIncompleteOrder($account);
+        if ($order instanceof Order) {
+            $this->telegramApiClient->sendMessage(
+                $chatId,
+                'آیا از حذف سفارش ناتمام مطمئن هستید؟',
+                ['inline_keyboard' => [
+                    [
+                        ['text' => '✅ بله، حذف شود', 'callback_data' => 'incomplete_order_cancel_confirm:'.$order->getId()],
+                        ['text' => '❌ انصراف', 'callback_data' => 'main_menu'],
+                    ],
+                ]]
+            );
+
+            return;
+        }
+
+        $draft = $this->findActiveOrderDraft($account);
+        if ($draft instanceof OrderDraft) {
+            $this->telegramApiClient->sendMessage(
+                $chatId,
+                'آیا از حذف سفارش ناتمام مطمئن هستید؟',
+                ['inline_keyboard' => [
+                    [
+                        ['text' => '✅ بله، حذف شود', 'callback_data' => 'incomplete_order_cancel_confirm:'.$draft->getId()],
+                        ['text' => '❌ انصراف', 'callback_data' => 'main_menu'],
+                    ],
+                ]]
+            );
+
+            return;
+        }
+
+        $this->telegramApiClient->sendMessage($chatId, 'سفارش ناتمامی وجود ندارد.', $this->keyboardFactory->mainReplyKeyboard($isAdmin, false));
+    }
+
+    private function handleIncompleteOrderCancelConfirm(TelegramAccount $account, string $chatId, int $id, ?string $callbackId, bool $isAdmin): void
+    {
+        $order = $this->entityManager->getRepository(Order::class)->find($id);
+        if ($order instanceof Order && $order->getUser()->getId() === $account->getUser()->getId()) {
+            $this->handleOrderCancel($account, $chatId, $id, $callbackId);
+
+            return;
+        }
+
+        $draft = $this->entityManager->getRepository(OrderDraft::class)->find($id);
+        if ($draft instanceof OrderDraft && $draft->getUser()->getId() === $account->getUser()->getId()) {
+            if (OrderDraftStatus::PENDING === $draft->getStatus()) {
+                $draft->setStatus(OrderDraftStatus::CANCELLED)->setUpdatedAt(new \DateTimeImmutable());
+                $this->entityManager->flush();
+            }
+            $this->acknowledgeCallback($callbackId);
+            $this->telegramApiClient->sendMessage($chatId, 'سفارش ناتمام حذف شد.', $this->keyboardFactory->mainReplyKeyboard($isAdmin, false));
+
+            return;
+        }
+
+        $this->showPopupOrMessage($chatId, $callbackId, 'سفارش ناتمام یافت نشد.', 'incomplete_cancel_confirm_not_found');
     }
 
     private function sendIncompleteOrderPromptIfAny(TelegramAccount $account, string $chatId): void
