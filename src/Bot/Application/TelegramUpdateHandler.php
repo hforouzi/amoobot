@@ -19,6 +19,7 @@ use App\Payment\Domain\PaymentGatewayType;
 use App\Payment\Domain\PaymentStatus;
 use App\Payment\Infrastructure\PaymentGatewayRegistry;
 use App\Shared\Infrastructure\SettingValueProvider;
+use App\Shop\Application\IncompleteOrderSettingsProvider;
 use App\Shop\Application\DiscountCodeService;
 use App\Shop\Application\PlanPricingService;
 use App\Shop\Domain\OrderDraftStatus;
@@ -48,6 +49,7 @@ class TelegramUpdateHandler
         private readonly EntityManagerInterface $entityManager,
         private readonly PaymentConfirmationService $paymentConfirmationService,
         private readonly SettingValueProvider $settingValueProvider,
+        private readonly IncompleteOrderSettingsProvider $incompleteOrderSettingsProvider,
         private readonly PlanPricingService $planPricingService,
         private readonly DiscountCodeService $discountCodeService,
         private readonly PaymentGatewayRegistry $paymentGatewayRegistry,
@@ -495,6 +497,17 @@ class TelegramUpdateHandler
         }
         $this->debugLog(sprintf('order_draft_start user_id=%d plan_id=%d draft_id=%d', $account->getUser()->getId() ?? 0, $plan->getId() ?? 0, $draft->getId() ?? 0));
 
+        $draftData = is_array($draft->getData()) ? $draft->getData() : [];
+        unset(
+            $draftData['navigation'],
+            $draftData['draftType'],
+            $draftData['orderType'],
+            $draftData['targetServiceId'],
+            $draftData['adminMode'],
+            $draftData['inputState'],
+            $draftData['priceSnapshot']
+        );
+
         $draft
             ->setStatus(OrderDraftStatus::PENDING)
             ->setStep(self::STEP_WAITING_CUSTOM_USERNAME)
@@ -508,7 +521,7 @@ class TelegramUpdateHandler
             ->setFinalAmount(null)
             ->setPriceSnapshot(null)
             ->setUpdatedAt(new \DateTimeImmutable())
-            ->setData([]);
+            ->setData($draftData);
 
         $this->setDraftCurrentStep($draft, self::STEP_WAITING_CUSTOM_USERNAME, false);
 
@@ -2628,13 +2641,7 @@ class TelegramUpdateHandler
 
     private function resolveIncompleteExpiresAt(): \DateTimeImmutable
     {
-        $hoursRaw = $this->settingValueProvider->get('orders.incomplete_expire_hours', '24');
-        $hours = is_string($hoursRaw) ? (int) trim($hoursRaw) : 24;
-        if ($hours <= 0) {
-            $hours = 24;
-        }
-
-        return (new \DateTimeImmutable())->modify(sprintf('+%d hours', $hours));
+        return (new \DateTimeImmutable())->modify(sprintf('+%d hours', $this->incompleteOrderSettingsProvider->expireHours()));
     }
 
     private function notifyAdmin(Payment $payment, string $kind): void

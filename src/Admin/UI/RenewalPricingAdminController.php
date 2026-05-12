@@ -8,6 +8,7 @@ use App\Entity\Setting;
 use App\Provisioning\Application\AutomationSettingsProvider;
 use App\Provisioning\Application\RenewalSettingsProvider;
 use App\Provisioning\Application\TrafficAddonSettingsProvider;
+use App\Shop\Application\IncompleteOrderSettingsProvider;
 use App\Shop\Application\PlanPriceAdjustmentService;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
@@ -23,6 +24,7 @@ final class RenewalPricingAdminController extends AbstractController
         private readonly RenewalSettingsProvider $renewalSettingsProvider,
         private readonly AutomationSettingsProvider $automationSettingsProvider,
         private readonly TrafficAddonSettingsProvider $trafficAddonSettingsProvider,
+        private readonly IncompleteOrderSettingsProvider $incompleteOrderSettingsProvider,
         private readonly PlanPriceAdjustmentService $planPriceAdjustmentService,
     ) {
     }
@@ -160,7 +162,7 @@ final class RenewalPricingAdminController extends AbstractController
                 'automation_auto_suspend_traffic_exhausted_enabled' => $this->automationSettingsProvider->autoSuspendTrafficExhaustedEnabled(),
                 'automation_expire_incomplete_orders_enabled' => $this->automationSettingsProvider->expireIncompleteOrdersEnabled(),
                 'automation_batch_limit' => $this->automationSettingsProvider->batchLimit(),
-                'orders_incomplete_expire_hours' => (int) ($this->entityManager->getRepository(Setting::class)->findOneBy(['keyName' => 'orders.incomplete_expire_hours'])?->getValue() ?? '24'),
+                'orders_incomplete_expire_hours' => $this->incompleteOrderSettingsProvider->expireHours(),
             ],
         ]);
     }

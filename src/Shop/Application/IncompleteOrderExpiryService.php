@@ -8,7 +8,6 @@ use App\Entity\Order;
 use App\Entity\OrderDraft;
 use App\Entity\Payment;
 use App\Payment\Domain\PaymentStatus;
-use App\Shared\Infrastructure\SettingValueProvider;
 use App\Shop\Domain\OrderDraftStatus;
 use App\Shop\Domain\OrderStatus;
 use Doctrine\ORM\EntityManagerInterface;
@@ -17,7 +16,7 @@ final class IncompleteOrderExpiryService
 {
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
-        private readonly SettingValueProvider $settingValueProvider,
+        private readonly IncompleteOrderSettingsProvider $incompleteOrderSettingsProvider,
     ) {
     }
 
@@ -128,9 +127,6 @@ final class IncompleteOrderExpiryService
 
     public function configuredHours(): int
     {
-        $raw = $this->settingValueProvider->get('orders.incomplete_expire_hours', '24');
-        $hours = is_string($raw) ? (int) trim($raw) : 24;
-
-        return $hours > 0 ? $hours : 24;
+        return $this->incompleteOrderSettingsProvider->expireHours();
     }
 }

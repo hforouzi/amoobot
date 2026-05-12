@@ -28,6 +28,7 @@ use App\Shop\Application\PlanPricingService;
 use App\Shop\Application\RenewalPriceResult;
 use App\Shop\Application\TrafficAddonPricingService;
 use App\Shop\Application\DiscountCodeService;
+use App\Shop\Application\IncompleteOrderSettingsProvider;
 use App\Shop\Domain\OrderDraftStatus;
 use App\Shop\Domain\OrderStatus;
 use App\Shop\Domain\OrderType;
@@ -54,6 +55,7 @@ class ServiceManagementService
         private readonly PlanPricingService $planPricingService,
         private readonly TrafficAddonPricingService $trafficAddonPricingService,
         private readonly DiscountCodeService $discountCodeService,
+        private readonly IncompleteOrderSettingsProvider $incompleteOrderSettingsProvider,
         private readonly PaymentGatewayRegistry $paymentGatewayRegistry,
         private readonly StorePaymentMethodResolver $storePaymentMethodResolver,
         private readonly string $paymentCardNumber = '',
@@ -1638,13 +1640,7 @@ class ServiceManagementService
 
     private function resolveIncompleteExpiresAt(): \DateTimeImmutable
     {
-        $hoursRaw = $this->settingValueProvider->get('orders.incomplete_expire_hours', '24');
-        $hours = is_string($hoursRaw) ? (int) trim($hoursRaw) : 24;
-        if ($hours <= 0) {
-            $hours = 24;
-        }
-
-        return (new \DateTimeImmutable())->modify(sprintf('+%d hours', $hours));
+        return (new \DateTimeImmutable())->modify(sprintf('+%d hours', $this->incompleteOrderSettingsProvider->expireHours()));
     }
 
     private function formatTrafficUsed(VpnService $service): string
