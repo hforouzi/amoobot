@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Command;
 
 use App\Entity\PaymentGateway;
+use App\Payment\Domain\PaymentGatewayType;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
@@ -43,12 +44,24 @@ final class PaymentListGatewaysCommand extends Command
                 $gateway->getTitle(),
                 $gateway->getType(),
                 $gateway->isActive() ? 'yes' : 'no',
-                $gateway->isConfigured() ? 'yes' : 'no',
+                $this->isConfiguredForAdminList($gateway) ? 'yes' : 'no',
             ];
         }
 
         $io->table(['id', 'title', 'type', 'enabled', 'configured'], $rows);
 
         return Command::SUCCESS;
+    }
+
+    private function isConfiguredForAdminList(PaymentGateway $gateway): bool
+    {
+        return match ($gateway->getType()) {
+            PaymentGatewayType::MANUAL_CARD => '' !== trim((string) ($gateway->getManualCardNumber() ?? ''))
+                && '' !== trim((string) ($gateway->getManualCardHolder() ?? '')),
+            PaymentGatewayType::ZIBAL => '' !== trim((string) ($gateway->getZibalMerchant() ?? ''))
+                && '' !== trim((string) ($gateway->getZibalCallbackBaseUrl() ?? '')),
+            PaymentGatewayType::CUSTOM_API => $gateway->isConfigured(),
+            default => $gateway->isConfigured(),
+        };
     }
 }
