@@ -375,9 +375,6 @@ final class CustomApiGateway implements PaymentGatewayInterface
         return $sanitizer($payload);
     }
 
-    /**
-     * @param array<string, mixed> $payload
-     */
     private function stringOrNull(mixed $payload): ?string
     {
         if (!is_scalar($payload)) {

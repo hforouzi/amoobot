@@ -51,7 +51,14 @@ final class CustomApiCallbackController extends AbstractController
                 ->resolve($gateway)
                 ->verifyPayment($payment, $payload);
             $this->entityManager->flush();
-        } catch (\Throwable) {
+        } catch (\Throwable $e) {
+            error_log(sprintf(
+                '[CustomApiCallbackController] callback_verify_exception gateway_id=%d payment_id=%d message="%s"',
+                $gateway->getId() ?? 0,
+                $payment->getId() ?? 0,
+                $e->getMessage()
+            ));
+
             return $this->html('خطا در بررسی پرداخت.', 500);
         }
 
@@ -104,7 +111,14 @@ final class CustomApiCallbackController extends AbstractController
                 ->resolve($gateway)
                 ->verifyPayment($payment, $payload);
             $this->entityManager->flush();
-        } catch (\Throwable) {
+        } catch (\Throwable $e) {
+            error_log(sprintf(
+                '[CustomApiCallbackController] webhook_verify_exception gateway_id=%d payment_id=%d message="%s"',
+                $gateway->getId() ?? 0,
+                $payment->getId() ?? 0,
+                $e->getMessage()
+            ));
+
             return $this->json(['ok' => false, 'message' => 'verify_failed'], 500);
         }
 
@@ -338,4 +352,3 @@ final class CustomApiCallbackController extends AbstractController
         ), $status);
     }
 }
-
