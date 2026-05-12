@@ -89,10 +89,15 @@ final class DiscountCodeService
         }
 
         if ($discountCode->isFirstPurchaseOnly()) {
-            $paidOrders = $this->entityManager->getRepository(Order::class)->count([
-                'user' => $user,
-                'status' => [OrderStatus::PAID, OrderStatus::PROVISIONED],
-            ]);
+            $paidOrders = (int) $this->entityManager->getRepository(Order::class)
+                ->createQueryBuilder('o')
+                ->select('COUNT(o.id)')
+                ->where('o.user = :user')
+                ->andWhere('o.status IN (:statuses)')
+                ->setParameter('user', $user)
+                ->setParameter('statuses', [OrderStatus::PAID, OrderStatus::PROVISIONED])
+                ->getQuery()
+                ->getSingleScalarResult();
             if ($paidOrders > 0) {
                 return ValidationResult::invalid('این کد فقط برای خرید اول قابل استفاده است.');
             }

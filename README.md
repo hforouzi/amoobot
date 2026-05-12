@@ -353,6 +353,51 @@ Test command:
 php bin/console app:service:test-add-traffic {serviceId} --traffic-gb=1
 ```
 
+## Phase 1.6 Discount Codes and Campaigns
+- Discount code support is available for:
+  - خرید جدید (`new_service`)
+  - تمدید (`renewal`)
+  - خرید حجم اضافه (`add_traffic`)
+- Discount calculation order:
+  1. مبلغ پایه
+  2. تخفیف سراسری
+  3. کد تخفیف
+  4. مبلغ نهایی (هرگز کمتر از صفر نمی‌شود)
+- Price snapshot is stored in order metadata as:
+  - `baseAmount`
+  - `globalDiscountPercent`
+  - `globalDiscountAmount`
+  - `afterGlobalDiscountAmount`
+  - `discountCode`
+  - `discountCodeAmount`
+  - `finalAmount`
+
+### Discount restrictions
+- Active/inactive state
+- Start/end datetime window
+- Max total uses
+- Max uses per user
+- First-purchase-only mode
+- Applies-to scope (`all|new_service|renewal|add_traffic`)
+- Plan restriction (optional)
+- Minimum amount restriction (optional)
+
+### Duplicate usage prevention
+- Discount usage is recorded only after successful payment confirmation/provisioning.
+- On repeated confirmation of the same payment, usage is not duplicated.
+- `DiscountUsage` has unique protection for same `order + discount_code + user`.
+
+### Commands
+Create discount code:
+```bash
+php bin/console app:discount:create --code=TEST10 --type=percent --value=10 --max-uses=10 --applies-to=all --days-valid=7
+```
+
+Validate discount code:
+```bash
+php bin/console app:discount:validate TEST10 --user-id=1 --amount=1000000 --type=new_service
+```
+
 ### Known issue
 - Some 3x-ui versions may return empty responses for `addClient`/`updateClient`.
 - The driver logs this safely and handles it as a warning path where applicable.
