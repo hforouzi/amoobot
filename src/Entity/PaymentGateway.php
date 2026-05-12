@@ -214,6 +214,15 @@ class PaymentGateway
         return sprintf('%s (%s)', $this->title ?: 'Gateway', $this->type);
     }
 
+    public function isConfigured(): bool
+    {
+        return match ($this->type) {
+            PaymentGatewayType::MANUAL_CARD => null !== $this->getManualCardNumber() && null !== $this->getManualCardHolder(),
+            PaymentGatewayType::ZIBAL => null !== $this->getZibalCallbackBaseUrl() && null !== $this->getZibalMerchant(),
+            default => false,
+        };
+    }
+
     public function getManualCardNumber(): ?string
     {
         return $this->configString('card_number');

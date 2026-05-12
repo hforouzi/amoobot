@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Command;
 
 use App\Entity\PaymentGateway;
+use App\Entity\StorePaymentMethod;
 use App\Payment\Domain\PaymentGatewayType;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\Console\Attribute\AsCommand;
@@ -71,8 +72,38 @@ final class PaymentCreateDefaultGatewaysCommand extends Command
             $io->writeln('zibal gateway already exists.');
         }
 
+        $methodRepo = $this->entityManager->getRepository(StorePaymentMethod::class);
+
+        $manualMethod = $methodRepo->findOneBy(['gateway' => $manual], ['id' => 'ASC']);
+        if (!$manualMethod instanceof StorePaymentMethod) {
+            $manualMethod = (new StorePaymentMethod())
+                ->setGateway($manual)
+                ->setTitle('کارت به کارت')
+                ->setIsActive(true)
+                ->setSortOrder(1)
+                ->setCurrency('IRR');
+            $this->entityManager->persist($manualMethod);
+            $io->writeln('Created store payment method for manual_card.');
+        } else {
+            $io->writeln('Store method for manual_card already exists.');
+        }
+
+        $zibalMethod = $methodRepo->findOneBy(['gateway' => $zibal], ['id' => 'ASC']);
+        if (!$zibalMethod instanceof StorePaymentMethod) {
+            $zibalMethod = (new StorePaymentMethod())
+                ->setGateway($zibal)
+                ->setTitle('پرداخت آنلاین زیبال')
+                ->setIsActive(false)
+                ->setSortOrder(2)
+                ->setCurrency('IRR');
+            $this->entityManager->persist($zibalMethod);
+            $io->writeln('Created store payment method for zibal (inactive).');
+        } else {
+            $io->writeln('Store method for zibal already exists.');
+        }
+
         $this->entityManager->flush();
-        $io->success('Default gateways ensured.');
+        $io->success('Default gateways and store methods ensured.');
 
         return Command::SUCCESS;
     }

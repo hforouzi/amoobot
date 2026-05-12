@@ -43,14 +43,12 @@ final class PaymentListGatewaysCommand extends Command
                 $gateway->getTitle(),
                 $gateway->getType(),
                 $gateway->isActive() ? 'yes' : 'no',
-                $gateway->isDefault() ? 'yes' : 'no',
-                $gateway->getCurrency(),
+                $gateway->isConfigured() ? 'yes' : 'no',
             ];
         }
 
-        $io->table(['id', 'title', 'type', 'active', 'default', 'currency'], $rows);
+        $io->table(['id', 'title', 'type', 'enabled', 'configured'], $rows);
 
         return Command::SUCCESS;
     }
 }
-

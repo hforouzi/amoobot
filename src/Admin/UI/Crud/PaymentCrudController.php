@@ -48,6 +48,7 @@ class PaymentCrudController extends AbstractCrudController
             IdField::new('id')->onlyOnIndex(),
             AssociationField::new('order'),
             TextField::new('order.type', 'orderType')->hideOnForm(),
+            AssociationField::new('storePaymentMethod')->hideOnForm(),
             AssociationField::new('gateway'),
             TextField::new('method'),
             TextField::new('gatewayType'),

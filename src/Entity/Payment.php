@@ -26,6 +26,10 @@ class Payment
     #[ORM\JoinColumn(nullable: true, onDelete: 'SET NULL')]
     private ?PaymentGateway $gateway = null;
 
+    #[ORM\ManyToOne]
+    #[ORM\JoinColumn(nullable: true, onDelete: 'SET NULL')]
+    private ?StorePaymentMethod $storePaymentMethod = null;
+
     #[ORM\Column(length: 64, nullable: true)]
     private ?string $gatewayType = null;
 
@@ -137,6 +141,21 @@ class Payment
         if ($gateway instanceof PaymentGateway) {
             $this->gatewayType = $gateway->getType();
             $this->currency = $gateway->getCurrency();
+        }
+
+        return $this;
+    }
+
+    public function getStorePaymentMethod(): ?StorePaymentMethod
+    {
+        return $this->storePaymentMethod;
+    }
+
+    public function setStorePaymentMethod(?StorePaymentMethod $storePaymentMethod): self
+    {
+        $this->storePaymentMethod = $storePaymentMethod;
+        if ($storePaymentMethod instanceof StorePaymentMethod) {
+            $this->setGateway($storePaymentMethod->getGateway());
         }
 
         return $this;
@@ -396,4 +415,3 @@ class Payment
         return sprintf('Payment #%d', $this->id ?? 0);
     }
 }
-

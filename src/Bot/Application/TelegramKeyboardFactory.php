@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Bot\Application;
 
-use App\Entity\PaymentGateway;
+use App\Entity\StorePaymentMethod;
 use App\Payment\Domain\PaymentGatewayType;
 use App\Entity\Plan;
 
@@ -167,15 +167,20 @@ class TelegramKeyboardFactory
     }
 
     /**
-     * @param list<PaymentGateway> $gateways
+     * @param list<StorePaymentMethod> $methods
      *
      * @return array<string, array<array<array<string, string>>>>
      */
-    public function paymentGatewaySelectionMenu(int $orderId, array $gateways, string $cancelCallback): array
+    public function paymentGatewaySelectionMenu(int $orderId, array $methods, string $cancelCallback): array
     {
         $rows = [];
-        foreach ($gateways as $gateway) {
-            $text = match ($gateway->getType()) {
+        foreach ($methods as $method) {
+            if (!$method instanceof StorePaymentMethod) {
+                continue;
+            }
+
+            $gateway = $method->getGateway();
+            $text = '' !== trim($method->getTitle()) ? $method->getTitle() : match ($gateway->getType()) {
                 PaymentGatewayType::MANUAL_CARD => '💳 کارت به کارت',
                 PaymentGatewayType::ZIBAL => '🌐 پرداخت آنلاین (زیبال)',
                 default => $gateway->getTitle(),
@@ -183,7 +188,7 @@ class TelegramKeyboardFactory
 
             $rows[] = [[
                 'text' => $text,
-                'callback_data' => 'select_payment_gateway:'.$orderId.':'.$gateway->getId(),
+                'callback_data' => 'select_store_payment_method:'.$orderId.':'.$method->getId(),
             ]];
         }
 

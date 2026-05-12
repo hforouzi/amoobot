@@ -126,8 +126,8 @@ Webhook endpoint:
 2. Bot auto-registers TelegramAccount/User and shows main menu.
 3. User clicks `🛒 خرید سرویس` and sees active plans.
 4. User selects plan (`select_plan:{id}`).
-5. Bot shows payment gateway selection (`select_payment_gateway:{orderId}:{gatewayId}`) from active gateways.
-6. User selects `manual_card` or `zibal`; bot creates Order + Payment and starts selected gateway flow.
+5. Bot shows payment method selection (`select_store_payment_method:{orderId}:{storePaymentMethodId}`) from active store payment methods.
+6. User selects `manual_card` or `zibal`; bot creates/reuses Payment from selected store method gateway and starts selected flow.
 7. For manual card, user taps `✅ تایید و ارسال رسید` (`payment_submit_receipt:{paymentId}`) and then sends receipt photo or tracking text in chat.
 8. Payment becomes `submitted`, admin sees it in `/admin`.
 9. Admin confirms payment via `Confirm Payment` action.
@@ -141,22 +141,34 @@ In `/admin` -> Payments, use actions:
 
 ## Phase 1.7.1 Payment Gateway Architecture
 
-### PaymentGateway setup
-- Entity: `PaymentGateway` with supported types:
+### PaymentGateway setup (module/account config)
+- Entity: `PaymentGateway` with supported types only:
   - `manual_card`
   - `zibal`
-- Manage gateways in `/admin` -> `Payment Gateways`.
-- You can enable/disable gateways with `isActive` and order them with `sortOrder`.
-- Gateway config fields in admin form:
+- Manage gateways in `/admin` -> `درگاههای پرداخت`.
+- Type-specific configuration pages:
+  - `کانفیگ کارت به کارت`
+  - `کانفیگ زیبال`
+- Gateway config fields:
   - `manual_card`: `card_number`, `card_holder`, `bank_name`, `instructions`
   - `zibal`: `merchant`, `sandbox`, `callback_base_url`, `description`, and optional advanced fields (`mobile`, `allowedCards`, `percentMode`, `feeMode`, `multiplexingAccountNumber`)
 
-### Manual card setup
-- Create (or keep) one active `manual_card` gateway.
-- Existing receipt upload/admin approval flow remains unchanged.
+### Store Payment Methods setup (bot-visible methods)
+- Entity: `StorePaymentMethod` controls user-visible payment choices in bot.
+- Manage methods in `/admin` -> `روشهای پرداخت فروشگاه`.
+- Each method links to one configured `PaymentGateway`.
+- Only active store methods are shown to users.
+- You can set: `title`, `isActive`, `sortOrder`, `minAmount`, `maxAmount`, `currency`.
+
+### Admin setup flow
+1. Go to `درگاههای پرداخت` and configure gateway credentials/accounts.
+2. Go to `روشهای پرداخت فروشگاه`.
+3. Create method rows pointing to configured gateways.
+4. Activate desired methods.
+5. Bot shows only active store payment methods.
 
 ### Zibal setup
-- Create a `zibal` gateway and configure JSON:
+- Create/configure a `zibal` gateway:
   ```json
   {
     "merchant": "zibal",
@@ -187,9 +199,13 @@ In `/admin` -> Payments, use actions:
   ```bash
   php bin/console app:payment:create-default-gateways
   ```
-- List gateways:
+- List configured gateways:
   ```bash
   php bin/console app:payment:list-gateways
+  ```
+- List store methods:
+  ```bash
+  php bin/console app:payment:list-methods
   ```
 - Test zibal request:
   ```bash
