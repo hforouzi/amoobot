@@ -677,7 +677,7 @@ class TelegramUpdateHandler
         $this->telegramApiClient->sendMessage(
             $chatId,
             sprintf('حجم موردنظر را وارد کنید. حداقل %d گیگ و حداکثر %d گیگ.', (int) ($plan->getMinTrafficGb() ?? 0), (int) ($plan->getMaxTrafficGb() ?? 0)),
-            $this->keyboardFactory->customOrderInputMenu((int) ($draft->getId() ?? 0))
+            $this->keyboardFactory->customOrderStepMenu((int) ($draft->getId() ?? 0))
         );
     }
 
@@ -687,7 +687,7 @@ class TelegramUpdateHandler
         $this->telegramApiClient->sendMessage(
             $chatId,
             sprintf('مدت زمان موردنظر را وارد کنید. حداقل %d روز و حداکثر %d روز.', (int) ($plan->getMinDurationDays() ?? 0), (int) ($plan->getMaxDurationDays() ?? 0)),
-            $this->keyboardFactory->customOrderInputMenu((int) ($draft->getId() ?? 0))
+            $this->keyboardFactory->customOrderStepMenu((int) ($draft->getId() ?? 0))
         );
     }
 

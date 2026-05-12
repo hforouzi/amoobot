@@ -238,11 +238,11 @@ class TelegramKeyboardFactory
             'inline_keyboard' => [
                 [[
                     'text' => '🔙 بازگشت',
-                    'callback_data' => 'draft_back:'.$draftId,
+                    'callback_data' => 'buy_service',
                 ]],
                 [[
                     'text' => '❌ انصراف',
-                    'callback_data' => 'draft_cancel:'.$draftId,
+                    'callback_data' => 'custom_order_cancel:'.$draftId,
                 ]],
             ],
         ];
@@ -255,6 +255,25 @@ class TelegramKeyboardFactory
     {
         return [
             'inline_keyboard' => [
+                [[
+                    'text' => '❌ انصراف',
+                    'callback_data' => 'draft_cancel:'.$draftId,
+                ]],
+            ],
+        ];
+    }
+
+    /**
+     * @return array<string, array<array<array<string, string>>>>
+     */
+    public function customOrderStepMenu(int $draftId): array
+    {
+        return [
+            'inline_keyboard' => [
+                [[
+                    'text' => '🔙 بازگشت',
+                    'callback_data' => 'draft_back:'.$draftId,
+                ]],
                 [[
                     'text' => '❌ انصراف',
                     'callback_data' => 'draft_cancel:'.$draftId,
@@ -688,25 +707,29 @@ class TelegramKeyboardFactory
      */
     public function discountCodePrompt(int $draftId, string $cancelCallback): array
     {
+        $rows = [];
+        if (str_starts_with($cancelCallback, 'draft_cancel:')) {
+            $rows[] = [[
+                'text' => '🔙 بازگشت به خلاصه سفارش',
+                'callback_data' => 'draft_back:'.$draftId,
+            ]];
+        }
+
+        $rows[] = [[
+            'text' => '🎟 وارد کردن کد تخفیف',
+            'callback_data' => 'discount_enter:'.$draftId,
+        ]];
+        $rows[] = [[
+            'text' => 'ادامه بدون کد تخفیف',
+            'callback_data' => 'discount_skip:'.$draftId,
+        ]];
+        $rows[] = [[
+            'text' => '❌ انصراف',
+            'callback_data' => $cancelCallback,
+        ]];
+
         return [
-            'inline_keyboard' => [
-                [[
-                    'text' => '🔙 بازگشت به خلاصه سفارش',
-                    'callback_data' => 'draft_back:'.$draftId,
-                ]],
-                [[
-                    'text' => '🎟 وارد کردن کد تخفیف',
-                    'callback_data' => 'discount_enter:'.$draftId,
-                ]],
-                [[
-                    'text' => 'ادامه بدون کد تخفیف',
-                    'callback_data' => 'discount_skip:'.$draftId,
-                ]],
-                [[
-                    'text' => '❌ انصراف',
-                    'callback_data' => $cancelCallback,
-                ]],
-            ],
+            'inline_keyboard' => $rows,
         ];
     }
 

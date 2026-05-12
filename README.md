@@ -304,6 +304,33 @@ In `/admin` -> Payments, use actions:
 - Zibal callback verification is always re-verified with gateway API.
 - Payment confirmation is idempotent through existing approval checks, so repeated callbacks do not double-provision/renew/add-traffic.
 
+## Phase 1.7.3 Incomplete Order Management and Navigation
+
+- Custom new-service draft steps now keep navigation history and support back/cancel callbacks:
+  - `draft_back:{draftId}`
+  - `draft_cancel:{draftId}`
+- After order creation, payment navigation uses order callbacks (not draft id):
+  - `order_back_to_payment_methods:{orderId}`
+  - `order_cancel:{orderId}`
+  - `order_resume:{orderId}`
+  - `discount_back:{orderId}`
+  - `payment_methods_back:{orderId}`
+- `/start` and main menu show an incomplete-order prompt when applicable:
+  - `▶️ ادامه سفارش`
+  - `🗑 حذف سفارش ناتمام`
+  - `➕ سفارش جدید`
+- Canceling incomplete flows marks records as cancelled/rejected; rows are not deleted.
+- Incomplete expiration is configurable by admin setting:
+  - `orders.incomplete_expire_hours` (default `24`)
+- New command:
+  ```bash
+  php bin/console app:orders:expire-incomplete --dry-run
+  php bin/console app:orders:expire-incomplete --hours=24 --limit=100
+  ```
+- Automation includes incomplete-order expiration (configurable):
+  - `automation.expire_incomplete_orders_enabled` (default `true`)
+  - `php bin/console app:automation:run --only=orders --dry-run`
+
 ## Admin approval from Telegram
 - Set `TELEGRAM_ADMIN_CHAT_ID` in `.env.local` to the admin Telegram chat ID.
 - After a user submits receipt photo/tracking text, bot sends admin a Telegram message with:
@@ -457,6 +484,13 @@ Safe single-command cron example:
 ```bash
 */10 * * * * cd /path/to/project && php bin/console app:automation:run --limit=100 > var/log/automation.log 2>&1
 ```
+
+Automation execution order:
+1. expire incomplete orders
+2. sync usage
+3. check expiry
+4. auto suspend
+5. notifications
 
 ## Phase 1.4.3 Renewal Flow
 - User can renew an existing service directly from service detail (`🔄 تمدید سرویس`).
