@@ -27,6 +27,8 @@ services:
             tags: ['app.telegram_service_action']
         App\Provisioning\Domain\VpnPanelDriverInterface:
             tags: ['app.vpn_driver']
+        App\Payment\Domain\PaymentGatewayInterface:
+            tags: ['app.payment_gateway']
 
     _defaults:
         autowire: true
@@ -64,3 +66,7 @@ services:
     App\Provisioning\Infrastructure\VpnPanelDriverRegistry:
         arguments:
             $drivers: !tagged_iterator 'app.vpn_driver'
+
+    App\Payment\Infrastructure\PaymentGatewayRegistry:
+        arguments:
+            $drivers: !tagged_iterator 'app.payment_gateway'

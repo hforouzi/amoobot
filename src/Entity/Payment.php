@@ -22,6 +22,46 @@ class Payment
     #[ORM\Column(length: 64)]
     private string $method = 'manual_card';
 
+    #[ORM\ManyToOne]
+    #[ORM\JoinColumn(nullable: true, onDelete: 'SET NULL')]
+    private ?PaymentGateway $gateway = null;
+
+    #[ORM\Column(length: 64, nullable: true)]
+    private ?string $gatewayType = null;
+
+    #[ORM\Column(length: 255, nullable: true)]
+    private ?string $gatewayTransactionId = null;
+
+    #[ORM\Column(length: 255, nullable: true)]
+    private ?string $authority = null;
+
+    #[ORM\Column(type: 'text', nullable: true)]
+    private ?string $paymentUrl = null;
+
+    #[ORM\Column(length: 8)]
+    private string $currency = 'IRR';
+
+    #[ORM\Column(nullable: true)]
+    private ?int $payableAmount = null;
+
+    #[ORM\Column(type: 'json', nullable: true)]
+    private ?array $callbackPayload = null;
+
+    #[ORM\Column(type: 'json', nullable: true)]
+    private ?array $requestPayload = null;
+
+    #[ORM\Column(type: 'json', nullable: true)]
+    private ?array $verifyPayload = null;
+
+    #[ORM\Column(nullable: true)]
+    private ?\DateTimeImmutable $verifiedAt = null;
+
+    #[ORM\Column(nullable: true)]
+    private ?\DateTimeImmutable $failedAt = null;
+
+    #[ORM\Column(nullable: true)]
+    private ?\DateTimeImmutable $expiresAt = null;
+
     #[ORM\Column]
     private int $amount;
 
@@ -79,6 +119,170 @@ class Payment
     public function setMethod(string $method): self
     {
         $this->method = $method;
+        if (null === $this->gatewayType || '' === trim($this->gatewayType)) {
+            $this->gatewayType = $method;
+        }
+
+        return $this;
+    }
+
+    public function getGateway(): ?PaymentGateway
+    {
+        return $this->gateway;
+    }
+
+    public function setGateway(?PaymentGateway $gateway): self
+    {
+        $this->gateway = $gateway;
+        if ($gateway instanceof PaymentGateway) {
+            $this->gatewayType = $gateway->getType();
+            $this->currency = $gateway->getCurrency();
+        }
+
+        return $this;
+    }
+
+    public function getGatewayType(): ?string
+    {
+        return $this->gatewayType;
+    }
+
+    public function setGatewayType(?string $gatewayType): self
+    {
+        $this->gatewayType = null === $gatewayType ? null : trim($gatewayType);
+
+        return $this;
+    }
+
+    public function getGatewayTransactionId(): ?string
+    {
+        return $this->gatewayTransactionId;
+    }
+
+    public function setGatewayTransactionId(?string $gatewayTransactionId): self
+    {
+        $this->gatewayTransactionId = $gatewayTransactionId;
+
+        return $this;
+    }
+
+    public function getAuthority(): ?string
+    {
+        return $this->authority;
+    }
+
+    public function setAuthority(?string $authority): self
+    {
+        $this->authority = $authority;
+
+        return $this;
+    }
+
+    public function getPaymentUrl(): ?string
+    {
+        return $this->paymentUrl;
+    }
+
+    public function setPaymentUrl(?string $paymentUrl): self
+    {
+        $this->paymentUrl = $paymentUrl;
+
+        return $this;
+    }
+
+    public function getCurrency(): string
+    {
+        return $this->currency;
+    }
+
+    public function setCurrency(string $currency): self
+    {
+        $currency = strtoupper(trim($currency));
+        $this->currency = '' === $currency ? 'IRR' : $currency;
+
+        return $this;
+    }
+
+    public function getPayableAmount(): ?int
+    {
+        return $this->payableAmount;
+    }
+
+    public function setPayableAmount(?int $payableAmount): self
+    {
+        $this->payableAmount = $payableAmount;
+
+        return $this;
+    }
+
+    public function getCallbackPayload(): ?array
+    {
+        return $this->callbackPayload;
+    }
+
+    public function setCallbackPayload(?array $callbackPayload): self
+    {
+        $this->callbackPayload = $callbackPayload;
+
+        return $this;
+    }
+
+    public function getRequestPayload(): ?array
+    {
+        return $this->requestPayload;
+    }
+
+    public function setRequestPayload(?array $requestPayload): self
+    {
+        $this->requestPayload = $requestPayload;
+
+        return $this;
+    }
+
+    public function getVerifyPayload(): ?array
+    {
+        return $this->verifyPayload;
+    }
+
+    public function setVerifyPayload(?array $verifyPayload): self
+    {
+        $this->verifyPayload = $verifyPayload;
+
+        return $this;
+    }
+
+    public function getVerifiedAt(): ?\DateTimeImmutable
+    {
+        return $this->verifiedAt;
+    }
+
+    public function setVerifiedAt(?\DateTimeImmutable $verifiedAt): self
+    {
+        $this->verifiedAt = $verifiedAt;
+
+        return $this;
+    }
+
+    public function getFailedAt(): ?\DateTimeImmutable
+    {
+        return $this->failedAt;
+    }
+
+    public function setFailedAt(?\DateTimeImmutable $failedAt): self
+    {
+        $this->failedAt = $failedAt;
+
+        return $this;
+    }
+
+    public function getExpiresAt(): ?\DateTimeImmutable
+    {
+        return $this->expiresAt;
+    }
+
+    public function setExpiresAt(?\DateTimeImmutable $expiresAt): self
+    {
+        $this->expiresAt = $expiresAt;
 
         return $this;
     }
@@ -91,6 +295,9 @@ class Payment
     public function setAmount(int $amount): self
     {
         $this->amount = $amount;
+        if (null === $this->payableAmount) {
+            $this->payableAmount = $amount;
+        }
 
         return $this;
     }
@@ -189,3 +396,4 @@ class Payment
         return sprintf('Payment #%d', $this->id ?? 0);
     }
 }
+

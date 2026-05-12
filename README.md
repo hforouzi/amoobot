@@ -126,9 +126,9 @@ Webhook endpoint:
 2. Bot auto-registers TelegramAccount/User and shows main menu.
 3. User clicks `🛒 خرید سرویس` and sees active plans.
 4. User selects plan (`select_plan:{id}`).
-5. Bot shows payment method selection (`select_payment_method:{planId}:manual_card`).
-6. User selects `💳 کارت به کارت`; bot creates Order + Payment and sends payment instructions.
-7. User taps `✅ تایید و ارسال رسید` (`payment_submit_receipt:{paymentId}`) and then sends receipt photo or tracking text in chat.
+5. Bot shows payment gateway selection (`select_payment_gateway:{draftId}:{gatewayId}`) from active gateways.
+6. User selects `manual_card` or `zibal`; bot creates Order + Payment and starts selected gateway flow.
+7. For manual card, user taps `✅ تایید و ارسال رسید` (`payment_submit_receipt:{paymentId}`) and then sends receipt photo or tracking text in chat.
 8. Payment becomes `submitted`, admin sees it in `/admin`.
 9. Admin confirms payment via `Confirm Payment` action.
 10. System provisions via `DummyVpnPanelDriver` and sends subscription/config to user.
@@ -138,6 +138,55 @@ Webhook endpoint:
 In `/admin` -> Payments, use actions:
 - `Confirm Payment` -> marks payment confirmed, order paid/provisioned, creates VPN service, notifies user.
 - `Reject Payment` -> marks payment rejected and notifies user.
+
+## Phase 1.7.1 Payment Gateway Architecture
+
+### PaymentGateway setup
+- Entity: `PaymentGateway` with supported types:
+  - `manual_card`
+  - `zibal`
+- Manage gateways in `/admin` -> `Payment Gateways`.
+- You can enable/disable gateways with `isActive` and order them with `sortOrder`.
+
+### Manual card setup
+- Create (or keep) one active `manual_card` gateway.
+- Existing receipt upload/admin approval flow remains unchanged.
+
+### Zibal setup
+- Create a `zibal` gateway and configure JSON:
+  ```json
+  {
+    "merchant": "zibal",
+    "sandbox": true,
+    "callback_base_url": "https://example.com"
+  }
+  ```
+- Callback URL:
+  - `GET/POST /payment/callback/zibal`
+
+### Telegram online payment flow
+- For zibal payments bot sends:
+  - `پرداخت آنلاین` (URL button)
+  - `بررسی پرداخت` (`payment_check:{paymentId}`)
+  - `انصراف` (`payment_cancel:{paymentId}`)
+
+### Commands
+- Create defaults:
+  ```bash
+  php bin/console app:payment:create-default-gateways
+  ```
+- List gateways:
+  ```bash
+  php bin/console app:payment:list-gateways
+  ```
+- Test zibal request:
+  ```bash
+  php bin/console app:payment:test-zibal {gatewayId} --amount=10000
+  ```
+
+### Duplicate callback safety
+- Zibal callback verification is always re-verified with gateway API.
+- Payment confirmation is idempotent through existing approval checks, so repeated callbacks do not double-provision/renew/add-traffic.
 
 ## Admin approval from Telegram
 - Set `TELEGRAM_ADMIN_CHAT_ID` in `.env.local` to the admin Telegram chat ID.
@@ -580,5 +629,5 @@ php bin/console app:telegram:poll --force
 - Reseller/Agent
 - Referral
 - Wallet
-- Online payment gateways
+- Online payment gateways other than `zibal`
 - Additional real panel drivers beyond `sanaei_3xui`

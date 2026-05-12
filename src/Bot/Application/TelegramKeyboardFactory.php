@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Bot\Application;
 
+use App\Entity\PaymentGateway;
+use App\Payment\Domain\PaymentGatewayType;
 use App\Entity\Plan;
 
 class TelegramKeyboardFactory
@@ -165,6 +167,35 @@ class TelegramKeyboardFactory
     }
 
     /**
+     * @param list<PaymentGateway> $gateways
+     *
+     * @return array<string, array<array<array<string, string>>>>
+     */
+    public function paymentGatewaySelectionMenu(int $draftId, array $gateways, string $cancelCallback): array
+    {
+        $rows = [];
+        foreach ($gateways as $gateway) {
+            $text = match ($gateway->getType()) {
+                PaymentGatewayType::MANUAL_CARD => '💳 کارت به کارت',
+                PaymentGatewayType::ZIBAL => '🌐 پرداخت آنلاین (زیبال)',
+                default => $gateway->getTitle(),
+            };
+
+            $rows[] = [[
+                'text' => $text,
+                'callback_data' => 'select_payment_gateway:'.$draftId.':'.$gateway->getId(),
+            ]];
+        }
+
+        $rows[] = [[
+            'text' => '❌ انصراف',
+            'callback_data' => $cancelCallback,
+        ]];
+
+        return ['inline_keyboard' => $rows];
+    }
+
+    /**
      * @return array<string, array<array<array<string, string>>>>
      */
     public function customOrderSummaryMenu(int $draftId): array
@@ -215,6 +246,29 @@ class TelegramKeyboardFactory
                 ]],
                 [[
                     'text' => '❌ انصراف',
+                    'callback_data' => 'payment_cancel:'.$paymentId,
+                ]],
+            ],
+        ];
+    }
+
+    /**
+     * @return array<string, array<array<array<string, string>>>>
+     */
+    public function paymentOnlineActionMenu(int $paymentId, string $paymentUrl): array
+    {
+        return [
+            'inline_keyboard' => [
+                [[
+                    'text' => 'پرداخت آنلاین',
+                    'url' => $paymentUrl,
+                ]],
+                [[
+                    'text' => 'بررسی پرداخت',
+                    'callback_data' => 'payment_check:'.$paymentId,
+                ]],
+                [[
+                    'text' => 'انصراف',
                     'callback_data' => 'payment_cancel:'.$paymentId,
                 ]],
             ],
