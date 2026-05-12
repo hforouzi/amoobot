@@ -9,6 +9,7 @@ use App\Provisioning\Application\ServiceAutoSuspendService;
 use App\Provisioning\Application\ServiceExpiryChecker;
 use App\Provisioning\Application\ServiceNotificationService;
 use App\Provisioning\Application\ServiceUsageSyncService;
+use App\Shop\Application\IncompleteOrderExpiryService;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
@@ -26,6 +27,7 @@ final class AutomationRunCommand extends Command
         private readonly ServiceExpiryChecker $serviceExpiryChecker,
         private readonly ServiceAutoSuspendService $serviceAutoSuspendService,
         private readonly ServiceNotificationService $serviceNotificationService,
+        private readonly IncompleteOrderExpiryService $incompleteOrderExpiryService,
         private readonly LoggerInterface $logger,
     ) {
         parent::__construct();
@@ -36,7 +38,7 @@ final class AutomationRunCommand extends Command
         $this
             ->addOption('dry-run', null, InputOption::VALUE_NONE, 'Show automation results without saving/sending')
             ->addOption('limit', null, InputOption::VALUE_REQUIRED, 'Max services to process per task; falls back to automation.batch_limit', null)
-            ->addOption('only', null, InputOption::VALUE_REQUIRED, 'Run only sync|expiry|notifications|suspend|all', 'all');
+            ->addOption('only', null, InputOption::VALUE_REQUIRED, 'Run only orders|sync|expiry|notifications|suspend|all', 'all');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
@@ -44,10 +46,10 @@ final class AutomationRunCommand extends Command
         $io = new SymfonyStyle($input, $output);
         $dryRun = (bool) $input->getOption('dry-run');
         $only = strtolower(trim((string) $input->getOption('only')));
-        $onlyOptions = ['sync', 'expiry', 'notifications', 'suspend', 'all'];
+        $onlyOptions = ['orders', 'sync', 'expiry', 'notifications', 'suspend', 'all'];
 
         if (!in_array($only, $onlyOptions, true)) {
-            $io->error('--only option must be one of: sync, expiry, notifications, suspend, all.');
+            $io->error('--only option must be one of: orders, sync, expiry, notifications, suspend, all.');
 
             return Command::FAILURE;
         }
@@ -61,6 +63,16 @@ final class AutomationRunCommand extends Command
         $notified = 0;
         $failed = 0;
         $skipped = 0;
+
+        if ($this->shouldRun($only, 'orders')) {
+            if ($this->automationSettingsProvider->expireIncompleteOrdersEnabled()) {
+                $summary = $this->incompleteOrderExpiryService->expire($dryRun, null, $limit);
+                $updated += (int) $summary['draftsExpired'] + (int) $summary['ordersExpired'];
+                $this->logger->info('automation_task_completed', ['task' => 'expire_incomplete_orders', 'summary' => $summary]);
+            } else {
+                $this->logger->info('automation_task_skipped_by_setting', ['task' => 'expire_incomplete_orders']);
+            }
+        }
 
         if ($this->shouldRun($only, 'sync')) {
             if ($this->automationSettingsProvider->syncUsageEnabled()) {

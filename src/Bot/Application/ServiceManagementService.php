@@ -450,7 +450,7 @@ class ServiceManagementService
                 ],
                 'adminMode' => $adminMode,
             ])
-            ->setExpiresAt((new \DateTimeImmutable())->modify('+1 hour'))
+            ->setExpiresAt($this->resolveIncompleteExpiresAt())
             ->setUpdatedAt(new \DateTimeImmutable());
 
         $this->entityManager->persist($draft);
@@ -511,7 +511,7 @@ class ServiceManagementService
                 'draftType' => 'add_traffic',
                 'targetServiceId' => $serviceId,
             ])
-            ->setExpiresAt((new \DateTimeImmutable())->modify('+1 hour'))
+            ->setExpiresAt($this->resolveIncompleteExpiresAt())
             ->setUpdatedAt(new \DateTimeImmutable());
 
         $this->entityManager->persist($draft);
@@ -848,6 +848,40 @@ class ServiceManagementService
         return $this->handleSelectStorePaymentMethodForOrder($account, $orderId, (int) ($method->getId() ?? 0), $chatId, $callbackId);
     }
 
+    public function showPaymentMethodsForOrder(TelegramAccount $account, int $orderId, string $chatId, ?string $callbackId = null): bool
+    {
+        $order = $this->entityManager->getRepository(Order::class)->find($orderId);
+        if (
+            !$order instanceof Order
+            || $order->getUser()->getId() !== $account->getUser()->getId()
+            || !in_array($order->getType(), [OrderType::RENEWAL, OrderType::ADD_TRAFFIC], true)
+            || OrderStatus::WAITING_PAYMENT !== $order->getStatus()
+        ) {
+            return false;
+        }
+
+        $methods = $this->findAvailableStorePaymentMethods($order);
+        if ([] === $methods) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'در حال حاضر روش پرداخت فعالی وجود ندارد.', 'no_active_store_method_order_resume');
+
+            return true;
+        }
+
+        $this->acknowledgeCallback($callbackId);
+        $this->telegramApiClient->sendMessage(
+            $chatId,
+            'روش پرداخت را انتخاب کنید:',
+            $this->keyboardFactory->paymentGatewaySelectionMenu(
+                (int) ($order->getId() ?? 0),
+                $methods,
+                'payment_methods_back:'.((int) ($order->getId() ?? 0)),
+                'order_cancel:'.((int) ($order->getId() ?? 0))
+            )
+        );
+
+        return true;
+    }
+
     private function sendPaymentGatewaySelection(OrderDraft $draft, string $chatId, ?string $callbackId): void
     {
         $order = $this->createOrderFromDraft($draft);
@@ -882,7 +916,7 @@ class ServiceManagementService
         $this->telegramApiClient->sendMessage(
             $chatId,
             'روش پرداخت را انتخاب کنید:',
-            $this->keyboardFactory->paymentGatewaySelectionMenu((int) ($order->getId() ?? 0), $methods, $cancelCallback)
+            $this->keyboardFactory->paymentGatewaySelectionMenu((int) ($order->getId() ?? 0), $methods, 'payment_methods_back:'.((int) ($order->getId() ?? 0)), $cancelCallback)
         );
     }
 
@@ -1060,7 +1094,7 @@ class ServiceManagementService
             $this->telegramApiClient->sendMessage(
                 $chatId,
                 'برای پرداخت آنلاین روی دکمه زیر بزنید.',
-                $this->keyboardFactory->paymentOnlineActionMenu((int) ($payment->getId() ?? 0), (string) $payment->getPaymentUrl())
+                $this->keyboardFactory->paymentOnlineActionMenu((int) ($payment->getId() ?? 0), (int) ($order->getId() ?? 0), (string) $payment->getPaymentUrl())
             );
 
             return;
@@ -1085,7 +1119,7 @@ class ServiceManagementService
         );
 
         $this->acknowledgeCallback($callbackId);
-        $this->telegramApiClient->sendMessage($chatId, trim($message), $this->keyboardFactory->paymentActionMenu((int) ($payment->getId() ?? 0)));
+        $this->telegramApiClient->sendMessage($chatId, trim($message), $this->keyboardFactory->paymentActionMenu((int) ($payment->getId() ?? 0), (int) ($order->getId() ?? 0)));
     }
 
     public function suspendService(int $serviceId, string $chatId, string $callbackId): void
@@ -1600,6 +1634,17 @@ class ServiceManagementService
         $int = (int) $value;
 
         return $int > 0 ? $int : null;
+    }
+
+    private function resolveIncompleteExpiresAt(): \DateTimeImmutable
+    {
+        $hoursRaw = $this->settingValueProvider->get('orders.incomplete_expire_hours', '24');
+        $hours = is_string($hoursRaw) ? (int) trim($hoursRaw) : 24;
+        if ($hours <= 0) {
+            $hours = 24;
+        }
+
+        return (new \DateTimeImmutable())->modify(sprintf('+%d hours', $hours));
     }
 
     private function formatTrafficUsed(VpnService $service): string

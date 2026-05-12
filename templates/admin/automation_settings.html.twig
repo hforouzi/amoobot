@@ -24,11 +24,18 @@
             <input class="form-check-input" type="checkbox" id="automation_auto_suspend_traffic_exhausted_enabled" name="automation_auto_suspend_traffic_exhausted_enabled" {% if values.automation_auto_suspend_traffic_exhausted_enabled %}checked{% endif %}>
             <label class="form-check-label" for="automation_auto_suspend_traffic_exhausted_enabled">فعال بودن auto suspend traffic exhausted services</label>
         </div>
+        <div class="mb-3 form-check">
+            <input class="form-check-input" type="checkbox" id="automation_expire_incomplete_orders_enabled" name="automation_expire_incomplete_orders_enabled" {% if values.automation_expire_incomplete_orders_enabled %}checked{% endif %}>
+            <label class="form-check-label" for="automation_expire_incomplete_orders_enabled">فعال بودن expire incomplete orders</label>
+        </div>
         <div class="mb-3">
             <label class="form-label" for="automation_batch_limit">Batch limit</label>
             <input class="form-control" type="number" min="1" step="1" id="automation_batch_limit" name="automation_batch_limit" value="{{ values.automation_batch_limit }}">
         </div>
+        <div class="mb-3">
+            <label class="form-label" for="orders_incomplete_expire_hours">انقضای سفارش ناقص (ساعت)</label>
+            <input class="form-control" type="number" min="1" step="1" id="orders_incomplete_expire_hours" name="orders_incomplete_expire_hours" value="{{ values.orders_incomplete_expire_hours }}">
+        </div>
         <button type="submit" class="btn btn-primary">ذخیره تنظیمات</button>
     </form>
 {% endblock %}
-

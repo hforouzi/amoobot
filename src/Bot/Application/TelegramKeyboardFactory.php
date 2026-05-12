@@ -171,7 +171,7 @@ class TelegramKeyboardFactory
      *
      * @return array<string, array<array<array<string, string>>>>
      */
-    public function paymentGatewaySelectionMenu(int $orderId, array $methods, string $cancelCallback): array
+    public function paymentGatewaySelectionMenu(int $orderId, array $methods, string $backCallback, string $cancelCallback): array
     {
         $rows = [];
         foreach ($methods as $method) {
@@ -194,6 +194,11 @@ class TelegramKeyboardFactory
         }
 
         $rows[] = [[
+            'text' => '🔙 بازگشت',
+            'callback_data' => $backCallback,
+        ]];
+
+        $rows[] = [[
             'text' => '❌ انصراف',
             'callback_data' => $cancelCallback,
         ]];
@@ -213,8 +218,12 @@ class TelegramKeyboardFactory
                     'callback_data' => 'custom_order_confirm:'.$draftId,
                 ]],
                 [[
+                    'text' => '🔙 بازگشت',
+                    'callback_data' => 'draft_back:'.$draftId,
+                ]],
+                [[
                     'text' => '❌ انصراف',
-                    'callback_data' => 'custom_order_cancel:'.$draftId,
+                    'callback_data' => 'draft_cancel:'.$draftId,
                 ]],
             ],
         ];
@@ -229,11 +238,11 @@ class TelegramKeyboardFactory
             'inline_keyboard' => [
                 [[
                     'text' => '🔙 بازگشت',
-                    'callback_data' => 'buy_service',
+                    'callback_data' => 'draft_back:'.$draftId,
                 ]],
                 [[
                     'text' => '❌ انصراف',
-                    'callback_data' => 'custom_order_cancel:'.$draftId,
+                    'callback_data' => 'draft_cancel:'.$draftId,
                 ]],
             ],
         ];
@@ -242,7 +251,22 @@ class TelegramKeyboardFactory
     /**
      * @return array<string, array<array<array<string, string>>>>
      */
-    public function paymentActionMenu(int $paymentId): array
+    public function customOrderUsernameInputMenu(int $draftId): array
+    {
+        return [
+            'inline_keyboard' => [
+                [[
+                    'text' => '❌ انصراف',
+                    'callback_data' => 'draft_cancel:'.$draftId,
+                ]],
+            ],
+        ];
+    }
+
+    /**
+     * @return array<string, array<array<array<string, string>>>>
+     */
+    public function paymentActionMenu(int $paymentId, int $orderId): array
     {
         return [
             'inline_keyboard' => [
@@ -251,8 +275,12 @@ class TelegramKeyboardFactory
                     'callback_data' => 'payment_submit_receipt:'.$paymentId,
                 ]],
                 [[
-                    'text' => '❌ انصراف',
-                    'callback_data' => 'payment_cancel:'.$paymentId,
+                    'text' => '🔙 بازگشت به روشهای پرداخت',
+                    'callback_data' => 'order_back_to_payment_methods:'.$orderId,
+                ]],
+                [[
+                    'text' => '❌ انصراف سفارش',
+                    'callback_data' => 'order_cancel:'.$orderId,
                 ]],
             ],
         ];
@@ -261,7 +289,7 @@ class TelegramKeyboardFactory
     /**
      * @return array<string, array<array<array<string, string>>>>
      */
-    public function paymentOnlineActionMenu(int $paymentId, string $paymentUrl): array
+    public function paymentOnlineActionMenu(int $paymentId, int $orderId, string $paymentUrl): array
     {
         return [
             'inline_keyboard' => [
@@ -270,12 +298,16 @@ class TelegramKeyboardFactory
                     'url' => $paymentUrl,
                 ]],
                 [[
-                    'text' => 'بررسی پرداخت',
+                    'text' => '🔄 بررسی پرداخت',
                     'callback_data' => 'payment_check:'.$paymentId,
                 ]],
                 [[
-                    'text' => 'انصراف',
-                    'callback_data' => 'payment_cancel:'.$paymentId,
+                    'text' => '🔙 بازگشت به روشهای پرداخت',
+                    'callback_data' => 'order_back_to_payment_methods:'.$orderId,
+                ]],
+                [[
+                    'text' => '❌ انصراف سفارش',
+                    'callback_data' => 'order_cancel:'.$orderId,
                 ]],
             ],
         ];
@@ -659,6 +691,10 @@ class TelegramKeyboardFactory
         return [
             'inline_keyboard' => [
                 [[
+                    'text' => '🔙 بازگشت به خلاصه سفارش',
+                    'callback_data' => 'draft_back:'.$draftId,
+                ]],
+                [[
                     'text' => '🎟 وارد کردن کد تخفیف',
                     'callback_data' => 'discount_enter:'.$draftId,
                 ]],
@@ -682,6 +718,10 @@ class TelegramKeyboardFactory
         return [
             'inline_keyboard' => [
                 [[
+                    'text' => '🔙 بازگشت به خلاصه سفارش',
+                    'callback_data' => 'discount_back:'.$orderId,
+                ]],
+                [[
                     'text' => '🎟 وارد کردن کد تخفیف',
                     'callback_data' => 'discount_enter_order:'.$orderId,
                 ]],
@@ -692,6 +732,67 @@ class TelegramKeyboardFactory
                 [[
                     'text' => '❌ انصراف',
                     'callback_data' => $cancelCallback,
+                ]],
+            ],
+        ];
+    }
+
+    /**
+     * @return array<string, array<array<array<string, string>>>>
+     */
+    public function discountCodeInputMenu(int $draftId): array
+    {
+        return [
+            'inline_keyboard' => [
+                [[
+                    'text' => '🔙 بازگشت به انتخاب تخفیف',
+                    'callback_data' => 'draft_back:'.$draftId,
+                ]],
+                [[
+                    'text' => '❌ انصراف',
+                    'callback_data' => 'draft_cancel:'.$draftId,
+                ]],
+            ],
+        ];
+    }
+
+    /**
+     * @return array<string, array<array<array<string, string>>>>
+     */
+    public function discountCodeInputMenuForOrder(int $orderId): array
+    {
+        return [
+            'inline_keyboard' => [
+                [[
+                    'text' => '🔙 بازگشت به انتخاب تخفیف',
+                    'callback_data' => 'discount_back:'.$orderId,
+                ]],
+                [[
+                    'text' => '❌ انصراف',
+                    'callback_data' => 'order_cancel:'.$orderId,
+                ]],
+            ],
+        ];
+    }
+
+    /**
+     * @return array<string, array<array<array<string, string>>>>
+     */
+    public function incompleteOrderPrompt(int $id): array
+    {
+        return [
+            'inline_keyboard' => [
+                [[
+                    'text' => '▶️ ادامه سفارش',
+                    'callback_data' => 'resume_incomplete_order:'.$id,
+                ]],
+                [[
+                    'text' => '🗑 حذف سفارش ناتمام',
+                    'callback_data' => 'cancel_incomplete_order:'.$id,
+                ]],
+                [[
+                    'text' => '➕ سفارش جدید',
+                    'callback_data' => 'start_new_order',
                 ]],
             ],
         ];
