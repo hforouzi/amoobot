@@ -31,7 +31,8 @@ final class StorePaymentMethodResolver
                 continue;
             }
 
-            if ($this->methodSkipReasons($method, $order, $amount, $currency) !== []) {
+            $skipReasons = $this->methodSkipReasons($method, $order, $amount, $currency);
+            if ($skipReasons !== []) {
                 continue;
             }
 
