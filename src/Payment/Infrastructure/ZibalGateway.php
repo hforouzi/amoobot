@@ -49,7 +49,7 @@ final class ZibalGateway implements PaymentGatewayInterface
             'merchant' => $merchant,
             'amount' => $amount,
             'callbackUrl' => $callbackUrl,
-            'orderId' => (string) ($payment->getId() ?? $order->getId() ?? ''),
+            'orderId' => (string) ($order->getId() ?? $payment->getId() ?? ''),
             'description' => trim((string) ($config['description'] ?? sprintf('order_%d_payment_%d', $order->getId() ?? 0, $payment->getId() ?? 0))),
         ];
         $this->appendOptionalRequestFields($requestBody, $config);
