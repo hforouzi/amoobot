@@ -29,6 +29,7 @@ use App\Shop\Application\RenewalPriceResult;
 use App\Shop\Application\TrafficAddonPricingService;
 use App\Shop\Application\DiscountCodeService;
 use App\Shop\Application\IncompleteOrderSettingsProvider;
+use App\Shop\Application\OrderTrackingCodeService;
 use App\Shop\Domain\OrderDraftStatus;
 use App\Shop\Domain\OrderStatus;
 use App\Shop\Domain\OrderType;
@@ -56,6 +57,7 @@ class ServiceManagementService
         private readonly TrafficAddonPricingService $trafficAddonPricingService,
         private readonly DiscountCodeService $discountCodeService,
         private readonly IncompleteOrderSettingsProvider $incompleteOrderSettingsProvider,
+        private readonly OrderTrackingCodeService $orderTrackingCodeService,
         private readonly PaymentGatewayRegistry $paymentGatewayRegistry,
         private readonly StorePaymentMethodResolver $storePaymentMethodResolver,
         private readonly string $paymentCardNumber = '',
@@ -1025,6 +1027,7 @@ class ServiceManagementService
             ->setAmount($finalAmount)
             ->setMetadata($metadata)
             ->setStatus(OrderStatus::WAITING_PAYMENT);
+        $this->orderTrackingCodeService->assignIfMissing($order);
 
         $draft->setStatus(OrderDraftStatus::CONFIRMED)->setUpdatedAt(new \DateTimeImmutable());
         $this->entityManager->persist($order);
@@ -1099,7 +1102,7 @@ class ServiceManagementService
             $this->acknowledgeCallback($callbackId);
             $this->telegramApiClient->sendMessage(
                 $chatId,
-                'برای پرداخت آنلاین روی دکمه زیر بزنید.',
+                sprintf("برای پرداخت آنلاین روی دکمه زیر بزنید.\nکد پیگیری: %s", (string) ($order->getTrackingCode() ?? '-')),
                 $this->keyboardFactory->paymentOnlineActionMenu((int) ($payment->getId() ?? 0), (int) ($order->getId() ?? 0), (string) $payment->getPaymentUrl())
             );
 
@@ -1112,7 +1115,8 @@ class ServiceManagementService
         $cardHolder = $gateway->getManualCardHolder() ?? $this->settingValueProvider->get('payment.card_holder', $this->paymentCardHolder);
         $description = $gateway->getManualInstructions() ?? $this->settingValueProvider->get('payment.description', $this->paymentDescription);
         $message = sprintf(
-            "شناسه سرویس: %d\nمبلغ پایه: %d تومان\nتخفیف سراسری: %d تومان\nکد تخفیف: %s (%d تومان)\nمبلغ نهایی: %d تومان\nشماره کارت: %s\nبه نام: %s\n%s\n\nبرای ارسال رسید روی «✅ تایید و ارسال رسید» بزنید.",
+            "کد پیگیری سفارش شما:\n%s\n\nشناسه سرویس: %d\nمبلغ پایه: %d تومان\nتخفیف سراسری: %d تومان\nکد تخفیف: %s (%d تومان)\nمبلغ نهایی: %d تومان\nشماره کارت: %s\nبه نام: %s\n%s\n\nبرای ارسال رسید روی «✅ تایید و ارسال رسید» بزنید.",
+            (string) ($order->getTrackingCode() ?? '-'),
             (int) ($metadata['targetServiceId'] ?? 0),
             (int) ($priceSnapshot['baseAmount'] ?? 0),
             (int) ($priceSnapshot['globalDiscountAmount'] ?? 0),

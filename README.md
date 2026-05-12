@@ -617,10 +617,12 @@ If `test login` works but provisioning still fails on `addClient`:
     - Row 2: `🎧 پشتیبانی` (+ `🛠 مدیریت` for admins)
   - When user has an active incomplete order or draft:
     - Row 1: `▶️ ادامه سفارش قبلی` | `🗑 حذف سفارش ناتمام`
-    - Row 2: `🛒 خرید سرویس` | `📦 سرویسهای من`
-    - Row 3: `🎧 پشتیبانی` (+ `🛠 مدیریت` for admins)
+    - Row 2: `🔎 پیگیری سفارش` (if user has recent trackable orders)
+    - Row 3: `🛒 خرید سرویس` | `📦 سرویسهای من`
+    - Row 4: `🎧 پشتیبانی` (+ `🛠 مدیریت` for admins)
   - Pressing `▶️ ادامه سفارش قبلی` resumes the correct draft step or order payment page.
   - Pressing `🗑 حذف سفارش ناتمام` asks confirmation with inline buttons before cancelling.
+  - Pressing `🔎 پیگیری سفارش` shows recent orders with their `trackingCode` and status.
   - Reply keyboard updates (incomplete buttons appear/disappear) at `/start`, `main_menu`, and after order cancel flows.
 - **Inline Keyboard (contextual):** used for action-specific flows. Most multi-option rows use a **two-column layout** to reduce vertical space:
   - plan selection
@@ -676,7 +678,9 @@ If `test login` works but provisioning still fails on `addClient`:
 - `app:service:sync-usage [--service-id=ID] [--limit=100] [--dry-run]`
 - `app:service:check-expiry [--service-id=ID] [--dry-run]`
 - `app:service:send-notifications [--dry-run] [--type=expiry|traffic|expired|all] [--limit=100]`
-- `app:automation:run [--dry-run] [--limit=100] [--only=sync|expiry|notifications|suspend|all]`
+- `app:automation:run [--dry-run] [--limit=100] [--only=orders|sync|expiry|notifications|suspend|all]`
+- `app:orders:backfill-tracking-codes`
+- `app:orders:expire-incomplete [--dry-run] [--hours=24] [--limit=100]`
 - `app:service:test-renew {serviceId} [--days=30] [--traffic-gb=10]`
 - `app:service:test-add-traffic {serviceId} [--traffic-gb=1]`
 - `app:plans:adjust-prices [--percent=10|--amount=50000] [--direction=increase|decrease] [--field=price|pricePerGb|pricePerDay|all] [--dry-run]`

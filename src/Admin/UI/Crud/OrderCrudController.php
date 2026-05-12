@@ -58,6 +58,7 @@ class OrderCrudController extends AbstractCrudController
             AssociationField::new('plan'),
             AssociationField::new('targetService'),
             TextField::new('type'),
+            TextField::new('trackingCode'),
             IntegerField::new('amount'),
             TextField::new('status'),
             TextareaField::new('metadata')

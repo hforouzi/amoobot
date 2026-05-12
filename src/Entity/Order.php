@@ -41,6 +41,9 @@ class Order
     #[ORM\Column(type: 'json', nullable: true)]
     private ?array $metadata = null;
 
+    #[ORM\Column(length: 32, unique: true, nullable: true)]
+    private ?string $trackingCode = null;
+
     #[ORM\Column]
     private \DateTimeImmutable $createdAt;
 
@@ -140,6 +143,19 @@ class Order
     public function setMetadata(?array $metadata): self
     {
         $this->metadata = $metadata;
+
+        return $this;
+    }
+
+    public function getTrackingCode(): ?string
+    {
+        return $this->trackingCode;
+    }
+
+    public function setTrackingCode(?string $trackingCode): self
+    {
+        $trackingCode = null === $trackingCode ? null : strtoupper(trim($trackingCode));
+        $this->trackingCode = '' === (string) $trackingCode ? null : $trackingCode;
 
         return $this;
     }
