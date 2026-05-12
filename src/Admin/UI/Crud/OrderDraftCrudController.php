@@ -63,7 +63,11 @@ final class OrderDraftCrudController extends AbstractCrudController
             IntegerField::new('calculatedAmount'),
             IntegerField::new('finalAmount'),
             TextareaField::new('data')
-                ->formatValue(static fn (mixed $value): string => json_encode($value, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '')
+                ->formatValue(static function (mixed $value): string {
+                    $encoded = json_encode($value, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+
+                    return false === $encoded ? '' : $encoded;
+                })
                 ->hideOnIndex()
                 ->hideOnForm(),
             DateTimeField::new('createdAt')->hideOnForm(),
