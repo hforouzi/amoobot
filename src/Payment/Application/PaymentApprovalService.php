@@ -5,11 +5,13 @@ declare(strict_types=1);
 namespace App\Payment\Application;
 
 use App\Entity\Payment;
+use App\Entity\DiscountCode;
 use App\Entity\VpnService;
 use App\Payment\Domain\PaymentStatus;
 use App\Provisioning\Application\ServiceTrafficAddonService;
 use App\Provisioning\Application\ServiceRenewalService;
 use App\Provisioning\Application\VpnProvisioningService;
+use App\Shop\Application\DiscountCodeService;
 use App\Shop\Domain\OrderStatus;
 use App\Shop\Domain\OrderType;
 use Doctrine\ORM\EntityManagerInterface;
@@ -21,6 +23,7 @@ class PaymentApprovalService
         private readonly VpnProvisioningService $vpnProvisioningService,
         private readonly ServiceRenewalService $serviceRenewalService,
         private readonly ServiceTrafficAddonService $serviceTrafficAddonService,
+        private readonly DiscountCodeService $discountCodeService,
     ) {
     }
 
@@ -109,6 +112,7 @@ class PaymentApprovalService
                 ->setStatus(OrderStatus::PROVISIONED)
                 ->setProvisionedAt($order->getProvisionedAt() ?? new \DateTimeImmutable());
 
+            $this->markOrderDiscountUsed($order);
             $this->entityManager->flush();
 
             return PaymentApprovalResult::processed('Payment confirmed and service renewed.', $targetService);
@@ -145,6 +149,7 @@ class PaymentApprovalService
                 ->setStatus(OrderStatus::PROVISIONED)
                 ->setProvisionedAt($order->getProvisionedAt() ?? new \DateTimeImmutable());
 
+            $this->markOrderDiscountUsed($order);
             $this->entityManager->flush();
 
             return PaymentApprovalResult::processed('Payment confirmed and service traffic updated.', $targetService);
@@ -175,6 +180,7 @@ class PaymentApprovalService
             return new PaymentApprovalResult(false, false, 'ساخت کاربر در پنل انجام نشد. لاگ را بررسی کنید.');
         }
 
+        $this->markOrderDiscountUsed($order);
         $this->entityManager->flush();
 
         return PaymentApprovalResult::processed('Payment confirmed and service provisioned.', $vpnService);
@@ -203,6 +209,26 @@ class PaymentApprovalService
         $this->entityManager->flush();
 
         return PaymentApprovalResult::processed('Payment rejected.');
+    }
+
+    private function markOrderDiscountUsed(\App\Entity\Order $order): void
+    {
+        $metadata = is_array($order->getMetadata()) ? $order->getMetadata() : [];
+        $priceSnapshot = is_array($metadata['priceSnapshot'] ?? null) ? $metadata['priceSnapshot'] : [];
+        $discountCodeText = strtoupper(trim((string) ($priceSnapshot['discountCode'] ?? '')));
+        if ('' === $discountCodeText) {
+            return;
+        }
+
+        $discountCode = $this->entityManager->getRepository(DiscountCode::class)->findOneBy(['code' => $discountCodeText]);
+        if (!$discountCode instanceof DiscountCode) {
+            return;
+        }
+
+        $before = (int) ($priceSnapshot['afterGlobalDiscountAmount'] ?? $order->getAmount());
+        $discount = (int) ($priceSnapshot['discountCodeAmount'] ?? 0);
+        $after = (int) ($priceSnapshot['finalAmount'] ?? $order->getAmount());
+        $this->discountCodeService->markUsed($discountCode, $order->getUser(), $order, $before, $discount, $after);
     }
 
 }

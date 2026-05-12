@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Admin\UI;
 
 use App\Admin\UI\Crud\BotMessageLogCrudController;
+use App\Admin\UI\Crud\DiscountCodeCrudController;
+use App\Admin\UI\Crud\DiscountUsageCrudController;
 use App\Admin\UI\Crud\OrderCrudController;
 use App\Admin\UI\Crud\PaymentCrudController;
 use App\Admin\UI\Crud\PlanCrudController;
@@ -43,6 +45,8 @@ class DashboardController extends AbstractDashboardController
         yield MenuItem::linkTo(PlanCrudController::class, 'Plans', 'fa fa-list');
         yield MenuItem::linkTo(OrderCrudController::class, 'Orders', 'fa fa-shopping-cart');
         yield MenuItem::linkTo(PaymentCrudController::class, 'Payments', 'fa fa-credit-card');
+        yield MenuItem::linkTo(DiscountCodeCrudController::class, 'Discount Codes', 'fa fa-ticket');
+        yield MenuItem::linkTo(DiscountUsageCrudController::class, 'Discount Usage', 'fa fa-bar-chart');
         yield MenuItem::linkTo(VpnServiceCrudController::class, 'VPN Services', 'fa fa-link');
         yield MenuItem::linkTo(ServiceNotificationLogCrudController::class, 'Service Notifications', 'fa fa-bell');
         yield MenuItem::linkTo(BotMessageLogCrudController::class, 'Bot Logs', 'fa fa-file-text');

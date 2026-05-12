@@ -41,6 +41,18 @@ class OrderDraft
     #[ORM\Column(nullable: true)]
     private ?int $calculatedAmount = null;
 
+    #[ORM\Column(length: 64, nullable: true)]
+    private ?string $discountCode = null;
+
+    #[ORM\Column(nullable: true)]
+    private ?int $discountAmount = null;
+
+    #[ORM\Column(nullable: true)]
+    private ?int $finalAmount = null;
+
+    #[ORM\Column(type: 'json', nullable: true)]
+    private ?array $priceSnapshot = null;
+
     #[ORM\Column(length: 64)]
     private string $step = 'waiting_custom_username';
 
@@ -159,6 +171,60 @@ class OrderDraft
     public function setCalculatedAmount(?int $calculatedAmount): self
     {
         $this->calculatedAmount = $calculatedAmount;
+
+        return $this;
+    }
+
+    public function getDiscountCode(): ?string
+    {
+        return $this->discountCode;
+    }
+
+    public function setDiscountCode(?string $discountCode): self
+    {
+        $this->discountCode = $discountCode;
+
+        return $this;
+    }
+
+    public function getDiscountAmount(): ?int
+    {
+        return $this->discountAmount;
+    }
+
+    public function setDiscountAmount(?int $discountAmount): self
+    {
+        $this->discountAmount = $discountAmount;
+
+        return $this;
+    }
+
+    public function getFinalAmount(): ?int
+    {
+        return $this->finalAmount;
+    }
+
+    public function setFinalAmount(?int $finalAmount): self
+    {
+        $this->finalAmount = $finalAmount;
+
+        return $this;
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    public function getPriceSnapshot(): ?array
+    {
+        return $this->priceSnapshot;
+    }
+
+    /**
+     * @param array<string, mixed>|null $priceSnapshot
+     */
+    public function setPriceSnapshot(?array $priceSnapshot): self
+    {
+        $this->priceSnapshot = $priceSnapshot;
 
         return $this;
     }
