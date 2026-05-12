@@ -8,7 +8,7 @@ use App\Shop\Domain\OrderType;
 use Doctrine\ORM\Mapping as ORM;
 
 #[ORM\Entity]
-#[ORM\Table(name: 'discount_code', uniqueConstraints: [new ORM\UniqueConstraint(name: 'uniq_discount_code_code', columns: ['code'])])]
+#[ORM\Table(name: 'discount_code', uniqueConstraints: [new ORM\UniqueConstraint(name: 'uniq_discount_code', columns: ['code'])])]
 class DiscountCode
 {
     public const TYPE_PERCENT = 'percent';

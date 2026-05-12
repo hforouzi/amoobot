@@ -1208,6 +1208,8 @@ class ServiceManagementService
     }
 
     /**
+     * amount and afterGlobalDiscountAmount are intentionally the same at this stage (before discount code).
+     *
      * @return array{plan: Plan, amount: int, trafficGb: int, durationDays: int, unlimitedDuration: bool, baseAmount: int, globalDiscountPercent: int, globalDiscountAmount: int, afterGlobalDiscountAmount: int, carryRemainingTraffic: bool, carryRemainingDays: bool}|null
      */
     private function resolveRenewalPackage(VpnService $service): ?array

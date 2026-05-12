@@ -141,7 +141,7 @@ final class DiscountCodeService
         return DiscountResult::applied($validation->discountCode, $amount, $validation->discountAmount, $validation->finalAmount);
     }
 
-    public function markUsed(DiscountCode $code, User $user, Order $order, int $before, int $discount, int $after): void
+    public function markUsed(DiscountCode $code, User $user, Order $order, int $amountBeforeDiscount, int $discountAmount, int $amountAfterDiscount): void
     {
         $existing = $this->entityManager->getRepository(DiscountUsage::class)->findOneBy([
             'discountCode' => $code,
@@ -158,9 +158,9 @@ final class DiscountCodeService
             ->setDiscountCode($code)
             ->setUser($user)
             ->setOrder($order)
-            ->setAmountBefore($before)
-            ->setDiscountAmount($discount)
-            ->setAmountAfter($after)
+            ->setAmountBefore($amountBeforeDiscount)
+            ->setDiscountAmount($discountAmount)
+            ->setAmountAfter($amountAfterDiscount)
             ->setUsedAt(new \DateTimeImmutable())
             ->setMetadata([
                 'orderType' => $order->getType(),
@@ -174,10 +174,10 @@ final class DiscountCodeService
 
     public function calculateDiscountAmount(DiscountCode $code, int $amount): int
     {
-        $safeAmount = max(0, $amount);
-        if ($safeAmount <= 0) {
+        if ($amount <= 0) {
             return 0;
         }
+        $safeAmount = max(0, $amount);
 
         if (DiscountCode::TYPE_PERCENT === $code->getType()) {
             return (int) floor(($safeAmount * max(0, min(100, $code->getValue()))) / 100);
