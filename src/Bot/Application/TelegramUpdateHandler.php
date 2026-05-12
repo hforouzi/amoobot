@@ -351,6 +351,12 @@ class TelegramUpdateHandler
             return;
         }
 
+        if (str_starts_with($data, 'order_payment_methods:')) {
+            $this->handleOrderBackToPaymentMethods($account, $chatId, (int) str_replace('order_payment_methods:', '', $data), $callbackId);
+
+            return;
+        }
+
         if (str_starts_with($data, 'payment_methods_back:')) {
             $this->handleOrderBackToPaymentMethods($account, $chatId, (int) str_replace('payment_methods_back:', '', $data), $callbackId);
 
@@ -407,6 +413,12 @@ class TelegramUpdateHandler
 
         if (str_starts_with($data, 'discount_back:')) {
             $this->handleDiscountBackOrder($account, $chatId, (int) str_replace('discount_back:', '', $data), $callbackId);
+
+            return;
+        }
+
+        if (str_starts_with($data, 'order_summary:')) {
+            $this->handleOrderSummary($account, $chatId, (int) str_replace('order_summary:', '', $data), $callbackId);
 
             return;
         }
@@ -1091,7 +1103,7 @@ class TelegramUpdateHandler
 
     private function handleDiscountEnterOrder(TelegramAccount $account, string $chatId, int $orderId, ?string $callbackId = null): void
     {
-        $order = $this->findPendingNewServiceOrder($account, $orderId);
+        $order = $this->findPendingEditableOrder($account, $orderId);
         if (!$order instanceof Order) {
             $this->showPopupOrMessage($chatId, $callbackId, 'سفارش نامعتبر است.', 'invalid_discount_enter_order');
 
@@ -1107,7 +1119,7 @@ class TelegramUpdateHandler
 
     private function handleDiscountSkipOrder(TelegramAccount $account, string $chatId, int $orderId, ?string $callbackId = null): void
     {
-        $order = $this->findPendingNewServiceOrder($account, $orderId);
+        $order = $this->findPendingEditableOrder($account, $orderId);
         if (!$order instanceof Order) {
             $this->showPopupOrMessage($chatId, $callbackId, 'سفارش نامعتبر است.', 'invalid_discount_skip_order');
 
@@ -1173,14 +1185,14 @@ class TelegramUpdateHandler
         if ($order->getUser()->getId() !== $account->getUser()->getId()) {
             return;
         }
-        if (OrderStatus::WAITING_PAYMENT !== $order->getStatus() || OrderType::NEW_SERVICE !== $order->getType()) {
+        if (!$this->canEditOrderForPayment($order)) {
             return;
         }
 
         $metadata = is_array($order->getMetadata()) ? $order->getMetadata() : [];
         $priceSnapshot = is_array($metadata['priceSnapshot'] ?? null) ? $metadata['priceSnapshot'] : [];
         $amountBeforeCode = (int) ($priceSnapshot['afterGlobalDiscountAmount'] ?? $order->getAmount());
-        $result = $this->discountCodeService->validateCode($codeInput, $order->getUser(), OrderType::NEW_SERVICE, $order->getPlan(), $amountBeforeCode);
+        $result = $this->discountCodeService->validateCode($codeInput, $order->getUser(), $order->getType(), $order->getPlan(), $amountBeforeCode);
         if (!$result->valid || !$result->discountCode instanceof \App\Entity\DiscountCode) {
             $this->telegramApiClient->sendMessage(
                 $chatId,
@@ -1350,7 +1362,7 @@ class TelegramUpdateHandler
         }
 
         $this->acknowledgeCallback($callbackId);
-        $backCallback ??= 'discount_back:'.((int) ($order->getId() ?? 0));
+        $backCallback ??= 'order_summary:'.((int) ($order->getId() ?? 0));
         $cancelCallback ??= 'order_cancel:'.((int) ($order->getId() ?? 0));
         $this->telegramApiClient->sendMessage(
             $chatId,
@@ -2054,6 +2066,16 @@ class TelegramUpdateHandler
 
     private function findPendingNewServiceOrder(TelegramAccount $account, int $orderId): ?Order
     {
+        $order = $this->findPendingEditableOrder($account, $orderId);
+        if (!$order instanceof Order || OrderType::NEW_SERVICE !== $order->getType()) {
+            return null;
+        }
+
+        return $order;
+    }
+
+    private function findPendingEditableOrder(TelegramAccount $account, int $orderId): ?Order
+    {
         if ($orderId <= 0) {
             return null;
         }
@@ -2062,8 +2084,7 @@ class TelegramUpdateHandler
         if (
             !$order instanceof Order
             || $order->getUser()->getId() !== $account->getUser()->getId()
-            || OrderStatus::WAITING_PAYMENT !== $order->getStatus()
-            || OrderType::NEW_SERVICE !== $order->getType()
+            || !$this->canEditOrderForPayment($order)
         ) {
             return null;
         }
@@ -2141,13 +2162,16 @@ class TelegramUpdateHandler
     private function findWaitingDiscountCodeOrder(TelegramAccount $account): ?Order
     {
         $orders = $this->entityManager->getRepository(Order::class)->findBy(
-            ['user' => $account->getUser(), 'status' => OrderStatus::WAITING_PAYMENT, 'type' => OrderType::NEW_SERVICE],
+            ['user' => $account->getUser()],
             ['id' => 'DESC'],
-            10
+            20
         );
 
         foreach ($orders as $order) {
             if (!$order instanceof Order) {
+                continue;
+            }
+            if (!$this->canEditOrderForPayment($order)) {
                 continue;
             }
             $metadata = is_array($order->getMetadata()) ? $order->getMetadata() : [];
@@ -2161,6 +2185,12 @@ class TelegramUpdateHandler
         }
 
         return null;
+    }
+
+    private function canEditOrderForPayment(Order $order): bool
+    {
+        return in_array($order->getType(), [OrderType::NEW_SERVICE, OrderType::RENEWAL, OrderType::ADD_TRAFFIC], true)
+            && in_array($order->getStatus(), [OrderStatus::WAITING_PAYMENT, OrderStatus::PAYMENT_PENDING, OrderStatus::PENDING, OrderStatus::DRAFT], true);
     }
 
     private function findActiveOrderDraft(TelegramAccount $account): ?OrderDraft
@@ -2235,16 +2265,22 @@ class TelegramUpdateHandler
 
     private function handleOrderBackToPaymentMethods(TelegramAccount $account, string $chatId, int $orderId, ?string $callbackId): void
     {
-        $order = $this->findPendingNewServiceOrder($account, $orderId);
+        $order = $this->findPendingEditableOrder($account, $orderId);
         if (!$order instanceof Order) {
-            if (!$this->serviceManagementService->showPaymentMethodsForOrder($account, $orderId, $chatId, $callbackId)) {
-                $this->showPopupOrMessage($chatId, $callbackId, 'سفارش نامعتبر است.', 'invalid_order_back_to_methods');
-            }
+            $this->showPopupOrMessage($chatId, $callbackId, 'سفارش نامعتبر است.', 'invalid_order_back_to_methods');
 
             return;
         }
 
-        $this->sendPaymentGatewaySelectionForOrder($order, $chatId, $callbackId, 'discount_back:'.$orderId, 'order_cancel:'.$orderId);
+        if (OrderType::NEW_SERVICE === $order->getType()) {
+            $this->sendPaymentGatewaySelectionForOrder($order, $chatId, $callbackId, 'order_summary:'.$orderId, 'order_cancel:'.$orderId);
+
+            return;
+        }
+
+        if (!$this->serviceManagementService->showPaymentMethodsForOrder($account, $orderId, $chatId, $callbackId)) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'سفارش نامعتبر است.', 'invalid_order_back_to_methods_service');
+        }
     }
 
     private function handleOrderCancel(TelegramAccount $account, string $chatId, int $orderId, ?string $callbackId): void
@@ -2287,7 +2323,7 @@ class TelegramUpdateHandler
         if (
             !$order instanceof Order
             || $order->getUser()->getId() !== $account->getUser()->getId()
-            || !in_array($order->getStatus(), [OrderStatus::WAITING_PAYMENT, OrderStatus::PAYMENT_PENDING, OrderStatus::PENDING, OrderStatus::DRAFT], true)
+            || !$this->canEditOrderForPayment($order)
         ) {
             $this->showPopupOrMessage($chatId, $callbackId, 'سفارش ناتمام یافت نشد.', 'resume_order_not_found');
 
@@ -2297,7 +2333,7 @@ class TelegramUpdateHandler
         $payment = $this->findLatestOrderPayment($order);
         if (!$payment instanceof Payment) {
             if (OrderType::NEW_SERVICE === $order->getType()) {
-                $this->sendPaymentGatewaySelectionForOrder($order, $chatId, $callbackId, 'discount_back:'.$orderId, 'order_cancel:'.$orderId);
+                $this->sendPaymentGatewaySelectionForOrder($order, $chatId, $callbackId, 'order_summary:'.$orderId, 'order_cancel:'.$orderId);
             } else {
                 $this->serviceManagementService->showPaymentMethodsForOrder($account, $orderId, $chatId, $callbackId);
             }
@@ -2342,20 +2378,87 @@ class TelegramUpdateHandler
 
     private function handleDiscountBackOrder(TelegramAccount $account, string $chatId, int $orderId, ?string $callbackId): void
     {
-        $order = $this->findPendingNewServiceOrder($account, $orderId);
-        if (!$order instanceof Order) {
-            $this->showPopupOrMessage($chatId, $callbackId, 'سفارش نامعتبر است.', 'discount_back_invalid_order');
+        $this->handleOrderSummary($account, $chatId, $orderId, $callbackId);
+    }
+
+    private function handleOrderSummary(TelegramAccount $account, string $chatId, int $orderId, ?string $callbackId): void
+    {
+        $order = $this->entityManager->getRepository(Order::class)->find($orderId);
+        if (!$order instanceof Order || $order->getUser()->getId() !== $account->getUser()->getId()) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'سفارش نامعتبر است.', 'order_summary_invalid_order');
 
             return;
         }
 
+        if (!$this->canEditOrderForPayment($order)) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'این سفارش قبلاً پردازش شده است.', 'order_summary_already_processed');
+
+            return;
+        }
+
+        $this->debugLog(sprintf(
+            'action=render_order_summary order_id=%d user_id=%d status=%s',
+            (int) ($order->getId() ?? 0),
+            (int) ($account->getUser()->getId() ?? 0),
+            $order->getStatus()
+        ));
         $this->clearOrderDiscountCodeWaitingState($order);
         $this->entityManager->flush();
         $this->acknowledgeCallback($callbackId);
         $this->telegramApiClient->sendMessage(
             $chatId,
-            'کد تخفیف دارید؟',
-            $this->keyboardFactory->discountCodePromptForOrder((int) ($order->getId() ?? 0), 'order_cancel:'.$orderId)
+            $this->renderOrderSummary($order),
+            $this->keyboardFactory->orderSummaryMenu((int) ($order->getId() ?? 0))
+        );
+    }
+
+    private function renderOrderSummary(Order $order): string
+    {
+        $metadata = is_array($order->getMetadata()) ? $order->getMetadata() : [];
+        $priceSnapshot = is_array($metadata['priceSnapshot'] ?? null) ? $metadata['priceSnapshot'] : [];
+        $payment = $this->findLatestOrderPayment($order);
+        $payableAmount = $payment instanceof Payment ? $payment->getPayableAmount() : null;
+        $finalAmount = $order->getAmount();
+        if (null !== $payableAmount && $payableAmount > 0) {
+            $finalAmount = $payableAmount;
+        } elseif (isset($priceSnapshot['finalAmount'])) {
+            $finalAmount = (int) $priceSnapshot['finalAmount'];
+        }
+
+        $typeSummary = match ($order->getType()) {
+            OrderType::RENEWAL => sprintf(
+                "نوع سفارش: تمدید\nشناسه سرویس: %s\nحجم تمدید: %s گیگ\nمدت تمدید: %s",
+                (string) ($metadata['targetServiceId'] ?? ($order->getTargetService()?->getId() ?? '-')),
+                (string) ($metadata['trafficGb'] ?? '-'),
+                true === ($metadata['unlimitedDuration'] ?? false)
+                    ? 'نامحدود'
+                    : ((string) ($metadata['durationDays'] ?? '-').' روز')
+            ),
+            OrderType::ADD_TRAFFIC => sprintf(
+                "نوع سفارش: خرید حجم اضافه\nشناسه سرویس: %s\nحجم درخواستی: %s گیگ",
+                (string) ($metadata['targetServiceId'] ?? ($order->getTargetService()?->getId() ?? '-')),
+                (string) ($metadata['trafficGb'] ?? '-')
+            ),
+            default => sprintf(
+                "نوع سفارش: خرید سرویس جدید\nنام کاربری: %s\nحجم: %s گیگ\nمدت: %s",
+                (string) ($metadata['finalUsername'] ?? '-'),
+                (string) ($metadata['trafficGb'] ?? '-'),
+                true === ($metadata['unlimitedDuration'] ?? false)
+                    ? 'نامحدود'
+                    : ((string) ($metadata['durationDays'] ?? '-').' روز')
+            ),
+        };
+
+        return sprintf(
+            "خلاصه سفارش #%d\nپلن: %s\n%s\n\nمبلغ پایه: %d تومان\nتخفیف سراسری: %d تومان\nکد تخفیف: %s (%d تومان)\nمبلغ نهایی: %d تومان",
+            (int) ($order->getId() ?? 0),
+            $order->getPlan()->getTitle(),
+            $typeSummary,
+            (int) ($priceSnapshot['baseAmount'] ?? $finalAmount),
+            (int) ($priceSnapshot['globalDiscountAmount'] ?? 0),
+            (string) ($priceSnapshot['discountCode'] ?? '-'),
+            (int) ($priceSnapshot['discountCodeAmount'] ?? 0),
+            $finalAmount
         );
     }
 

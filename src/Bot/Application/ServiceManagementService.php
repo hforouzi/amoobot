@@ -876,7 +876,7 @@ class ServiceManagementService
             $this->keyboardFactory->paymentGatewaySelectionMenu(
                 (int) ($order->getId() ?? 0),
                 $methods,
-                'payment_methods_back:'.((int) ($order->getId() ?? 0)),
+                'order_summary:'.((int) ($order->getId() ?? 0)),
                 'order_cancel:'.((int) ($order->getId() ?? 0))
             )
         );
@@ -913,12 +913,16 @@ class ServiceManagementService
             return;
         }
 
-        $cancelCallback = $this->resolveCancelCallbackForDraft($draft);
         $this->acknowledgeCallback($callbackId);
         $this->telegramApiClient->sendMessage(
             $chatId,
             'روش پرداخت را انتخاب کنید:',
-            $this->keyboardFactory->paymentGatewaySelectionMenu((int) ($order->getId() ?? 0), $methods, 'payment_methods_back:'.((int) ($order->getId() ?? 0)), $cancelCallback)
+            $this->keyboardFactory->paymentGatewaySelectionMenu(
+                (int) ($order->getId() ?? 0),
+                $methods,
+                'order_summary:'.((int) ($order->getId() ?? 0)),
+                'order_cancel:'.((int) ($order->getId() ?? 0))
+            )
         );
     }
 

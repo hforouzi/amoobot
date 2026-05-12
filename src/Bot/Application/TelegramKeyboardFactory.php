@@ -295,7 +295,11 @@ class TelegramKeyboardFactory
                 ]],
                 [[
                     'text' => '🔙 بازگشت به روشهای پرداخت',
-                    'callback_data' => 'order_back_to_payment_methods:'.$orderId,
+                    'callback_data' => 'order_payment_methods:'.$orderId,
+                ]],
+                [[
+                    'text' => '🔙 بازگشت به خلاصه سفارش',
+                    'callback_data' => 'order_summary:'.$orderId,
                 ]],
                 [[
                     'text' => '❌ انصراف سفارش',
@@ -322,7 +326,11 @@ class TelegramKeyboardFactory
                 ]],
                 [[
                     'text' => '🔙 بازگشت به روشهای پرداخت',
-                    'callback_data' => 'order_back_to_payment_methods:'.$orderId,
+                    'callback_data' => 'order_payment_methods:'.$orderId,
+                ]],
+                [[
+                    'text' => '🔙 بازگشت به خلاصه سفارش',
+                    'callback_data' => 'order_summary:'.$orderId,
                 ]],
                 [[
                     'text' => '❌ انصراف سفارش',
@@ -742,7 +750,7 @@ class TelegramKeyboardFactory
             'inline_keyboard' => [
                 [[
                     'text' => '🔙 بازگشت به خلاصه سفارش',
-                    'callback_data' => 'discount_back:'.$orderId,
+                    'callback_data' => 'order_summary:'.$orderId,
                 ]],
                 [[
                     'text' => '🎟 وارد کردن کد تخفیف',
@@ -787,8 +795,8 @@ class TelegramKeyboardFactory
         return [
             'inline_keyboard' => [
                 [[
-                    'text' => '🔙 بازگشت به انتخاب تخفیف',
-                    'callback_data' => 'discount_back:'.$orderId,
+                    'text' => '🔙 بازگشت به خلاصه سفارش',
+                    'callback_data' => 'order_summary:'.$orderId,
                 ]],
                 [[
                     'text' => '❌ انصراف',
@@ -816,6 +824,29 @@ class TelegramKeyboardFactory
                 [[
                     'text' => '➕ سفارش جدید',
                     'callback_data' => 'start_new_order',
+                ]],
+            ],
+        ];
+    }
+
+    /**
+     * @return array<string, array<array<array<string, string>>>>
+     */
+    public function orderSummaryMenu(int $orderId): array
+    {
+        return [
+            'inline_keyboard' => [
+                [[
+                    'text' => '🎟 وارد کردن کد تخفیف',
+                    'callback_data' => 'discount_enter_order:'.$orderId,
+                ]],
+                [[
+                    'text' => 'ادامه بدون کد تخفیف',
+                    'callback_data' => 'discount_skip_order:'.$orderId,
+                ]],
+                [[
+                    'text' => '❌ انصراف',
+                    'callback_data' => 'order_cancel:'.$orderId,
                 ]],
             ],
         ];
