@@ -55,6 +55,7 @@ class ServiceManagementService
         private readonly TrafficAddonPricingService $trafficAddonPricingService,
         private readonly DiscountCodeService $discountCodeService,
         private readonly PaymentGatewayRegistry $paymentGatewayRegistry,
+        private readonly StorePaymentMethodResolver $storePaymentMethodResolver,
         private readonly string $paymentCardNumber = '',
         private readonly string $paymentCardHolder = '',
         private readonly ?string $paymentDescription = null,
@@ -858,6 +859,17 @@ class ServiceManagementService
 
         $methods = $this->findAvailableStorePaymentMethods($order);
         if ([] === $methods) {
+            $diagnostics = $this->storePaymentMethodResolver->getDiagnostics($order);
+            $encodedReasons = json_encode($diagnostics['skippedReasons'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            $this->debugLog(sprintf(
+                'no_store_payment_methods order_id=%d amount=%d payable_amount=%d currency=%s active_count=%d skipped_reasons=%s',
+                (int) ($diagnostics['orderId'] ?? 0),
+                (int) ($diagnostics['amount'] ?? 0),
+                (int) ($diagnostics['payableAmount'] ?? 0),
+                (string) ($diagnostics['currency'] ?? 'IRR'),
+                (int) ($diagnostics['activeStorePaymentMethodCount'] ?? 0),
+                false === $encodedReasons ? '[]' : $encodedReasons
+            ));
             $this->showPopupOrMessage($chatId, $callbackId, 'در حال حاضر درگاه پرداخت فعالی وجود ندارد.', 'no_active_payment_gateway');
 
             return;
@@ -877,28 +889,7 @@ class ServiceManagementService
      */
     private function findAvailableStorePaymentMethods(Order $order): array
     {
-        $amount = $order->getAmount();
-        $qb = $this->entityManager->getRepository(StorePaymentMethod::class)->createQueryBuilder('m');
-        $qb->join('m.gateway', 'g')
-            ->where('m.isActive = :active')
-            ->andWhere('g.isActive = :gatewayActive')
-            ->andWhere('m.currency = :currency')
-            ->andWhere('g.currency = :currency')
-            ->andWhere('(m.minAmount IS NULL OR m.minAmount <= :amount)')
-            ->andWhere('(m.maxAmount IS NULL OR m.maxAmount >= :amount)')
-            ->setParameter('active', true)
-            ->setParameter('gatewayActive', true)
-            ->setParameter('currency', 'IRR')
-            ->setParameter('amount', $amount)
-            ->orderBy('m.sortOrder', 'ASC')
-            ->addOrderBy('m.id', 'ASC');
-
-        $methods = $qb->getQuery()->getResult();
-
-        return array_values(array_filter(
-            is_array($methods) ? $methods : [],
-            static fn (mixed $item): bool => $item instanceof StorePaymentMethod && $item->getGateway()->isConfigured()
-        ));
+        return $this->storePaymentMethodResolver->getAvailableMethods($order);
     }
 
     private function findStorePaymentMethodForOrder(Order $order, int $storePaymentMethodId): ?StorePaymentMethod

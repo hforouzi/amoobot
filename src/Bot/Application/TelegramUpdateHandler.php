@@ -50,6 +50,7 @@ class TelegramUpdateHandler
         private readonly PlanPricingService $planPricingService,
         private readonly DiscountCodeService $discountCodeService,
         private readonly PaymentGatewayRegistry $paymentGatewayRegistry,
+        private readonly StorePaymentMethodResolver $storePaymentMethodResolver,
         private readonly ?string $adminChatId = null,
         private readonly string $paymentCardNumber = '',
         private readonly string $paymentCardHolder = '',
@@ -124,6 +125,15 @@ class TelegramUpdateHandler
         }
 
         $activeDraft = $this->findActiveOrderDraft($account);
+        if ('' !== $text) {
+            $waitingOrder = $this->findWaitingDiscountCodeOrder($account);
+            if ($waitingOrder instanceof Order) {
+                $this->handleOrderDiscountCodeInput($account, $waitingOrder, $text, $chatId);
+
+                return;
+            }
+        }
+
         if ('' !== $text && $activeDraft instanceof OrderDraft) {
             if (ServiceManagementService::STEP_WAITING_ADD_TRAFFIC_AMOUNT === $activeDraft->getStep()) {
                 $this->serviceManagementService->handleAddTrafficDraftAmountInput($account, $activeDraft, $text, $chatId);
@@ -333,6 +343,24 @@ class TelegramUpdateHandler
 
         if (str_starts_with($data, 'discount_skip:')) {
             $this->handleDiscountSkip($account, $chatId, (int) str_replace('discount_skip:', '', $data), $callbackId);
+
+            return;
+        }
+
+        if (str_starts_with($data, 'discount_enter_order:')) {
+            $this->handleDiscountEnterOrder($account, $chatId, (int) str_replace('discount_enter_order:', '', $data), $callbackId);
+
+            return;
+        }
+
+        if (str_starts_with($data, 'apply_discount_order:')) {
+            $this->handleDiscountEnterOrder($account, $chatId, (int) str_replace('apply_discount_order:', '', $data), $callbackId);
+
+            return;
+        }
+
+        if (str_starts_with($data, 'discount_skip_order:')) {
+            $this->handleDiscountSkipOrder($account, $chatId, (int) str_replace('discount_skip_order:', '', $data), $callbackId);
 
             return;
         }
@@ -650,7 +678,6 @@ class TelegramUpdateHandler
             'durationDays' => $draft->getDurationDays(),
         ]);
         $draft
-            ->setStep(self::STEP_WAITING_DISCOUNT_DECISION)
             ->setCalculatedAmount($price->afterGlobalDiscountAmount)
             ->setDiscountCode(null)
             ->setDiscountAmount(0)
@@ -670,13 +697,21 @@ class TelegramUpdateHandler
                 'orderType' => OrderType::NEW_SERVICE,
             ]))
             ->setUpdatedAt(new \DateTimeImmutable());
+        $order = $this->createOrderFromNewServiceDraft($draft);
+        if (!$order instanceof Order) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'سفارش نامعتبر است.', 'invalid_order_from_new_service_draft');
+
+            return;
+        }
+
+        $this->clearOrderDiscountCodeWaitingState($order);
         $this->entityManager->flush();
 
         $this->acknowledgeCallback($callbackId);
         $this->telegramApiClient->sendMessage(
             $chatId,
             "کد تخفیف دارید؟",
-            $this->keyboardFactory->discountCodePrompt($draftId, 'custom_order_cancel:'.$draftId)
+            $this->keyboardFactory->discountCodePromptForOrder((int) ($order->getId() ?? 0), 'main_menu')
         );
     }
 
@@ -884,7 +919,18 @@ class TelegramUpdateHandler
     private function handleDiscountEnter(TelegramAccount $account, string $chatId, int $draftId, ?string $callbackId = null): void
     {
         $draft = $this->entityManager->getRepository(OrderDraft::class)->find($draftId);
-        if (!$draft instanceof OrderDraft || $draft->getUser()->getId() !== $account->getUser()->getId() || OrderDraftStatus::PENDING !== $draft->getStatus()) {
+        if (
+            !$draft instanceof OrderDraft
+            || $draft->getUser()->getId() !== $account->getUser()->getId()
+            || OrderDraftStatus::PENDING !== $draft->getStatus()
+        ) {
+            $order = $this->findOrderByDraftId($account, $draftId);
+            if ($order instanceof Order) {
+                $this->handleDiscountEnterOrder($account, $chatId, (int) ($order->getId() ?? 0), $callbackId);
+
+                return;
+            }
+
             $this->showPopupOrMessage($chatId, $callbackId, 'پیش‌نویس سفارش نامعتبر است.', 'invalid_discount_enter_draft');
 
             return;
@@ -908,7 +954,18 @@ class TelegramUpdateHandler
     private function handleDiscountSkip(TelegramAccount $account, string $chatId, int $draftId, ?string $callbackId = null): void
     {
         $draft = $this->entityManager->getRepository(OrderDraft::class)->find($draftId);
-        if (!$draft instanceof OrderDraft || $draft->getUser()->getId() !== $account->getUser()->getId() || OrderDraftStatus::PENDING !== $draft->getStatus()) {
+        if (
+            !$draft instanceof OrderDraft
+            || $draft->getUser()->getId() !== $account->getUser()->getId()
+            || OrderDraftStatus::PENDING !== $draft->getStatus()
+        ) {
+            $order = $this->findOrderByDraftId($account, $draftId);
+            if ($order instanceof Order) {
+                $this->handleDiscountSkipOrder($account, $chatId, (int) ($order->getId() ?? 0), $callbackId);
+
+                return;
+            }
+
             $this->showPopupOrMessage($chatId, $callbackId, 'پیش‌نویس سفارش نامعتبر است.', 'invalid_discount_skip_draft');
 
             return;
@@ -930,6 +987,50 @@ class TelegramUpdateHandler
         $this->entityManager->flush();
 
         $this->sendPaymentGatewaySelectionForNewServiceDraft($draft, $chatId, $callbackId);
+    }
+
+    private function handleDiscountEnterOrder(TelegramAccount $account, string $chatId, int $orderId, ?string $callbackId = null): void
+    {
+        $order = $this->findPendingNewServiceOrder($account, $orderId);
+        if (!$order instanceof Order) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'سفارش نامعتبر است.', 'invalid_discount_enter_order');
+
+            return;
+        }
+
+        $this->markOrderWaitingDiscountCode($order);
+        $this->entityManager->flush();
+
+        $this->acknowledgeCallback($callbackId);
+        $this->telegramApiClient->sendMessage($chatId, 'کد تخفیف را ارسال کنید.');
+    }
+
+    private function handleDiscountSkipOrder(TelegramAccount $account, string $chatId, int $orderId, ?string $callbackId = null): void
+    {
+        $order = $this->findPendingNewServiceOrder($account, $orderId);
+        if (!$order instanceof Order) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'سفارش نامعتبر است.', 'invalid_discount_skip_order');
+
+            return;
+        }
+
+        $metadata = is_array($order->getMetadata()) ? $order->getMetadata() : [];
+        $priceSnapshot = is_array($metadata['priceSnapshot'] ?? null) ? $metadata['priceSnapshot'] : [];
+        $baseFinal = (int) ($priceSnapshot['afterGlobalDiscountAmount'] ?? $order->getAmount());
+        $priceSnapshot['discountCode'] = null;
+        $priceSnapshot['discountCodeAmount'] = 0;
+        $priceSnapshot['finalAmount'] = $baseFinal;
+        $metadata['priceSnapshot'] = $priceSnapshot;
+        $metadata['discountCode'] = null;
+        $metadata['discountAmount'] = 0;
+        unset($metadata['inputState']);
+
+        $order
+            ->setMetadata($metadata)
+            ->setAmount($baseFinal);
+
+        $this->entityManager->flush();
+        $this->sendPaymentGatewaySelectionForOrder($order, $chatId, $callbackId);
     }
 
     private function handleNewServiceDraftDiscountCodeInput(TelegramAccount $account, OrderDraft $draft, string $codeInput, string $chatId): void
@@ -964,6 +1065,45 @@ class TelegramUpdateHandler
         $this->entityManager->flush();
 
         $this->sendPaymentGatewaySelectionForNewServiceDraft($draft, $chatId, null);
+    }
+
+    private function handleOrderDiscountCodeInput(TelegramAccount $account, Order $order, string $codeInput, string $chatId): void
+    {
+        if ($order->getUser()->getId() !== $account->getUser()->getId()) {
+            return;
+        }
+        if (OrderStatus::WAITING_PAYMENT !== $order->getStatus() || OrderType::NEW_SERVICE !== $order->getType()) {
+            return;
+        }
+
+        $metadata = is_array($order->getMetadata()) ? $order->getMetadata() : [];
+        $priceSnapshot = is_array($metadata['priceSnapshot'] ?? null) ? $metadata['priceSnapshot'] : [];
+        $amountBeforeCode = (int) ($priceSnapshot['afterGlobalDiscountAmount'] ?? $order->getAmount());
+        $result = $this->discountCodeService->validateCode($codeInput, $order->getUser(), OrderType::NEW_SERVICE, $order->getPlan(), $amountBeforeCode);
+        if (!$result->valid || !$result->discountCode instanceof \App\Entity\DiscountCode) {
+            $this->telegramApiClient->sendMessage(
+                $chatId,
+                $result->message,
+                $this->keyboardFactory->discountCodePromptForOrder((int) ($order->getId() ?? 0), 'main_menu')
+            );
+
+            return;
+        }
+
+        $priceSnapshot['discountCode'] = $result->discountCode->getCode();
+        $priceSnapshot['discountCodeAmount'] = $result->discountAmount;
+        $priceSnapshot['finalAmount'] = $result->finalAmount;
+        $metadata['priceSnapshot'] = $priceSnapshot;
+        $metadata['discountCode'] = $result->discountCode->getCode();
+        $metadata['discountAmount'] = $result->discountAmount;
+        unset($metadata['inputState']);
+
+        $order
+            ->setMetadata($metadata)
+            ->setAmount($result->finalAmount);
+
+        $this->entityManager->flush();
+        $this->sendPaymentGatewaySelectionForOrder($order, $chatId, null);
     }
 
     private function createOrReuseNewServiceOrderPayment(Order $order, PaymentGateway $gateway, StorePaymentMethod $storePaymentMethod, string $chatId, ?string $callbackId = null): void
@@ -1083,8 +1223,24 @@ class TelegramUpdateHandler
             return;
         }
 
-        $methods = $this->findAvailableStorePaymentMethods($order);
+        $this->sendPaymentGatewaySelectionForOrder($order, $chatId, $callbackId, 'main_menu');
+    }
+
+    private function sendPaymentGatewaySelectionForOrder(Order $order, string $chatId, ?string $callbackId, string $cancelCallback = 'main_menu'): void
+    {
+        $methods = $this->storePaymentMethodResolver->getAvailableMethods($order);
         if ([] === $methods) {
+            $diagnostics = $this->storePaymentMethodResolver->getDiagnostics($order);
+            $encodedReasons = json_encode($diagnostics['skippedReasons'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            $this->debugLog(sprintf(
+                'no_store_payment_methods order_id=%d amount=%d payable_amount=%d currency=%s active_count=%d skipped_reasons=%s',
+                (int) ($diagnostics['orderId'] ?? 0),
+                (int) ($diagnostics['amount'] ?? 0),
+                (int) ($diagnostics['payableAmount'] ?? 0),
+                (string) ($diagnostics['currency'] ?? 'IRR'),
+                (int) ($diagnostics['activeStorePaymentMethodCount'] ?? 0),
+                false === $encodedReasons ? '[]' : $encodedReasons
+            ));
             $this->showPopupOrMessage($chatId, $callbackId, 'در حال حاضر روش پرداخت فعالی وجود ندارد.', 'no_active_store_payment_method_new_service');
 
             return;
@@ -1094,7 +1250,7 @@ class TelegramUpdateHandler
         $this->telegramApiClient->sendMessage(
             $chatId,
             'روش پرداخت را انتخاب کنید:',
-            $this->keyboardFactory->paymentGatewaySelectionMenu((int) ($order->getId() ?? 0), $methods, 'custom_order_cancel:'.((int) ($draft->getId() ?? 0)))
+            $this->keyboardFactory->paymentGatewaySelectionMenu((int) ($order->getId() ?? 0), $methods, $cancelCallback)
         );
     }
 
@@ -1757,28 +1913,7 @@ class TelegramUpdateHandler
      */
     private function findAvailableStorePaymentMethods(Order $order): array
     {
-        $amount = $order->getAmount();
-        $qb = $this->entityManager->getRepository(StorePaymentMethod::class)->createQueryBuilder('m');
-        $qb->join('m.gateway', 'g')
-            ->where('m.isActive = :active')
-            ->andWhere('g.isActive = :gatewayActive')
-            ->andWhere('m.currency = :currency')
-            ->andWhere('g.currency = :currency')
-            ->andWhere('(m.minAmount IS NULL OR m.minAmount <= :amount)')
-            ->andWhere('(m.maxAmount IS NULL OR m.maxAmount >= :amount)')
-            ->setParameter('active', true)
-            ->setParameter('gatewayActive', true)
-            ->setParameter('currency', 'IRR')
-            ->setParameter('amount', $amount)
-            ->orderBy('m.sortOrder', 'ASC')
-            ->addOrderBy('m.id', 'ASC');
-
-        $methods = $qb->getQuery()->getResult();
-
-        return array_values(array_filter(
-            is_array($methods) ? $methods : [],
-            static fn (mixed $item): bool => $item instanceof StorePaymentMethod && $item->getGateway()->isConfigured()
-        ));
+        return $this->storePaymentMethodResolver->getAvailableMethods($order);
     }
 
     private function findStorePaymentMethodForOrder(Order $order, int $storePaymentMethodId): ?StorePaymentMethod
@@ -1797,6 +1932,89 @@ class TelegramUpdateHandler
         foreach ($this->findAvailableStorePaymentMethods($order) as $method) {
             if ((int) ($method->getGateway()->getId() ?? 0) === $gatewayId) {
                 return $method;
+            }
+        }
+
+        return null;
+    }
+
+    private function findPendingNewServiceOrder(TelegramAccount $account, int $orderId): ?Order
+    {
+        if ($orderId <= 0) {
+            return null;
+        }
+
+        $order = $this->entityManager->getRepository(Order::class)->find($orderId);
+        if (
+            !$order instanceof Order
+            || $order->getUser()->getId() !== $account->getUser()->getId()
+            || OrderStatus::WAITING_PAYMENT !== $order->getStatus()
+            || OrderType::NEW_SERVICE !== $order->getType()
+        ) {
+            return null;
+        }
+
+        return $order;
+    }
+
+    private function findOrderByDraftId(TelegramAccount $account, int $draftId): ?Order
+    {
+        if ($draftId <= 0) {
+            return null;
+        }
+
+        $orders = $this->entityManager->getRepository(Order::class)->findBy(
+            ['user' => $account->getUser(), 'status' => OrderStatus::WAITING_PAYMENT, 'type' => OrderType::NEW_SERVICE],
+            ['id' => 'DESC'],
+            20
+        );
+
+        foreach ($orders as $order) {
+            if (!$order instanceof Order) {
+                continue;
+            }
+            $metadata = is_array($order->getMetadata()) ? $order->getMetadata() : [];
+            if ((int) ($metadata['orderDraftId'] ?? 0) === $draftId) {
+                return $order;
+            }
+        }
+
+        return null;
+    }
+
+    private function markOrderWaitingDiscountCode(Order $order): void
+    {
+        $metadata = is_array($order->getMetadata()) ? $order->getMetadata() : [];
+        $metadata['inputState'] = sprintf('waiting_discount_code_order:%d', (int) ($order->getId() ?? 0));
+        $order->setMetadata($metadata);
+    }
+
+    private function clearOrderDiscountCodeWaitingState(Order $order): void
+    {
+        $metadata = is_array($order->getMetadata()) ? $order->getMetadata() : [];
+        unset($metadata['inputState']);
+        $order->setMetadata($metadata);
+    }
+
+    private function findWaitingDiscountCodeOrder(TelegramAccount $account): ?Order
+    {
+        $orders = $this->entityManager->getRepository(Order::class)->findBy(
+            ['user' => $account->getUser(), 'status' => OrderStatus::WAITING_PAYMENT, 'type' => OrderType::NEW_SERVICE],
+            ['id' => 'DESC'],
+            10
+        );
+
+        foreach ($orders as $order) {
+            if (!$order instanceof Order) {
+                continue;
+            }
+            $metadata = is_array($order->getMetadata()) ? $order->getMetadata() : [];
+            $inputState = trim((string) ($metadata['inputState'] ?? ''));
+            if (str_starts_with($inputState, 'waiting_discount_code_order:')) {
+                $stateOrderId = (int) str_replace('waiting_discount_code_order:', '', $inputState);
+                if ($stateOrderId > 0 && $stateOrderId === (int) ($order->getId() ?? 0)) {
+                    return $order;
+                }
             }
         }
 

@@ -673,4 +673,27 @@ class TelegramKeyboardFactory
             ],
         ];
     }
+
+    /**
+     * @return array<string, array<array<array<string, string>>>>
+     */
+    public function discountCodePromptForOrder(int $orderId, string $cancelCallback): array
+    {
+        return [
+            'inline_keyboard' => [
+                [[
+                    'text' => '🎟 وارد کردن کد تخفیف',
+                    'callback_data' => 'discount_enter_order:'.$orderId,
+                ]],
+                [[
+                    'text' => 'ادامه بدون کد تخفیف',
+                    'callback_data' => 'discount_skip_order:'.$orderId,
+                ]],
+                [[
+                    'text' => '❌ انصراف',
+                    'callback_data' => $cancelCallback,
+                ]],
+            ],
+        ];
+    }
 }
