@@ -8,6 +8,7 @@ use App\Entity\Setting;
 use App\Provisioning\Application\AutomationSettingsProvider;
 use App\Provisioning\Application\RenewalSettingsProvider;
 use App\Provisioning\Application\TrafficAddonSettingsProvider;
+use App\Shop\Application\IncompleteOrderSettingsProvider;
 use App\Shop\Application\PlanPriceAdjustmentService;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
@@ -23,6 +24,7 @@ final class RenewalPricingAdminController extends AbstractController
         private readonly RenewalSettingsProvider $renewalSettingsProvider,
         private readonly AutomationSettingsProvider $automationSettingsProvider,
         private readonly TrafficAddonSettingsProvider $trafficAddonSettingsProvider,
+        private readonly IncompleteOrderSettingsProvider $incompleteOrderSettingsProvider,
         private readonly PlanPriceAdjustmentService $planPriceAdjustmentService,
     ) {
     }
@@ -130,16 +132,22 @@ final class RenewalPricingAdminController extends AbstractController
     {
         if ($request->isMethod('POST')) {
             $batchLimitRaw = trim((string) $request->request->get('automation_batch_limit', '100'));
+            $expireHoursRaw = trim((string) $request->request->get('orders_incomplete_expire_hours', '24'));
             $batchLimit = is_numeric($batchLimitRaw) ? (int) $batchLimitRaw : 0;
+            $expireHours = is_numeric($expireHoursRaw) ? (int) $expireHoursRaw : 0;
             if ($batchLimit <= 0) {
                 $this->addFlash('danger', 'مقدار batch limit باید بزرگتر از صفر باشد.');
+            } elseif ($expireHours <= 0) {
+                $this->addFlash('danger', 'زمان انقضای سفارش ناقص باید بزرگتر از صفر باشد.');
             } else {
                 $this->upsertSetting('automation.sync_usage_enabled', $request->request->has('automation_sync_usage_enabled') ? 'true' : 'false', 'boolean');
                 $this->upsertSetting('automation.check_expiry_enabled', $request->request->has('automation_check_expiry_enabled') ? 'true' : 'false', 'boolean');
                 $this->upsertSetting('automation.send_notifications_enabled', $request->request->has('automation_send_notifications_enabled') ? 'true' : 'false', 'boolean');
                 $this->upsertSetting('automation.auto_suspend_expired_enabled', $request->request->has('automation_auto_suspend_expired_enabled') ? 'true' : 'false', 'boolean');
                 $this->upsertSetting('automation.auto_suspend_traffic_exhausted_enabled', $request->request->has('automation_auto_suspend_traffic_exhausted_enabled') ? 'true' : 'false', 'boolean');
+                $this->upsertSetting('automation.expire_incomplete_orders_enabled', $request->request->has('automation_expire_incomplete_orders_enabled') ? 'true' : 'false', 'boolean');
                 $this->upsertSetting('automation.batch_limit', (string) $batchLimit, 'number');
+                $this->upsertSetting('orders.incomplete_expire_hours', (string) $expireHours, 'number');
                 $this->entityManager->flush();
                 $this->addFlash('success', 'تنظیمات اتوماسیون بروزرسانی شد.');
             }
@@ -152,7 +160,9 @@ final class RenewalPricingAdminController extends AbstractController
                 'automation_send_notifications_enabled' => $this->automationSettingsProvider->sendNotificationsEnabled(),
                 'automation_auto_suspend_expired_enabled' => $this->automationSettingsProvider->autoSuspendExpiredEnabled(),
                 'automation_auto_suspend_traffic_exhausted_enabled' => $this->automationSettingsProvider->autoSuspendTrafficExhaustedEnabled(),
+                'automation_expire_incomplete_orders_enabled' => $this->automationSettingsProvider->expireIncompleteOrdersEnabled(),
                 'automation_batch_limit' => $this->automationSettingsProvider->batchLimit(),
+                'orders_incomplete_expire_hours' => $this->incompleteOrderSettingsProvider->expireHours(),
             ],
         ]);
     }

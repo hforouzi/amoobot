@@ -49,5 +49,9 @@ final class AutomationSettingsProvider
 
         return min($limit, 1000);
     }
-}
 
+    public function expireIncompleteOrdersEnabled(): bool
+    {
+        return $this->settingValueProvider->getBool('automation.expire_incomplete_orders_enabled', true);
+    }
+}
