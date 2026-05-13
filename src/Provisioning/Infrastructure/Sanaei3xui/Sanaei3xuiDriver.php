@@ -147,7 +147,7 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
             $officialClientLinksResult = $this->apiClient->getClientLinks($panel, $inboundIdInt, $email);
             if (($officialClientLinksResult['ok'] ?? false) === true) {
                 $payload = is_array($officialClientLinksResult['data'] ?? null) ? $officialClientLinksResult['data'] : [];
-                if (($payload['success'] ?? true) !== false) {
+                if (($payload['success'] ?? false) === true) {
                     $configLinks = $this->extractLinkArray($payload['obj'] ?? null);
                 }
             }
@@ -156,7 +156,7 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
                 $subLinksResult = $this->apiClient->getSubLinks($panel, $subId);
                 if (($subLinksResult['ok'] ?? false) === true) {
                     $subPayload = is_array($subLinksResult['data'] ?? null) ? $subLinksResult['data'] : [];
-                    if (($subPayload['success'] ?? true) !== false) {
+                    if (($subPayload['success'] ?? false) === true) {
                         $configLinks = array_values(array_unique([
                             ...$configLinks,
                             ...$this->extractLinkArray($subPayload['obj'] ?? null),
