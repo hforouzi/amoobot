@@ -1,0 +1,76 @@
+admin:
+  dashboard: Dashboard
+  menu:
+    store: Store
+    vpn: VPN
+    users: Users
+    automation: Automation
+    system: System
+    payments: Payments
+  users: Users
+  telegram_accounts: Telegram Accounts
+  vpn_panels: VPN Panels
+  vpn_inbounds: VPN Inbounds
+  vpn_services: VPN Services
+  plans: Plans
+  orders: Orders
+  payments: Payments
+  payment_gateways: Payment Gateways
+  store_payment_methods: Store Payment Methods
+  discount_codes: Discount Codes
+  discount_usages: Discount Usage
+  bot_logs: Bot Logs
+  settings: Settings
+  notifications: Service Notification Logs
+  automation: Automation
+  system_status: System Status
+  renewal_pricing_settings: Renewal & Pricing Settings
+  automation_settings: Automation Settings
+  bulk_plan_price_adjustment: Bulk Plan Price Adjustment
+
+status:
+  active: Active
+  inactive: Inactive
+  pending: Pending
+  waiting_payment: Waiting Payment
+  payment_pending: Payment Pending
+  submitted: Submitted
+  paid: Paid
+  confirmed: Confirmed
+  processing: Processing
+  completed: Completed
+  provisioned: Provisioned
+  failed: Failed
+  rejected: Rejected
+  cancelled: Cancelled
+  expired: Expired
+  suspended: Suspended
+  deleted: Deleted
+
+common:
+  save: Save
+  cancel: Cancel
+  back: Back
+  edit: Edit
+  delete: Delete
+  enabled: Enabled
+  disabled: Disabled
+  yes: 'Yes'
+  no: 'No'
+  created_at: Created At
+  updated_at: Updated At
+  actions: Actions
+
+payment:
+  gateway:
+    manual_card: Manual Card Gateway
+    zibal: Zibal Gateway
+    nowpayments: NOWPayments Gateway
+    custom_api: Custom API Gateway
+
+help:
+  payment_gateway_store_method: PaymentGateway stores gateway credentials. StorePaymentMethod controls what users see in the bot.
+  plan_custom_pricing: If enabled, custom pricing is calculated based on traffic and duration values.
+  nowpayments_rate: Set conversion rates based on the selected amount unit (toman or rial).
+  panel_bearer_token: For Sanaei v3 bearer mode, use Settings → Security → API Token and set auth mode to bearer.
+  incomplete_order_expiration: Defines expiration time for incomplete orders in automation settings.

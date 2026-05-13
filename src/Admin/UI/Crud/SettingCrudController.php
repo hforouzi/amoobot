@@ -22,11 +22,11 @@ class SettingCrudController extends AbstractCrudController
     {
         return [
             IdField::new('id')->onlyOnIndex(),
-            TextField::new('keyName'),
-            TextareaField::new('value')->hideOnIndex(),
-            TextField::new('type'),
-            DateTimeField::new('createdAt')->hideOnForm(),
-            DateTimeField::new('updatedAt')->hideOnForm(),
+            TextField::new('keyName')->setLabel('Key'),
+            TextareaField::new('value')->setLabel('Value')->hideOnIndex(),
+            TextField::new('type')->setLabel('Type'),
+            DateTimeField::new('createdAt')->setLabel('common.created_at')->hideOnForm(),
+            DateTimeField::new('updatedAt')->setLabel('common.updated_at')->hideOnForm(),
         ];
     }
 }

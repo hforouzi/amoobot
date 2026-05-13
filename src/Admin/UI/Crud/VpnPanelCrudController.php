@@ -84,7 +84,7 @@ class VpnPanelCrudController extends AbstractCrudController
             TextField::new('apiToken', 'API Token')
                 ->setFormType(PasswordType::class)
                 ->setFormTypeOption('always_empty', false)
-                ->setHelp('For 3x-ui v3+, use Settings → Security → API Token and auth_mode=bearer.')
+                ->setHelp('help.panel_bearer_token')
                 ->hideOnIndex(),
             TextField::new('apiTokenConfiguredLabel', 'Token configured')
                 ->hideOnForm(),
@@ -96,8 +96,8 @@ class VpnPanelCrudController extends AbstractCrudController
                 ->hideOnForm()
                 ->hideOnIndex(),
             BooleanField::new('isActive'),
-            DateTimeField::new('createdAt')->hideOnForm(),
-            DateTimeField::new('updatedAt')->hideOnForm(),
+            DateTimeField::new('createdAt')->setLabel('common.created_at')->hideOnForm(),
+            DateTimeField::new('updatedAt')->setLabel('common.updated_at')->hideOnForm(),
         ];
     }
 }

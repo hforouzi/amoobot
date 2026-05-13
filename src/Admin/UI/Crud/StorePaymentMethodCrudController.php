@@ -9,6 +9,7 @@ use EasyCorp\Bundle\EasyAdminBundle\Controller\AbstractCrudController;
 use EasyCorp\Bundle\EasyAdminBundle\Field\AssociationField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\BooleanField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\DateTimeField;
+use EasyCorp\Bundle\EasyAdminBundle\Field\FormField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\IdField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\IntegerField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\TextField;
@@ -47,16 +48,20 @@ final class StorePaymentMethodCrudController extends AbstractCrudController
     public function configureFields(string $pageName): iterable
     {
         return [
+            FormField::addPanel('Store Payment Method'),
             IdField::new('id')->onlyOnIndex(),
-            TextField::new('title'),
-            AssociationField::new('gateway'),
-            BooleanField::new('isActive'),
-            IntegerField::new('sortOrder'),
-            IntegerField::new('minAmount'),
-            IntegerField::new('maxAmount'),
-            TextField::new('currency'),
-            DateTimeField::new('createdAt')->hideOnForm(),
-            DateTimeField::new('updatedAt')->hideOnForm(),
+            TextField::new('title')->setLabel('Title')
+                ->setHelp('help.payment_gateway_store_method'),
+            AssociationField::new('gateway')->setLabel('admin.payment_gateways')
+                ->setHelp('help.payment_gateway_store_method'),
+            BooleanField::new('isActive')->setLabel('common.enabled'),
+            IntegerField::new('sortOrder')->setLabel('Sort Order'),
+            IntegerField::new('minAmount')->setLabel('Min Amount'),
+            IntegerField::new('maxAmount')->setLabel('Max Amount'),
+            TextField::new('currency')->setLabel('Currency'),
+            FormField::addPanel('Metadata'),
+            DateTimeField::new('createdAt')->setLabel('common.created_at')->hideOnForm(),
+            DateTimeField::new('updatedAt')->setLabel('common.updated_at')->hideOnForm(),
         ];
     }
 }

@@ -16,6 +16,7 @@ use EasyCorp\Bundle\EasyAdminBundle\Dto\EntityDto;
 use EasyCorp\Bundle\EasyAdminBundle\Dto\SearchDto;
 use EasyCorp\Bundle\EasyAdminBundle\Field\BooleanField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\DateTimeField;
+use EasyCorp\Bundle\EasyAdminBundle\Field\FormField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\IdField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\TextareaField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\TextField;
@@ -65,6 +66,7 @@ final class ManualCardPaymentGatewayCrudController extends AbstractCrudControlle
     public function configureFields(string $pageName): iterable
     {
         return [
+            FormField::addPanel('General'),
             IdField::new('id')->onlyOnIndex(),
             TextField::new('title'),
             TextareaField::new('description')->hideOnIndex(),
@@ -74,6 +76,7 @@ final class ManualCardPaymentGatewayCrudController extends AbstractCrudControlle
             TextField::new('manualCardHolder')->setLabel('card_holder'),
             TextField::new('manualBankName')->setLabel('bank_name'),
             TextareaField::new('manualInstructions')->setLabel('instructions'),
+            FormField::addPanel('Metadata'),
             DateTimeField::new('createdAt')->hideOnForm(),
             DateTimeField::new('updatedAt')->hideOnForm(),
         ];

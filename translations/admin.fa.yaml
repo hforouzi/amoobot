@@ -1,0 +1,76 @@
+admin:
+  dashboard: داشبورد
+  menu:
+    store: فروشگاه
+    vpn: VPN
+    users: کاربران
+    automation: اتوماسیون
+    system: سیستم
+    payments: پرداخت
+  users: کاربران
+  telegram_accounts: اکانت‌های تلگرام
+  vpn_panels: پنل‌های VPN
+  vpn_inbounds: اینباندهای VPN
+  vpn_services: سرویس‌های VPN
+  plans: پلن‌ها
+  orders: سفارش‌ها
+  payments: پرداخت‌ها
+  payment_gateways: درگاه‌های پرداخت
+  store_payment_methods: روش‌های پرداخت فروشگاه
+  discount_codes: کدهای تخفیف
+  discount_usages: مصرف کد تخفیف
+  bot_logs: لاگ‌های بات
+  settings: تنظیمات
+  notifications: لاگ اعلان سرویس
+  automation: اتوماسیون
+  system_status: وضعیت سیستم
+  renewal_pricing_settings: تنظیمات تمدید و قیمت‌گذاری
+  automation_settings: تنظیمات اتوماسیون
+  bulk_plan_price_adjustment: تغییر گروهی قیمت پلن‌ها
+
+status:
+  active: فعال
+  inactive: غیرفعال
+  pending: در انتظار
+  waiting_payment: در انتظار پرداخت
+  payment_pending: پرداخت در انتظار تایید
+  submitted: ارسال‌شده
+  paid: پرداخت‌شده
+  confirmed: تایید‌شده
+  processing: در حال پردازش
+  completed: تکمیل‌شده
+  provisioned: تحویل‌شده
+  failed: ناموفق
+  rejected: رد‌شده
+  cancelled: لغو‌شده
+  expired: منقضی
+  suspended: تعلیق‌شده
+  deleted: حذف‌شده
+
+common:
+  save: ذخیره
+  cancel: انصراف
+  back: بازگشت
+  edit: ویرایش
+  delete: حذف
+  enabled: فعال
+  disabled: غیرفعال
+  yes: بله
+  no: خیر
+  created_at: ایجاد شده در
+  updated_at: بروزرسانی شده در
+  actions: عملیات
+
+payment:
+  gateway:
+    manual_card: درگاه کارت‌به‌کارت
+    zibal: درگاه زیبال
+    nowpayments: درگاه NOWPayments
+    custom_api: درگاه API سفارشی
+
+help:
+  payment_gateway_store_method: PaymentGateway اطلاعات اتصال و اعتبارنامه درگاه را نگهداری می‌کند. StorePaymentMethod تعیین می‌کند کاربر در بات چه روش‌هایی ببیند.
+  plan_custom_pricing: در صورت فعال بودن، قیمت سفارشی بر اساس حجم و مدت محاسبه می‌شود.
+  nowpayments_rate: نرخ تبدیل را بر اساس amount unit انتخاب‌شده (toman یا rial) تنظیم کنید.
+  panel_bearer_token: برای حالت bearer در Sanaei v3 از Settings → Security → API Token استفاده کنید و auth mode را bearer بگذارید.
+  incomplete_order_expiration: زمان انقضای سفارش ناقص در تنظیمات اتوماسیون را مشخص می‌کند.

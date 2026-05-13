@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="{{ app.request.locale }}" dir="{{ app.request.locale starts with 'fa' ? 'rtl' : 'ltr' }}">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ 'login.title'|trans }}</title>
+    <link rel="stylesheet" href="{{ asset('admin.css') }}">
+</head>
+<body class="admin-login-page">
+    <div class="admin-login-wrapper">
+        <div class="admin-login-locale-switcher" aria-label="{{ 'login.language'|trans }}">
+            <a href="{{ path('admin_locale_switch', {locale: 'fa', redirect_to: app.request.uri}) }}" class="{{ app.request.locale starts with 'fa' ? 'active' : '' }}">فارسی</a>
+            <span aria-hidden="true">|</span>
+            <a href="{{ path('admin_locale_switch', {locale: 'en', redirect_to: app.request.uri}) }}" class="{{ app.request.locale starts with 'en' ? 'active' : '' }}">English</a>
+        </div>
+
+        <div class="admin-login-card">
+            <div class="admin-login-brand">Amoobot</div>
+            <h1>{{ 'login.title'|trans }}</h1>
+            <p>{{ 'login.subtitle'|trans }}</p>
+
+            {% if error %}
+                <div class="admin-login-error">{{ 'login.invalid_credentials'|trans }}</div>
+            {% endif %}
+
+            <form method="post" action="{{ path('admin_login') }}">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token('authenticate') }}">
+                <input type="hidden" name="_target_path" value="{{ path('admin') }}">
+
+                <label for="username">{{ 'login.username'|trans }}</label>
+                <input type="text" id="username" name="_username" value="{{ last_username }}" required autofocus autocomplete="username">
+
+                <label for="password">{{ 'login.password'|trans }}</label>
+                <input type="password" id="password" name="_password" required autocomplete="current-password">
+
+                <label class="remember-me" for="remember_me">
+                    <input type="checkbox" id="remember_me" name="_remember_me">
+                    {{ 'login.remember_me'|trans }}
+                </label>
+
+                <button type="submit">{{ 'login.submit'|trans }}</button>
+            </form>
+        </div>
+    </div>
+</body>
+</html>

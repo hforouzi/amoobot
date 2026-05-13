@@ -4,12 +4,14 @@ declare(strict_types=1);
 
 namespace App\Admin\UI\Crud;
 
+use App\Admin\UI\Support\AdminStatusBadge;
 use App\Entity\Order;
 use App\Shop\Domain\OrderStatus;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Crud;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Filters;
 use EasyCorp\Bundle\EasyAdminBundle\Controller\AbstractCrudController;
 use EasyCorp\Bundle\EasyAdminBundle\Field\AssociationField;
+use EasyCorp\Bundle\EasyAdminBundle\Field\ChoiceField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\DateTimeField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\IdField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\IntegerField;
@@ -35,39 +37,30 @@ class OrderCrudController extends AbstractCrudController
         return $filters
             ->add(EntityFilter::new('user'))
             ->add(EntityFilter::new('plan'))
-            ->add(ChoiceFilter::new('status')->setChoices([
-                OrderStatus::DRAFT => OrderStatus::DRAFT,
-                OrderStatus::PENDING => OrderStatus::PENDING,
-                OrderStatus::WAITING_PAYMENT => OrderStatus::WAITING_PAYMENT,
-                OrderStatus::PAYMENT_PENDING => OrderStatus::PAYMENT_PENDING,
-                OrderStatus::PAID => OrderStatus::PAID,
-                OrderStatus::PROCESSING => OrderStatus::PROCESSING,
-                OrderStatus::COMPLETED => OrderStatus::COMPLETED,
-                OrderStatus::PROVISIONED => OrderStatus::PROVISIONED,
-                OrderStatus::CANCELLED => OrderStatus::CANCELLED,
-                OrderStatus::EXPIRED => OrderStatus::EXPIRED,
-                OrderStatus::FAILED => OrderStatus::FAILED,
-            ]));
+            ->add(ChoiceFilter::new('status')->setChoices(AdminStatusBadge::choices(OrderStatus::ALL)));
     }
 
     public function configureFields(string $pageName): iterable
     {
         return [
             IdField::new('id')->onlyOnIndex(),
-            AssociationField::new('user'),
-            AssociationField::new('plan'),
-            AssociationField::new('targetService'),
-            TextField::new('type'),
-            TextField::new('trackingCode'),
-            IntegerField::new('amount'),
-            TextField::new('status'),
+            AssociationField::new('user')->setLabel('admin.users'),
+            AssociationField::new('plan')->setLabel('admin.plans'),
+            AssociationField::new('targetService')->setLabel('admin.vpn_services'),
+            TextField::new('type')->setLabel('Type'),
+            TextField::new('trackingCode')->setLabel('Tracking Code'),
+            IntegerField::new('amount')->setLabel('Amount'),
+            ChoiceField::new('status')
+                ->setChoices(AdminStatusBadge::choices(OrderStatus::ALL))
+                ->renderAsBadges(AdminStatusBadge::badgeMap()),
             TextareaField::new('metadata')
+                ->setLabel('Metadata')
                 ->formatValue(static fn (mixed $value): string => json_encode($value, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '')
                 ->hideOnIndex()
                 ->hideOnForm(),
-            DateTimeField::new('createdAt')->hideOnForm(),
-            DateTimeField::new('paidAt'),
-            DateTimeField::new('provisionedAt'),
+            DateTimeField::new('createdAt')->setLabel('common.created_at')->hideOnForm(),
+            DateTimeField::new('paidAt')->setLabel('Paid At'),
+            DateTimeField::new('provisionedAt')->setLabel('Provisioned At'),
         ];
     }
 }

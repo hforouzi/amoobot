@@ -17,6 +17,7 @@ use EasyCorp\Bundle\EasyAdminBundle\Dto\SearchDto;
 use EasyCorp\Bundle\EasyAdminBundle\Field\BooleanField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\ChoiceField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\DateTimeField;
+use EasyCorp\Bundle\EasyAdminBundle\Field\FormField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\IdField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\IntegerField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\TextField;
@@ -90,12 +91,15 @@ final class NowPaymentsPaymentGatewayCrudController extends AbstractCrudControll
             ->onlyOnForms();
 
         return [
+            FormField::addPanel('General'),
             IdField::new('id')->onlyOnIndex(),
             TextField::new('title')->setHelp('نام نمایشی درگاه'),
             TextareaField::new('description')->hideOnIndex()->setHelp('توضیحات اختیاری'),
             BooleanField::new('isActive')->setLabel('فعال'),
+            FormField::addPanel('Credentials'),
             $apiKeyField,
             $ipnSecretField,
+            FormField::addPanel('Payment Settings'),
             TextField::new('nowPaymentsApiBaseUrl')->setLabel('api_base_url')->setHelp('آدرس API NOWPayments. پیشفرض: https://api.nowpayments.io/v1'),
             BooleanField::new('nowPaymentsSandbox')->setLabel('sandbox')->setHelp('حالت sandbox برای تست'),
             TextField::new('nowPaymentsCallbackBaseUrl')->setLabel('callback_base_url')->setHelp('آدرس پایه سایت شما، مثال: https://your-domain.com'),
@@ -110,13 +114,14 @@ final class NowPaymentsPaymentGatewayCrudController extends AbstractCrudControll
                 'toman' => 'toman',
                 'rial' => 'rial',
             ])->setHelp('واحد مبالغ سفارش در سیستم شما. اگر قیمت‌ها را به تومان نگه می‌دارید `toman` را انتخاب کنید.'),
-            IntegerField::new('nowPaymentsTomanPerUsd')->setLabel('toman_per_usd')->setHelp('اگر amount_unit=toman است، تعداد تومان به ازای ۱ دلار را وارد کنید.')->hideOnIndex(),
-            IntegerField::new('nowPaymentsIrrToUsdRate')->setLabel('irr_to_usd_rate')->setHelp('اگر amount_unit=rial است، تعداد ریال به ازای ۱ دلار را وارد کنید.')->hideOnIndex(),
+            IntegerField::new('nowPaymentsTomanPerUsd')->setLabel('toman_per_usd')->setHelp('help.nowpayments_rate')->hideOnIndex(),
+            IntegerField::new('nowPaymentsIrrToUsdRate')->setLabel('irr_to_usd_rate')->setHelp('help.nowpayments_rate')->hideOnIndex(),
             TextField::new('nowPaymentsMinPriceAmountOverride')->setLabel('min_price_amount_override')->setHelp('حداقل مبلغ دلاری قیمت برای NOWPayments (اختیاری). اگر خالی باشد از min-amount خود NOWPayments استفاده می‌شود.')->hideOnIndex(),
             IntegerField::new('nowPaymentsMinOrderAmountToman')->setLabel('min_order_amount_toman')->setHelp('حداقل مبلغ سفارش به تومان برای نمایش این روش پرداخت در فروشگاه (اختیاری).')->hideOnIndex(),
             TextField::new('nowPaymentsSuccessUrl')->setLabel('success_url')->setHelp('آدرس بازگشت پس از پرداخت موفق (اختیاری)')->hideOnIndex(),
             TextField::new('nowPaymentsCancelUrl')->setLabel('cancel_url')->setHelp('آدرس بازگشت پس از لغو پرداخت (اختیاری)')->hideOnIndex(),
             TextField::new('nowPaymentsOrderDescription')->setLabel('order_description')->setHelp('توضیحات سفارش ارسالی به NOWPayments')->hideOnIndex(),
+            FormField::addPanel('Metadata'),
             DateTimeField::new('createdAt')->hideOnForm(),
             DateTimeField::new('updatedAt')->hideOnForm(),
         ];

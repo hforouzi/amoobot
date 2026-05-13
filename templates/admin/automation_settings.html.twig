@@ -35,6 +35,7 @@
         <div class="mb-3">
             <label class="form-label" for="orders_incomplete_expire_hours">انقضای سفارش ناقص (ساعت)</label>
             <input class="form-control" type="number" min="1" step="1" id="orders_incomplete_expire_hours" name="orders_incomplete_expire_hours" value="{{ values.orders_incomplete_expire_hours }}">
+            <div class="form-text">{{ 'help.incomplete_order_expiration'|trans({}, 'admin') }}</div>
         </div>
         <button type="submit" class="btn btn-primary">ذخیره تنظیمات</button>
     </form>
