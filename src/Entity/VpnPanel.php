@@ -123,12 +123,22 @@ class VpnPanel
 
     public function getApiToken(): ?string
     {
-        return $this->apiToken;
+        $token = trim((string) ($this->apiToken ?? ''));
+        if ('' !== $token) {
+            return $token;
+        }
+
+        $config = is_array($this->config) ? $this->config : [];
+        $fallback = trim((string) ($config['api_token'] ?? ''));
+
+        return '' === $fallback ? null : $fallback;
     }
 
     public function setApiToken(?string $apiToken): self
     {
-        $this->apiToken = $apiToken;
+        $token = trim((string) ($apiToken ?? ''));
+        $this->apiToken = '' === $token ? null : $token;
+        $this->setConfigValue('api_token', $this->apiToken);
 
         return $this;
     }
@@ -147,12 +157,21 @@ class VpnPanel
 
     public function getSubscriptionBaseUrl(): ?string
     {
-        return $this->subscriptionBaseUrl;
+        $value = trim((string) ($this->subscriptionBaseUrl ?? ''));
+        if ('' !== $value) {
+            return $value;
+        }
+
+        $fallback = trim((string) ($this->getConfigValue('subscription_base_url') ?? ''));
+
+        return '' === $fallback ? null : $fallback;
     }
 
     public function setSubscriptionBaseUrl(?string $subscriptionBaseUrl): self
     {
-        $this->subscriptionBaseUrl = $subscriptionBaseUrl;
+        $value = trim((string) ($subscriptionBaseUrl ?? ''));
+        $this->subscriptionBaseUrl = '' === $value ? null : $value;
+        $this->setConfigValue('subscription_base_url', $this->subscriptionBaseUrl);
 
         return $this;
     }
@@ -232,5 +251,159 @@ class VpnPanel
     public function __toString(): string
     {
         return sprintf('%s (%s)', $this->title ?? 'Panel', $this->type);
+    }
+
+    public function getApiVersion(): string
+    {
+        $apiVersion = strtolower(trim((string) ($this->getConfigValue('api_version') ?? '')));
+
+        return in_array($apiVersion, ['legacy', 'v3'], true) ? $apiVersion : 'legacy';
+    }
+
+    public function setApiVersion(?string $apiVersion): self
+    {
+        $normalized = strtolower(trim((string) ($apiVersion ?? '')));
+        if (!in_array($normalized, ['legacy', 'v3'], true)) {
+            $normalized = 'legacy';
+        }
+        $this->setConfigValue('api_version', $normalized);
+
+        return $this;
+    }
+
+    public function getAuthMode(): string
+    {
+        $authMode = strtolower(trim((string) ($this->getConfigValue('auth_mode') ?? '')));
+
+        return in_array($authMode, ['cookie', 'bearer'], true) ? $authMode : 'cookie';
+    }
+
+    public function setAuthMode(?string $authMode): self
+    {
+        $normalized = strtolower(trim((string) ($authMode ?? '')));
+        if (!in_array($normalized, ['cookie', 'bearer'], true)) {
+            $normalized = 'cookie';
+        }
+        $this->setConfigValue('auth_mode', $normalized);
+
+        return $this;
+    }
+
+    public function getBasePath(): ?string
+    {
+        $value = trim((string) ($this->getConfigValue('base_path') ?? ''));
+
+        return '' === $value ? null : '/'.ltrim($value, '/');
+    }
+
+    public function setBasePath(?string $basePath): self
+    {
+        $value = trim((string) ($basePath ?? ''));
+        if ('' === $value) {
+            $this->setConfigValue('base_path', null);
+
+            return $this;
+        }
+
+        $this->setConfigValue('base_path', '/'.ltrim($value, '/'));
+
+        return $this;
+    }
+
+    public function getSubscriptionPathPrefix(): ?string
+    {
+        $value = trim((string) ($this->getConfigValue('subscription_path_prefix') ?? ''));
+
+        return '' === $value ? null : '/'.ltrim($value, '/');
+    }
+
+    public function setSubscriptionPathPrefix(?string $prefix): self
+    {
+        $value = trim((string) ($prefix ?? ''));
+        if ('' === $value) {
+            $this->setConfigValue('subscription_path_prefix', null);
+
+            return $this;
+        }
+
+        $this->setConfigValue('subscription_path_prefix', '/'.ltrim($value, '/'));
+
+        return $this;
+    }
+
+    public function isApiTokenConfigured(): bool
+    {
+        return '' !== trim((string) ($this->getApiToken() ?? ''));
+    }
+
+    public function getApiTokenConfiguredLabel(): string
+    {
+        return $this->isApiTokenConfigured() ? 'yes' : 'no';
+    }
+
+    public function getLastTestResultSummary(): ?string
+    {
+        $config = is_array($this->config) ? $this->config : [];
+        $entry = $config['last_test_result'] ?? null;
+        if (!is_array($entry)) {
+            return null;
+        }
+
+        $status = strtoupper(trim((string) ($entry['status'] ?? '')));
+        $message = trim((string) ($entry['message'] ?? ''));
+        $checkedAt = trim((string) ($entry['checked_at'] ?? ''));
+
+        if ('' === $status && '' === $message && '' === $checkedAt) {
+            return null;
+        }
+
+        $parts = array_values(array_filter([$status, $message, $checkedAt], static fn (string $part): bool => '' !== $part));
+
+        return [] === $parts ? null : implode(' | ', $parts);
+    }
+
+    public function setLastTestResult(?string $status, ?string $message = null): self
+    {
+        $normalizedStatus = strtoupper(trim((string) ($status ?? '')));
+        if ('' === $normalizedStatus) {
+            $this->setConfigValue('last_test_result', null);
+
+            return $this;
+        }
+
+        $entry = [
+            'status' => $normalizedStatus,
+            'message' => trim((string) ($message ?? '')),
+            'checked_at' => (new \DateTimeImmutable())->format(\DateTimeInterface::ATOM),
+        ];
+        $this->setConfigValue('last_test_result', $entry);
+
+        return $this;
+    }
+
+    private function getConfigValue(string $key): mixed
+    {
+        $config = is_array($this->config) ? $this->config : [];
+
+        return $config[$key] ?? null;
+    }
+
+    private function setConfigValue(string $key, mixed $value): void
+    {
+        $config = is_array($this->config) ? $this->config : [];
+        $shouldUnset = false;
+        if (null === $value) {
+            $shouldUnset = true;
+        } elseif (is_string($value) && '' === trim($value)) {
+            $shouldUnset = true;
+        }
+
+        if ($shouldUnset) {
+            unset($config[$key]);
+        } else {
+            $config[$key] = $value;
+        }
+
+        $this->config = $config;
     }
 }

@@ -404,7 +404,11 @@ In `/admin` -> Payments, use actions:
 - In `/admin` -> VPN Panels create/edit:
   - `type`: `sanaei_3xui`
   - `baseUrl`: panel base URL (example: `https://panel.example.com`)
-  - `username` / `password`: panel login credentials
+  - `apiVersion`: `legacy` or `v3`
+  - `authMode`: `cookie` or `bearer`
+  - `apiToken`: for v3 bearer auth (from panel settings)
+  - `basePath`: optional when panel is installed under a sub-path (example: `/xui`)
+  - `username` / `password`: panel login credentials for cookie mode
   - `config` JSON for global panel settings (no `inbound_id`):
     ```json
     {
@@ -413,6 +417,31 @@ In `/admin` -> Payments, use actions:
       "public_host": "sub.boodbash.ir"
     }
     ```
+
+### Sanaei/3x-ui API versions
+Legacy panel:
+```json
+{
+  "api_version": "legacy",
+  "auth_mode": "cookie"
+}
+```
+
+3x-ui v3+ Bearer token:
+```json
+{
+  "api_version": "v3",
+  "auth_mode": "bearer",
+  "api_token": "YOUR_TOKEN",
+  "subscription_base_url": "https://sub.example.com:8443",
+  "subscription_path_prefix": "/rain"
+}
+```
+
+- API token is from `Settings → Security → API Token` on 3x-ui.
+- Bearer token mode skips CSRF and login cookie flow.
+- v3 uses official `getClientLinks` endpoint when available.
+- legacy panels continue manual link generation from `externalProxy`.
 
 ### Subscription URL format
 - Subscription URL is built as:
@@ -439,16 +468,20 @@ In `/admin` -> Payments, use actions:
 php bin/console app:panel:test-login {panelId}
 php bin/console app:panel:debug-transport {panelId}
 php bin/console app:panel:list-inbounds {panelId}
+php bin/console app:panel:detect-version {panelId} [--apply]
 php bin/console app:panel:sync-inbounds {panelId}
 php bin/console app:panel:test-create-client {inboundId}
+php bin/console app:panel:test-client-links {serviceId}
 ```
 
 ### CLI equivalents
 ```bash
 php bin/console app:panel:test-login 1
 php bin/console app:panel:debug-transport 1
+php bin/console app:panel:detect-version 1
 php bin/console app:panel:sync-inbounds 1
 php bin/console app:panel:test-create-client 3
+php bin/console app:panel:test-client-links 10
 php bin/console app:service:debug-links 10
 php bin/console app:service:regenerate-config 10
 ```
@@ -671,8 +704,10 @@ If `test login` works but provisioning still fails on `addClient`:
 - `app:panel:test-login {panelId}`
 - `app:panel:debug-transport {panelId}`
 - `app:panel:list-inbounds {panelId}`
+- `app:panel:detect-version {panelId} [--apply]`
 - `app:panel:sync-inbounds {panelId}`
 - `app:panel:test-create-client {inboundId}`
+- `app:panel:test-client-links {serviceId}`
 - `app:service:debug-links {serviceId}`
 - `app:service:regenerate-config {serviceId}`
 - `app:service:sync-usage [--service-id=ID] [--limit=100] [--dry-run]`

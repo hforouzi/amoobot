@@ -49,8 +49,15 @@ final class PanelTestLoginCommand extends Command
         }
 
         $diagnostics = $this->panelHttpClientFactory->diagnostics($panel);
+        $apiVersion = $this->apiClient->getConfiguredApiVersion($panel);
+        $authMode = $this->apiClient->getConfiguredAuthMode($panel);
+        $bearerEnabled = $this->apiClient->isBearerAuthEnabled($panel);
         $io->section('Transport diagnostics');
         $io->listing([
+            sprintf('api_version: %s', $apiVersion),
+            sprintf('auth_mode: %s', $authMode),
+            sprintf('bearer enabled: %s', $bearerEnabled ? 'yes' : 'no'),
+            sprintf('base api url: %s', $this->apiClient->getPanelApiBaseUrl($panel)),
             sprintf('panel id: %s', (string) ($diagnostics['panelId'] ?? '')),
             sprintf('proxy source: %s', (string) ($diagnostics['proxySource'] ?? 'none')),
             sprintf('proxy enabled: %s', (($diagnostics['proxyEnabled'] ?? false) === true) ? 'yes' : 'no'),
@@ -62,12 +69,24 @@ final class PanelTestLoginCommand extends Command
 
         $result = $this->apiClient->login($panel);
         if (($result['ok'] ?? false) !== true) {
-            $io->error('Login failed.');
+            $io->error('Auth/login failed.');
 
             return Command::FAILURE;
         }
 
-        $io->success('Login successful.');
+        $io->success('Auth/login successful.');
+
+        $listResult = $this->apiClient->listInbounds($panel);
+        if (($listResult['ok'] ?? false) !== true) {
+            $io->error(sprintf('List endpoint test failed. status=%s error=%s', (string) ($listResult['status'] ?? 'null'), (string) ($listResult['error'] ?? 'unknown')));
+
+            return Command::FAILURE;
+        }
+
+        $payload = is_array($listResult['data'] ?? null) ? $listResult['data'] : [];
+        $obj = $payload['obj'] ?? $payload;
+        $count = is_array($obj) ? count($obj) : 0;
+        $io->success(sprintf('List endpoint test successful. inbound_count=%d', $count));
 
         return Command::SUCCESS;
     }
