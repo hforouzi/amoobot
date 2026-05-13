@@ -494,6 +494,33 @@ class PaymentGateway
         return $this->setConfigString('pay_currency', $value);
     }
 
+    public function getNowPaymentsPaymentMode(): string
+    {
+        $value = strtolower((string) ($this->configString('payment_mode') ?? 'invoice'));
+
+        return in_array($value, ['invoice', 'payment'], true) ? $value : 'invoice';
+    }
+
+    public function setNowPaymentsPaymentMode(?string $value): self
+    {
+        $normalized = strtolower(trim((string) $value));
+        if (!in_array($normalized, ['invoice', 'payment'], true)) {
+            $normalized = 'invoice';
+        }
+
+        return $this->setConfigString('payment_mode', $normalized);
+    }
+
+    public function isNowPaymentsLockPayCurrency(): bool
+    {
+        return true === ($this->configBool('lock_pay_currency'));
+    }
+
+    public function setNowPaymentsLockPayCurrency(bool $value): self
+    {
+        return $this->setConfigBool('lock_pay_currency', $value);
+    }
+
     public function getNowPaymentsAmountUnit(): string
     {
         $value = strtolower((string) ($this->configString('amount_unit') ?? 'toman'));
@@ -640,10 +667,17 @@ class PaymentGateway
     {
         $apiKey = $this->getNowPaymentsApiKey();
         $apiBaseUrl = trim($this->getNowPaymentsApiBaseUrl());
-        $priceCurrency = $this->getNowPaymentsPriceCurrency();
-        $payCurrency = $this->getNowPaymentsPayCurrency();
+        $priceCurrency = trim((string) ($this->getNowPaymentsPriceCurrency() ?? ''));
+        $payCurrency = trim((string) ($this->getNowPaymentsPayCurrency() ?? ''));
+        $paymentMode = $this->getNowPaymentsPaymentMode();
+        $payCurrencyRequired = 'payment' === $paymentMode || ('invoice' === $paymentMode && $this->isNowPaymentsLockPayCurrency());
 
-        if (null === $apiKey || '' === $apiBaseUrl || null === $priceCurrency || null === $payCurrency) {
+        if (
+            null === $apiKey
+            || '' === $apiBaseUrl
+            || '' === $priceCurrency
+            || ($payCurrencyRequired && '' === $payCurrency)
+        ) {
             return false;
         }
 

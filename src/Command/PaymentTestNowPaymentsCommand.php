@@ -33,7 +33,8 @@ final class PaymentTestNowPaymentsCommand extends Command
     {
         $this
             ->addArgument('gatewayId', InputArgument::REQUIRED, 'PaymentGateway id (nowpayments)')
-            ->addOption('amount', null, InputOption::VALUE_REQUIRED, 'Test amount in gateway currency', '1000000');
+            ->addOption('amount', null, InputOption::VALUE_REQUIRED, 'Test amount in gateway currency', '1000000')
+            ->addOption('mode', null, InputOption::VALUE_REQUIRED, 'Override payment mode (invoice|payment)');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
@@ -41,6 +42,7 @@ final class PaymentTestNowPaymentsCommand extends Command
         $io = new SymfonyStyle($input, $output);
         $gatewayId = (int) $input->getArgument('gatewayId');
         $amount = max(1, (int) $input->getOption('amount'));
+        $modeOverride = trim((string) ($input->getOption('mode') ?? ''));
 
         $gateway = $this->entityManager->getRepository(PaymentGateway::class)->find($gatewayId);
         if (!$gateway instanceof PaymentGateway) {
@@ -55,8 +57,20 @@ final class PaymentTestNowPaymentsCommand extends Command
             return Command::FAILURE;
         }
 
+        if ('' !== $modeOverride && !in_array($modeOverride, ['invoice', 'payment'], true)) {
+            $io->error('Invalid --mode value. Use invoice or payment.');
+
+            return Command::FAILURE;
+        }
+
+        if ('' !== $modeOverride) {
+            $config = is_array($gateway->getConfig()) ? $gateway->getConfig() : [];
+            $config['payment_mode'] = $modeOverride;
+            $gateway->setConfig($config);
+        }
+
         if (!$gateway->isNowPaymentsConfigured()) {
-            $io->error('NOWPayments gateway is not fully configured. Check api_key, api_base_url, price_currency, pay_currency, amount_unit, and the matching USD rate field.');
+            $io->error('NOWPayments gateway is not fully configured. Check api_key, api_base_url, payment_mode, price_currency, and required rate/pay_currency fields for the selected mode.');
 
             return Command::FAILURE;
         }
@@ -84,6 +98,7 @@ final class PaymentTestNowPaymentsCommand extends Command
         $io->section('NOWPayments Test Request');
         $io->writeln(sprintf('Gateway:        #%d %s', $gateway->getId() ?? 0, $gateway->getTitle()));
         $io->writeln(sprintf('Original amount: %d %s', $amount, $gateway->getCurrency()));
+        $io->writeln(sprintf('Mode:           %s', strtoupper((string) ($quote['paymentMode'] ?? $modeOverride ?: ($config['payment_mode'] ?? 'invoice')))));
         $io->writeln(sprintf('Amount unit:    %s', (string) ($quote['amountUnit'] ?? $gateway->getNowPaymentsAmountUnit())));
         $io->writeln(sprintf('Rate field:     %s', (string) ($rateSnapshot['rateField'] ?? '-')));
         $io->writeln(sprintf('Rate used:      %s', null === ($rateSnapshot['rateUsed'] ?? null) ? '-' : (string) $rateSnapshot['rateUsed']));
@@ -128,11 +143,18 @@ final class PaymentTestNowPaymentsCommand extends Command
         }
 
         $io->success('NOWPayments payment created successfully.');
-        $io->writeln(sprintf('payment_id:    %s', $payment->getCryptoPaymentId() ?? '(none)'));
+        $mode = strtolower((string) ($quote['paymentMode'] ?? $modeOverride ?: ($config['payment_mode'] ?? 'invoice')));
+        if ('invoice' === $mode) {
+            $io->writeln(sprintf('invoice_id:    %s', $payment->getCryptoInvoiceId() ?? '(none)'));
+            $io->writeln(sprintf('invoice_url:   %s', $payment->getCryptoInvoiceUrl() ?? '(none)'));
+        }
+        $io->writeln(sprintf('payment_id:     %s', $payment->getCryptoPaymentId() ?? '(none)'));
         $io->writeln(sprintf('payment_status: %s', $payment->getCryptoPaymentStatus() ?? '(none)'));
-        $io->writeln(sprintf('pay_amount:    %s', $payment->getCryptoPayAmount() ?? '(none)'));
-        $io->writeln(sprintf('pay_currency:  %s', strtoupper($payment->getCryptoPayCurrency() ?? '(none)')));
-        $io->writeln(sprintf('pay_address:   %s', $payment->getCryptoAddress() ?? '(none)'));
+        if ('payment' === $mode) {
+            $io->writeln(sprintf('pay_amount:    %s', $payment->getCryptoPayAmount() ?? '(none)'));
+            $io->writeln(sprintf('pay_currency:  %s', strtoupper($payment->getCryptoPayCurrency() ?? '(none)')));
+            $io->writeln(sprintf('pay_address:   %s', $payment->getCryptoAddress() ?? '(none)'));
+        }
         $io->writeln(sprintf('payment_url:   %s', $payment->getPaymentUrl() ?? '(none)'));
 
         if (null !== $result->rawResponse) {

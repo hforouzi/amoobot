@@ -878,7 +878,7 @@ class TelegramKeyboardFactory
 
         if (null !== $paymentUrl && '' !== $paymentUrl) {
             $rows[] = [[
-                'text' => 'پرداخت در صفحه پرداخت',
+                'text' => '💳 پرداخت در صفحه پرداخت',
                 'url' => $paymentUrl,
             ]];
         }

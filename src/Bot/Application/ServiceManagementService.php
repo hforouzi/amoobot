@@ -1108,6 +1108,8 @@ class ServiceManagementService
                         ->setCryptoPayCurrency(null)
                         ->setCryptoPriceCurrency(null)
                         ->setCryptoPurchaseId(null)
+                        ->setCryptoInvoiceId(null)
+                        ->setCryptoInvoiceUrl(null)
                         ->setCryptoNetwork(null)
                         ->setCryptoExpiresAt(null);
                 }
@@ -1127,6 +1129,38 @@ class ServiceManagementService
                 $chatId,
                 sprintf("برای پرداخت آنلاین روی دکمه زیر بزنید.\nکد پیگیری: %s", (string) ($order->getTrackingCode() ?? '-')),
                 $this->keyboardFactory->paymentOnlineActionMenu((int) ($payment->getId() ?? 0), (int) ($order->getId() ?? 0), (string) $payment->getPaymentUrl())
+            );
+
+            return;
+        }
+
+        if (PaymentGatewayType::NOWPAYMENTS === $gateway->getType()) {
+            if (!$requestResult->success) {
+                $this->showPopupOrMessage($chatId, $callbackId, $requestResult->message ?: 'ایجاد پرداخت ارز دیجیتال انجام نشد.', 'nowpayments_create_failed');
+
+                return;
+            }
+
+            $trackingCode = (string) ($order->getTrackingCode() ?? '-');
+            $message = null !== $payment->getPaymentUrl() && '' !== trim((string) $payment->getPaymentUrl())
+                ? "پرداخت ارز دیجیتال آماده است.\nبرای پرداخت روی دکمه زیر بزنید.\n\nوضعیت: در انتظار پرداخت\nکد پیگیری سفارش: ".$trackingCode
+                : sprintf(
+                    "💎 پرداخت ارز دیجیتال\n\nمبلغ پرداختی: %s %s\n\nآدرس کیف پول:\n%s\n\nوضعیت: در انتظار پرداخت\nکد پیگیری سفارش: %s",
+                    $payment->getCryptoPayAmount() ?? '-',
+                    strtoupper($payment->getCryptoPayCurrency() ?? '-'),
+                    $payment->getCryptoAddress() ?? '-',
+                    $trackingCode
+                );
+
+            $this->acknowledgeCallback($callbackId);
+            $this->telegramApiClient->sendMessage(
+                $chatId,
+                $message,
+                $this->keyboardFactory->cryptoPaymentActionMenu(
+                    (int) ($payment->getId() ?? 0),
+                    (int) ($order->getId() ?? 0),
+                    $payment->getPaymentUrl()
+                )
             );
 
             return;

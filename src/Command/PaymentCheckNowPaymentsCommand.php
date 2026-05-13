@@ -58,6 +58,8 @@ final class PaymentCheckNowPaymentsCommand extends Command
 
         $io->section(sprintf('NOWPayments Status Check — Payment #%d', $paymentId));
         $io->writeln(sprintf('crypto_payment_id:     %s', $payment->getCryptoPaymentId() ?? '(none)'));
+        $io->writeln(sprintf('crypto_invoice_id:     %s', $payment->getCryptoInvoiceId() ?? '(none)'));
+        $io->writeln(sprintf('crypto_invoice_url:    %s', $payment->getCryptoInvoiceUrl() ?? '(none)'));
         $io->writeln(sprintf('current_payment_status: %s', $payment->getCryptoPaymentStatus() ?? '(none)'));
         $io->writeln(sprintf('payment_status (app):  %s', $payment->getStatus()));
         $io->newLine();
@@ -85,7 +87,7 @@ final class PaymentCheckNowPaymentsCommand extends Command
         }
 
         if (!$result->paid) {
-            $io->warning('Payment is not yet confirmed. No action taken.');
+            $io->warning($result->message ?: 'Payment is not yet confirmed. No action taken.');
 
             return Command::SUCCESS;
         }

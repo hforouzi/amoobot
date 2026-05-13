@@ -1437,6 +1437,8 @@ class TelegramUpdateHandler
                 ->setCryptoPayCurrency(null)
                 ->setCryptoPriceCurrency(null)
                 ->setCryptoPurchaseId(null)
+                ->setCryptoInvoiceId(null)
+                ->setCryptoInvoiceUrl(null)
                 ->setCryptoNetwork(null)
                 ->setCryptoExpiresAt(null);
         }
@@ -1661,6 +1663,12 @@ class TelegramUpdateHandler
         if (PaymentGatewayType::NOWPAYMENTS === $gatewayType) {
             $cryptoStatus = $payment->getCryptoPaymentStatus() ?? ($verify->message ?? '');
 
+            if (!$verify->success && NowPaymentsGateway::PAYMENT_NOT_REPORTED_MESSAGE === ($verify->message ?? '')) {
+                $this->showPopupOrMessage($chatId, $callbackId, NowPaymentsGateway::PAYMENT_NOT_REPORTED_MESSAGE, 'payment_check_nowpayments_not_reported');
+
+                return;
+            }
+
             if (in_array(strtolower($cryptoStatus), ['partially_paid'], true)) {
                 $this->showPopupOrMessage($chatId, $callbackId, 'مبلغ پرداختی کافی نیست. لطفاً وضعیت پرداخت را بررسی کنید.', 'payment_check_partially_paid');
 
@@ -1697,6 +1705,16 @@ class TelegramUpdateHandler
 
     private function buildCryptoPaymentMessage(Payment $payment, Order $order): string
     {
+        if (null !== $payment->getPaymentUrl() && '' !== trim((string) $payment->getPaymentUrl())) {
+            return implode("\n", [
+                'پرداخت ارز دیجیتال آماده است.',
+                'برای پرداخت روی دکمه زیر بزنید.',
+                '',
+                'وضعیت: '.self::NOWPAYMENTS_WAITING_STATUS_TEXT,
+                sprintf('کد پیگیری سفارش: %s', (string) ($order->getTrackingCode() ?? $order->getId() ?? '-')),
+            ]);
+        }
+
         $payAmount = $payment->getCryptoPayAmount() ?? '-';
         $payCurrency = strtoupper($payment->getCryptoPayCurrency() ?? '-');
         $address = $payment->getCryptoAddress() ?? '-';

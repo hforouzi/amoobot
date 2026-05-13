@@ -847,8 +847,10 @@ In Admin → درگاههای پرداخت → کانفیگ NOWPayments, create 
 | `ipn_secret` | IPN Secret for webhook signature validation |
 | `sandbox` | Informational flag for diagnostics; base URL is controlled by `api_base_url` |
 | `callback_base_url` | Your site base URL, e.g. `https://your-domain.com` |
+| `payment_mode` | `invoice` (default) for hosted page, or `payment` for direct wallet mode |
 | `price_currency` | Currency of the price sent to NOWPayments (usually `usd`) |
 | `pay_currency` | Default crypto currency for payment, e.g. `usdttrc20`, `btc`, `eth`. For USDT TRC20 use `usdttrc20` |
+| `lock_pay_currency` | In invoice mode, locks pay currency on hosted page when enabled |
 | `amount_unit` | Unit of stored order amounts: `toman` or `rial` |
 | `toman_per_usd` | Required when `amount_unit=toman` and `price_currency=usd` |
 | `irr_to_usd_rate` | Required when `amount_unit=rial` and `price_currency=usd` |
@@ -866,8 +868,10 @@ In Admin → درگاههای پرداخت → کانفیگ NOWPayments, create 
   "ipn_secret": "YOUR_IPN_SECRET",
   "sandbox": false,
   "callback_base_url": "https://your-domain.com",
+  "payment_mode": "invoice",
   "price_currency": "usd",
   "pay_currency": "usdttrc20",
+  "lock_pay_currency": false,
   "amount_unit": "toman",
   "toman_per_usd": 45000,
   "min_price_amount_override": "10",
@@ -882,6 +886,10 @@ NOWPayments payment endpoints in this phase use:
 - `x-api-key: YOUR_API_KEY`
 - `Content-Type: application/json` for POST requests
 - `Accept: application/json`
+
+Mode-specific create endpoint:
+- `payment_mode=invoice` → `POST /invoice` (hosted invoice/payment page)
+- `payment_mode=payment` → `POST /payment` (direct wallet payment)
 
 `Authorization: Bearer ...` is **not** used for NOWPayments payment endpoints.
 
@@ -904,8 +912,9 @@ The method is shown in bot only if:
 - gateway type is `nowpayments`
 - `api_key` is set
 - `api_base_url` exists (or falls back to the production default)
-- `pay_currency` is set
 - `price_currency` is set
+- if `payment_mode=payment`, `pay_currency` must be set
+- if `payment_mode=invoice` and `lock_pay_currency=true`, `pay_currency` must be set
 - if gateway currency is IRR and `price_currency` is `usd`, then:
   - `toman_per_usd` must be set for `amount_unit=toman`
   - `irr_to_usd_rate` must be set for `amount_unit=rial`
@@ -924,7 +933,7 @@ if amount_unit=rial:
   priceAmount (USD) = order.payableAmount / irr_to_usd_rate
 ```
 
-Before `POST /payment`, the gateway calls:
+Before creating a direct payment (or locked invoice), the gateway calls:
 - `GET /estimate`
 - `GET /min-amount`
 
@@ -957,7 +966,13 @@ Live rate fetching is **not implemented** in this phase. Update the matching USD
 
 ### 6. Telegram UX
 
-When user selects NOWPayments, bot sends:
+If invoice URL exists:
+```
+پرداخت ارز دیجیتال آماده است.
+برای پرداخت روی دکمه زیر بزنید.
+```
+
+Otherwise (direct wallet mode), bot sends:
 ```
 💎 پرداخت ارز دیجیتال
 
@@ -971,9 +986,9 @@ When user selects NOWPayments, bot sends:
 ```
 
 Buttons:
+- 💳 پرداخت در صفحه پرداخت (if URL exists)
 - 🔄 بررسی پرداخت → checks payment status
 - ❌ انصراف → cancels the payment
-- پرداخت در صفحه پرداخت (if `invoice_url` returned) → URL button
 
 ### 7. CLI Commands
 
@@ -983,6 +998,12 @@ php bin/console app:payment:test-nowpayments {gatewayId} --amount=1000000
 ```
 
 Prints: price amount/currency, amount unit, conversion rate, estimate/min diagnostics, pay amount/currency, address, payment_id, status, payment URL.
+
+Optional mode override for tests:
+```bash
+php bin/console app:payment:test-nowpayments {gatewayId} --amount=1000000 --mode=invoice
+php bin/console app:payment:test-nowpayments {gatewayId} --amount=1000000 --mode=payment
+```
 
 #### Debug conversion + minimum checks:
 ```bash

@@ -29,6 +29,9 @@ final class NowPaymentsGateway implements PaymentGatewayInterface
 {
     public const DEFAULT_API_BASE = 'https://api.nowpayments.io/v1';
     public const BELOW_MINIMUM_USER_MESSAGE = 'مبلغ این سفارش برای پرداخت با این ارز کمتر از حداقل مجاز درگاه است. لطفاً روش پرداخت دیگری انتخاب کنید یا مبلغ سفارش را افزایش دهید.';
+    public const PAYMENT_NOT_REPORTED_MESSAGE = 'پرداخت هنوز از سمت درگاه گزارش نشده است. پس از پرداخت چند دقیقه صبر کنید و دوباره بررسی کنید.';
+    public const MODE_INVOICE = 'invoice';
+    public const MODE_PAYMENT = 'payment';
 
     /** Statuses that are considered fully paid and trigger provisioning */
     public const PAID_STATUSES = ['finished', 'confirmed'];
@@ -58,9 +61,13 @@ final class NowPaymentsGateway implements PaymentGatewayInterface
         $callbackBaseUrl = rtrim(trim((string) ($config['callback_base_url'] ?? '')), '/');
         $priceCurrency = strtolower(trim((string) ($config['price_currency'] ?? 'usd')));
         $payCurrency = strtolower(trim((string) ($config['pay_currency'] ?? '')));
+        $paymentMode = $this->resolvePaymentMode($config);
+        $lockPayCurrency = $this->resolveLockPayCurrency($config);
+        $payCurrencyRequired = self::MODE_PAYMENT === $paymentMode || (self::MODE_INVOICE === $paymentMode && $lockPayCurrency);
         $sandbox = true === ($config['sandbox'] ?? false);
         $baseUrl = $this->resolveApiBaseUrl($config);
-        $endpoint = $baseUrl.'/payment';
+        $endpoint = self::MODE_INVOICE === $paymentMode ? $baseUrl.'/invoice' : $baseUrl.'/payment';
+        $quotePayCurrency = $payCurrencyRequired ? $payCurrency : '';
 
         if ('' === $apiKey) {
             return new PaymentRequestResult(success: false, message: 'NOWPayments api_key is not configured.');
@@ -68,11 +75,11 @@ final class NowPaymentsGateway implements PaymentGatewayInterface
         if ('' === $callbackBaseUrl) {
             return new PaymentRequestResult(success: false, message: 'NOWPayments callback_base_url is not configured.');
         }
-        if ('' === $payCurrency) {
+        if ($payCurrencyRequired && '' === $payCurrency) {
             return new PaymentRequestResult(success: false, message: 'NOWPayments pay_currency is not configured.');
         }
 
-        $quote = $this->buildPaymentQuote($gateway, $payment);
+        $quote = $this->buildPaymentQuote($gateway, $payment, $quotePayCurrency, $payCurrencyRequired);
         $priceAmount = $quote['priceAmount'];
         if (!is_float($priceAmount)) {
             return new PaymentRequestResult(
@@ -91,16 +98,26 @@ final class NowPaymentsGateway implements PaymentGatewayInterface
         $requestBody = [
             'price_amount' => $priceAmount,
             'price_currency' => $priceCurrency,
-            'pay_currency' => $payCurrency,
             'order_id' => $orderId,
             'order_description' => $description,
             'ipn_callback_url' => $ipnCallbackUrl,
         ];
+        if (self::MODE_PAYMENT === $paymentMode || (self::MODE_INVOICE === $paymentMode && $lockPayCurrency && '' !== $payCurrency)) {
+            $requestBody['pay_currency'] = $payCurrency;
+        }
         if (null !== $successUrl) {
             $requestBody['success_url'] = $successUrl;
         }
         if (null !== $cancelUrl) {
             $requestBody['cancel_url'] = $cancelUrl;
+        }
+        $partiallyPaidUrl = trim((string) ($config['partially_paid_url'] ?? ''));
+        if ('' !== $partiallyPaidUrl) {
+            $requestBody['partially_paid_url'] = $partiallyPaidUrl;
+        }
+        $payoutCurrency = strtolower(trim((string) ($config['payout_currency'] ?? '')));
+        if ('' !== $payoutCurrency) {
+            $requestBody['payout_currency'] = $payoutCurrency;
         }
 
         $requestPayload = $this->buildRequestPayloadSnapshot($requestBody, $quote);
@@ -160,16 +177,36 @@ final class NowPaymentsGateway implements PaymentGatewayInterface
         }
 
         $paymentId = trim((string) ($raw['payment_id'] ?? ''));
+        if ('' === $paymentId && is_array($raw['payments'] ?? null)) {
+            $first = $raw['payments'][0] ?? null;
+            if (is_array($first)) {
+                $paymentId = trim((string) ($first['payment_id'] ?? ''));
+            }
+        }
+        $invoiceId = trim((string) ($raw['invoice_id'] ?? $raw['id'] ?? ''));
         $payAddress = trim((string) ($raw['pay_address'] ?? ''));
         $payAmount = trim((string) ($raw['pay_amount'] ?? ''));
         $payCurrencyActual = trim((string) ($raw['pay_currency'] ?? $payCurrency));
-        $paymentStatus = trim((string) ($raw['payment_status'] ?? 'waiting'));
+        $paymentStatus = trim((string) ($raw['payment_status'] ?? $raw['invoice_status'] ?? $raw['status'] ?? 'waiting'));
         $purchaseId = trim((string) ($raw['purchase_id'] ?? ''));
         $paymentUrlFromApi = trim((string) ($raw['invoice_url'] ?? $raw['payment_url'] ?? ''));
         $network = trim((string) ($raw['network'] ?? ''));
         $expirationEstimate = trim((string) ($raw['expiration_estimate_date'] ?? ''));
 
-        if ('' === $paymentId) {
+        if (self::MODE_INVOICE === $paymentMode && '' === $paymentUrlFromApi) {
+            $this->safeLog('nowpayments_invoice_missing_url', [
+                'paymentId' => $payment->getId(),
+                'raw' => $this->sanitizeResponse($raw),
+            ]);
+
+            return new PaymentRequestResult(
+                success: false,
+                message: 'ایجاد صفحه پرداخت ارز دیجیتال انجام نشد. لطفاً روش پرداخت دیگری انتخاب کنید یا بعداً تلاش کنید.',
+                rawResponse: $requestPayload
+            );
+        }
+
+        if (self::MODE_PAYMENT === $paymentMode && '' === $paymentId) {
             $this->safeLog('nowpayments_create_no_payment_id', [
                 'paymentId' => $payment->getId(),
                 'raw' => $this->sanitizeResponse($raw),
@@ -183,7 +220,9 @@ final class NowPaymentsGateway implements PaymentGatewayInterface
         }
 
         $payment
-            ->setCryptoPaymentId($paymentId)
+            ->setCryptoPaymentId('' !== $paymentId ? $paymentId : null)
+            ->setCryptoInvoiceId('' !== $invoiceId ? $invoiceId : $payment->getCryptoInvoiceId())
+            ->setCryptoInvoiceUrl('' !== $paymentUrlFromApi ? $paymentUrlFromApi : $payment->getCryptoInvoiceUrl())
             ->setCryptoPaymentStatus($paymentStatus)
             ->setCryptoAddress('' !== $payAddress ? $payAddress : null)
             ->setCryptoPayAmount('' !== $payAmount ? $payAmount : null)
@@ -191,7 +230,7 @@ final class NowPaymentsGateway implements PaymentGatewayInterface
             ->setCryptoPriceCurrency($priceCurrency)
             ->setCryptoPurchaseId('' !== $purchaseId ? $purchaseId : null)
             ->setCryptoNetwork('' !== $network ? $network : null)
-            ->setGatewayTransactionId($paymentId);
+            ->setGatewayTransactionId('' !== $paymentId ? $paymentId : ('' !== $invoiceId ? $invoiceId : $payment->getGatewayTransactionId()));
 
         if ('' !== $paymentUrlFromApi) {
             $payment->setPaymentUrl($paymentUrlFromApi);
@@ -208,7 +247,7 @@ final class NowPaymentsGateway implements PaymentGatewayInterface
         return new PaymentRequestResult(
             success: true,
             paymentUrl: '' !== $paymentUrlFromApi ? $paymentUrlFromApi : null,
-            transactionId: $paymentId,
+            transactionId: '' !== $paymentId ? $paymentId : ('' !== $invoiceId ? $invoiceId : null),
             message: 'nowpayments_created',
             rawResponse: $requestPayload
         );
@@ -227,9 +266,13 @@ final class NowPaymentsGateway implements PaymentGatewayInterface
             return new PaymentVerificationResult(success: false, paid: false, message: 'NOWPayments api_key is not configured.');
         }
 
-        $paymentId = trim((string) ($payload['payment_id'] ?? $payment->getCryptoPaymentId() ?? $payment->getGatewayTransactionId() ?? ''));
+        $paymentId = trim((string) ($payload['payment_id'] ?? $payment->getCryptoPaymentId() ?? ''));
+        $invoiceId = trim((string) ($payload['invoice_id'] ?? $payment->getCryptoInvoiceId() ?? ''));
+        if ('' === $paymentId && '' !== $invoiceId) {
+            return $this->verifyInvoicePayment($payment, $invoiceId, $apiKey, $baseUrl, $sandbox);
+        }
         if ('' === $paymentId) {
-            return new PaymentVerificationResult(success: false, paid: false, message: 'NOWPayments payment_id not found.');
+            return new PaymentVerificationResult(success: false, paid: false, message: self::PAYMENT_NOT_REPORTED_MESSAGE);
         }
 
         $endpoint = $baseUrl.'/payment/'.$paymentId;
@@ -301,6 +344,90 @@ final class NowPaymentsGateway implements PaymentGatewayInterface
         );
     }
 
+    private function verifyInvoicePayment(Payment $payment, string $invoiceId, string $apiKey, string $baseUrl, bool $sandbox): PaymentVerificationResult
+    {
+        $endpoint = $baseUrl.'/invoice/'.$invoiceId;
+
+        try {
+            $response = $this->httpClient->request('GET', $endpoint, [
+                'headers' => $this->buildGetHeaders($apiKey),
+                'timeout' => 20,
+            ]);
+            $statusCode = $response->getStatusCode();
+            $raw = $response->toArray(false);
+        } catch (TransportExceptionInterface|\Throwable $e) {
+            $this->safeLog('nowpayments_verify_invoice_exception', array_merge(
+                ['message' => $e->getMessage(), 'paymentId' => $payment->getId(), 'invoiceId' => $invoiceId],
+                $this->buildApiDiagnostics($apiKey, $endpoint, $sandbox)
+            ));
+
+            return new PaymentVerificationResult(success: false, paid: false, message: self::PAYMENT_NOT_REPORTED_MESSAGE);
+        }
+
+        $rawMessage = trim((string) ($raw['message'] ?? ''));
+        if ($statusCode >= 400) {
+            $this->safeLog('nowpayments_verify_invoice_failed', array_merge(
+                ['paymentId' => $payment->getId(), 'invoiceId' => $invoiceId, 'statusCode' => $statusCode, 'raw' => $this->sanitizeResponse($raw)],
+                $this->buildApiDiagnostics($apiKey, $endpoint, $sandbox)
+            ));
+
+            return new PaymentVerificationResult(success: false, paid: false, message: '' !== $rawMessage ? $rawMessage : self::PAYMENT_NOT_REPORTED_MESSAGE, rawResponse: is_array($raw) ? $raw : null);
+        }
+
+        $paymentId = trim((string) ($raw['payment_id'] ?? ''));
+        $status = strtolower(trim((string) ($raw['payment_status'] ?? $raw['invoice_status'] ?? $raw['status'] ?? '')));
+        $paymentUrl = trim((string) ($raw['invoice_url'] ?? ''));
+        $payAmount = trim((string) ($raw['pay_amount'] ?? ''));
+        $payCurrency = trim((string) ($raw['pay_currency'] ?? ''));
+        $payAddress = trim((string) ($raw['pay_address'] ?? ''));
+
+        $payment
+            ->setCryptoInvoiceId($invoiceId)
+            ->setCryptoInvoiceUrl('' !== $paymentUrl ? $paymentUrl : $payment->getCryptoInvoiceUrl())
+            ->setCryptoPaymentId('' !== $paymentId ? $paymentId : $payment->getCryptoPaymentId())
+            ->setCryptoPaymentStatus('' !== $status ? $status : $payment->getCryptoPaymentStatus())
+            ->setVerifyPayload(is_array($raw) ? $raw : null);
+
+        if ('' !== $paymentUrl) {
+            $payment->setPaymentUrl($paymentUrl);
+        }
+        if ('' !== $payAmount) {
+            $payment->setCryptoPayAmount($payAmount);
+        }
+        if ('' !== $payCurrency) {
+            $payment->setCryptoPayCurrency(strtolower($payCurrency));
+        }
+        if ('' !== $payAddress) {
+            $payment->setCryptoAddress($payAddress);
+        }
+        if ('' !== $paymentId) {
+            $payment->setGatewayTransactionId($paymentId);
+        }
+
+        $paid = in_array($status, self::PAID_STATUSES, true);
+        $failed = in_array($status, self::FAILED_STATUSES, true);
+
+        if ($paid) {
+            $payment
+                ->setVerifiedAt($payment->getVerifiedAt() ?? new \DateTimeImmutable())
+                ->setFailedAt(null);
+        } elseif ($failed) {
+            $payment->setFailedAt($payment->getFailedAt() ?? new \DateTimeImmutable());
+        }
+
+        if ('' === $status) {
+            return new PaymentVerificationResult(success: false, paid: false, message: self::PAYMENT_NOT_REPORTED_MESSAGE, rawResponse: is_array($raw) ? $raw : null);
+        }
+
+        return new PaymentVerificationResult(
+            success: true,
+            paid: $paid,
+            transactionId: '' !== $paymentId ? $paymentId : $invoiceId,
+            message: $status,
+            rawResponse: is_array($raw) ? $raw : null
+        );
+    }
+
     /**
      * @return array{success: bool, statusCode: int, endpoint: string, api_key_configured: string, api_key_length: int, api_key_prefix: string, sandbox: string, response: array<string, mixed>|list<mixed>|null, message: string}
      */
@@ -366,7 +493,14 @@ final class NowPaymentsGateway implements PaymentGatewayInterface
             ->setAmount(max(1, $amount))
             ->setPayableAmount(max(1, $amount));
 
-        return $this->buildPaymentQuote($gateway, $payment);
+        $config = $this->resolveConfig($gateway);
+        $mode = $this->resolvePaymentMode($config);
+        $lockPayCurrency = $this->resolveLockPayCurrency($config);
+        $payCurrency = strtolower(trim((string) ($config['pay_currency'] ?? '')));
+        $payCurrencyRequired = self::MODE_PAYMENT === $mode || (self::MODE_INVOICE === $mode && $lockPayCurrency);
+        $quotePayCurrency = $payCurrencyRequired ? $payCurrency : '';
+
+        return $this->buildPaymentQuote($gateway, $payment, $quotePayCurrency, $payCurrencyRequired);
     }
 
     /**
@@ -412,12 +546,13 @@ final class NowPaymentsGateway implements PaymentGatewayInterface
     /**
      * @return array<string, mixed>
      */
-    private function buildPaymentQuote(?PaymentGateway $gateway, Payment $payment): array
+    private function buildPaymentQuote(?PaymentGateway $gateway, Payment $payment, string $payCurrency, bool $payCurrencyRequired): array
     {
         $config = $this->resolveConfig($gateway);
         $apiKey = $this->resolveApiKey($config);
         $priceCurrency = strtolower(trim((string) ($config['price_currency'] ?? 'usd')));
-        $payCurrency = strtolower(trim((string) ($config['pay_currency'] ?? '')));
+        $paymentMode = $this->resolvePaymentMode($config);
+        $lockPayCurrency = $this->resolveLockPayCurrency($config);
         $sandbox = true === ($config['sandbox'] ?? false);
         $baseUrl = $this->resolveApiBaseUrl($config);
         $conversionSnapshot = $this->resolveConversionSnapshot($payment, $config);
@@ -442,7 +577,7 @@ final class NowPaymentsGateway implements PaymentGatewayInterface
         if ('' === $apiKey) {
             $canCreate = false;
             $message = 'NOWPayments api_key is not configured.';
-        } elseif ('' === $payCurrency) {
+        } elseif ($payCurrencyRequired && '' === $payCurrency) {
             $canCreate = false;
             $message = 'NOWPayments pay_currency is not configured.';
         } elseif (!is_float($priceAmount)) {
@@ -450,7 +585,7 @@ final class NowPaymentsGateway implements PaymentGatewayInterface
             $message = $this->buildMissingRateMessage($conversionSnapshot);
         }
 
-        if ($canCreate) {
+        if ($canCreate && '' !== $payCurrency) {
             [$estimateStatusCode, $estimateResponse, $estimateMessage] = $this->fetchEstimate(
                 $apiKey,
                 $estimateEndpoint,
@@ -482,21 +617,22 @@ final class NowPaymentsGateway implements PaymentGatewayInterface
             $comparisonBasis = $minAnalysis['comparisonBasis'];
             $belowMinimum = $minAnalysis['belowMinimum'];
 
-            $override = $this->resolveMinPriceAmountOverride($config);
-            if (null !== $override && (float) $priceAmount < $override) {
-                $belowMinimum = true;
-                if (null === $minPriceAmount || $override > $minPriceAmount) {
-                    $minPriceAmount = $override;
-                    $minAmount = $this->formatDecimal($override);
-                    $minAmountCurrency = $priceCurrency;
-                    $comparisonBasis = 'price';
-                }
-            }
+        }
 
-            if ($belowMinimum) {
-                $canCreate = false;
-                $message = self::BELOW_MINIMUM_USER_MESSAGE;
+        $override = $this->resolveMinPriceAmountOverride($config);
+        if ($canCreate && is_float($priceAmount) && null !== $override && (float) $priceAmount < $override) {
+            $belowMinimum = true;
+            if (null === $minPriceAmount || $override > $minPriceAmount) {
+                $minPriceAmount = $override;
+                $minAmount = $this->formatDecimal($override);
+                $minAmountCurrency = $priceCurrency;
+                $comparisonBasis = 'price';
             }
+        }
+
+        if ($belowMinimum) {
+            $canCreate = false;
+            $message = self::BELOW_MINIMUM_USER_MESSAGE;
         }
 
         return [
@@ -513,6 +649,8 @@ final class NowPaymentsGateway implements PaymentGatewayInterface
             'priceAmount' => $priceAmount,
             'priceCurrency' => $priceCurrency,
             'payCurrency' => $payCurrency,
+            'paymentMode' => $paymentMode,
+            'lockPayCurrency' => $lockPayCurrency ? 'yes' : 'no',
             'estimatedPayAmount' => $estimatedPayAmount,
             'minAmount' => $minAmount,
             'minAmountCurrency' => $minAmountCurrency,
@@ -752,6 +890,29 @@ final class NowPaymentsGateway implements PaymentGatewayInterface
     /**
      * @param array<string, mixed> $config
      */
+    private function resolvePaymentMode(array $config): string
+    {
+        $value = strtolower(trim((string) ($config['payment_mode'] ?? self::MODE_INVOICE)));
+
+        return in_array($value, [self::MODE_INVOICE, self::MODE_PAYMENT], true) ? $value : self::MODE_INVOICE;
+    }
+
+    /**
+     * @param array<string, mixed> $config
+     */
+    private function resolveLockPayCurrency(array $config): bool
+    {
+        $value = $config['lock_pay_currency'] ?? false;
+        if (is_bool($value)) {
+            return $value;
+        }
+
+        return in_array(strtolower(trim((string) $value)), ['1', 'true', 'yes', 'on'], true);
+    }
+
+    /**
+     * @param array<string, mixed> $config
+     */
     private function resolveUsdRate(array $config, string $amountUnit): ?int
     {
         $key = 'rial' === $amountUnit ? 'irr_to_usd_rate' : 'toman_per_usd';
@@ -825,6 +986,8 @@ final class NowPaymentsGateway implements PaymentGatewayInterface
             'priceAmount' => $quote['priceAmount'] ?? null,
             'priceCurrency' => $quote['priceCurrency'] ?? null,
             'payCurrency' => $quote['payCurrency'] ?? null,
+            'paymentMode' => $quote['paymentMode'] ?? self::MODE_INVOICE,
+            'lockPayCurrency' => $quote['lockPayCurrency'] ?? 'no',
             'estimatedPayAmount' => $quote['estimatedPayAmount'] ?? null,
             'minAmount' => $quote['minAmount'] ?? null,
             'minAmountCurrency' => $quote['minAmountCurrency'] ?? null,

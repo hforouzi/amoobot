@@ -55,12 +55,13 @@ final class NowPaymentsWebhookController extends AbstractController
         }
 
         $paymentId = trim((string) ($payload['payment_id'] ?? ''));
+        $invoiceId = trim((string) ($payload['invoice_id'] ?? ''));
         $orderId = trim((string) ($payload['order_id'] ?? ''));
-        $status = strtolower(trim((string) ($payload['payment_status'] ?? '')));
+        $status = strtolower(trim((string) ($payload['payment_status'] ?? $payload['invoice_status'] ?? $payload['status'] ?? '')));
 
-        $payment = $this->findPayment($paymentId, $orderId);
+        $payment = $this->findPayment($paymentId, $invoiceId, $orderId);
         if (!$payment instanceof Payment) {
-            error_log(sprintf('[NowPaymentsWebhookController] payment_not_found payment_id=%s order_id=%s', $paymentId, $orderId));
+            error_log(sprintf('[NowPaymentsWebhookController] payment_not_found payment_id=%s invoice_id=%s order_id=%s', $paymentId, $invoiceId, $orderId));
 
             return new JsonResponse(['status' => 'ok', 'message' => 'payment_not_found'], Response::HTTP_OK);
         }
@@ -87,6 +88,23 @@ final class NowPaymentsWebhookController extends AbstractController
         // Update crypto status fields from payload
         if ('' !== $status) {
             $payment->setCryptoPaymentStatus($status);
+        }
+        if ('' !== $paymentId) {
+            $payment
+                ->setCryptoPaymentId($paymentId)
+                ->setGatewayTransactionId($paymentId);
+        }
+        if ('' !== $invoiceId) {
+            $payment->setCryptoInvoiceId($invoiceId);
+            if ('' === $paymentId) {
+                $payment->setGatewayTransactionId($invoiceId);
+            }
+        }
+        $invoiceUrl = trim((string) ($payload['invoice_url'] ?? ''));
+        if ('' !== $invoiceUrl) {
+            $payment
+                ->setCryptoInvoiceUrl($invoiceUrl)
+                ->setPaymentUrl($invoiceUrl);
         }
         $actuallyPaid = trim((string) ($payload['actually_paid'] ?? ''));
         if ('' !== $actuallyPaid) {
@@ -136,7 +154,7 @@ final class NowPaymentsWebhookController extends AbstractController
         return new JsonResponse(['status' => 'ok', 'message' => 'status_updated']);
     }
 
-    private function findPayment(string $paymentId, string $orderId): ?Payment
+    private function findPayment(string $paymentId, string $invoiceId, string $orderId): ?Payment
     {
         if ('' !== $paymentId) {
             $payment = $this->entityManager->getRepository(Payment::class)
@@ -159,6 +177,22 @@ final class NowPaymentsWebhookController extends AbstractController
                 ->where('p.gatewayTransactionId = :pid')
                 ->andWhere('p.gatewayType = :type')
                 ->setParameter('pid', $paymentId)
+                ->setParameter('type', PaymentGatewayType::NOWPAYMENTS)
+                ->setMaxResults(1)
+                ->getQuery()
+                ->getOneOrNullResult();
+
+            if ($payment instanceof Payment) {
+                return $payment;
+            }
+        }
+
+        if ('' !== $invoiceId) {
+            $payment = $this->entityManager->getRepository(Payment::class)
+                ->createQueryBuilder('p')
+                ->where('p.cryptoInvoiceId = :invoiceId')
+                ->andWhere('p.gatewayType = :type')
+                ->setParameter('invoiceId', $invoiceId)
                 ->setParameter('type', PaymentGatewayType::NOWPAYMENTS)
                 ->setMaxResults(1)
                 ->getQuery()

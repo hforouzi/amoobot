@@ -118,6 +118,12 @@ class Payment
     #[ORM\Column(length: 128, nullable: true)]
     private ?string $cryptoPurchaseId = null;
 
+    #[ORM\Column(length: 128, nullable: true)]
+    private ?string $cryptoInvoiceId = null;
+
+    #[ORM\Column(type: 'text', nullable: true)]
+    private ?string $cryptoInvoiceUrl = null;
+
     #[ORM\Column(type: 'text', nullable: true)]
     private ?string $cryptoAddress = null;
 
@@ -544,6 +550,30 @@ class Payment
     public function setCryptoPurchaseId(?string $cryptoPurchaseId): self
     {
         $this->cryptoPurchaseId = $cryptoPurchaseId;
+
+        return $this;
+    }
+
+    public function getCryptoInvoiceId(): ?string
+    {
+        return $this->cryptoInvoiceId;
+    }
+
+    public function setCryptoInvoiceId(?string $cryptoInvoiceId): self
+    {
+        $this->cryptoInvoiceId = $cryptoInvoiceId;
+
+        return $this;
+    }
+
+    public function getCryptoInvoiceUrl(): ?string
+    {
+        return $this->cryptoInvoiceUrl;
+    }
+
+    public function setCryptoInvoiceUrl(?string $cryptoInvoiceUrl): self
+    {
+        $this->cryptoInvoiceUrl = $cryptoInvoiceUrl;
 
         return $this;
     }

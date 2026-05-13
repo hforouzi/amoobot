@@ -62,6 +62,7 @@ final class PaymentDebugNowPaymentsAmountCommand extends Command
         $io->listing([
             sprintf('gateway id: %d', $gatewayId),
             sprintf('original amount: %d %s', $amount, $gateway->getCurrency()),
+            sprintf('mode: %s', (string) ($quote['paymentMode'] ?? 'invoice')),
             sprintf('amount unit: %s', (string) ($quote['amountUnit'] ?? $gateway->getNowPaymentsAmountUnit())),
             sprintf('conversion rate field: %s', (string) ($rateSnapshot['rateField'] ?? '-')),
             sprintf('conversion rate: %s', null === ($rateSnapshot['rateUsed'] ?? null) ? '-' : (string) $rateSnapshot['rateUsed']),

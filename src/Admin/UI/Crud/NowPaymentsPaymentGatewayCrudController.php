@@ -45,6 +45,8 @@ final class NowPaymentsPaymentGatewayCrudController extends AbstractCrudControll
             ->setIsActive(true)
             ->setNowPaymentsSandbox(false)
             ->setNowPaymentsApiBaseUrl('https://api.nowpayments.io/v1')
+            ->setNowPaymentsPaymentMode('invoice')
+            ->setNowPaymentsLockPayCurrency(false)
             ->setNowPaymentsPriceCurrency('usd')
             ->setNowPaymentsPayCurrency('usdttrc20')
             ->setNowPaymentsAmountUnit('toman')
@@ -97,8 +99,13 @@ final class NowPaymentsPaymentGatewayCrudController extends AbstractCrudControll
             TextField::new('nowPaymentsApiBaseUrl')->setLabel('api_base_url')->setHelp('آدرس API NOWPayments. پیشفرض: https://api.nowpayments.io/v1'),
             BooleanField::new('nowPaymentsSandbox')->setLabel('sandbox')->setHelp('حالت sandbox برای تست'),
             TextField::new('nowPaymentsCallbackBaseUrl')->setLabel('callback_base_url')->setHelp('آدرس پایه سایت شما، مثال: https://your-domain.com'),
+            ChoiceField::new('nowPaymentsPaymentMode')->setLabel('حالت پرداخت')->setChoices([
+                'صفحه پرداخت / Invoice' => 'invoice',
+                'پرداخت مستقیم کیف پول / Direct Payment' => 'payment',
+            ])->setHelp('حالت invoice پیش‌فرض است و صفحه پرداخت NOWPayments را نمایش می‌دهد.'),
             TextField::new('nowPaymentsPriceCurrency')->setLabel('price_currency')->setHelp('ارز قیمت (معمولاً usd)'),
-            TextField::new('nowPaymentsPayCurrency')->setLabel('pay_currency')->setHelp('ارز پرداخت، مثال: usdttrc20، btc، eth. برای USDT شبکه TRC20 از usdttrc20 استفاده کنید و trx را فقط برای TRX بگذارید.'),
+            TextField::new('nowPaymentsPayCurrency')->setLabel('pay_currency')->setHelp('برای USDT TRC20 از usdttrc20 استفاده کنید. اگر TRX می‌خواهید trx بگذارید. در حالت invoice با lock=false می‌تواند خالی باشد.'),
+            BooleanField::new('nowPaymentsLockPayCurrency')->setLabel('lock_pay_currency')->setHelp('در حالت invoice اگر فعال باشد pay_currency روی درگاه قفل می‌شود.'),
             ChoiceField::new('nowPaymentsAmountUnit')->setLabel('amount_unit')->setChoices([
                 'toman' => 'toman',
                 'rial' => 'rial',
