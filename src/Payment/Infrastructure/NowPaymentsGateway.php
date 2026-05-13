@@ -125,7 +125,7 @@ final class NowPaymentsGateway implements PaymentGatewayInterface
         } catch (TransportExceptionInterface|\Throwable $e) {
             $this->safeLog('nowpayments_create_exception', ['message' => $e->getMessage(), 'paymentId' => $payment->getId()]);
 
-            return new PaymentRequestResult(success: false, message: 'در ارتباط با درگاه NOWPayments مشکل رخ داد.');
+            return new PaymentRequestResult(success: false, message: 'در ارتباط با درگاه NOWPayments مشکل رخ داد: '.$e->getMessage());
         }
 
         if (isset($raw['message']) && isset($raw['statusCode']) && !in_array((int) ($raw['statusCode'] ?? 0), [200, 201], true)) {
@@ -218,7 +218,7 @@ final class NowPaymentsGateway implements PaymentGatewayInterface
         } catch (TransportExceptionInterface|\Throwable $e) {
             $this->safeLog('nowpayments_verify_exception', ['message' => $e->getMessage(), 'paymentId' => $payment->getId()]);
 
-            return new PaymentVerificationResult(success: false, paid: false, message: 'خطا در بررسی وضعیت پرداخت NOWPayments.');
+            return new PaymentVerificationResult(success: false, paid: false, message: 'خطا در بررسی وضعیت پرداخت NOWPayments: '.$e->getMessage());
         }
 
         $status = strtolower(trim((string) ($raw['payment_status'] ?? '')));

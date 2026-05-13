@@ -81,9 +81,8 @@ final class NowPaymentsWebhookController extends AbstractController
             }
         }
 
-        // Store IPN payload (sanitize: remove sensitive fields before storing)
-        $safePayload = $payload;
-        $payment->setIpnPayload($safePayload);
+        // Store IPN payload
+        $payment->setIpnPayload($payload);
 
         // Update crypto status fields from payload
         if ('' !== $status) {

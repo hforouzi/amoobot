@@ -18,6 +18,7 @@ use App\Entity\User;
 use App\Payment\Application\PaymentConfirmationService;
 use App\Payment\Domain\PaymentGatewayType;
 use App\Payment\Domain\PaymentStatus;
+use App\Payment\Infrastructure\NowPaymentsGateway;
 use App\Payment\Infrastructure\PaymentGatewayRegistry;
 use App\Shared\Infrastructure\SettingValueProvider;
 use App\Shop\Application\IncompleteOrderSettingsProvider;
@@ -1630,16 +1631,14 @@ class TelegramUpdateHandler
 
         if (PaymentGatewayType::NOWPAYMENTS === $gatewayType) {
             $cryptoStatus = $payment->getCryptoPaymentStatus() ?? ($verify->message ?? '');
-            $partiallyPaidStatuses = ['partially_paid'];
-            $failedStatuses = ['failed', 'expired', 'refunded'];
 
-            if (in_array(strtolower($cryptoStatus), $partiallyPaidStatuses, true)) {
+            if (in_array(strtolower($cryptoStatus), ['partially_paid'], true)) {
                 $this->showPopupOrMessage($chatId, $callbackId, 'مبلغ پرداختی کافی نیست. لطفاً وضعیت پرداخت را بررسی کنید.', 'payment_check_partially_paid');
 
                 return;
             }
 
-            if (in_array(strtolower($cryptoStatus), $failedStatuses, true)) {
+            if (in_array(strtolower($cryptoStatus), NowPaymentsGateway::FAILED_STATUSES, true)) {
                 $this->showPopupOrMessage($chatId, $callbackId, 'پرداخت منقضی یا ناموفق شده است.', 'payment_check_failed_expired');
 
                 return;
