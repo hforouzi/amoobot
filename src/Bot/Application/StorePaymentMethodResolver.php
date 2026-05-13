@@ -182,6 +182,14 @@ final class StorePaymentMethodResolver
             }
 
             if (
+                PaymentGatewayType::NOWPAYMENTS === $gatewayType
+                && null !== $gateway->getNowPaymentsMinOrderAmountToman()
+                && $orderPayableAmount < (int) $gateway->getNowPaymentsMinOrderAmountToman()
+            ) {
+                $skipReasons[] = 'below minimum order amount for NOWPayments';
+            }
+
+            if (
                 (int) ($order->getId() ?? 0) > 0
                 && $order->getStatus() !== OrderStatus::WAITING_PAYMENT
             ) {
@@ -235,6 +243,7 @@ final class StorePaymentMethodResolver
             PaymentGatewayType::MANUAL_CARD => $this->isManualCardConfiguredForResolver($gateway),
             PaymentGatewayType::ZIBAL => $this->isZibalConfigured($gateway),
             PaymentGatewayType::CUSTOM_API => $gateway->isConfigured(),
+            PaymentGatewayType::NOWPAYMENTS => $gateway->isNowPaymentsConfigured(),
             default => false,
         };
     }

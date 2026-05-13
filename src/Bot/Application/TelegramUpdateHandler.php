@@ -18,6 +18,7 @@ use App\Entity\User;
 use App\Payment\Application\PaymentConfirmationService;
 use App\Payment\Domain\PaymentGatewayType;
 use App\Payment\Domain\PaymentStatus;
+use App\Payment\Infrastructure\NowPaymentsGateway;
 use App\Payment\Infrastructure\PaymentGatewayRegistry;
 use App\Shared\Infrastructure\SettingValueProvider;
 use App\Shop\Application\IncompleteOrderSettingsProvider;
@@ -46,6 +47,7 @@ class TelegramUpdateHandler
     private const STEP_WAITING_DISCOUNT_DECISION = 'waiting_discount_decision';
     private const STEP_WAITING_DISCOUNT_CODE = 'waiting_discount_code';
     private const STEP_WAITING_PAYMENT_METHOD = 'waiting_payment_method';
+    private const NOWPAYMENTS_WAITING_STATUS_TEXT = 'در انتظار پرداخت';
 
     public function __construct(
         private readonly TelegramUserResolver $telegramUserResolver,
@@ -1293,6 +1295,7 @@ class TelegramUpdateHandler
             ->setMaxResults(1)
             ->getQuery()
             ->getOneOrNullResult();
+        $paymentWasCreated = false;
 
         if (!$payment instanceof Payment) {
             $payment = (new Payment())
@@ -1307,6 +1310,7 @@ class TelegramUpdateHandler
                 ->setStatus(PaymentStatus::PENDING);
             $this->entityManager->persist($payment);
             $this->entityManager->flush();
+            $paymentWasCreated = true;
         } else {
             $payment
                 ->setGateway($gateway)
@@ -1334,6 +1338,9 @@ class TelegramUpdateHandler
         }
         if (!$requestResult->success) {
             $payment->setAdminNote($requestResult->message);
+            if (PaymentGatewayType::NOWPAYMENTS === $gateway->getType() && NowPaymentsGateway::BELOW_MINIMUM_USER_MESSAGE === $requestResult->message) {
+                $this->markRejectedFailedNowPaymentsPayment($payment, $paymentWasCreated);
+            }
         }
         $this->entityManager->flush();
         $this->debugLog(sprintf('payment_gateway_selected order_id=%d payment_id=%d amount=%d', $order->getId() ?? 0, $payment->getId() ?? 0, $finalAmount));
@@ -1350,6 +1357,27 @@ class TelegramUpdateHandler
                 $chatId,
                 sprintf("برای پرداخت آنلاین روی دکمه زیر بزنید.\nکد پیگیری: %s", (string) ($order->getTrackingCode() ?? '-')),
                 $this->keyboardFactory->paymentOnlineActionMenu((int) ($payment->getId() ?? 0), (int) ($order->getId() ?? 0), (string) $payment->getPaymentUrl())
+            );
+
+            return;
+        }
+
+        if (PaymentGatewayType::NOWPAYMENTS === $gateway->getType()) {
+            if (!$requestResult->success) {
+                $this->showPopupOrMessage($chatId, $callbackId, $requestResult->message ?: 'ایجاد پرداخت ارز دیجیتال انجام نشد.', 'nowpayments_create_failed');
+
+                return;
+            }
+
+            $this->acknowledgeCallback($callbackId);
+            $this->telegramApiClient->sendMessage(
+                $chatId,
+                $this->buildCryptoPaymentMessage($payment, $order),
+                $this->keyboardFactory->cryptoPaymentActionMenu(
+                    (int) ($payment->getId() ?? 0),
+                    (int) ($order->getId() ?? 0),
+                    $payment->getPaymentUrl()
+                )
             );
 
             return;
@@ -1389,6 +1417,31 @@ class TelegramUpdateHandler
         }
 
         $this->sendPaymentGatewaySelectionForOrder($order, $chatId, $callbackId);
+    }
+
+    private function markRejectedFailedNowPaymentsPayment(Payment $payment, bool $paymentWasCreated): void
+    {
+        $payment
+            ->setStatus(PaymentStatus::REJECTED)
+            ->setFailedAt(new \DateTimeImmutable())
+            ->setGatewayTransactionId(null)
+            ->setAuthority(null)
+            ->setPaymentUrl(null);
+
+        if ($paymentWasCreated) {
+            $payment
+                ->setCryptoPaymentId(null)
+                ->setCryptoPaymentStatus(null)
+                ->setCryptoAddress(null)
+                ->setCryptoPayAmount(null)
+                ->setCryptoPayCurrency(null)
+                ->setCryptoPriceCurrency(null)
+                ->setCryptoPurchaseId(null)
+                ->setCryptoInvoiceId(null)
+                ->setCryptoInvoiceUrl(null)
+                ->setCryptoNetwork(null)
+                ->setCryptoExpiresAt(null);
+        }
     }
 
     private function sendPaymentGatewaySelectionForOrder(Order $order, string $chatId, ?string $callbackId, ?string $backCallback = null, ?string $cancelCallback = null): void
@@ -1607,7 +1660,34 @@ class TelegramUpdateHandler
             return;
         }
 
-        if (!$verify->success || !$verify->paid) {
+        if (PaymentGatewayType::NOWPAYMENTS === $gatewayType) {
+            $cryptoStatus = $payment->getCryptoPaymentStatus() ?? ($verify->message ?? '');
+
+            if (!$verify->success && NowPaymentsGateway::PAYMENT_NOT_REPORTED_MESSAGE === ($verify->message ?? '')) {
+                $this->showPopupOrMessage($chatId, $callbackId, NowPaymentsGateway::PAYMENT_NOT_REPORTED_MESSAGE, 'payment_check_nowpayments_not_reported');
+
+                return;
+            }
+
+            if (in_array(strtolower($cryptoStatus), ['partially_paid'], true)) {
+                $this->showPopupOrMessage($chatId, $callbackId, 'مبلغ پرداختی کافی نیست. لطفاً وضعیت پرداخت را بررسی کنید.', 'payment_check_partially_paid');
+
+                return;
+            }
+
+            if (in_array(strtolower($cryptoStatus), NowPaymentsGateway::FAILED_STATUSES, true)) {
+                $this->showPopupOrMessage($chatId, $callbackId, 'پرداخت منقضی یا ناموفق شده است.', 'payment_check_failed_expired');
+
+                return;
+            }
+
+            if (!$verify->success || !$verify->paid) {
+                $displayStatus = '' !== $cryptoStatus ? $cryptoStatus : 'نامشخص';
+                $this->showPopupOrMessage($chatId, $callbackId, sprintf('پرداخت هنوز تایید نشده است. وضعیت: %s', $displayStatus), 'payment_check_not_paid');
+
+                return;
+            }
+        } elseif (!$verify->success || !$verify->paid) {
             $this->showPopupOrMessage($chatId, $callbackId, 'پرداخت هنوز تایید نشده است.', 'payment_check_not_paid');
 
             return;
@@ -1621,6 +1701,38 @@ class TelegramUpdateHandler
         }
 
         $this->showPopupOrMessage($chatId, $callbackId, $result->message, 'payment_check_confirm_failed');
+    }
+
+    private function buildCryptoPaymentMessage(Payment $payment, Order $order): string
+    {
+        if (null !== $payment->getPaymentUrl() && '' !== trim((string) $payment->getPaymentUrl())) {
+            return implode("\n", [
+                'پرداخت ارز دیجیتال آماده است.',
+                'برای پرداخت روی دکمه زیر بزنید.',
+                '',
+                'وضعیت: '.self::NOWPAYMENTS_WAITING_STATUS_TEXT,
+                sprintf('کد پیگیری سفارش: %s', (string) ($order->getTrackingCode() ?? $order->getId() ?? '-')),
+            ]);
+        }
+
+        $payAmount = $payment->getCryptoPayAmount() ?? '-';
+        $payCurrency = strtoupper($payment->getCryptoPayCurrency() ?? '-');
+        $address = $payment->getCryptoAddress() ?? '-';
+        $trackingCode = (string) ($order->getTrackingCode() ?? $order->getId() ?? '-');
+
+        $lines = [
+            '💎 پرداخت ارز دیجیتال',
+            '',
+            sprintf('مبلغ پرداختی: %s %s', $payAmount, $payCurrency),
+            '',
+            'آدرس کیف پول:',
+            $address,
+            '',
+            'وضعیت: '.self::NOWPAYMENTS_WAITING_STATUS_TEXT,
+            sprintf('کد پیگیری سفارش: %s', $trackingCode),
+        ];
+
+        return implode("\n", $lines);
     }
 
     private function handlePaymentSubmitReceipt(TelegramAccount $account, string $chatId, int $paymentId, string $callbackId): void

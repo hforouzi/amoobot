@@ -89,6 +89,15 @@ class PaymentCrudController extends AbstractCrudController
             DateTimeField::new('createdAt')->hideOnForm(),
             DateTimeField::new('submittedAt'),
             DateTimeField::new('confirmedAt'),
+            // Crypto fields
+            TextField::new('cryptoPaymentId')->hideOnIndex()->setLabel('Crypto Payment ID'),
+            TextField::new('cryptoPaymentStatus')->hideOnIndex()->setLabel('Crypto Status'),
+            TextField::new('cryptoPayAmount')->hideOnIndex()->setLabel('Crypto Pay Amount'),
+            TextField::new('cryptoPayCurrency')->hideOnIndex()->setLabel('Crypto Pay Currency'),
+            TextField::new('cryptoAddress')->hideOnIndex()->setLabel('Crypto Address'),
+            TextField::new('cryptoPriceCurrency')->hideOnIndex()->setLabel('Crypto Price Currency'),
+            TextField::new('cryptoPurchaseId')->hideOnIndex()->setLabel('Crypto Purchase ID'),
+            DateTimeField::new('cryptoExpiresAt')->hideOnIndex()->setLabel('Crypto Expires At'),
         ];
     }
 }

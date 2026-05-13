@@ -220,6 +220,7 @@ class PaymentGateway
             PaymentGatewayType::MANUAL_CARD => null !== $this->getManualCardNumber() && null !== $this->getManualCardHolder(),
             PaymentGatewayType::ZIBAL => null !== $this->getZibalCallbackBaseUrl() && null !== $this->getZibalMerchant(),
             PaymentGatewayType::CUSTOM_API => $this->isCustomApiConfigured(),
+            PaymentGatewayType::NOWPAYMENTS => $this->isNowPaymentsConfigured(),
             default => false,
         };
     }
@@ -410,5 +411,283 @@ class PaymentGateway
         $verifyUrl = trim((string) ($config['verify']['url'] ?? ''));
 
         return '' !== $createUrl && '' !== $verifyUrl;
+    }
+
+    // NOWPayments config accessors
+
+    public function getNowPaymentsApiKey(): ?string
+    {
+        return $this->configString('api_key');
+    }
+
+    public function setNowPaymentsApiKey(?string $value): self
+    {
+        return $this->setConfigString('api_key', $value);
+    }
+
+    public function getNowPaymentsIpnSecret(): ?string
+    {
+        return $this->configString('ipn_secret');
+    }
+
+    public function setNowPaymentsIpnSecret(?string $value): self
+    {
+        return $this->setConfigString('ipn_secret', $value);
+    }
+
+    public function isNowPaymentsSandbox(): bool
+    {
+        return true === ($this->configBool('sandbox'));
+    }
+
+    public function setNowPaymentsSandbox(bool $value): self
+    {
+        return $this->setConfigBool('sandbox', $value);
+    }
+
+    public function getNowPaymentsCallbackBaseUrl(): ?string
+    {
+        return $this->configString('callback_base_url');
+    }
+
+    public function setNowPaymentsCallbackBaseUrl(?string $value): self
+    {
+        return $this->setConfigString('callback_base_url', $value);
+    }
+
+    public function getNowPaymentsApiBaseUrl(): string
+    {
+        return $this->configString('api_base_url') ?? 'https://api.nowpayments.io/v1';
+    }
+
+    public function setNowPaymentsApiBaseUrl(?string $value): self
+    {
+        $text = trim((string) $value);
+        if ('' === $text || 'https://api.nowpayments.io/v1' === $text) {
+            $config = is_array($this->config) ? $this->config : [];
+            unset($config['api_base_url']);
+            $this->config = $config;
+
+            return $this;
+        }
+
+        return $this->setConfigString('api_base_url', $text);
+    }
+
+    public function getNowPaymentsPriceCurrency(): ?string
+    {
+        return $this->configString('price_currency');
+    }
+
+    public function setNowPaymentsPriceCurrency(?string $value): self
+    {
+        return $this->setConfigString('price_currency', $value);
+    }
+
+    public function getNowPaymentsPayCurrency(): ?string
+    {
+        return $this->configString('pay_currency');
+    }
+
+    public function setNowPaymentsPayCurrency(?string $value): self
+    {
+        return $this->setConfigString('pay_currency', $value);
+    }
+
+    public function getNowPaymentsPaymentMode(): string
+    {
+        $value = strtolower((string) ($this->configString('payment_mode') ?? 'invoice'));
+
+        return in_array($value, ['invoice', 'payment'], true) ? $value : 'invoice';
+    }
+
+    public function setNowPaymentsPaymentMode(?string $value): self
+    {
+        $normalized = strtolower(trim((string) $value));
+        if (!in_array($normalized, ['invoice', 'payment'], true)) {
+            $normalized = 'invoice';
+        }
+
+        return $this->setConfigString('payment_mode', $normalized);
+    }
+
+    public function isNowPaymentsLockPayCurrency(): bool
+    {
+        return true === ($this->configBool('lock_pay_currency'));
+    }
+
+    public function setNowPaymentsLockPayCurrency(bool $value): self
+    {
+        return $this->setConfigBool('lock_pay_currency', $value);
+    }
+
+    public function getNowPaymentsAmountUnit(): string
+    {
+        $value = strtolower((string) ($this->configString('amount_unit') ?? 'toman'));
+
+        return in_array($value, ['toman', 'rial'], true) ? $value : 'toman';
+    }
+
+    public function setNowPaymentsAmountUnit(?string $value): self
+    {
+        $normalized = strtolower(trim((string) $value));
+        if (!in_array($normalized, ['toman', 'rial'], true)) {
+            $normalized = 'toman';
+        }
+
+        return $this->setConfigString('amount_unit', $normalized);
+    }
+
+    public function getNowPaymentsTomanPerUsd(): ?int
+    {
+        $val = is_array($this->config) ? ($this->config['toman_per_usd'] ?? null) : null;
+        if (null === $val || '' === (string) $val) {
+            return null;
+        }
+
+        return (int) $val > 0 ? (int) $val : null;
+    }
+
+    public function setNowPaymentsTomanPerUsd(?int $value): self
+    {
+        $config = is_array($this->config) ? $this->config : [];
+        if (null === $value || $value <= 0) {
+            unset($config['toman_per_usd']);
+        } else {
+            $config['toman_per_usd'] = $value;
+        }
+        $this->config = $config;
+
+        return $this;
+    }
+
+    public function getNowPaymentsIrrToUsdRate(): ?int
+    {
+        $val = is_array($this->config) ? ($this->config['irr_to_usd_rate'] ?? null) : null;
+        if (null === $val || '' === (string) $val) {
+            return null;
+        }
+
+        return (int) $val > 0 ? (int) $val : null;
+    }
+
+    public function setNowPaymentsIrrToUsdRate(?int $value): self
+    {
+        $config = is_array($this->config) ? $this->config : [];
+        if (null === $value || $value <= 0) {
+            unset($config['irr_to_usd_rate']);
+        } else {
+            $config['irr_to_usd_rate'] = $value;
+        }
+        $this->config = $config;
+
+        return $this;
+    }
+
+    public function getNowPaymentsMinPriceAmountOverride(): ?float
+    {
+        $val = is_array($this->config) ? ($this->config['min_price_amount_override'] ?? null) : null;
+        if (null === $val || '' === trim((string) $val)) {
+            return null;
+        }
+
+        $number = (float) $val;
+
+        return $number > 0 ? round($number, 8) : null;
+    }
+
+    public function setNowPaymentsMinPriceAmountOverride(?string $value): self
+    {
+        $config = is_array($this->config) ? $this->config : [];
+        $text = trim((string) $value);
+        if ('' === $text || (float) $text <= 0) {
+            unset($config['min_price_amount_override']);
+        } else {
+            $config['min_price_amount_override'] = $text;
+        }
+        $this->config = $config;
+
+        return $this;
+    }
+
+    public function getNowPaymentsMinOrderAmountToman(): ?int
+    {
+        $val = is_array($this->config) ? ($this->config['min_order_amount_toman'] ?? null) : null;
+        if (null === $val || '' === (string) $val) {
+            return null;
+        }
+
+        return (int) $val > 0 ? (int) $val : null;
+    }
+
+    public function setNowPaymentsMinOrderAmountToman(?int $value): self
+    {
+        $config = is_array($this->config) ? $this->config : [];
+        if (null === $value || $value <= 0) {
+            unset($config['min_order_amount_toman']);
+        } else {
+            $config['min_order_amount_toman'] = $value;
+        }
+        $this->config = $config;
+
+        return $this;
+    }
+
+    public function getNowPaymentsSuccessUrl(): ?string
+    {
+        return $this->configString('success_url');
+    }
+
+    public function setNowPaymentsSuccessUrl(?string $value): self
+    {
+        return $this->setConfigString('success_url', $value);
+    }
+
+    public function getNowPaymentsCancelUrl(): ?string
+    {
+        return $this->configString('cancel_url');
+    }
+
+    public function setNowPaymentsCancelUrl(?string $value): self
+    {
+        return $this->setConfigString('cancel_url', $value);
+    }
+
+    public function getNowPaymentsOrderDescription(): ?string
+    {
+        return $this->configString('order_description');
+    }
+
+    public function setNowPaymentsOrderDescription(?string $value): self
+    {
+        return $this->setConfigString('order_description', $value);
+    }
+
+    public function isNowPaymentsConfigured(): bool
+    {
+        $apiKey = $this->getNowPaymentsApiKey();
+        $apiBaseUrl = trim($this->getNowPaymentsApiBaseUrl());
+        $priceCurrency = trim((string) ($this->getNowPaymentsPriceCurrency() ?? ''));
+        $payCurrency = trim((string) ($this->getNowPaymentsPayCurrency() ?? ''));
+        $paymentMode = $this->getNowPaymentsPaymentMode();
+        $payCurrencyRequired = 'payment' === $paymentMode || ('invoice' === $paymentMode && $this->isNowPaymentsLockPayCurrency());
+
+        if (
+            null === $apiKey
+            || '' === $apiBaseUrl
+            || '' === $priceCurrency
+            || ($payCurrencyRequired && '' === $payCurrency)
+        ) {
+            return false;
+        }
+
+        if ('irr' === strtolower($this->getCurrency()) && 'usd' === strtolower($priceCurrency)) {
+            return match ($this->getNowPaymentsAmountUnit()) {
+                'rial' => null !== $this->getNowPaymentsIrrToUsdRate(),
+                default => null !== $this->getNowPaymentsTomanPerUsd(),
+            };
+        }
+
+        return true;
     }
 }

@@ -16,6 +16,7 @@ use App\Entity\User;
 use App\Entity\VpnService;
 use App\Payment\Domain\PaymentStatus;
 use App\Payment\Domain\PaymentGatewayType;
+use App\Payment\Infrastructure\NowPaymentsGateway;
 use App\Payment\Infrastructure\PaymentGatewayRegistry;
 use App\Provisioning\Application\RenewalSettingsProvider;
 use App\Provisioning\Application\ServiceUsageSyncService;
@@ -1048,6 +1049,7 @@ class ServiceManagementService
             ->setMaxResults(1)
             ->getQuery()
             ->getOneOrNullResult();
+        $paymentWasCreated = false;
 
         if (!$payment instanceof Payment) {
             $payment = (new Payment())
@@ -1062,6 +1064,7 @@ class ServiceManagementService
                 ->setStatus(PaymentStatus::PENDING);
             $this->entityManager->persist($payment);
             $this->entityManager->flush();
+            $paymentWasCreated = true;
         } else {
             $payment
                 ->setGateway($gateway)
@@ -1089,6 +1092,28 @@ class ServiceManagementService
         }
         if (!$requestResult->success) {
             $payment->setAdminNote($requestResult->message);
+            if (PaymentGatewayType::NOWPAYMENTS === $gateway->getType() && NowPaymentsGateway::BELOW_MINIMUM_USER_MESSAGE === $requestResult->message) {
+                $payment
+                    ->setStatus(PaymentStatus::REJECTED)
+                    ->setFailedAt(new \DateTimeImmutable())
+                    ->setGatewayTransactionId(null)
+                    ->setAuthority(null)
+                    ->setPaymentUrl(null);
+                if ($paymentWasCreated) {
+                    $payment
+                        ->setCryptoPaymentId(null)
+                        ->setCryptoPaymentStatus(null)
+                        ->setCryptoAddress(null)
+                        ->setCryptoPayAmount(null)
+                        ->setCryptoPayCurrency(null)
+                        ->setCryptoPriceCurrency(null)
+                        ->setCryptoPurchaseId(null)
+                        ->setCryptoInvoiceId(null)
+                        ->setCryptoInvoiceUrl(null)
+                        ->setCryptoNetwork(null)
+                        ->setCryptoExpiresAt(null);
+                }
+            }
         }
         $this->entityManager->flush();
 
@@ -1104,6 +1129,38 @@ class ServiceManagementService
                 $chatId,
                 sprintf("برای پرداخت آنلاین روی دکمه زیر بزنید.\nکد پیگیری: %s", (string) ($order->getTrackingCode() ?? '-')),
                 $this->keyboardFactory->paymentOnlineActionMenu((int) ($payment->getId() ?? 0), (int) ($order->getId() ?? 0), (string) $payment->getPaymentUrl())
+            );
+
+            return;
+        }
+
+        if (PaymentGatewayType::NOWPAYMENTS === $gateway->getType()) {
+            if (!$requestResult->success) {
+                $this->showPopupOrMessage($chatId, $callbackId, $requestResult->message ?: 'ایجاد پرداخت ارز دیجیتال انجام نشد.', 'nowpayments_create_failed');
+
+                return;
+            }
+
+            $trackingCode = (string) ($order->getTrackingCode() ?? '-');
+            $message = null !== $payment->getPaymentUrl() && '' !== trim((string) $payment->getPaymentUrl())
+                ? "پرداخت ارز دیجیتال آماده است.\nبرای پرداخت روی دکمه زیر بزنید.\n\nوضعیت: در انتظار پرداخت\nکد پیگیری سفارش: ".$trackingCode
+                : sprintf(
+                    "💎 پرداخت ارز دیجیتال\n\nمبلغ پرداختی: %s %s\n\nآدرس کیف پول:\n%s\n\nوضعیت: در انتظار پرداخت\nکد پیگیری سفارش: %s",
+                    $payment->getCryptoPayAmount() ?? '-',
+                    strtoupper($payment->getCryptoPayCurrency() ?? '-'),
+                    $payment->getCryptoAddress() ?? '-',
+                    $trackingCode
+                );
+
+            $this->acknowledgeCallback($callbackId);
+            $this->telegramApiClient->sendMessage(
+                $chatId,
+                $message,
+                $this->keyboardFactory->cryptoPaymentActionMenu(
+                    (int) ($payment->getId() ?? 0),
+                    (int) ($order->getId() ?? 0),
+                    $payment->getPaymentUrl()
+                )
             );
 
             return;

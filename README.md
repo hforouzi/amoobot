@@ -827,5 +827,220 @@ php bin/console app:telegram:poll --force
 - Reseller/Agent
 - Referral
 - Wallet
-- Native online payment gateways other than `zibal` (simple ones can use `custom_api`)
 - Additional real panel drivers beyond `sanaei_3xui`
+
+---
+
+## Phase 1.8 — NOWPayments Crypto Payment Gateway
+
+This phase adds cryptocurrency payment support via [NOWPayments](https://nowpayments.io).
+
+### 1. Create NOWPayments Gateway
+
+In Admin → درگاههای پرداخت → کانفیگ NOWPayments, create a new gateway with:
+
+| Field | Description |
+|---|---|
+| `title` | Display name |
+| `api_key` | API key from NOWPayments dashboard |
+| `api_base_url` | NOWPayments API base URL. Default: `https://api.nowpayments.io/v1` |
+| `ipn_secret` | IPN Secret for webhook signature validation |
+| `sandbox` | Informational flag for diagnostics; base URL is controlled by `api_base_url` |
+| `callback_base_url` | Your site base URL, e.g. `https://your-domain.com` |
+| `payment_mode` | `invoice` (default) for hosted page, or `payment` for direct wallet mode |
+| `price_currency` | Currency of the price sent to NOWPayments (usually `usd`) |
+| `pay_currency` | Default crypto currency for payment, e.g. `usdttrc20`, `btc`, `eth`. For USDT TRC20 use `usdttrc20` |
+| `lock_pay_currency` | In invoice mode, locks pay currency on hosted page when enabled |
+| `amount_unit` | Unit of stored order amounts: `toman` or `rial` |
+| `toman_per_usd` | Required when `amount_unit=toman` and `price_currency=usd` |
+| `irr_to_usd_rate` | Required when `amount_unit=rial` and `price_currency=usd` |
+| `min_price_amount_override` | Optional minimum `price_amount` override in `price_currency` |
+| `min_order_amount_toman` | Optional minimum payable amount for showing NOWPayments in store methods |
+| `success_url` | Optional redirect URL after successful payment |
+| `cancel_url` | Optional redirect URL after cancelled payment |
+| `order_description` | Description sent to NOWPayments |
+
+**Example config (stored internally in PaymentGateway.config):**
+```json
+{
+  "api_key": "YOUR_API_KEY",
+  "api_base_url": "https://api.nowpayments.io/v1",
+  "ipn_secret": "YOUR_IPN_SECRET",
+  "sandbox": false,
+  "callback_base_url": "https://your-domain.com",
+  "payment_mode": "invoice",
+  "price_currency": "usd",
+  "pay_currency": "usdttrc20",
+  "lock_pay_currency": false,
+  "amount_unit": "toman",
+  "toman_per_usd": 45000,
+  "min_price_amount_override": "10",
+  "min_order_amount_toman": 500000,
+  "order_description": "Amoobot VPN order",
+  "success_url": "https://your-domain.com/payment/success",
+  "cancel_url": "https://your-domain.com/payment/cancel"
+}
+```
+
+NOWPayments payment endpoints in this phase use:
+- `x-api-key: YOUR_API_KEY`
+- `Content-Type: application/json` for POST requests
+- `Accept: application/json`
+
+Mode-specific create endpoint:
+- `payment_mode=invoice` → `POST /invoice` (hosted invoice/payment page)
+- `payment_mode=payment` → `POST /payment` (direct wallet payment)
+
+`Authorization: Bearer ...` is **not** used for NOWPayments payment endpoints.
+
+### 2. Webhook / IPN URL
+
+Configure in your NOWPayments dashboard:
+
+```
+POST /payment/webhook/nowpayments
+```
+
+IPN Signature validation uses `x-nowpayments-sig` header with HMAC-SHA512 over sorted JSON body using your `ipn_secret`. If `ipn_secret` is configured and the signature is invalid, the webhook is rejected (fail-closed). The handler is **idempotent** — duplicate IPN calls do not double-provision.
+
+### 3. Create StorePaymentMethod
+
+In Admin → روشهای پرداخت فروشگاه, create a StorePaymentMethod linked to the NOWPayments gateway.
+
+The method is shown in bot only if:
+- `isActive = true`
+- gateway type is `nowpayments`
+- `api_key` is set
+- `api_base_url` exists (or falls back to the production default)
+- `price_currency` is set
+- if `payment_mode=payment`, `pay_currency` must be set
+- if `payment_mode=invoice` and `lock_pay_currency=true`, `pay_currency` must be set
+- if gateway currency is IRR and `price_currency` is `usd`, then:
+  - `toman_per_usd` must be set for `amount_unit=toman`
+  - `irr_to_usd_rate` must be set for `amount_unit=rial`
+- if `min_order_amount_toman` is set, payable amount must be at least that threshold
+
+### 4. Currency Conversion
+
+Orders are stored with gateway currency `IRR`, while NOWPayments price conversion uses the configured amount unit.
+
+Conversion formula:
+```
+if amount_unit=toman:
+  priceAmount (USD) = order.payableAmount / toman_per_usd
+
+if amount_unit=rial:
+  priceAmount (USD) = order.payableAmount / irr_to_usd_rate
+```
+
+Before creating a direct payment (or locked invoice), the gateway calls:
+- `GET /estimate`
+- `GET /min-amount`
+
+The amount snapshot is stored in `Payment.requestPayload`:
+```json
+{
+  "priceAmount": 10.00,
+  "priceCurrency": "usd",
+  "payCurrency": "usdttrc20",
+  "estimatedPayAmount": "10",
+  "minAmount": "10",
+  "rateSnapshot": {
+    "amountUnit": "toman",
+    "rateField": "toman_per_usd",
+    "rateUsed": 45000
+  }
+}
+```
+
+Live rate fetching is **not implemented** in this phase. Update the matching USD rate field manually.
+
+### 5. Payment Status Mapping
+
+| NOWPayments status | App behavior |
+|---|---|
+| `finished`, `confirmed` | ✅ Mark as PAID, trigger PaymentApprovalService |
+| `waiting`, `confirming` | ⏳ Pending — do not provision |
+| `partially_paid` | ⚠️ Underpaid — do not provision, show user a warning |
+| `failed`, `expired`, `refunded` | ❌ Mark as REJECTED |
+
+### 6. Telegram UX
+
+If invoice URL exists:
+```
+پرداخت ارز دیجیتال آماده است.
+برای پرداخت روی دکمه زیر بزنید.
+```
+
+Otherwise (direct wallet mode), bot sends:
+```
+💎 پرداخت ارز دیجیتال
+
+مبلغ پرداختی: {pay_amount} {PAY_CURRENCY}
+
+آدرس کیف پول:
+{pay_address}
+
+وضعیت: در انتظار پرداخت
+کد پیگیری سفارش: {tracking_code}
+```
+
+Buttons:
+- 💳 پرداخت در صفحه پرداخت (if URL exists)
+- 🔄 بررسی پرداخت → checks payment status
+- ❌ انصراف → cancels the payment
+
+### 7. CLI Commands
+
+#### Test gateway (no provisioning):
+```bash
+php bin/console app:payment:test-nowpayments {gatewayId} --amount=1000000
+```
+
+Prints: price amount/currency, amount unit, conversion rate, estimate/min diagnostics, pay amount/currency, address, payment_id, status, payment URL.
+
+Optional mode override for tests:
+```bash
+php bin/console app:payment:test-nowpayments {gatewayId} --amount=1000000 --mode=invoice
+php bin/console app:payment:test-nowpayments {gatewayId} --amount=1000000 --mode=payment
+```
+
+#### Debug conversion + minimum checks:
+```bash
+php bin/console app:payment:debug-nowpayments-amount {gatewayId} --amount=4500000
+```
+
+Prints: original amount, amount unit, conversion rate, price amount, pay currency, estimated crypto amount, NOWPayments minimum amount, and eligibility.
+
+#### Test auth/config:
+```bash
+php bin/console app:payment:test-nowpayments-auth {gatewayId}
+```
+
+Calls `GET /currencies` with `x-api-key` and prints only safe diagnostics (`api_key_configured`, `api_key_length`, `api_key_prefix`, endpoint, HTTP status, sanitized response).
+
+#### Check payment status:
+```bash
+php bin/console app:payment:check-nowpayments {paymentId}
+```
+
+Add `--approve` flag to trigger provisioning if payment is confirmed:
+```bash
+php bin/console app:payment:check-nowpayments {paymentId} --approve
+```
+
+### 8. Underpaid/Partially Paid
+
+- `partially_paid` status does **not** trigger automatic provisioning.
+- Bot shows: "مبلغ پرداختی کافی نیست. لطفاً وضعیت پرداخت را بررسی کنید."
+- Admin can manually confirm via Admin → Payments → Confirm Payment.
+
+### 9. Database Migration
+
+Run after deployment:
+```bash
+php bin/console doctrine:migrations:migrate
+```
+
+New columns added to `payment` table:
+`crypto_price_currency`, `crypto_pay_currency`, `crypto_pay_amount`, `crypto_actually_paid`, `crypto_outcome_amount`, `crypto_payment_status`, `crypto_payment_id`, `crypto_purchase_id`, `crypto_address`, `crypto_network`, `crypto_expires_at`, `ipn_payload`

@@ -93,6 +93,49 @@ class Payment
     #[ORM\Column(nullable: true)]
     private ?\DateTimeImmutable $confirmedAt = null;
 
+    // Crypto payment fields
+    #[ORM\Column(length: 32, nullable: true)]
+    private ?string $cryptoPriceCurrency = null;
+
+    #[ORM\Column(length: 32, nullable: true)]
+    private ?string $cryptoPayCurrency = null;
+
+    #[ORM\Column(length: 64, nullable: true)]
+    private ?string $cryptoPayAmount = null;
+
+    #[ORM\Column(length: 64, nullable: true)]
+    private ?string $cryptoActuallyPaid = null;
+
+    #[ORM\Column(length: 64, nullable: true)]
+    private ?string $cryptoOutcomeAmount = null;
+
+    #[ORM\Column(length: 64, nullable: true)]
+    private ?string $cryptoPaymentStatus = null;
+
+    #[ORM\Column(length: 128, nullable: true)]
+    private ?string $cryptoPaymentId = null;
+
+    #[ORM\Column(length: 128, nullable: true)]
+    private ?string $cryptoPurchaseId = null;
+
+    #[ORM\Column(length: 128, nullable: true)]
+    private ?string $cryptoInvoiceId = null;
+
+    #[ORM\Column(type: 'text', nullable: true)]
+    private ?string $cryptoInvoiceUrl = null;
+
+    #[ORM\Column(type: 'text', nullable: true)]
+    private ?string $cryptoAddress = null;
+
+    #[ORM\Column(length: 64, nullable: true)]
+    private ?string $cryptoNetwork = null;
+
+    #[ORM\Column(nullable: true)]
+    private ?\DateTimeImmutable $cryptoExpiresAt = null;
+
+    #[ORM\Column(type: 'json', nullable: true)]
+    private ?array $ipnPayload = null;
+
     public function __construct()
     {
         $this->createdAt = new \DateTimeImmutable();
@@ -413,5 +456,173 @@ class Payment
     public function __toString(): string
     {
         return sprintf('Payment #%d', $this->id ?? 0);
+    }
+
+    public function getCryptoPriceCurrency(): ?string
+    {
+        return $this->cryptoPriceCurrency;
+    }
+
+    public function setCryptoPriceCurrency(?string $cryptoPriceCurrency): self
+    {
+        $this->cryptoPriceCurrency = $cryptoPriceCurrency;
+
+        return $this;
+    }
+
+    public function getCryptoPayCurrency(): ?string
+    {
+        return $this->cryptoPayCurrency;
+    }
+
+    public function setCryptoPayCurrency(?string $cryptoPayCurrency): self
+    {
+        $this->cryptoPayCurrency = $cryptoPayCurrency;
+
+        return $this;
+    }
+
+    public function getCryptoPayAmount(): ?string
+    {
+        return $this->cryptoPayAmount;
+    }
+
+    public function setCryptoPayAmount(?string $cryptoPayAmount): self
+    {
+        $this->cryptoPayAmount = $cryptoPayAmount;
+
+        return $this;
+    }
+
+    public function getCryptoActuallyPaid(): ?string
+    {
+        return $this->cryptoActuallyPaid;
+    }
+
+    public function setCryptoActuallyPaid(?string $cryptoActuallyPaid): self
+    {
+        $this->cryptoActuallyPaid = $cryptoActuallyPaid;
+
+        return $this;
+    }
+
+    public function getCryptoOutcomeAmount(): ?string
+    {
+        return $this->cryptoOutcomeAmount;
+    }
+
+    public function setCryptoOutcomeAmount(?string $cryptoOutcomeAmount): self
+    {
+        $this->cryptoOutcomeAmount = $cryptoOutcomeAmount;
+
+        return $this;
+    }
+
+    public function getCryptoPaymentStatus(): ?string
+    {
+        return $this->cryptoPaymentStatus;
+    }
+
+    public function setCryptoPaymentStatus(?string $cryptoPaymentStatus): self
+    {
+        $this->cryptoPaymentStatus = $cryptoPaymentStatus;
+
+        return $this;
+    }
+
+    public function getCryptoPaymentId(): ?string
+    {
+        return $this->cryptoPaymentId;
+    }
+
+    public function setCryptoPaymentId(?string $cryptoPaymentId): self
+    {
+        $this->cryptoPaymentId = $cryptoPaymentId;
+
+        return $this;
+    }
+
+    public function getCryptoPurchaseId(): ?string
+    {
+        return $this->cryptoPurchaseId;
+    }
+
+    public function setCryptoPurchaseId(?string $cryptoPurchaseId): self
+    {
+        $this->cryptoPurchaseId = $cryptoPurchaseId;
+
+        return $this;
+    }
+
+    public function getCryptoInvoiceId(): ?string
+    {
+        return $this->cryptoInvoiceId;
+    }
+
+    public function setCryptoInvoiceId(?string $cryptoInvoiceId): self
+    {
+        $this->cryptoInvoiceId = $cryptoInvoiceId;
+
+        return $this;
+    }
+
+    public function getCryptoInvoiceUrl(): ?string
+    {
+        return $this->cryptoInvoiceUrl;
+    }
+
+    public function setCryptoInvoiceUrl(?string $cryptoInvoiceUrl): self
+    {
+        $this->cryptoInvoiceUrl = $cryptoInvoiceUrl;
+
+        return $this;
+    }
+
+    public function getCryptoAddress(): ?string
+    {
+        return $this->cryptoAddress;
+    }
+
+    public function setCryptoAddress(?string $cryptoAddress): self
+    {
+        $this->cryptoAddress = $cryptoAddress;
+
+        return $this;
+    }
+
+    public function getCryptoNetwork(): ?string
+    {
+        return $this->cryptoNetwork;
+    }
+
+    public function setCryptoNetwork(?string $cryptoNetwork): self
+    {
+        $this->cryptoNetwork = $cryptoNetwork;
+
+        return $this;
+    }
+
+    public function getCryptoExpiresAt(): ?\DateTimeImmutable
+    {
+        return $this->cryptoExpiresAt;
+    }
+
+    public function setCryptoExpiresAt(?\DateTimeImmutable $cryptoExpiresAt): self
+    {
+        $this->cryptoExpiresAt = $cryptoExpiresAt;
+
+        return $this;
+    }
+
+    public function getIpnPayload(): ?array
+    {
+        return $this->ipnPayload;
+    }
+
+    public function setIpnPayload(?array $ipnPayload): self
+    {
+        $this->ipnPayload = $ipnPayload;
+
+        return $this;
     }
 }
