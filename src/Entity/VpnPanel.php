@@ -293,7 +293,7 @@ class VpnPanel
     {
         $value = trim((string) ($this->getConfigValue('base_path') ?? ''));
 
-        return '' === $value ? null : '/'.ltrim($value, '/');
+        return '' === $value ? null : $this->normalizeSlashPrefixedPath($value);
     }
 
     public function setBasePath(?string $basePath): self
@@ -305,7 +305,7 @@ class VpnPanel
             return $this;
         }
 
-        $this->setConfigValue('base_path', '/'.ltrim($value, '/'));
+        $this->setConfigValue('base_path', $this->normalizeSlashPrefixedPath($value));
 
         return $this;
     }
@@ -314,7 +314,7 @@ class VpnPanel
     {
         $value = trim((string) ($this->getConfigValue('subscription_path_prefix') ?? ''));
 
-        return '' === $value ? null : '/'.ltrim($value, '/');
+        return '' === $value ? null : $this->normalizeSlashPrefixedPath($value);
     }
 
     public function setSubscriptionPathPrefix(?string $prefix): self
@@ -326,7 +326,7 @@ class VpnPanel
             return $this;
         }
 
-        $this->setConfigValue('subscription_path_prefix', '/'.ltrim($value, '/'));
+        $this->setConfigValue('subscription_path_prefix', $this->normalizeSlashPrefixedPath($value));
 
         return $this;
     }
@@ -405,5 +405,10 @@ class VpnPanel
         }
 
         $this->config = $config;
+    }
+
+    private function normalizeSlashPrefixedPath(string $value): string
+    {
+        return '/'.ltrim(trim($value), '/');
     }
 }

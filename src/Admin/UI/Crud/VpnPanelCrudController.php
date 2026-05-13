@@ -65,13 +65,7 @@ class VpnPanelCrudController extends AbstractCrudController
                     'legacy' => 'legacy',
                     'v3' => 'v3',
                 ])
-                ->hideOnIndex(),
-            ChoiceField::new('apiVersion', 'API Version')
-                ->setChoices([
-                    'legacy' => 'legacy',
-                    'v3' => 'v3',
-                ])
-                ->onlyOnIndex(),
+                ->setHelp('legacy for old Sanaei panels, v3 for 3x-ui v3+ API'),
             ChoiceField::new('authMode', 'Auth Mode')
                 ->setChoices([
                     'cookie' => 'cookie',
