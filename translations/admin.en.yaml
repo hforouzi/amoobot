@@ -74,3 +74,10 @@ help:
   nowpayments_rate: Set conversion rates based on the selected amount unit (toman or rial).
   panel_bearer_token: For Sanaei v3 bearer mode, use Settings → Security → API Token and set auth mode to bearer.
   incomplete_order_expiration: Defines expiration time for incomplete orders in automation settings.
+
+fieldset:
+  general: General
+  metadata: Metadata
+  credentials: Credentials
+  payment_settings: Payment Settings
+  store_payment_method: Store Payment Method

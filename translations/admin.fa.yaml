@@ -74,3 +74,10 @@ help:
   nowpayments_rate: نرخ تبدیل را بر اساس amount unit انتخاب‌شده (toman یا rial) تنظیم کنید.
   panel_bearer_token: برای حالت bearer در Sanaei v3 از Settings → Security → API Token استفاده کنید و auth mode را bearer بگذارید.
   incomplete_order_expiration: زمان انقضای سفارش ناقص در تنظیمات اتوماسیون را مشخص می‌کند.
+
+fieldset:
+  general: عمومی
+  metadata: اطلاعات ثبتی
+  credentials: اعتبارنامه
+  payment_settings: تنظیمات پرداخت
+  store_payment_method: روش پرداخت فروشگاه

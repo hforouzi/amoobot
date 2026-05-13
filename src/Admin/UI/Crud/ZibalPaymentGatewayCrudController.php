@@ -68,7 +68,7 @@ final class ZibalPaymentGatewayCrudController extends AbstractCrudController
     public function configureFields(string $pageName): iterable
     {
         return [
-            FormField::addFieldset('General'),
+            FormField::addFieldset('fieldset.general'),
             IdField::new('id')->onlyOnIndex(),
             TextField::new('title'),
             TextareaField::new('description')->hideOnIndex(),
@@ -83,7 +83,7 @@ final class ZibalPaymentGatewayCrudController extends AbstractCrudController
             TextField::new('zibalPercentMode')->setLabel('percentMode')->hideOnIndex(),
             TextField::new('zibalFeeMode')->setLabel('feeMode')->hideOnIndex(),
             TextField::new('zibalMultiplexingAccountNumber')->setLabel('multiplexingAccountNumber')->hideOnIndex(),
-            FormField::addFieldset('Metadata'),
+            FormField::addFieldset('fieldset.metadata'),
             DateTimeField::new('createdAt')->hideOnForm(),
             DateTimeField::new('updatedAt')->hideOnForm(),
         ];

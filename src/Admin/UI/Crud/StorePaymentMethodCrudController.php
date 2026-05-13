@@ -48,7 +48,7 @@ final class StorePaymentMethodCrudController extends AbstractCrudController
     public function configureFields(string $pageName): iterable
     {
         return [
-            FormField::addFieldset('Store Payment Method'),
+            FormField::addFieldset('fieldset.store_payment_method'),
             IdField::new('id')->onlyOnIndex(),
             TextField::new('title')->setLabel('Title')
                 ->setHelp('help.payment_gateway_store_method'),
@@ -59,7 +59,7 @@ final class StorePaymentMethodCrudController extends AbstractCrudController
             IntegerField::new('minAmount')->setLabel('Min Amount'),
             IntegerField::new('maxAmount')->setLabel('Max Amount'),
             TextField::new('currency')->setLabel('Currency'),
-            FormField::addFieldset('Metadata'),
+            FormField::addFieldset('fieldset.metadata'),
             DateTimeField::new('createdAt')->setLabel('common.created_at')->hideOnForm(),
             DateTimeField::new('updatedAt')->setLabel('common.updated_at')->hideOnForm(),
         ];
