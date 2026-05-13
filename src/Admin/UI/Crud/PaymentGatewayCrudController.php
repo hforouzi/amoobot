@@ -34,7 +34,7 @@ final class PaymentGatewayCrudController extends AbstractCrudController
         return [
             FormField::addPanel('General'),
             IdField::new('id')->onlyOnIndex(),
-            TextField::new('title')->setLabel('Title'),
+            TextField::new('title')->setLabel('Title')->setHelp('help.payment_gateway_store_method'),
             TextField::new('type')->setLabel('Type'),
             BooleanField::new('configured')->setLabel('Configured'),
             BooleanField::new('isActive')->setLabel('common.enabled'),

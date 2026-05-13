@@ -9,6 +9,7 @@
 <body class="admin-login-page">
     <div class="admin-login-wrapper">
         <div class="admin-login-locale-switcher" aria-label="{{ 'login.language'|trans }}">
+            <span>{{ 'login.language'|trans }}:</span>
             <a href="{{ path('admin_locale_switch', {locale: 'fa', redirect_to: app.request.uri}) }}" class="{{ app.request.locale starts with 'fa' ? 'active' : '' }}">فارسی</a>
             <span aria-hidden="true">|</span>
             <a href="{{ path('admin_locale_switch', {locale: 'en', redirect_to: app.request.uri}) }}" class="{{ app.request.locale starts with 'en' ? 'active' : '' }}">English</a>

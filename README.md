@@ -85,6 +85,25 @@ Manage:
 - Bot Message Logs
 - Settings
 
+## Admin UX / i18n
+- Supported admin locales: `fa`, `en`
+- Default locale: `APP_DEFAULT_LOCALE=fa`
+- Language switching:
+  - Header switcher in admin (`فارسی` / `English`)
+  - Login page switcher
+  - Locale route: `/admin/locale/{locale}` (stores locale in session and redirects back)
+  - Query override also works on admin routes via `?_locale=fa|en`
+- Direction behavior:
+  - `fa` renders admin as RTL
+  - `en` renders admin as LTR
+- Admin navigation is grouped into logical sections: Dashboard, Store, VPN, Users, Automation, System
+- Payment admin separation:
+  - **PaymentGateway** = gateway config/credentials
+  - **StorePaymentMethod** = bot-visible payment methods and ordering/limits
+- Login page customization:
+  - Custom bilingual template: `templates/security/login.html.twig`
+  - Custom admin/login styles: `public/admin.css`
+
 ## Set Telegram Webhook
 ```bash
 php bin/console app:telegram:set-webhook https://mydomain.com
