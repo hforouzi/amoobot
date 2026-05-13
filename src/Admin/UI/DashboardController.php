@@ -5,11 +5,8 @@ declare(strict_types=1);
 namespace App\Admin\UI;
 
 use App\Admin\UI\Crud\BotMessageLogCrudController;
-use App\Admin\UI\Crud\CustomApiPaymentGatewayCrudController;
 use App\Admin\UI\Crud\DiscountCodeCrudController;
 use App\Admin\UI\Crud\DiscountUsageCrudController;
-use App\Admin\UI\Crud\ManualCardPaymentGatewayCrudController;
-use App\Admin\UI\Crud\NowPaymentsPaymentGatewayCrudController;
 use App\Admin\UI\Crud\OrderCrudController;
 use App\Admin\UI\Crud\OrderDraftCrudController;
 use App\Admin\UI\Crud\PaymentCrudController;
@@ -23,7 +20,6 @@ use App\Admin\UI\Crud\UserCrudController;
 use App\Admin\UI\Crud\VpnInboundCrudController;
 use App\Admin\UI\Crud\VpnPanelCrudController;
 use App\Admin\UI\Crud\VpnServiceCrudController;
-use App\Admin\UI\Crud\ZibalPaymentGatewayCrudController;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Assets;
 use EasyCorp\Bundle\EasyAdminBundle\Attribute\AdminDashboard;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Dashboard;
@@ -74,10 +70,6 @@ class DashboardController extends AbstractDashboardController
         yield MenuItem::linkTo(DiscountCodeCrudController::class, 'admin.discount_codes', 'fa fa-ticket');
         yield MenuItem::linkTo(DiscountUsageCrudController::class, 'admin.discount_usages', 'fa fa-bar-chart');
         yield MenuItem::linkTo(PaymentGatewayCrudController::class, 'admin.payment_gateways', 'fa fa-exchange');
-        yield MenuItem::linkTo(ManualCardPaymentGatewayCrudController::class, 'payment.gateway.manual_card', 'fa fa-credit-card');
-        yield MenuItem::linkTo(ZibalPaymentGatewayCrudController::class, 'payment.gateway.zibal', 'fa fa-globe');
-        yield MenuItem::linkTo(NowPaymentsPaymentGatewayCrudController::class, 'payment.gateway.nowpayments', 'fa fa-bitcoin');
-        yield MenuItem::linkTo(CustomApiPaymentGatewayCrudController::class, 'payment.gateway.custom_api', 'fa fa-plug');
         yield MenuItem::linkTo(StorePaymentMethodCrudController::class, 'admin.store_payment_methods', 'fa fa-list-ol');
 
         yield MenuItem::section('admin.menu.vpn', 'fa fa-server');

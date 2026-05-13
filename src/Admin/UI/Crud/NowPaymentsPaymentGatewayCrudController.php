@@ -91,15 +91,15 @@ final class NowPaymentsPaymentGatewayCrudController extends AbstractCrudControll
             ->onlyOnForms();
 
         return [
-            FormField::addPanel('General'),
+            FormField::addFieldset('General'),
             IdField::new('id')->onlyOnIndex(),
             TextField::new('title')->setHelp('نام نمایشی درگاه'),
             TextareaField::new('description')->hideOnIndex()->setHelp('توضیحات اختیاری'),
             BooleanField::new('isActive')->setLabel('فعال'),
-            FormField::addPanel('Credentials'),
+            FormField::addFieldset('Credentials'),
             $apiKeyField,
             $ipnSecretField,
-            FormField::addPanel('Payment Settings'),
+            FormField::addFieldset('Payment Settings'),
             TextField::new('nowPaymentsApiBaseUrl')->setLabel('api_base_url')->setHelp('آدرس API NOWPayments. پیشفرض: https://api.nowpayments.io/v1'),
             BooleanField::new('nowPaymentsSandbox')->setLabel('sandbox')->setHelp('حالت sandbox برای تست'),
             TextField::new('nowPaymentsCallbackBaseUrl')->setLabel('callback_base_url')->setHelp('آدرس پایه سایت شما، مثال: https://your-domain.com'),
@@ -121,7 +121,7 @@ final class NowPaymentsPaymentGatewayCrudController extends AbstractCrudControll
             TextField::new('nowPaymentsSuccessUrl')->setLabel('success_url')->setHelp('آدرس بازگشت پس از پرداخت موفق (اختیاری)')->hideOnIndex(),
             TextField::new('nowPaymentsCancelUrl')->setLabel('cancel_url')->setHelp('آدرس بازگشت پس از لغو پرداخت (اختیاری)')->hideOnIndex(),
             TextField::new('nowPaymentsOrderDescription')->setLabel('order_description')->setHelp('توضیحات سفارش ارسالی به NOWPayments')->hideOnIndex(),
-            FormField::addPanel('Metadata'),
+            FormField::addFieldset('Metadata'),
             DateTimeField::new('createdAt')->hideOnForm(),
             DateTimeField::new('updatedAt')->hideOnForm(),
         ];

@@ -142,7 +142,7 @@ TEXT;
     public function configureFields(string $pageName): iterable
     {
         return [
-            FormField::addPanel('General'),
+            FormField::addFieldset('General'),
             IdField::new('id')->onlyOnIndex(),
             TextField::new('title'),
             TextareaField::new('description')->hideOnIndex(),
@@ -153,7 +153,7 @@ TEXT;
                 ->setLabel('config_json')
                 ->setHelp(self::CONFIG_HELP)
                 ->hideOnIndex(),
-            FormField::addPanel('Metadata'),
+            FormField::addFieldset('Metadata'),
             DateTimeField::new('createdAt')->hideOnForm(),
             DateTimeField::new('updatedAt')->hideOnForm(),
         ];

@@ -66,7 +66,7 @@ final class ManualCardPaymentGatewayCrudController extends AbstractCrudControlle
     public function configureFields(string $pageName): iterable
     {
         return [
-            FormField::addPanel('General'),
+            FormField::addFieldset('General'),
             IdField::new('id')->onlyOnIndex(),
             TextField::new('title'),
             TextareaField::new('description')->hideOnIndex(),
@@ -76,7 +76,7 @@ final class ManualCardPaymentGatewayCrudController extends AbstractCrudControlle
             TextField::new('manualCardHolder')->setLabel('card_holder'),
             TextField::new('manualBankName')->setLabel('bank_name'),
             TextareaField::new('manualInstructions')->setLabel('instructions'),
-            FormField::addPanel('Metadata'),
+            FormField::addFieldset('Metadata'),
             DateTimeField::new('createdAt')->hideOnForm(),
             DateTimeField::new('updatedAt')->hideOnForm(),
         ];
