@@ -214,6 +214,7 @@ class TelegramKeyboardFactory
                 PaymentGatewayType::MANUAL_CARD => '💳 کارت به کارت',
                 PaymentGatewayType::ZIBAL => '🌐 پرداخت آنلاین (زیبال)',
                 PaymentGatewayType::CUSTOM_API => '🌐 پرداخت آنلاین',
+                PaymentGatewayType::NOWPAYMENTS => '₿ پرداخت ارز دیجیتال',
                 default => $gateway->getTitle(),
             };
 
@@ -861,6 +862,35 @@ class TelegramKeyboardFactory
             ['text' => '🔙 بازگشت', 'callback_data' => 'track_orders'],
             ['text' => '❌ بستن', 'callback_data' => 'main_menu'],
         ];
+
+        return ['inline_keyboard' => $rows];
+    }
+
+    /**
+     * Crypto payment action menu (NOWPayments).
+     * Shows check/cancel buttons and optionally a payment URL button.
+     *
+     * @return array<string, array<array<array<string, string>>>>
+     */
+    public function cryptoPaymentActionMenu(int $paymentId, int $orderId, ?string $paymentUrl = null): array
+    {
+        $rows = [];
+
+        if (null !== $paymentUrl && '' !== $paymentUrl) {
+            $rows[] = [[
+                'text' => 'پرداخت در صفحه پرداخت',
+                'url' => $paymentUrl,
+            ]];
+        }
+
+        $rows[] = [[
+            'text' => '🔄 بررسی پرداخت',
+            'callback_data' => 'payment_check:'.$paymentId,
+        ]];
+        $rows[] = [[
+            'text' => '❌ انصراف',
+            'callback_data' => 'payment_cancel:'.$paymentId,
+        ]];
 
         return ['inline_keyboard' => $rows];
     }

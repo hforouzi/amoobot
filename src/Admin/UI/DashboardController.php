@@ -22,6 +22,7 @@ use App\Admin\UI\Crud\VpnPanelCrudController;
 use App\Admin\UI\Crud\VpnServiceCrudController;
 use App\Admin\UI\Crud\CustomApiPaymentGatewayCrudController;
 use App\Admin\UI\Crud\ManualCardPaymentGatewayCrudController;
+use App\Admin\UI\Crud\NowPaymentsPaymentGatewayCrudController;
 use App\Admin\UI\Crud\ZibalPaymentGatewayCrudController;
 use EasyCorp\Bundle\EasyAdminBundle\Attribute\AdminDashboard;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Dashboard;
@@ -57,6 +58,7 @@ class DashboardController extends AbstractDashboardController
         yield MenuItem::linkTo(ManualCardPaymentGatewayCrudController::class, 'کانفیگ کارت به کارت', 'fa fa-credit-card');
         yield MenuItem::linkTo(ZibalPaymentGatewayCrudController::class, 'کانفیگ زیبال', 'fa fa-globe');
         yield MenuItem::linkTo(CustomApiPaymentGatewayCrudController::class, 'کانفیگ Custom API', 'fa fa-plug');
+        yield MenuItem::linkTo(NowPaymentsPaymentGatewayCrudController::class, 'کانفیگ NOWPayments', 'fa fa-bitcoin');
         yield MenuItem::section('روشهای پرداخت فروشگاه');
         yield MenuItem::linkTo(StorePaymentMethodCrudController::class, 'روشهای پرداخت فروشگاه', 'fa fa-list-ol');
         yield MenuItem::linkTo(DiscountCodeCrudController::class, 'Discount Codes', 'fa fa-ticket');

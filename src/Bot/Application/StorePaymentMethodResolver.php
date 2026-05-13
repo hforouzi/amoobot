@@ -235,6 +235,7 @@ final class StorePaymentMethodResolver
             PaymentGatewayType::MANUAL_CARD => $this->isManualCardConfiguredForResolver($gateway),
             PaymentGatewayType::ZIBAL => $this->isZibalConfigured($gateway),
             PaymentGatewayType::CUSTOM_API => $gateway->isConfigured(),
+            PaymentGatewayType::NOWPAYMENTS => $gateway->isNowPaymentsConfigured(),
             default => false,
         };
     }

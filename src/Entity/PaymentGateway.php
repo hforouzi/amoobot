@@ -220,6 +220,7 @@ class PaymentGateway
             PaymentGatewayType::MANUAL_CARD => null !== $this->getManualCardNumber() && null !== $this->getManualCardHolder(),
             PaymentGatewayType::ZIBAL => null !== $this->getZibalCallbackBaseUrl() && null !== $this->getZibalMerchant(),
             PaymentGatewayType::CUSTOM_API => $this->isCustomApiConfigured(),
+            PaymentGatewayType::NOWPAYMENTS => $this->isNowPaymentsConfigured(),
             default => false,
         };
     }
@@ -410,5 +411,138 @@ class PaymentGateway
         $verifyUrl = trim((string) ($config['verify']['url'] ?? ''));
 
         return '' !== $createUrl && '' !== $verifyUrl;
+    }
+
+    // NOWPayments config accessors
+
+    public function getNowPaymentsApiKey(): ?string
+    {
+        return $this->configString('api_key');
+    }
+
+    public function setNowPaymentsApiKey(?string $value): self
+    {
+        return $this->setConfigString('api_key', $value);
+    }
+
+    public function getNowPaymentsIpnSecret(): ?string
+    {
+        return $this->configString('ipn_secret');
+    }
+
+    public function setNowPaymentsIpnSecret(?string $value): self
+    {
+        return $this->setConfigString('ipn_secret', $value);
+    }
+
+    public function isNowPaymentsSandbox(): bool
+    {
+        return true === ($this->configBool('sandbox'));
+    }
+
+    public function setNowPaymentsSandbox(bool $value): self
+    {
+        return $this->setConfigBool('sandbox', $value);
+    }
+
+    public function getNowPaymentsCallbackBaseUrl(): ?string
+    {
+        return $this->configString('callback_base_url');
+    }
+
+    public function setNowPaymentsCallbackBaseUrl(?string $value): self
+    {
+        return $this->setConfigString('callback_base_url', $value);
+    }
+
+    public function getNowPaymentsPriceCurrency(): ?string
+    {
+        return $this->configString('price_currency');
+    }
+
+    public function setNowPaymentsPriceCurrency(?string $value): self
+    {
+        return $this->setConfigString('price_currency', $value);
+    }
+
+    public function getNowPaymentsPayCurrency(): ?string
+    {
+        return $this->configString('pay_currency');
+    }
+
+    public function setNowPaymentsPayCurrency(?string $value): self
+    {
+        return $this->setConfigString('pay_currency', $value);
+    }
+
+    public function getNowPaymentsIrrToUsdRate(): ?int
+    {
+        $val = is_array($this->config) ? ($this->config['irr_to_usd_rate'] ?? null) : null;
+        if (null === $val || '' === (string) $val) {
+            return null;
+        }
+
+        return (int) $val > 0 ? (int) $val : null;
+    }
+
+    public function setNowPaymentsIrrToUsdRate(?int $value): self
+    {
+        $config = is_array($this->config) ? $this->config : [];
+        if (null === $value || $value <= 0) {
+            unset($config['irr_to_usd_rate']);
+        } else {
+            $config['irr_to_usd_rate'] = $value;
+        }
+        $this->config = $config;
+
+        return $this;
+    }
+
+    public function getNowPaymentsSuccessUrl(): ?string
+    {
+        return $this->configString('success_url');
+    }
+
+    public function setNowPaymentsSuccessUrl(?string $value): self
+    {
+        return $this->setConfigString('success_url', $value);
+    }
+
+    public function getNowPaymentsCancelUrl(): ?string
+    {
+        return $this->configString('cancel_url');
+    }
+
+    public function setNowPaymentsCancelUrl(?string $value): self
+    {
+        return $this->setConfigString('cancel_url', $value);
+    }
+
+    public function getNowPaymentsOrderDescription(): ?string
+    {
+        return $this->configString('order_description');
+    }
+
+    public function setNowPaymentsOrderDescription(?string $value): self
+    {
+        return $this->setConfigString('order_description', $value);
+    }
+
+    public function isNowPaymentsConfigured(): bool
+    {
+        $apiKey = $this->getNowPaymentsApiKey();
+        $callbackBaseUrl = $this->getNowPaymentsCallbackBaseUrl();
+        $priceCurrency = $this->getNowPaymentsPriceCurrency();
+        $payCurrency = $this->getNowPaymentsPayCurrency();
+
+        if (null === $apiKey || null === $callbackBaseUrl || null === $priceCurrency || null === $payCurrency) {
+            return false;
+        }
+
+        if ('irr' === strtolower($this->getCurrency()) && 'usd' === strtolower($priceCurrency)) {
+            return null !== $this->getNowPaymentsIrrToUsdRate();
+        }
+
+        return true;
     }
 }
