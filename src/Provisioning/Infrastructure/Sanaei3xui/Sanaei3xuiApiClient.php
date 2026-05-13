@@ -22,6 +22,21 @@ final class Sanaei3xuiApiClient
 
     public function login(VpnPanel $panel): array
     {
+        if ($this->useBearerAuth($panel)) {
+            $this->loggedInPanels[$this->panelKey($panel)] = true;
+            $this->log(sprintf('panel_auth_success panel_id=%s mode="bearer"', $panel->getId() ?? 'null'));
+
+            return [
+                'ok' => true,
+                'status' => 200,
+                'data' => ['success' => true, 'auth' => 'bearer'],
+                'empty' => false,
+                'success' => true,
+                'bodyPreview' => '',
+                'error' => null,
+            ];
+        }
+
         $baseUrl = $this->normalizeBaseUrl($panel);
         $username = trim((string) $panel->getUsername());
         $password = (string) $panel->getPassword();
@@ -74,6 +89,24 @@ final class Sanaei3xuiApiClient
         }
 
         return $this->request($panel, 'GET', '/panel/api/inbounds/get/'.rawurlencode($id));
+    }
+
+    public function getClientTraffic(VpnPanel $panel, string $email): array
+    {
+        if (!$this->ensureLogin($panel)) {
+            return $this->errorResult('login_failed');
+        }
+
+        return $this->request($panel, 'GET', '/panel/api/inbounds/getClientTraffics/'.rawurlencode($email));
+    }
+
+    public function getClientTrafficById(VpnPanel $panel, string $clientId): array
+    {
+        if (!$this->ensureLogin($panel)) {
+            return $this->errorResult('login_failed');
+        }
+
+        return $this->request($panel, 'GET', '/panel/api/inbounds/getClientTrafficsById/'.rawurlencode($clientId));
     }
 
     public function addClient(VpnPanel $panel, int $inboundId, array $client, array $context = []): array
@@ -177,6 +210,15 @@ final class Sanaei3xuiApiClient
         return $this->request($panel, 'POST', sprintf('/panel/api/inbounds/%s/delClient/%s', rawurlencode($inboundId), rawurlencode($clientId)));
     }
 
+    public function deleteClientByEmail(VpnPanel $panel, string $inboundId, string $email): array
+    {
+        if (!$this->ensureLogin($panel)) {
+            return $this->errorResult('login_failed');
+        }
+
+        return $this->request($panel, 'POST', sprintf('/panel/api/inbounds/%s/delClientByEmail/%s', rawurlencode($inboundId), rawurlencode($email)));
+    }
+
     public function resetClientTraffic(VpnPanel $panel, string $inboundId, string $email): array
     {
         if (!$this->ensureLogin($panel)) {
@@ -186,19 +228,58 @@ final class Sanaei3xuiApiClient
         return $this->request($panel, 'POST', sprintf('/panel/api/inbounds/%s/resetClientTraffic/%s', rawurlencode($inboundId), rawurlencode($email)));
     }
 
-    public function getClientTraffic(VpnPanel $panel, string $email): array
+    public function getClientLinks(VpnPanel $panel, int $inboundId, string $email): array
     {
         if (!$this->ensureLogin($panel)) {
             return $this->errorResult('login_failed');
         }
 
-        return $this->request($panel, 'GET', '/panel/api/inbounds/getClientTraffics/'.rawurlencode($email));
+        return $this->request($panel, 'GET', sprintf('/panel/api/inbounds/getClientLinks/%d/%s', $inboundId, rawurlencode($email)));
+    }
+
+    public function getSubLinks(VpnPanel $panel, string $subId): array
+    {
+        if (!$this->ensureLogin($panel)) {
+            return $this->errorResult('login_failed');
+        }
+
+        return $this->request($panel, 'GET', '/panel/api/inbounds/getSubLinks/'.rawurlencode($subId));
+    }
+
+    public function getConfiguredApiVersion(VpnPanel $panel): string
+    {
+        return $this->isV3($panel) ? 'v3' : 'legacy';
+    }
+
+    public function getConfiguredAuthMode(VpnPanel $panel): string
+    {
+        $config = $this->panelConfig($panel);
+        $mode = strtolower(trim((string) ($config['auth_mode'] ?? $panel->getAuthMode() ?? '')));
+
+        return in_array($mode, ['cookie', 'bearer'], true) ? $mode : 'cookie';
+    }
+
+    public function isBearerAuthEnabled(VpnPanel $panel): bool
+    {
+        return $this->useBearerAuth($panel);
+    }
+
+    public function getPanelApiBaseUrl(VpnPanel $panel): string
+    {
+        return $this->buildApiUrl($panel, '/panel/api');
     }
 
     private function ensureLogin(VpnPanel $panel): bool
     {
-        if (($this->loggedInPanels[$this->panelKey($panel)] ?? false) === true) {
+        if ($this->useBearerAuth($panel)) {
             return true;
+        }
+
+        if (($this->loggedInPanels[$this->panelKey($panel)] ?? false) === true) {
+            if (null !== $this->buildCookieHeader($panel)) {
+                return true;
+            }
+            $this->loggedInPanels[$this->panelKey($panel)] = false;
         }
 
         $result = $this->login($panel);
@@ -208,25 +289,25 @@ final class Sanaei3xuiApiClient
 
     private function request(VpnPanel $panel, string $method, string $path, array $options = [], bool $expectJson = true): array
     {
-        $baseUrl = $this->normalizeBaseUrl($panel);
-        if ('' === $baseUrl) {
+        $requestUrl = $this->buildApiUrl($panel, $path);
+        if ('' === trim($requestUrl)) {
             return $this->errorResult('invalid_base_url');
         }
 
         $options = array_replace($this->panelHttpClientFactory->createRequestOptions($panel), $options);
 
         $headers = $options['headers'] ?? [];
-        $headers[] = 'Accept: application/json';
-        $cookieHeader = $this->buildCookieHeader($panel);
-        if (null !== $cookieHeader) {
-            $headers[] = 'Cookie: '.$cookieHeader;
+        foreach ($this->buildHeaders($panel) as $header) {
+            $headers[] = $header;
         }
         $options['headers'] = $headers;
 
         try {
-            $response = $this->httpClient->request($method, $baseUrl.$path, $options);
+            $response = $this->httpClient->request($method, $requestUrl, $options);
             $statusCode = $response->getStatusCode();
-            $this->captureCookies($panel, $response->getHeaders(false));
+            if (!$this->useBearerAuth($panel)) {
+                $this->captureCookies($panel, $response->getHeaders(false));
+            }
             $content = trim($response->getContent(false));
 
             if ('' === $content) {
@@ -289,7 +370,7 @@ final class Sanaei3xuiApiClient
                 'error' => null,
             ];
         } catch (TransportExceptionInterface $e) {
-            $this->log(sprintf('api_transport_failure endpoint="%s" message="%s"', $path, $e->getMessage()));
+            $this->log(sprintf('api_transport_failure endpoint="%s" message="%s"', $path, $this->sanitizeSnippet($e->getMessage())));
 
             return $this->errorResult('transport_failure');
         }
@@ -323,6 +404,87 @@ final class Sanaei3xuiApiClient
         if ([] !== $cookies) {
             $this->cookiesByPanel[$this->panelKey($panel)] = $cookies;
         }
+    }
+
+    private function panelConfig(VpnPanel $panel): array
+    {
+        return is_array($panel->getConfig()) ? $panel->getConfig() : [];
+    }
+
+    private function isV3(VpnPanel $panel): bool
+    {
+        $config = $this->panelConfig($panel);
+        $apiVersion = strtolower(trim((string) ($config['api_version'] ?? $panel->getApiVersion() ?? 'legacy')));
+
+        return 'v3' === $apiVersion;
+    }
+
+    private function useBearerAuth(VpnPanel $panel): bool
+    {
+        if (!$this->isV3($panel)) {
+            return false;
+        }
+
+        $config = $this->panelConfig($panel);
+        $authMode = strtolower(trim((string) ($config['auth_mode'] ?? '')));
+        $apiToken = $this->getApiToken($panel);
+
+        if ('' === $apiToken) {
+            return false;
+        }
+
+        if ('cookie' === $authMode) {
+            return false;
+        }
+
+        return '' === $authMode || 'bearer' === $authMode;
+    }
+
+    private function buildHeaders(VpnPanel $panel): array
+    {
+        $headers = ['Accept: application/json'];
+        if ($this->useBearerAuth($panel)) {
+            $headers[] = 'Authorization: Bearer '.$this->getApiToken($panel);
+
+            return $headers;
+        }
+
+        $cookieHeader = $this->buildCookieHeader($panel);
+        if (null !== $cookieHeader) {
+            $headers[] = 'Cookie: '.$cookieHeader;
+        }
+
+        return $headers;
+    }
+
+    private function buildApiUrl(VpnPanel $panel, string $path): string
+    {
+        $baseUrl = $this->normalizeBaseUrl($panel);
+        if ('' === $baseUrl) {
+            return '';
+        }
+
+        $basePath = trim((string) ($this->panelConfig($panel)['base_path'] ?? $panel->getBasePath() ?? ''));
+        $basePath = trim($basePath, '/');
+        $normalizedPath = '/'.ltrim($path, '/');
+
+        if ('' === $basePath) {
+            return $baseUrl.$normalizedPath;
+        }
+
+        return $baseUrl.'/'.$basePath.$normalizedPath;
+    }
+
+    private function getApiToken(VpnPanel $panel): string
+    {
+        $token = trim((string) ($panel->getApiToken() ?? ''));
+        if ('' !== $token) {
+            return $token;
+        }
+
+        $config = $this->panelConfig($panel);
+
+        return trim((string) ($config['api_token'] ?? ''));
     }
 
     private function buildCookieHeader(VpnPanel $panel): ?string
@@ -359,6 +521,7 @@ final class Sanaei3xuiApiClient
     {
         $snippet = preg_replace('/https?:\/\/\S+/i', '[url-redacted]', $text) ?? $text;
         $snippet = preg_replace('/("?(?:password|passwd|token|cookie|session)"?\s*[:=]\s*)"[^"]*"/i', '$1"[redacted]"', $snippet) ?? $snippet;
+        $snippet = preg_replace('/Bearer\s+[A-Za-z0-9\-\._~\+\/]+=*/i', 'Bearer [redacted]', $snippet) ?? $snippet;
         $snippet = preg_replace('/\s+/', ' ', $snippet) ?? $snippet;
 
         return mb_substr(trim($snippet), 0, 300);

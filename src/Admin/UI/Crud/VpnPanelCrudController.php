@@ -14,7 +14,7 @@ use EasyCorp\Bundle\EasyAdminBundle\Field\DateTimeField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\Field;
 use EasyCorp\Bundle\EasyAdminBundle\Field\IdField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\TextField;
-use EasyCorp\Bundle\EasyAdminBundle\Field\TextareaField;
+use Symfony\Component\Form\Extension\Core\Type\PasswordType;
 
 class VpnPanelCrudController extends AbstractCrudController
 {
@@ -60,16 +60,39 @@ class VpnPanelCrudController extends AbstractCrudController
                 ]),
             TextField::new('title'),
             TextField::new('baseUrl'),
+            ChoiceField::new('apiVersion', 'API Version')
+                ->setChoices([
+                    'legacy' => 'legacy',
+                    'v3' => 'v3',
+                ])
+                ->setHelp('legacy for old Sanaei panels, v3 for 3x-ui v3+ API'),
+            ChoiceField::new('authMode', 'Auth Mode')
+                ->setChoices([
+                    'cookie' => 'cookie',
+                    'bearer' => 'bearer',
+                ]),
+            TextField::new('basePath', 'Base Path')
+                ->setHelp('Optional panel path prefix, e.g. /xui'),
+            TextField::new('subscriptionPathPrefix', 'Subscription Path Prefix')
+                ->setHelp('Used with subscription base URL to build subscription URL.'),
             TextField::new('subscriptionBaseUrl')
                 ->setHelp('For Sanaei subscriptions, prefer config.subscription_base_url and config.subscription_path_prefix.'),
             TextField::new('publicHost')
                 ->setHelp('Used as fallback host for generated single links when inbound/external proxy host is missing.'),
             TextField::new('username'),
             TextField::new('password')->hideOnIndex(),
-            TextareaField::new('apiToken')->hideOnIndex(),
+            TextField::new('apiToken', 'API Token')
+                ->setFormType(PasswordType::class)
+                ->setFormTypeOption('always_empty', false)
+                ->setHelp('For 3x-ui v3+, use Settings → Security → API Token and auth_mode=bearer.')
+                ->hideOnIndex(),
+            TextField::new('apiTokenConfiguredLabel', 'Token configured')
+                ->hideOnForm(),
+            TextField::new('lastTestResultSummary', 'Last test result')
+                ->hideOnForm(),
             Field::new('config')
                 ->formatValue(static fn (mixed $value): string => json_encode($value, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '')
-                ->setHelp('Example: {"subscription_base_url":"https://sub.boodbash.ir:8443","subscription_path_prefix":"/rain","public_host":"sub.boodbash.ir"}')
+                ->setHelp('Example: {"api_version":"v3","auth_mode":"bearer","subscription_base_url":"https://sub.example.com:8443","subscription_path_prefix":"/rain","base_path":"/xui"}')
                 ->hideOnForm()
                 ->hideOnIndex(),
             BooleanField::new('isActive'),

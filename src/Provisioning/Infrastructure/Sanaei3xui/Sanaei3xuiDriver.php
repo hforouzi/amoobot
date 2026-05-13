@@ -140,11 +140,41 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
         }
 
         $subscriptionUrl = $this->buildSubscriptionUrl($panel, $config, $subId);
-        $configText = trim($this->configGenerator->generateConfigText($inbound, $clientUuid, $email, $subId));
-        $configLinks = array_values(array_filter(
-            array_map('trim', explode("\n", $configText)),
-            static fn (string $line): bool => '' !== $line
-        ));
+        $configLinks = [];
+        $configText = '';
+
+        if ($this->isV3Panel($panel)) {
+            $officialClientLinksResult = $this->apiClient->getClientLinks($panel, $inboundIdInt, $email);
+            if (($officialClientLinksResult['ok'] ?? false) === true) {
+                $payload = is_array($officialClientLinksResult['data'] ?? null) ? $officialClientLinksResult['data'] : [];
+                if (($payload['success'] ?? false) === true) {
+                    $configLinks = $this->extractLinkArray($payload['obj'] ?? null);
+                }
+            }
+
+            if ('' !== trim($subId)) {
+                $subLinksResult = $this->apiClient->getSubLinks($panel, $subId);
+                if (($subLinksResult['ok'] ?? false) === true) {
+                    $subPayload = is_array($subLinksResult['data'] ?? null) ? $subLinksResult['data'] : [];
+                    if (($subPayload['success'] ?? false) === true) {
+                        $configLinks = array_values(array_unique([
+                            ...$configLinks,
+                            ...$this->extractLinkArray($subPayload['obj'] ?? null),
+                        ]));
+                    }
+                }
+            }
+        }
+
+        if ([] === $configLinks) {
+            $configText = trim($this->configGenerator->generateConfigText($inbound, $clientUuid, $email, $subId));
+            $configLinks = array_values(array_filter(
+                array_map('trim', explode("\n", $configText)),
+                static fn (string $line): bool => '' !== $line
+            ));
+        } else {
+            $configText = implode("\n", $configLinks);
+        }
 
         $this->log(sprintf(
             'create_service_generated_config source="%s" inbound_id=%d uuid="%s" sub_id="%s" generated_config_link_count=%d config_text_empty=%s subscription_url_present=%s config_text_preview="%s"',
@@ -312,6 +342,10 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
         $ref = $this->parseRemoteIdOrFail($remoteId);
         $inboundIdInt = $this->toInboundIdIntOrFail($ref->inboundId);
         $result = $this->apiClient->deleteClient($panel, (string) $inboundIdInt, $ref->clientId);
+        $payload = is_array($result['data'] ?? null) ? $result['data'] : [];
+        if ($this->isV3Panel($panel) && ((($result['ok'] ?? false) !== true) || (($payload['success'] ?? true) === false))) {
+            $result = $this->apiClient->deleteClientByEmail($panel, (string) $inboundIdInt, $ref->email);
+        }
         $this->assertPanelResult($result, 'delClient');
         $this->assertPanelBusinessResult($result, 'delClient');
     }
@@ -331,6 +365,18 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
         $panel = $this->requireSupportedPanel($panel);
         $ref = $this->parseRemoteIdOrFail($remoteId);
         $result = $this->apiClient->getClientTraffic($panel, $ref->email);
+        $payload = is_array($result['data'] ?? null) ? $result['data'] : [];
+        $obj = $payload['obj'] ?? null;
+        $missingObj = null === $obj || ([] === $obj);
+        if ($this->isV3Panel($panel) && (($result['ok'] ?? false) !== true || (($payload['success'] ?? true) === false) || $missingObj)) {
+            $fallbackId = trim($ref->clientId);
+            if ('' === $fallbackId) {
+                $fallbackId = trim((string) ($ref->subId ?? ''));
+            }
+            if ('' !== $fallbackId) {
+                $result = $this->apiClient->getClientTrafficById($panel, $fallbackId);
+            }
+        }
         $this->assertPanelResult($result, 'getClientTraffics');
         $this->assertPanelBusinessResult($result, 'getClientTraffics');
 
@@ -592,6 +638,32 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
         }
 
         return mb_substr($text, 0, $max);
+    }
+
+    private function isV3Panel(VpnPanel $panel): bool
+    {
+        return 'v3' === strtolower(trim((string) ($this->panelConfig($panel)['api_version'] ?? $panel->getApiVersion() ?? 'legacy')));
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function extractLinkArray(mixed $value): array
+    {
+        if (!is_array($value)) {
+            return [];
+        }
+
+        $links = [];
+        foreach ($value as $item) {
+            $text = trim((string) $item);
+            if ('' === $text) {
+                continue;
+            }
+            $links[] = $text;
+        }
+
+        return array_values(array_unique($links));
     }
 
     /**

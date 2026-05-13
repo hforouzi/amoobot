@@ -40,10 +40,26 @@ final class VpnPanelInboundActionsController extends AbstractController
         }
 
         $result = $apiClient->login($panel);
-        if (($result['ok'] ?? false) === true) {
-            $this->addFlash('success', 'اتصال به پنل موفق بود.');
-        } else {
+        if (($result['ok'] ?? false) !== true) {
+            $panel->setLastTestResult('FAIL', 'Auth/login failed');
+            $this->entityManager->flush();
             $this->addFlash('danger', $this->safePanelError($result));
+
+            return $this->redirectToPanels();
+        }
+
+        $listResult = $apiClient->listInbounds($panel);
+        if (($listResult['ok'] ?? false) === true) {
+            $payload = is_array($listResult['data'] ?? null) ? $listResult['data'] : [];
+            $obj = $payload['obj'] ?? $payload;
+            $count = is_array($obj) ? count($obj) : 0;
+            $panel->setLastTestResult('OK', sprintf('list_inbounds_ok count=%d', $count));
+            $this->entityManager->flush();
+            $this->addFlash('success', sprintf('اتصال به پنل موفق بود. تعداد اینباند: %d', $count));
+        } else {
+            $panel->setLastTestResult('FAIL', sprintf('list_inbounds_failed status=%s error=%s', (string) ($listResult['status'] ?? 'null'), (string) ($listResult['error'] ?? 'unknown')));
+            $this->entityManager->flush();
+            $this->addFlash('danger', $this->safePanelError($listResult));
         }
 
         return $this->redirectToPanels();

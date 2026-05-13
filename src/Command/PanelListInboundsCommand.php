@@ -58,6 +58,11 @@ final class PanelListInboundsCommand extends Command
         }
 
         $payload = $result['data'];
+        if (($payload['success'] ?? true) === false) {
+            $io->error(sprintf('Panel returned failure: %s', (string) ($payload['msg'] ?? 'unknown_error')));
+
+            return Command::FAILURE;
+        }
         $inbounds = $payload['obj'] ?? $payload;
         if (!is_array($inbounds) || [] === $inbounds) {
             $io->warning('No inbound found.');
