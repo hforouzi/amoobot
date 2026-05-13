@@ -182,6 +182,14 @@ final class StorePaymentMethodResolver
             }
 
             if (
+                PaymentGatewayType::NOWPAYMENTS === $gatewayType
+                && null !== $gateway->getNowPaymentsMinOrderAmountToman()
+                && $orderPayableAmount < (int) $gateway->getNowPaymentsMinOrderAmountToman()
+            ) {
+                $skipReasons[] = 'below minimum order amount for NOWPayments';
+            }
+
+            if (
                 (int) ($order->getId() ?? 0) > 0
                 && $order->getStatus() !== OrderStatus::WAITING_PAYMENT
             ) {

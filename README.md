@@ -848,8 +848,12 @@ In Admin → درگاههای پرداخت → کانفیگ NOWPayments, create 
 | `sandbox` | Informational flag for diagnostics; base URL is controlled by `api_base_url` |
 | `callback_base_url` | Your site base URL, e.g. `https://your-domain.com` |
 | `price_currency` | Currency of the price sent to NOWPayments (usually `usd`) |
-| `pay_currency` | Default crypto currency for payment, e.g. `usdttrc20`, `btc`, `eth` |
-| `irr_to_usd_rate` | IRR per 1 USD conversion rate (e.g. `600000`). Required when gateway currency is IRR and price_currency is `usd`. |
+| `pay_currency` | Default crypto currency for payment, e.g. `usdttrc20`, `btc`, `eth`. For USDT TRC20 use `usdttrc20` |
+| `amount_unit` | Unit of stored order amounts: `toman` or `rial` |
+| `toman_per_usd` | Required when `amount_unit=toman` and `price_currency=usd` |
+| `irr_to_usd_rate` | Required when `amount_unit=rial` and `price_currency=usd` |
+| `min_price_amount_override` | Optional minimum `price_amount` override in `price_currency` |
+| `min_order_amount_toman` | Optional minimum payable amount for showing NOWPayments in store methods |
 | `success_url` | Optional redirect URL after successful payment |
 | `cancel_url` | Optional redirect URL after cancelled payment |
 | `order_description` | Description sent to NOWPayments |
@@ -864,7 +868,10 @@ In Admin → درگاههای پرداخت → کانفیگ NOWPayments, create 
   "callback_base_url": "https://your-domain.com",
   "price_currency": "usd",
   "pay_currency": "usdttrc20",
-  "irr_to_usd_rate": 600000,
+  "amount_unit": "toman",
+  "toman_per_usd": 45000,
+  "min_price_amount_override": "10",
+  "min_order_amount_toman": 500000,
   "order_description": "Amoobot VPN order",
   "success_url": "https://your-domain.com/payment/success",
   "cancel_url": "https://your-domain.com/payment/cancel"
@@ -899,29 +906,45 @@ The method is shown in bot only if:
 - `api_base_url` exists (or falls back to the production default)
 - `pay_currency` is set
 - `price_currency` is set
-- if gateway currency is IRR and `price_currency` is `usd`, then `irr_to_usd_rate` must be set
+- if gateway currency is IRR and `price_currency` is `usd`, then:
+  - `toman_per_usd` must be set for `amount_unit=toman`
+  - `irr_to_usd_rate` must be set for `amount_unit=rial`
+- if `min_order_amount_toman` is set, payable amount must be at least that threshold
 
 ### 4. Currency Conversion
 
-Orders are stored in IRR. NOWPayments typically expects USD prices.
+Orders are stored with gateway currency `IRR`, while NOWPayments price conversion uses the configured amount unit.
 
 Conversion formula:
 ```
-priceAmount (USD) = order.payableAmount (IRR) / irr_to_usd_rate
+if amount_unit=toman:
+  priceAmount (USD) = order.payableAmount / toman_per_usd
+
+if amount_unit=rial:
+  priceAmount (USD) = order.payableAmount / irr_to_usd_rate
 ```
 
-The conversion snapshot is stored in `Payment.requestPayload._conversion`:
+Before `POST /payment`, the gateway calls:
+- `GET /estimate`
+- `GET /min-amount`
+
+The amount snapshot is stored in `Payment.requestPayload`:
 ```json
 {
-  "originalAmount": 6000000,
-  "originalCurrency": "IRR",
   "priceAmount": 10.00,
   "priceCurrency": "usd",
-  "rate": 600000
+  "payCurrency": "usdttrc20",
+  "estimatedPayAmount": "10",
+  "minAmount": "10",
+  "rateSnapshot": {
+    "amountUnit": "toman",
+    "rateField": "toman_per_usd",
+    "rateUsed": 45000
+  }
 }
 ```
 
-Live rate fetching is **not implemented** in this phase. Update `irr_to_usd_rate` manually.
+Live rate fetching is **not implemented** in this phase. Update the matching USD rate field manually.
 
 ### 5. Payment Status Mapping
 
@@ -959,7 +982,14 @@ Buttons:
 php bin/console app:payment:test-nowpayments {gatewayId} --amount=1000000
 ```
 
-Prints: price amount/currency, pay amount/currency, address, payment_id, status, payment URL.
+Prints: price amount/currency, amount unit, conversion rate, estimate/min diagnostics, pay amount/currency, address, payment_id, status, payment URL.
+
+#### Debug conversion + minimum checks:
+```bash
+php bin/console app:payment:debug-nowpayments-amount {gatewayId} --amount=4500000
+```
+
+Prints: original amount, amount unit, conversion rate, price amount, pay currency, estimated crypto amount, NOWPayments minimum amount, and eligibility.
 
 #### Test auth/config:
 ```bash

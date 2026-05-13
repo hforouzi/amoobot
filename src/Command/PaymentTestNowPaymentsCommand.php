@@ -56,7 +56,7 @@ final class PaymentTestNowPaymentsCommand extends Command
         }
 
         if (!$gateway->isNowPaymentsConfigured()) {
-            $io->error('NOWPayments gateway is not fully configured. Check api_key, api_base_url, price_currency, pay_currency, and irr_to_usd_rate (if IRR).');
+            $io->error('NOWPayments gateway is not fully configured. Check api_key, api_base_url, price_currency, pay_currency, amount_unit, and the matching USD rate field.');
 
             return Command::FAILURE;
         }
@@ -77,19 +77,33 @@ final class PaymentTestNowPaymentsCommand extends Command
         $driver = $this->paymentGatewayRegistry->resolve($gateway);
 
         $config = $gateway->getConfig() ?? [];
+        $quote = $driver->debugAmount($gateway, $amount);
         $priceAmount = $driver->resolvePriceAmount($payment, $config);
+        $rateSnapshot = is_array($quote['rateSnapshot'] ?? null) ? $quote['rateSnapshot'] : [];
 
         $io->section('NOWPayments Test Request');
         $io->writeln(sprintf('Gateway:        #%d %s', $gateway->getId() ?? 0, $gateway->getTitle()));
         $io->writeln(sprintf('Original amount: %d %s', $amount, $gateway->getCurrency()));
+        $io->writeln(sprintf('Amount unit:    %s', (string) ($quote['amountUnit'] ?? $gateway->getNowPaymentsAmountUnit())));
+        $io->writeln(sprintf('Rate field:     %s', (string) ($rateSnapshot['rateField'] ?? '-')));
+        $io->writeln(sprintf('Rate used:      %s', null === ($rateSnapshot['rateUsed'] ?? null) ? '-' : (string) $rateSnapshot['rateUsed']));
         $io->writeln(sprintf('Price amount:   %s %s', null !== $priceAmount ? number_format($priceAmount, 4) : 'ERROR', strtoupper((string) ($config['price_currency'] ?? 'usd'))));
         $io->writeln(sprintf('Pay currency:   %s', strtoupper((string) ($config['pay_currency'] ?? ''))));
+        $io->writeln(sprintf('Estimated pay:  %s', (string) ($quote['estimatedPayAmount'] ?? '(unavailable)')));
+        $io->writeln(sprintf('Min amount:     %s %s', (string) ($quote['minAmount'] ?? '(unavailable)'), strtoupper((string) ($quote['minAmountCurrency'] ?? ''))));
+        $io->writeln(sprintf('Eligible:       %s', true === ($quote['canCreate'] ?? false) ? 'YES' : 'NO'));
         $io->writeln(sprintf('API base URL:   %s', $gateway->getNowPaymentsApiBaseUrl()));
         $io->writeln(sprintf('Sandbox:        %s', $gateway->isNowPaymentsSandbox() ? 'YES' : 'NO'));
         $io->newLine();
 
         if (null === $priceAmount) {
-            $io->error('Cannot resolve price amount. Ensure irr_to_usd_rate is set for IRR→USD conversion.');
+            $io->error((string) ($quote['message'] ?? 'Cannot resolve price amount. Check amount_unit and the matching USD rate field.'));
+
+            return Command::FAILURE;
+        }
+
+        if (false === ($quote['canCreate'] ?? false)) {
+            $io->error((string) ($quote['message'] ?? 'NOWPayments amount is not eligible for payment creation.'));
 
             return Command::FAILURE;
         }

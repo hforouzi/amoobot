@@ -15,6 +15,7 @@ use EasyCorp\Bundle\EasyAdminBundle\Controller\AbstractCrudController;
 use EasyCorp\Bundle\EasyAdminBundle\Dto\EntityDto;
 use EasyCorp\Bundle\EasyAdminBundle\Dto\SearchDto;
 use EasyCorp\Bundle\EasyAdminBundle\Field\BooleanField;
+use EasyCorp\Bundle\EasyAdminBundle\Field\ChoiceField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\DateTimeField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\IdField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\IntegerField;
@@ -46,6 +47,7 @@ final class NowPaymentsPaymentGatewayCrudController extends AbstractCrudControll
             ->setNowPaymentsApiBaseUrl('https://api.nowpayments.io/v1')
             ->setNowPaymentsPriceCurrency('usd')
             ->setNowPaymentsPayCurrency('usdttrc20')
+            ->setNowPaymentsAmountUnit('toman')
             ->setNowPaymentsOrderDescription('Amoobot VPN order');
     }
 
@@ -96,8 +98,15 @@ final class NowPaymentsPaymentGatewayCrudController extends AbstractCrudControll
             BooleanField::new('nowPaymentsSandbox')->setLabel('sandbox')->setHelp('حالت sandbox برای تست'),
             TextField::new('nowPaymentsCallbackBaseUrl')->setLabel('callback_base_url')->setHelp('آدرس پایه سایت شما، مثال: https://your-domain.com'),
             TextField::new('nowPaymentsPriceCurrency')->setLabel('price_currency')->setHelp('ارز قیمت (معمولاً usd)'),
-            TextField::new('nowPaymentsPayCurrency')->setLabel('pay_currency')->setHelp('ارز پرداخت، مثال: usdttrc20، btc، eth'),
-            IntegerField::new('nowPaymentsIrrToUsdRate')->setLabel('irr_to_usd_rate')->setHelp('نرخ تبدیل ریال به دلار (تعداد ریال در ازای ۱ دلار)، مثال: 600000')->hideOnIndex(),
+            TextField::new('nowPaymentsPayCurrency')->setLabel('pay_currency')->setHelp('ارز پرداخت، مثال: usdttrc20، btc، eth. برای USDT شبکه TRC20 از usdttrc20 استفاده کنید و trx را فقط برای TRX بگذارید.'),
+            ChoiceField::new('nowPaymentsAmountUnit')->setLabel('amount_unit')->setChoices([
+                'toman' => 'toman',
+                'rial' => 'rial',
+            ])->setHelp('واحد مبالغ سفارش در سیستم شما. اگر قیمت‌ها را به تومان نگه می‌دارید `toman` را انتخاب کنید.'),
+            IntegerField::new('nowPaymentsTomanPerUsd')->setLabel('toman_per_usd')->setHelp('اگر amount_unit=toman است، تعداد تومان به ازای ۱ دلار را وارد کنید.')->hideOnIndex(),
+            IntegerField::new('nowPaymentsIrrToUsdRate')->setLabel('irr_to_usd_rate')->setHelp('اگر amount_unit=rial است، تعداد ریال به ازای ۱ دلار را وارد کنید.')->hideOnIndex(),
+            TextField::new('nowPaymentsMinPriceAmountOverride')->setLabel('min_price_amount_override')->setHelp('حداقل مبلغ دلاری قیمت برای NOWPayments (اختیاری). اگر خالی باشد از min-amount خود NOWPayments استفاده می‌شود.')->hideOnIndex(),
+            IntegerField::new('nowPaymentsMinOrderAmountToman')->setLabel('min_order_amount_toman')->setHelp('حداقل مبلغ سفارش به تومان برای نمایش این روش پرداخت در فروشگاه (اختیاری).')->hideOnIndex(),
             TextField::new('nowPaymentsSuccessUrl')->setLabel('success_url')->setHelp('آدرس بازگشت پس از پرداخت موفق (اختیاری)')->hideOnIndex(),
             TextField::new('nowPaymentsCancelUrl')->setLabel('cancel_url')->setHelp('آدرس بازگشت پس از لغو پرداخت (اختیاری)')->hideOnIndex(),
             TextField::new('nowPaymentsOrderDescription')->setLabel('order_description')->setHelp('توضیحات سفارش ارسالی به NOWPayments')->hideOnIndex(),

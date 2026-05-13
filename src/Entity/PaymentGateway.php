@@ -494,6 +494,46 @@ class PaymentGateway
         return $this->setConfigString('pay_currency', $value);
     }
 
+    public function getNowPaymentsAmountUnit(): string
+    {
+        $value = strtolower((string) ($this->configString('amount_unit') ?? 'toman'));
+
+        return in_array($value, ['toman', 'rial'], true) ? $value : 'toman';
+    }
+
+    public function setNowPaymentsAmountUnit(?string $value): self
+    {
+        $normalized = strtolower(trim((string) $value));
+        if (!in_array($normalized, ['toman', 'rial'], true)) {
+            $normalized = 'toman';
+        }
+
+        return $this->setConfigString('amount_unit', $normalized);
+    }
+
+    public function getNowPaymentsTomanPerUsd(): ?int
+    {
+        $val = is_array($this->config) ? ($this->config['toman_per_usd'] ?? null) : null;
+        if (null === $val || '' === (string) $val) {
+            return null;
+        }
+
+        return (int) $val > 0 ? (int) $val : null;
+    }
+
+    public function setNowPaymentsTomanPerUsd(?int $value): self
+    {
+        $config = is_array($this->config) ? $this->config : [];
+        if (null === $value || $value <= 0) {
+            unset($config['toman_per_usd']);
+        } else {
+            $config['toman_per_usd'] = $value;
+        }
+        $this->config = $config;
+
+        return $this;
+    }
+
     public function getNowPaymentsIrrToUsdRate(): ?int
     {
         $val = is_array($this->config) ? ($this->config['irr_to_usd_rate'] ?? null) : null;
@@ -511,6 +551,55 @@ class PaymentGateway
             unset($config['irr_to_usd_rate']);
         } else {
             $config['irr_to_usd_rate'] = $value;
+        }
+        $this->config = $config;
+
+        return $this;
+    }
+
+    public function getNowPaymentsMinPriceAmountOverride(): ?float
+    {
+        $val = is_array($this->config) ? ($this->config['min_price_amount_override'] ?? null) : null;
+        if (null === $val || '' === trim((string) $val)) {
+            return null;
+        }
+
+        $number = (float) $val;
+
+        return $number > 0 ? round($number, 8) : null;
+    }
+
+    public function setNowPaymentsMinPriceAmountOverride(?string $value): self
+    {
+        $config = is_array($this->config) ? $this->config : [];
+        $text = trim((string) $value);
+        if ('' === $text || (float) $text <= 0) {
+            unset($config['min_price_amount_override']);
+        } else {
+            $config['min_price_amount_override'] = $text;
+        }
+        $this->config = $config;
+
+        return $this;
+    }
+
+    public function getNowPaymentsMinOrderAmountToman(): ?int
+    {
+        $val = is_array($this->config) ? ($this->config['min_order_amount_toman'] ?? null) : null;
+        if (null === $val || '' === (string) $val) {
+            return null;
+        }
+
+        return (int) $val > 0 ? (int) $val : null;
+    }
+
+    public function setNowPaymentsMinOrderAmountToman(?int $value): self
+    {
+        $config = is_array($this->config) ? $this->config : [];
+        if (null === $value || $value <= 0) {
+            unset($config['min_order_amount_toman']);
+        } else {
+            $config['min_order_amount_toman'] = $value;
         }
         $this->config = $config;
 
@@ -559,7 +648,10 @@ class PaymentGateway
         }
 
         if ('irr' === strtolower($this->getCurrency()) && 'usd' === strtolower($priceCurrency)) {
-            return null !== $this->getNowPaymentsIrrToUsdRate();
+            return match ($this->getNowPaymentsAmountUnit()) {
+                'rial' => null !== $this->getNowPaymentsIrrToUsdRate(),
+                default => null !== $this->getNowPaymentsTomanPerUsd(),
+            };
         }
 
         return true;

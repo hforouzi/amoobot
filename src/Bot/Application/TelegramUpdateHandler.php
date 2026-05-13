@@ -1295,6 +1295,7 @@ class TelegramUpdateHandler
             ->setMaxResults(1)
             ->getQuery()
             ->getOneOrNullResult();
+        $paymentWasCreated = false;
 
         if (!$payment instanceof Payment) {
             $payment = (new Payment())
@@ -1309,6 +1310,7 @@ class TelegramUpdateHandler
                 ->setStatus(PaymentStatus::PENDING);
             $this->entityManager->persist($payment);
             $this->entityManager->flush();
+            $paymentWasCreated = true;
         } else {
             $payment
                 ->setGateway($gateway)
@@ -1336,6 +1338,9 @@ class TelegramUpdateHandler
         }
         if (!$requestResult->success) {
             $payment->setAdminNote($requestResult->message);
+            if (PaymentGatewayType::NOWPAYMENTS === $gateway->getType() && NowPaymentsGateway::BELOW_MINIMUM_USER_MESSAGE === $requestResult->message) {
+                $this->markRejectedFailedNowPaymentsPayment($payment, $paymentWasCreated);
+            }
         }
         $this->entityManager->flush();
         $this->debugLog(sprintf('payment_gateway_selected order_id=%d payment_id=%d amount=%d', $order->getId() ?? 0, $payment->getId() ?? 0, $finalAmount));
@@ -1412,6 +1417,29 @@ class TelegramUpdateHandler
         }
 
         $this->sendPaymentGatewaySelectionForOrder($order, $chatId, $callbackId);
+    }
+
+    private function markRejectedFailedNowPaymentsPayment(Payment $payment, bool $paymentWasCreated): void
+    {
+        $payment
+            ->setStatus(PaymentStatus::REJECTED)
+            ->setFailedAt(new \DateTimeImmutable())
+            ->setGatewayTransactionId(null)
+            ->setAuthority(null)
+            ->setPaymentUrl(null);
+
+        if ($paymentWasCreated) {
+            $payment
+                ->setCryptoPaymentId(null)
+                ->setCryptoPaymentStatus(null)
+                ->setCryptoAddress(null)
+                ->setCryptoPayAmount(null)
+                ->setCryptoPayCurrency(null)
+                ->setCryptoPriceCurrency(null)
+                ->setCryptoPurchaseId(null)
+                ->setCryptoNetwork(null)
+                ->setCryptoExpiresAt(null);
+        }
     }
 
     private function sendPaymentGatewaySelectionForOrder(Order $order, string $chatId, ?string $callbackId, ?string $backCallback = null, ?string $cancelCallback = null): void
