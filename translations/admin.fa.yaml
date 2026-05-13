@@ -81,3 +81,20 @@ fieldset:
   credentials: اعتبارنامه
   payment_settings: تنظیمات پرداخت
   store_payment_method: روش پرداخت فروشگاه
+
+payment_gateway:
+  title: عنوان
+  type: نوع درگاه
+  type_help: "یکی از ماژول‌های پشتیبانی‌شده را انتخاب کنید: manual_card، zibal، nowpayments."
+  configured: پیکربندی شده
+  active: فعال
+  currency: ارز
+  description: توضیحات
+  json_config: تنظیمات JSON
+  invalid_json: JSON نامعتبر است. لطفاً یک شیء JSON معتبر وارد کنید.
+  install_action: افزودن درگاه پرداخت
+  add_store_method: افزودن به روش‌های پرداخت فروشگاه
+  sort_order: ترتیب نمایش
+  min_amount: حداقل مبلغ
+  max_amount: حداکثر مبلغ
+  display_settings: تنظیمات نمایش در فروشگاه

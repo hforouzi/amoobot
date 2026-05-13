@@ -81,3 +81,20 @@ fieldset:
   credentials: Credentials
   payment_settings: Payment Settings
   store_payment_method: Store Payment Method
+
+payment_gateway:
+  title: Title
+  type: Gateway Type
+  type_help: "Choose one supported module: manual_card, zibal, nowpayments."
+  configured: Configured
+  active: Active
+  currency: Currency
+  description: Description
+  json_config: JSON Configuration
+  invalid_json: Invalid JSON. Enter a valid JSON object.
+  install_action: Add Payment Gateway
+  add_store_method: Add to Store Payment Methods
+  sort_order: Sort Order
+  min_amount: Min Amount
+  max_amount: Max Amount
+  display_settings: Store Display Settings

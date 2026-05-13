@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace App\Command;
 
 use App\Entity\PaymentGateway;
-use App\Payment\Domain\PaymentGatewayType;
+use App\Payment\Application\PaymentGatewayModuleRegistry;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
@@ -13,11 +13,12 @@ use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Style\SymfonyStyle;
 
-#[AsCommand(name: 'app:payment:list-gateways', description: 'List payment gateways')]
+#[AsCommand(name: 'app:payment:list-gateways', description: 'List configured payment gateway rows')]
 final class PaymentListGatewaysCommand extends Command
 {
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
+        private readonly PaymentGatewayModuleRegistry $moduleRegistry,
     ) {
         parent::__construct();
     }
@@ -26,7 +27,13 @@ final class PaymentListGatewaysCommand extends Command
     {
         $io = new SymfonyStyle($input, $output);
         $gateways = $this->entityManager->getRepository(PaymentGateway::class)
-            ->findBy([], ['sortOrder' => 'ASC', 'id' => 'ASC']);
+            ->createQueryBuilder('gateway')
+            ->andWhere('gateway.type IN (:types)')
+            ->setParameter('types', $this->moduleRegistry->supportedTypes())
+            ->orderBy('gateway.sortOrder', 'ASC')
+            ->addOrderBy('gateway.id', 'ASC')
+            ->getQuery()
+            ->getResult();
 
         if ([] === $gateways) {
             $io->warning('No payment gateways found.');
@@ -44,24 +51,13 @@ final class PaymentListGatewaysCommand extends Command
                 $gateway->getTitle(),
                 $gateway->getType(),
                 $gateway->isActive() ? 'yes' : 'no',
-                $this->isConfiguredForAdminList($gateway) ? 'yes' : 'no',
+                $this->moduleRegistry->isConfigured($gateway) ? 'yes' : 'no',
+                $gateway->getCurrency(),
             ];
         }
 
-        $io->table(['id', 'title', 'type', 'enabled', 'configured'], $rows);
+        $io->table(['id', 'title', 'type', 'active', 'configured', 'currency'], $rows);
 
         return Command::SUCCESS;
-    }
-
-    private function isConfiguredForAdminList(PaymentGateway $gateway): bool
-    {
-        return match ($gateway->getType()) {
-            PaymentGatewayType::MANUAL_CARD => '' !== trim((string) ($gateway->getManualCardNumber() ?? ''))
-                && '' !== trim((string) ($gateway->getManualCardHolder() ?? '')),
-            PaymentGatewayType::ZIBAL => '' !== trim((string) ($gateway->getZibalMerchant() ?? ''))
-                && '' !== trim((string) ($gateway->getZibalCallbackBaseUrl() ?? '')),
-            PaymentGatewayType::CUSTOM_API => $gateway->isConfigured(),
-            default => $gateway->isConfigured(),
-        };
     }
 }
