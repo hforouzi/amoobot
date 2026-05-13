@@ -874,6 +874,8 @@ final class NowPaymentsGateway implements PaymentGatewayInterface
             'amountUnit' => $quote['amountUnit'] ?? null,
             'rate_used' => $rateSnapshot['rateUsed'] ?? null,
             'rate_field' => $rateSnapshot['rateField'] ?? null,
+            'estimate_response' => is_array($quote['estimate'] ?? null) ? ($quote['estimate']['response'] ?? null) : null,
+            'min_amount_response' => is_array($quote['minAmountCheck'] ?? null) ? ($quote['minAmountCheck']['response'] ?? null) : null,
         ];
     }
 
