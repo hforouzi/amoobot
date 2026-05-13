@@ -843,8 +843,9 @@ In Admin → درگاههای پرداخت → کانفیگ NOWPayments, create 
 |---|---|
 | `title` | Display name |
 | `api_key` | API key from NOWPayments dashboard |
+| `api_base_url` | NOWPayments API base URL. Default: `https://api.nowpayments.io/v1` |
 | `ipn_secret` | IPN Secret for webhook signature validation |
-| `sandbox` | Enable sandbox mode for testing |
+| `sandbox` | Informational flag for diagnostics; base URL is controlled by `api_base_url` |
 | `callback_base_url` | Your site base URL, e.g. `https://your-domain.com` |
 | `price_currency` | Currency of the price sent to NOWPayments (usually `usd`) |
 | `pay_currency` | Default crypto currency for payment, e.g. `usdttrc20`, `btc`, `eth` |
@@ -857,6 +858,7 @@ In Admin → درگاههای پرداخت → کانفیگ NOWPayments, create 
 ```json
 {
   "api_key": "YOUR_API_KEY",
+  "api_base_url": "https://api.nowpayments.io/v1",
   "ipn_secret": "YOUR_IPN_SECRET",
   "sandbox": false,
   "callback_base_url": "https://your-domain.com",
@@ -868,6 +870,13 @@ In Admin → درگاههای پرداخت → کانفیگ NOWPayments, create 
   "cancel_url": "https://your-domain.com/payment/cancel"
 }
 ```
+
+NOWPayments payment endpoints in this phase use:
+- `x-api-key: YOUR_API_KEY`
+- `Content-Type: application/json` for POST requests
+- `Accept: application/json`
+
+`Authorization: Bearer ...` is **not** used for NOWPayments payment endpoints.
 
 ### 2. Webhook / IPN URL
 
@@ -887,7 +896,7 @@ The method is shown in bot only if:
 - `isActive = true`
 - gateway type is `nowpayments`
 - `api_key` is set
-- `callback_base_url` is set
+- `api_base_url` exists (or falls back to the production default)
 - `pay_currency` is set
 - `price_currency` is set
 - if gateway currency is IRR and `price_currency` is `usd`, then `irr_to_usd_rate` must be set
@@ -952,6 +961,13 @@ php bin/console app:payment:test-nowpayments {gatewayId} --amount=1000000
 
 Prints: price amount/currency, pay amount/currency, address, payment_id, status, payment URL.
 
+#### Test auth/config:
+```bash
+php bin/console app:payment:test-nowpayments-auth {gatewayId}
+```
+
+Calls `GET /currencies` with `x-api-key` and prints only safe diagnostics (`api_key_configured`, `api_key_length`, `api_key_prefix`, endpoint, HTTP status, sanitized response).
+
 #### Check payment status:
 ```bash
 php bin/console app:payment:check-nowpayments {paymentId}
@@ -977,4 +993,3 @@ php bin/console doctrine:migrations:migrate
 
 New columns added to `payment` table:
 `crypto_price_currency`, `crypto_pay_currency`, `crypto_pay_amount`, `crypto_actually_paid`, `crypto_outcome_amount`, `crypto_payment_status`, `crypto_payment_id`, `crypto_purchase_id`, `crypto_address`, `crypto_network`, `crypto_expires_at`, `ipn_payload`
-

@@ -455,6 +455,25 @@ class PaymentGateway
         return $this->setConfigString('callback_base_url', $value);
     }
 
+    public function getNowPaymentsApiBaseUrl(): string
+    {
+        return $this->configString('api_base_url') ?? 'https://api.nowpayments.io/v1';
+    }
+
+    public function setNowPaymentsApiBaseUrl(?string $value): self
+    {
+        $text = trim((string) $value);
+        if ('' === $text || 'https://api.nowpayments.io/v1' === $text) {
+            $config = is_array($this->config) ? $this->config : [];
+            unset($config['api_base_url']);
+            $this->config = $config;
+
+            return $this;
+        }
+
+        return $this->setConfigString('api_base_url', $text);
+    }
+
     public function getNowPaymentsPriceCurrency(): ?string
     {
         return $this->configString('price_currency');
@@ -531,11 +550,11 @@ class PaymentGateway
     public function isNowPaymentsConfigured(): bool
     {
         $apiKey = $this->getNowPaymentsApiKey();
-        $callbackBaseUrl = $this->getNowPaymentsCallbackBaseUrl();
+        $apiBaseUrl = trim($this->getNowPaymentsApiBaseUrl());
         $priceCurrency = $this->getNowPaymentsPriceCurrency();
         $payCurrency = $this->getNowPaymentsPayCurrency();
 
-        if (null === $apiKey || null === $callbackBaseUrl || null === $priceCurrency || null === $payCurrency) {
+        if (null === $apiKey || '' === $apiBaseUrl || null === $priceCurrency || null === $payCurrency) {
             return false;
         }
 

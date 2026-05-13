@@ -27,8 +27,7 @@ use Symfony\Contracts\HttpClient\HttpClientInterface;
  */
 final class NowPaymentsGateway implements PaymentGatewayInterface
 {
-    private const API_BASE = 'https://api.nowpayments.io/v1';
-    private const SANDBOX_API_BASE = 'https://api-sandbox.nowpayments.io/v1';
+    public const DEFAULT_API_BASE = 'https://api.nowpayments.io/v1';
 
     /** Statuses that are considered fully paid and trigger provisioning */
     public const PAID_STATUSES = ['finished', 'confirmed'];
@@ -54,11 +53,13 @@ final class NowPaymentsGateway implements PaymentGatewayInterface
         $gateway = $payment->getGateway();
         $config = $this->resolveConfig($gateway);
 
-        $apiKey = trim((string) ($config['api_key'] ?? ''));
+        $apiKey = $this->resolveApiKey($config);
         $callbackBaseUrl = rtrim(trim((string) ($config['callback_base_url'] ?? '')), '/');
         $priceCurrency = strtolower(trim((string) ($config['price_currency'] ?? 'usd')));
         $payCurrency = strtolower(trim((string) ($config['pay_currency'] ?? '')));
         $sandbox = true === ($config['sandbox'] ?? false);
+        $baseUrl = $this->resolveApiBaseUrl($config);
+        $endpoint = $baseUrl.'/payment';
 
         if ('' === $apiKey) {
             return new PaymentRequestResult(success: false, message: 'NOWPayments api_key is not configured.');
@@ -113,27 +114,34 @@ final class NowPaymentsGateway implements PaymentGatewayInterface
         }
         $payment->setRequestPayload(array_merge(['_conversion' => $conversionSnapshot], $requestBody));
 
-        $baseUrl = $sandbox ? self::SANDBOX_API_BASE : self::API_BASE;
-
         try {
-            $response = $this->httpClient->request('POST', $baseUrl.'/payment', [
-                'headers' => ['x-api-key' => $apiKey],
+            $response = $this->httpClient->request('POST', $endpoint, [
+                'headers' => $this->buildPostHeaders($apiKey),
                 'json' => $requestBody,
                 'timeout' => 20,
             ]);
+            $statusCode = $response->getStatusCode();
             $raw = $response->toArray(false);
         } catch (TransportExceptionInterface|\Throwable $e) {
-            $this->safeLog('nowpayments_create_exception', ['message' => $e->getMessage(), 'paymentId' => $payment->getId()]);
+            $this->safeLog('nowpayments_create_exception', array_merge(
+                ['message' => $e->getMessage(), 'paymentId' => $payment->getId()],
+                $this->buildApiDiagnostics($apiKey, $endpoint, $sandbox)
+            ));
 
             return new PaymentRequestResult(success: false, message: 'در ارتباط با درگاه NOWPayments مشکل رخ داد: '.$e->getMessage());
         }
 
-        if (isset($raw['message']) && isset($raw['statusCode']) && !in_array((int) ($raw['statusCode'] ?? 0), [200, 201], true)) {
-            $this->safeLog('nowpayments_create_failed', ['paymentId' => $payment->getId(), 'raw' => $raw]);
+        $rawMessage = trim((string) ($raw['message'] ?? ''));
+        if ($statusCode >= 400 || (isset($raw['statusCode']) && !in_array((int) ($raw['statusCode'] ?? 0), [200, 201], true))) {
+            $logEvent = $this->isInvalidApiKeyMessage($rawMessage) ? 'nowpayments_invalid_api_key' : 'nowpayments_create_failed';
+            $this->safeLog($logEvent, array_merge(
+                ['paymentId' => $payment->getId(), 'statusCode' => $statusCode, 'raw' => $raw],
+                $this->buildApiDiagnostics($apiKey, $endpoint, $sandbox)
+            ));
 
             return new PaymentRequestResult(
                 success: false,
-                message: (string) ($raw['message'] ?? 'NOWPayments payment creation failed.'),
+                message: $this->buildUserFacingErrorMessage($rawMessage, 'خطا در اتصال به درگاه پرداخت ارز دیجیتال. لطفاً بعداً تلاش کنید.'),
                 rawResponse: is_array($raw) ? $raw : null
             );
         }
@@ -195,8 +203,9 @@ final class NowPaymentsGateway implements PaymentGatewayInterface
         $gateway = $payment->getGateway();
         $config = $this->resolveConfig($gateway);
 
-        $apiKey = trim((string) ($config['api_key'] ?? ''));
+        $apiKey = $this->resolveApiKey($config);
         $sandbox = true === ($config['sandbox'] ?? false);
+        $baseUrl = $this->resolveApiBaseUrl($config);
 
         if ('' === $apiKey) {
             return new PaymentVerificationResult(success: false, paid: false, message: 'NOWPayments api_key is not configured.');
@@ -207,18 +216,38 @@ final class NowPaymentsGateway implements PaymentGatewayInterface
             return new PaymentVerificationResult(success: false, paid: false, message: 'NOWPayments payment_id not found.');
         }
 
-        $baseUrl = $sandbox ? self::SANDBOX_API_BASE : self::API_BASE;
+        $endpoint = $baseUrl.'/payment/'.$paymentId;
 
         try {
-            $response = $this->httpClient->request('GET', $baseUrl.'/payment/'.$paymentId, [
-                'headers' => ['x-api-key' => $apiKey],
+            $response = $this->httpClient->request('GET', $endpoint, [
+                'headers' => $this->buildGetHeaders($apiKey),
                 'timeout' => 20,
             ]);
+            $statusCode = $response->getStatusCode();
             $raw = $response->toArray(false);
         } catch (TransportExceptionInterface|\Throwable $e) {
-            $this->safeLog('nowpayments_verify_exception', ['message' => $e->getMessage(), 'paymentId' => $payment->getId()]);
+            $this->safeLog('nowpayments_verify_exception', array_merge(
+                ['message' => $e->getMessage(), 'paymentId' => $payment->getId()],
+                $this->buildApiDiagnostics($apiKey, $endpoint, $sandbox)
+            ));
 
             return new PaymentVerificationResult(success: false, paid: false, message: 'خطا در بررسی وضعیت پرداخت NOWPayments: '.$e->getMessage());
+        }
+
+        $rawMessage = trim((string) ($raw['message'] ?? ''));
+        if ($statusCode >= 400) {
+            $logEvent = $this->isInvalidApiKeyMessage($rawMessage) ? 'nowpayments_invalid_api_key' : 'nowpayments_verify_failed';
+            $this->safeLog($logEvent, array_merge(
+                ['paymentId' => $payment->getId(), 'statusCode' => $statusCode, 'raw' => $raw],
+                $this->buildApiDiagnostics($apiKey, $endpoint, $sandbox)
+            ));
+
+            return new PaymentVerificationResult(
+                success: false,
+                paid: false,
+                message: $this->buildUserFacingErrorMessage($rawMessage, 'خطا در اتصال به درگاه پرداخت ارز دیجیتال. لطفاً بعداً تلاش کنید.'),
+                rawResponse: is_array($raw) ? $raw : null
+            );
         }
 
         $status = strtolower(trim((string) ($raw['payment_status'] ?? '')));
@@ -254,6 +283,58 @@ final class NowPaymentsGateway implements PaymentGatewayInterface
             message: '' !== $status ? $status : 'unknown',
             rawResponse: is_array($raw) ? $raw : null
         );
+    }
+
+    /**
+     * @return array{success: bool, statusCode: int, endpoint: string, api_key_configured: string, api_key_length: int, api_key_prefix: string, sandbox: string, response: array<string, mixed>|list<mixed>|null, message: string}
+     */
+    public function testAuthentication(PaymentGateway $gateway): array
+    {
+        $config = $this->resolveConfig($gateway);
+        $apiKey = $this->resolveApiKey($config);
+        $sandbox = true === ($config['sandbox'] ?? false);
+        $endpoint = $this->resolveApiBaseUrl($config).'/currencies';
+        $diagnostics = $this->buildApiDiagnostics($apiKey, $endpoint, $sandbox);
+
+        if ('' === $apiKey) {
+            return array_merge($diagnostics, [
+                'success' => false,
+                'statusCode' => 0,
+                'response' => null,
+                'message' => 'NOWPayments api_key is not configured.',
+            ]);
+        }
+
+        try {
+            $response = $this->httpClient->request('GET', $endpoint, [
+                'headers' => $this->buildGetHeaders($apiKey),
+                'timeout' => 20,
+            ]);
+            $statusCode = $response->getStatusCode();
+            $raw = $response->toArray(false);
+        } catch (TransportExceptionInterface|\Throwable $e) {
+            $this->safeLog('nowpayments_auth_test_exception', array_merge(['message' => $e->getMessage()], $diagnostics));
+
+            return array_merge($diagnostics, [
+                'success' => false,
+                'statusCode' => 0,
+                'response' => null,
+                'message' => $e->getMessage(),
+            ]);
+        }
+
+        $rawMessage = trim((string) ($raw['message'] ?? ''));
+        if ($statusCode >= 400) {
+            $logEvent = $this->isInvalidApiKeyMessage($rawMessage) ? 'nowpayments_invalid_api_key' : 'nowpayments_auth_test_failed';
+            $this->safeLog($logEvent, array_merge(['statusCode' => $statusCode, 'raw' => $raw], $diagnostics));
+        }
+
+        return array_merge($diagnostics, [
+            'success' => $statusCode >= 200 && $statusCode < 300,
+            'statusCode' => $statusCode,
+            'response' => is_array($raw) ? $this->sanitizeResponse($raw) : null,
+            'message' => $rawMessage,
+        ]);
     }
 
     /**
@@ -317,6 +398,97 @@ final class NowPaymentsGateway implements PaymentGatewayInterface
         $config = $gateway?->getConfig();
 
         return is_array($config) ? $config : [];
+    }
+
+    /**
+     * @param array<string, mixed> $config
+     */
+    private function resolveApiKey(array $config): string
+    {
+        return trim((string) ($config['api_key'] ?? ''));
+    }
+
+    /**
+     * @param array<string, mixed> $config
+     */
+    private function resolveApiBaseUrl(array $config): string
+    {
+        $value = trim((string) ($config['api_base_url'] ?? self::DEFAULT_API_BASE));
+
+        return '' === $value ? self::DEFAULT_API_BASE : rtrim($value, '/');
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function buildPostHeaders(string $apiKey): array
+    {
+        return [
+            'x-api-key' => $apiKey,
+            'Content-Type' => 'application/json',
+            'Accept' => 'application/json',
+        ];
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function buildGetHeaders(string $apiKey): array
+    {
+        return [
+            'x-api-key' => $apiKey,
+            'Accept' => 'application/json',
+        ];
+    }
+
+    /**
+     * @return array{api_key_configured: string, api_key_length: int, api_key_prefix: string, endpoint: string, sandbox: string}
+     */
+    private function buildApiDiagnostics(string $apiKey, string $endpoint, bool $sandbox): array
+    {
+        return [
+            'api_key_configured' => '' !== $apiKey ? 'yes' : 'no',
+            'api_key_length' => strlen($apiKey),
+            'api_key_prefix' => '' !== $apiKey ? substr($apiKey, 0, 4) : '',
+            'endpoint' => $endpoint,
+            'sandbox' => $sandbox ? 'yes' : 'no',
+        ];
+    }
+
+    private function isInvalidApiKeyMessage(string $message): bool
+    {
+        return str_contains(strtolower($message), 'invalid api key');
+    }
+
+    private function buildUserFacingErrorMessage(string $rawMessage, string $defaultMessage): string
+    {
+        if ($this->isInvalidApiKeyMessage($rawMessage)) {
+            return 'خطا در اتصال به درگاه پرداخت ارز دیجیتال. لطفاً بعداً تلاش کنید.';
+        }
+
+        return '' !== $rawMessage ? $rawMessage : $defaultMessage;
+    }
+
+    /**
+     * @param array<string, mixed>|list<mixed> $payload
+     *
+     * @return array<string, mixed>|list<mixed>
+     */
+    private function sanitizeResponse(array $payload): array
+    {
+        if (array_is_list($payload)) {
+            return array_map(fn (mixed $value): mixed => is_array($value) ? $this->sanitizeResponse($value) : $value, $payload);
+        }
+
+        $sanitized = [];
+        foreach ($payload as $key => $value) {
+            if (in_array((string) $key, ['api_key', 'ipn_secret'], true)) {
+                continue;
+            }
+            $sanitized[$key] = is_array($value) ? $this->sanitizeResponse($value) : $value;
+        }
+
+        return $sanitized;
     }
 
     /**

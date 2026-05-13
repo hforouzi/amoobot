@@ -56,7 +56,7 @@ final class PaymentTestNowPaymentsCommand extends Command
         }
 
         if (!$gateway->isNowPaymentsConfigured()) {
-            $io->error('NOWPayments gateway is not fully configured. Check api_key, callback_base_url, price_currency, pay_currency, and irr_to_usd_rate (if IRR).');
+            $io->error('NOWPayments gateway is not fully configured. Check api_key, api_base_url, price_currency, pay_currency, and irr_to_usd_rate (if IRR).');
 
             return Command::FAILURE;
         }
@@ -84,6 +84,7 @@ final class PaymentTestNowPaymentsCommand extends Command
         $io->writeln(sprintf('Original amount: %d %s', $amount, $gateway->getCurrency()));
         $io->writeln(sprintf('Price amount:   %s %s', null !== $priceAmount ? number_format($priceAmount, 4) : 'ERROR', strtoupper((string) ($config['price_currency'] ?? 'usd'))));
         $io->writeln(sprintf('Pay currency:   %s', strtoupper((string) ($config['pay_currency'] ?? ''))));
+        $io->writeln(sprintf('API base URL:   %s', $gateway->getNowPaymentsApiBaseUrl()));
         $io->writeln(sprintf('Sandbox:        %s', $gateway->isNowPaymentsSandbox() ? 'YES' : 'NO'));
         $io->newLine();
 

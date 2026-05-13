@@ -42,6 +42,7 @@ final class NowPaymentsPaymentGatewayCrudController extends AbstractCrudControll
             ->setCurrency('IRR')
             ->setIsActive(true)
             ->setNowPaymentsSandbox(false)
+            ->setNowPaymentsApiBaseUrl('https://api.nowpayments.io/v1')
             ->setNowPaymentsPriceCurrency('usd')
             ->setNowPaymentsPayCurrency('usdttrc20')
             ->setNowPaymentsOrderDescription('Amoobot VPN order');
@@ -76,6 +77,7 @@ final class NowPaymentsPaymentGatewayCrudController extends AbstractCrudControll
             BooleanField::new('isActive')->setLabel('فعال'),
             TextField::new('nowPaymentsApiKey')->setLabel('api_key')->setHelp('کلید API از داشبورد NOWPayments'),
             TextField::new('nowPaymentsIpnSecret')->setLabel('ipn_secret')->setHelp('IPN Secret برای اعتبارسنجی وبهوک'),
+            TextField::new('nowPaymentsApiBaseUrl')->setLabel('api_base_url')->setHelp('آدرس API NOWPayments. پیشفرض: https://api.nowpayments.io/v1'),
             BooleanField::new('nowPaymentsSandbox')->setLabel('sandbox')->setHelp('حالت sandbox برای تست'),
             TextField::new('nowPaymentsCallbackBaseUrl')->setLabel('callback_base_url')->setHelp('آدرس پایه سایت شما، مثال: https://your-domain.com'),
             TextField::new('nowPaymentsPriceCurrency')->setLabel('price_currency')->setHelp('ارز قیمت (معمولاً usd)'),
