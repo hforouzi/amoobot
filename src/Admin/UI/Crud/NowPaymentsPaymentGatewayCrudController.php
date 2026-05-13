@@ -18,8 +18,9 @@ use EasyCorp\Bundle\EasyAdminBundle\Field\BooleanField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\DateTimeField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\IdField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\IntegerField;
-use EasyCorp\Bundle\EasyAdminBundle\Field\TextareaField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\TextField;
+use EasyCorp\Bundle\EasyAdminBundle\Field\TextareaField;
+use Symfony\Component\Form\Extension\Core\Type\PasswordType;
 
 final class NowPaymentsPaymentGatewayCrudController extends AbstractCrudController
 {
@@ -70,13 +71,27 @@ final class NowPaymentsPaymentGatewayCrudController extends AbstractCrudControll
 
     public function configureFields(string $pageName): iterable
     {
+        $apiKeyField = TextField::new('nowPaymentsApiKey')
+            ->setLabel('api_key')
+            ->setFormType(PasswordType::class)
+            ->setFormTypeOption('always_empty', false)
+            ->setHelp('کلید API از داشبورد NOWPayments')
+            ->onlyOnForms();
+
+        $ipnSecretField = TextField::new('nowPaymentsIpnSecret')
+            ->setLabel('ipn_secret')
+            ->setFormType(PasswordType::class)
+            ->setFormTypeOption('always_empty', false)
+            ->setHelp('IPN Secret برای اعتبارسنجی وبهوک')
+            ->onlyOnForms();
+
         return [
             IdField::new('id')->onlyOnIndex(),
             TextField::new('title')->setHelp('نام نمایشی درگاه'),
             TextareaField::new('description')->hideOnIndex()->setHelp('توضیحات اختیاری'),
             BooleanField::new('isActive')->setLabel('فعال'),
-            TextField::new('nowPaymentsApiKey')->setLabel('api_key')->setHelp('کلید API از داشبورد NOWPayments'),
-            TextField::new('nowPaymentsIpnSecret')->setLabel('ipn_secret')->setHelp('IPN Secret برای اعتبارسنجی وبهوک'),
+            $apiKeyField,
+            $ipnSecretField,
             TextField::new('nowPaymentsApiBaseUrl')->setLabel('api_base_url')->setHelp('آدرس API NOWPayments. پیشفرض: https://api.nowpayments.io/v1'),
             BooleanField::new('nowPaymentsSandbox')->setLabel('sandbox')->setHelp('حالت sandbox برای تست'),
             TextField::new('nowPaymentsCallbackBaseUrl')->setLabel('callback_base_url')->setHelp('آدرس پایه سایت شما، مثال: https://your-domain.com'),

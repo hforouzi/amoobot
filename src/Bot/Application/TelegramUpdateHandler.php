@@ -47,6 +47,7 @@ class TelegramUpdateHandler
     private const STEP_WAITING_DISCOUNT_DECISION = 'waiting_discount_decision';
     private const STEP_WAITING_DISCOUNT_CODE = 'waiting_discount_code';
     private const STEP_WAITING_PAYMENT_METHOD = 'waiting_payment_method';
+    private const NOWPAYMENTS_WAITING_STATUS_TEXT = 'در انتظار پرداخت';
 
     public function __construct(
         private readonly TelegramUserResolver $telegramUserResolver,
@@ -1681,7 +1682,7 @@ class TelegramUpdateHandler
             'آدرس کیف پول:',
             $address,
             '',
-            'وضعیت: در انتظار پرداخت',
+            'وضعیت: '.self::NOWPAYMENTS_WAITING_STATUS_TEXT,
             sprintf('کد پیگیری سفارش: %s', $trackingCode),
         ];
 
