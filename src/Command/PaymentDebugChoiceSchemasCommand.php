@@ -73,4 +73,3 @@ final class PaymentDebugChoiceSchemasCommand extends Command
         return Command::SUCCESS;
     }
 }
-
