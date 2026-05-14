@@ -6,7 +6,6 @@ namespace App\Admin\UI\Crud;
 
 use App\Admin\Form\ConfigSchemaChoiceNormalizer;
 use App\Entity\PaymentGateway;
-use App\Form\Type\JsonTextareaType;
 use App\Payment\Application\PaymentGatewayModuleRegistry;
 use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\ORM\QueryBuilder;
@@ -130,6 +129,7 @@ final class PaymentGatewayCrudController extends AbstractCrudController
             TextField::new('title', 'payment_gateway.title'),
             ChoiceField::new('type', 'payment_gateway.type')
                 ->setChoices($this->moduleRegistry->choiceMap())
+                ->setFormTypeOption('disabled', true)
                 ->formatValue(fn (mixed $value): string => $this->moduleRegistry->displayName((string) $value))
                 ->setHelp('payment_gateway.type_help'),
             $configuredField,
@@ -139,9 +139,8 @@ final class PaymentGatewayCrudController extends AbstractCrudController
             TextareaField::new('description', 'payment_gateway.description')
                 ->hideOnIndex(),
             TextareaField::new('config', 'payment_gateway.json_config')
-                ->setFormType(JsonTextareaType::class)
-                ->setFormTypeOption('invalid_message', 'payment_gateway.invalid_json')
                 ->setHelp($configHelp)
+                ->hideOnForm()
                 ->hideOnIndex()
                 ->formatValue(static fn (mixed $value): string => is_array($value)
                     ? (json_encode($value, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '')
