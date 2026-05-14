@@ -20,18 +20,19 @@ final class PaymentGatewayModuleRegistry
      *   supportsWebhook: bool,
      *   supportsOnlinePayment: bool,
      *   defaults: array<string, mixed>,
-     *   schema: list<array{name: string, type: string, required: bool, default?: mixed}>
+     *   schema: list<array{name: string, type: string, required: bool, default?: mixed, choices?: array<string, string|int>}>
      * }>
      */
     private array $modules;
 
     public function __construct(
         private readonly PaymentGatewayRegistry $gatewayRegistry,
+        private readonly ConfigSchemaChoiceNormalizer $choiceNormalizer,
     ) {
         $this->modules = [
             PaymentGatewayType::MANUAL_CARD => [
                 'type' => PaymentGatewayType::MANUAL_CARD,
-                'displayName' => 'کارت به کارت',
+                'displayName' => 'Manual Card / کارت به کارت',
                 'defaultTitle' => 'کارت به کارت',
                 'description' => 'ثبت اطلاعات کارت و نمایش راهنمای پرداخت دستی برای کاربر.',
                 'category' => 'offline',
@@ -52,7 +53,7 @@ final class PaymentGatewayModuleRegistry
             ],
             PaymentGatewayType::ZIBAL => [
                 'type' => PaymentGatewayType::ZIBAL,
-                'displayName' => 'زیبال',
+                'displayName' => 'Zibal / زیبال',
                 'defaultTitle' => 'زیبال',
                 'description' => 'درگاه آنلاین ریالی زیبال برای پرداخت مستقیم کاربر.',
                 'category' => 'online',
@@ -93,10 +94,28 @@ final class PaymentGatewayModuleRegistry
                     ['name' => 'api_key', 'type' => 'password', 'required' => true],
                     ['name' => 'ipn_secret', 'type' => 'password', 'required' => false],
                     ['name' => 'api_base_url', 'type' => 'text', 'required' => false, 'default' => 'https://api.nowpayments.io/v1'],
-                    ['name' => 'payment_mode', 'type' => 'choice', 'required' => true, 'default' => 'invoice'],
+                    [
+                        'name' => 'payment_mode',
+                        'type' => 'choice',
+                        'required' => true,
+                        'default' => 'invoice',
+                        'choices' => [
+                            ['label' => 'Invoice / صفحه پرداخت', 'value' => 'invoice'],
+                            ['label' => 'Direct Payment / پرداخت مستقیم', 'value' => 'payment'],
+                        ],
+                    ],
                     ['name' => 'price_currency', 'type' => 'text', 'required' => true, 'default' => 'usd'],
                     ['name' => 'pay_currency', 'type' => 'text', 'required' => false, 'default' => 'usdttrc20'],
-                    ['name' => 'amount_unit', 'type' => 'choice', 'required' => false, 'default' => 'toman'],
+                    [
+                        'name' => 'amount_unit',
+                        'type' => 'choice',
+                        'required' => false,
+                        'default' => 'toman',
+                        'choices' => [
+                            'Toman / تومان' => 'toman',
+                            'Rial / ریال' => 'rial',
+                        ],
+                    ],
                     ['name' => 'toman_per_usd', 'type' => 'integer', 'required' => false],
                     ['name' => 'callback_base_url', 'type' => 'text', 'required' => true],
                     ['name' => 'success_url', 'type' => 'text', 'required' => false],
@@ -104,6 +123,8 @@ final class PaymentGatewayModuleRegistry
                 ],
             ],
         ];
+
+        $this->normalizeSchemaChoices();
     }
 
     /**
@@ -144,12 +165,11 @@ final class PaymentGatewayModuleRegistry
      */
     public function choiceMap(): array
     {
-        $choices = [];
-        foreach ($this->modules as $type => $module) {
-            $choices[(string) $module['displayName']] = $type;
-        }
-
-        return $choices;
+        return $this->choiceNormalizer->normalizeChoices([
+            'Manual Card / کارت به کارت' => PaymentGatewayType::MANUAL_CARD,
+            'Zibal / زیبال' => PaymentGatewayType::ZIBAL,
+            'NOWPayments' => PaymentGatewayType::NOWPAYMENTS,
+        ], 'gateway.type');
     }
 
     public function displayName(string $type): string
@@ -298,5 +318,30 @@ final class PaymentGatewayModuleRegistry
         }
 
         return true;
+    }
+
+    private function normalizeSchemaChoices(): void
+    {
+        foreach ($this->modules as $moduleType => $module) {
+            $schema = is_array($module['schema'] ?? null) ? $module['schema'] : [];
+
+            foreach ($schema as $index => $field) {
+                if (!is_array($field)) {
+                    continue;
+                }
+                if ('choice' !== (string) ($field['type'] ?? '')) {
+                    continue;
+                }
+
+                $fieldName = (string) ($field['name'] ?? ('field_'.$index));
+                $choices = is_array($field['choices'] ?? null) ? $field['choices'] : [];
+                $schema[$index]['choices'] = $this->choiceNormalizer->normalizeChoices(
+                    $choices,
+                    sprintf('%s.%s', $moduleType, $fieldName)
+                );
+            }
+
+            $this->modules[$moduleType]['schema'] = $schema;
+        }
     }
 }
