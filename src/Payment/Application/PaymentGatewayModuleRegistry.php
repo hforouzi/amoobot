@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Payment\Application;
 
+use App\Admin\Form\ConfigSchemaChoiceNormalizer;
 use App\Entity\PaymentGateway;
 use App\Payment\Domain\PaymentGatewayType;
 use App\Payment\Infrastructure\PaymentGatewayRegistry;
@@ -165,9 +166,9 @@ final class PaymentGatewayModuleRegistry
      */
     public function choiceMap(): array
     {
-        return $this->choiceNormalizer->normalizeChoices([
-            'Manual Card / کارت به کارت' => PaymentGatewayType::MANUAL_CARD,
-            'Zibal / زیبال' => PaymentGatewayType::ZIBAL,
+        return $this->choiceNormalizer->normalize([
+            'کارت به کارت' => PaymentGatewayType::MANUAL_CARD,
+            'زیبال' => PaymentGatewayType::ZIBAL,
             'NOWPayments' => PaymentGatewayType::NOWPAYMENTS,
         ], 'gateway.type');
     }
@@ -335,7 +336,7 @@ final class PaymentGatewayModuleRegistry
 
                 $fieldName = (string) ($field['name'] ?? ('field_'.$index));
                 $choices = is_array($field['choices'] ?? null) ? $field['choices'] : [];
-                $schema[$index]['choices'] = $this->choiceNormalizer->normalizeChoices(
+                $schema[$index]['choices'] = $this->choiceNormalizer->normalize(
                     $choices,
                     sprintf('%s.%s', $moduleType, $fieldName)
                 );

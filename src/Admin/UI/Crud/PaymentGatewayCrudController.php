@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Admin\UI\Crud;
 
+use App\Admin\Form\ConfigSchemaChoiceNormalizer;
 use App\Entity\PaymentGateway;
 use App\Form\Type\JsonTextareaType;
 use App\Payment\Application\PaymentGatewayModuleRegistry;
@@ -30,6 +31,7 @@ final class PaymentGatewayCrudController extends AbstractCrudController
 {
     public function __construct(
         private readonly PaymentGatewayModuleRegistry $moduleRegistry,
+        private readonly ConfigSchemaChoiceNormalizer $choiceNormalizer,
         private readonly AdminUrlGeneratorInterface $adminUrlGenerator,
         private readonly RequestStack $requestStack,
         private readonly EntityManagerInterface $entityManager,
@@ -113,13 +115,13 @@ final class PaymentGatewayCrudController extends AbstractCrudController
         $configHelp = $this->moduleRegistry->configHelp($currentType);
 
         $configuredField = ChoiceField::new('configured', 'payment_gateway.configured')
-            ->setChoices([
+            ->setChoices($this->choiceNormalizer->normalize([
                 'common.yes' => true,
                 'common.no' => false,
-            ])
+            ], 'payment_gateway.configured'))
             ->renderAsBadges([
-                true => 'success',
-                false => 'secondary',
+                '1' => 'success',
+                '0' => 'secondary',
             ])
             ->onlyOnIndex();
 
