@@ -1125,8 +1125,55 @@ php bin/console app:plugin:enable demo_payment_gateway
 php bin/console app:plugin:disable demo_payment_gateway
 ```
 
+### Payment Gateway Plugin Bridge
+
+Enabled plugins with `type: "payment_gateway"` appear in Admin -> Payment Gateways -> Add Payment Gateway. Installing one creates a normal `PaymentGateway` row with the plugin code as the gateway type and `pluginCode`.
+
+`StorePaymentMethod` still controls bot visibility. The bot does not need to know whether a gateway is core or plugin. If a plugin is disabled, payment methods using it are skipped.
+
+Plugin gateway classes must implement `App\Payment\Plugin\PaymentGatewayPluginInterface`. Plugin code is not executed while listing modules or rendering the install wizard; it is loaded only when a plugin gateway is resolved or tested.
+
+### Demo Payment Gateway Plugin
+
+Source path:
+
+```text
+docs/plugins/demo-payment-gateway
+```
+
+Build ZIP:
+
+```bash
+cd docs/plugins/demo-payment-gateway
+zip -r /tmp/demo-payment-gateway.zip plugin.json README.md src
+```
+
+Install and enable:
+
+```bash
+php bin/console app:plugin:install /tmp/demo-payment-gateway.zip
+php bin/console app:plugin:enable demo_payment_gateway
+php bin/console app:payment:list-modules
+```
+
+Admin test:
+- Open Admin -> Payment Gateways -> Add Payment Gateway.
+- Install `demo_payment_gateway`.
+- Use `demo_mode=success_url` and `payment_url=https://example.com/demo-payment`.
+- Create a `StorePaymentMethod` for the created gateway if it should appear in bot payment selection.
+
+Driver loading test:
+
+```bash
+php bin/console app:payment:test-plugin-gateway {gatewayId}
+```
+
+The demo plugin does not process real payments, does not call external HTTP, and does not call `PaymentApprovalService`.
+
+For a clean development reinstall, the installer intentionally rejects duplicate plugin codes. Disable the plugin, delete its `plugin` table row, and remove `var/plugins/demo_payment_gateway`, or test with a bumped plugin code.
+
 Security notes:
 - Only install trusted plugins.
 - Plugin ZIPs are extracted under `var/plugins/{code}`.
 - Plugin code is not executed during upload validation or installation.
-- Existing payment gateways and bot payment flow do not depend on plugins in this phase.
+- Existing core gateways remain unchanged.

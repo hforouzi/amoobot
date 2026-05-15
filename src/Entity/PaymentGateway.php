@@ -7,7 +7,6 @@ namespace App\Entity;
 use App\Payment\Domain\PaymentGatewayType;
 use Doctrine\DBAL\Types\Types;
 use Doctrine\ORM\Mapping as ORM;
-use Symfony\Component\Validator\Constraints as Assert;
 
 #[ORM\Entity]
 class PaymentGateway
@@ -20,8 +19,10 @@ class PaymentGateway
     private ?int $id = null;
 
     #[ORM\Column(length: 64)]
-    #[Assert\Choice(choices: PaymentGatewayType::ALL)]
     private string $type = PaymentGatewayType::MANUAL_CARD;
+
+    #[ORM\Column(length: 128, nullable: true)]
+    private ?string $pluginCode = null;
 
     #[ORM\Column(length: 255)]
     private string $title = '';
@@ -68,6 +69,19 @@ class PaymentGateway
     public function setType(string $type): self
     {
         $this->type = $type;
+
+        return $this;
+    }
+
+    public function getPluginCode(): ?string
+    {
+        return $this->pluginCode;
+    }
+
+    public function setPluginCode(?string $pluginCode): self
+    {
+        $pluginCode = null === $pluginCode ? null : trim($pluginCode);
+        $this->pluginCode = '' === $pluginCode ? null : $pluginCode;
 
         return $this;
     }
@@ -212,6 +226,11 @@ class PaymentGateway
     public function __toString(): string
     {
         return sprintf('%s (%s)', $this->title ?: 'Gateway', $this->type);
+    }
+
+    public function getConfiguredStatus(): string
+    {
+        return 'configured';
     }
 
     public function isConfigured(): bool

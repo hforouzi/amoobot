@@ -3,14 +3,47 @@
   "type": "payment_gateway",
   "code": "demo_payment_gateway",
   "name": {
-    "fa": "درگاه تست",
+    "fa": "درگاه پرداخت تستی",
     "en": "Demo Payment Gateway"
   },
   "version": "1.0.0",
+  "description": {
+    "fa": "پلاگین تستی برای بررسی سیستم نصب و اجرای درگاه پرداخت.",
+    "en": "Demo plugin for testing payment gateway plugin installation and execution."
+  },
   "mainClass": "Amoobot\\Plugin\\DemoPaymentGateway\\DemoPaymentGatewayPlugin",
+  "category": "test",
   "permissions": [
     "payment.create",
     "payment.verify"
   ],
-  "configSchema": []
+  "supportsWebhook": false,
+  "supportsOnlinePayment": true,
+  "supportsManualConfirmation": false,
+  "configSchema": [
+    {
+      "key": "demo_mode",
+      "type": "choice",
+      "required": true,
+      "default": "success_url",
+      "label": {
+        "fa": "حالت تست",
+        "en": "Demo mode"
+      },
+      "choices": {
+        "نمایش لینک پرداخت تستی": "success_url",
+        "خطای تستی": "failure"
+      }
+    },
+    {
+      "key": "payment_url",
+      "type": "url",
+      "required": false,
+      "default": "https://example.com/demo-payment",
+      "label": {
+        "fa": "لینک پرداخت تستی",
+        "en": "Demo payment URL"
+      }
+    }
+  ]
 }
