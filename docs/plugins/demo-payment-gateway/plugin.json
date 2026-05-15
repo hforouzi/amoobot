@@ -1,0 +1,16 @@
+{
+  "manifestVersion": 1,
+  "type": "payment_gateway",
+  "code": "demo_payment_gateway",
+  "name": {
+    "fa": "درگاه تست",
+    "en": "Demo Payment Gateway"
+  },
+  "version": "1.0.0",
+  "mainClass": "Amoobot\\Plugin\\DemoPaymentGateway\\DemoPaymentGatewayPlugin",
+  "permissions": [
+    "payment.create",
+    "payment.verify"
+  ],
+  "configSchema": []
+}

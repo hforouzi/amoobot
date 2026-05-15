@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Admin\UI\Crud;
 
+use App\Admin\UI\Support\AdminJsonFormatter;
+use App\Admin\UI\Support\AdminStatusBadge;
 use App\Entity\OrderDraft;
 use App\Shop\Domain\OrderDraftStatus;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Crud;
@@ -55,7 +57,9 @@ final class OrderDraftCrudController extends AbstractCrudController
             IdField::new('id')->onlyOnIndex(),
             AssociationField::new('user'),
             AssociationField::new('plan'),
-            TextField::new('status'),
+            TextField::new('status')
+                ->formatValue(static fn (mixed $value): string => AdminStatusBadge::html($value))
+                ->renderAsHtml(),
             TextField::new('step'),
             TextField::new('finalUsername'),
             IntegerField::new('trafficGb'),
@@ -63,11 +67,8 @@ final class OrderDraftCrudController extends AbstractCrudController
             IntegerField::new('calculatedAmount'),
             IntegerField::new('finalAmount'),
             TextareaField::new('data')
-                ->formatValue(static function (mixed $value): string {
-                    $encoded = json_encode($value, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-
-                    return false === $encoded ? '' : $encoded;
-                })
+                ->formatValue(static fn (mixed $value): string => AdminJsonFormatter::toPrettyHtml($value))
+                ->renderAsHtml()
                 ->hideOnIndex()
                 ->hideOnForm(),
             DateTimeField::new('createdAt')->hideOnForm(),

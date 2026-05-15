@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Admin\UI\Crud;
 
+use App\Admin\UI\Support\AdminJsonFormatter;
 use App\Entity\VpnPanel;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Action;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Actions;
@@ -11,8 +12,8 @@ use EasyCorp\Bundle\EasyAdminBundle\Controller\AbstractCrudController;
 use EasyCorp\Bundle\EasyAdminBundle\Field\BooleanField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\ChoiceField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\DateTimeField;
-use EasyCorp\Bundle\EasyAdminBundle\Field\Field;
 use EasyCorp\Bundle\EasyAdminBundle\Field\IdField;
+use EasyCorp\Bundle\EasyAdminBundle\Field\TextareaField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\TextField;
 use Symfony\Component\Form\Extension\Core\Type\PasswordType;
 
@@ -90,8 +91,9 @@ class VpnPanelCrudController extends AbstractCrudController
                 ->hideOnForm(),
             TextField::new('lastTestResultSummary', 'Last test result')
                 ->hideOnForm(),
-            Field::new('config')
-                ->formatValue(static fn (mixed $value): string => json_encode($value, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '')
+            TextareaField::new('config')
+                ->formatValue(static fn (mixed $value): string => AdminJsonFormatter::toPrettyHtml($value))
+                ->renderAsHtml()
                 ->setHelp('Example: {"api_version":"v3","auth_mode":"bearer","subscription_base_url":"https://sub.example.com:8443","subscription_path_prefix":"/rain","base_path":"/xui"}')
                 ->hideOnForm()
                 ->hideOnIndex(),

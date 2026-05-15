@@ -45,4 +45,31 @@ final class AdminStatusBadge
             'inactive' => 'secondary',
         ];
     }
+
+    public static function html(mixed $value): string
+    {
+        $label = (string) ($value ?: 'unknown');
+        $class = match ($label) {
+            'enabled', 'active', 'completed', 'paid', 'confirmed' => 'badge badge-success',
+            'installed', 'pending', 'waiting_payment', 'payment_pending', 'submitted', 'processing' => 'badge badge-warning',
+            'disabled', 'cancelled', 'expired', 'suspended', 'deleted', 'inactive' => 'badge badge-secondary',
+            'error', 'failed', 'rejected' => 'badge badge-danger',
+            default => 'badge badge-secondary',
+        };
+
+        return sprintf(
+            '<span class="%s">%s</span>',
+            $class,
+            htmlspecialchars($label, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8')
+        );
+    }
+
+    public static function boolHtml(mixed $value): string
+    {
+        $enabled = true === $value || '1' === (string) $value;
+        $label = $enabled ? 'yes' : 'no';
+        $class = $enabled ? 'badge badge-success' : 'badge badge-secondary';
+
+        return sprintf('<span class="%s">%s</span>', $class, $label);
+    }
 }

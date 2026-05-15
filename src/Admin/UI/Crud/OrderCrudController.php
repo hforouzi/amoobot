@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Admin\UI\Crud;
 
 use App\Admin\UI\Support\AdminStatusBadge;
+use App\Admin\UI\Support\AdminJsonFormatter;
 use App\Entity\Order;
 use App\Shop\Domain\OrderStatus;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Crud;
@@ -50,12 +51,13 @@ class OrderCrudController extends AbstractCrudController
             TextField::new('type')->setLabel('Type'),
             TextField::new('trackingCode')->setLabel('Tracking Code'),
             IntegerField::new('amount')->setLabel('Amount'),
-            ChoiceField::new('status')
-                ->setChoices(AdminStatusBadge::choices(OrderStatus::ALL))
-                ->renderAsBadges(AdminStatusBadge::badgeMap()),
+            TextField::new('status')
+                ->formatValue(static fn (mixed $value): string => AdminStatusBadge::html($value))
+                ->renderAsHtml(),
             TextareaField::new('metadata')
                 ->setLabel('Metadata')
-                ->formatValue(static fn (mixed $value): string => json_encode($value, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '')
+                ->formatValue(static fn (mixed $value): string => AdminJsonFormatter::toPrettyHtml($value))
+                ->renderAsHtml()
                 ->hideOnIndex()
                 ->hideOnForm(),
             DateTimeField::new('createdAt')->setLabel('common.created_at')->hideOnForm(),

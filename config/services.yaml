@@ -22,6 +22,7 @@ parameters:
     default_traffic_addon_min_gb: '1'
     default_traffic_addon_max_gb: '100'
     default_traffic_addon_price_per_gb: '0'
+    app.plugin_max_upload_bytes: 10485760
 
 services:
     _instanceof:
@@ -61,6 +62,8 @@ services:
             string $paymentCardNumber: '%env(PAYMENT_CARD_NUMBER)%'
             string $paymentCardHolder: '%env(PAYMENT_CARD_HOLDER)%'
             $paymentDescription: '%env(default::PAYMENT_DESCRIPTION)%'
+            string $projectDir: '%kernel.project_dir%'
+            int $maxUploadBytes: '%app.plugin_max_upload_bytes%'
 
     App\:
         resource: '../src/'

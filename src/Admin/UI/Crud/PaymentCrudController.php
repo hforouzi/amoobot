@@ -73,9 +73,9 @@ class PaymentCrudController extends AbstractCrudController
             IntegerField::new('amount')->setLabel('Amount'),
             IntegerField::new('payableAmount')->setLabel('Payable Amount'),
             TextField::new('currency')->setLabel('Currency'),
-            ChoiceField::new('status')
-                ->setChoices(AdminStatusBadge::choices(PaymentStatus::ALL))
-                ->renderAsBadges(AdminStatusBadge::badgeMap()),
+            TextField::new('status')
+                ->formatValue(static fn (mixed $value): string => AdminStatusBadge::html($value))
+                ->renderAsHtml(),
             TextField::new('gatewayTransactionId')->hideOnIndex(),
             TextField::new('authority')->hideOnIndex(),
             TextField::new('paymentUrl')->hideOnIndex(),

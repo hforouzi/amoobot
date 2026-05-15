@@ -4,8 +4,9 @@ declare(strict_types=1);
 
 namespace App\Admin\UI\Crud;
 
-use App\Admin\Form\ConfigSchemaChoiceNormalizer;
 use App\Admin\UI\DashboardController;
+use App\Admin\UI\Support\AdminJsonFormatter;
+use App\Admin\UI\Support\AdminStatusBadge;
 use App\Entity\PaymentGateway;
 use App\Entity\StorePaymentMethod;
 use App\Payment\Application\PaymentGatewayModuleRegistry;
@@ -21,7 +22,6 @@ use EasyCorp\Bundle\EasyAdminBundle\Controller\AbstractCrudController;
 use EasyCorp\Bundle\EasyAdminBundle\Dto\EntityDto;
 use EasyCorp\Bundle\EasyAdminBundle\Dto\SearchDto;
 use EasyCorp\Bundle\EasyAdminBundle\Field\BooleanField;
-use EasyCorp\Bundle\EasyAdminBundle\Field\ChoiceField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\DateTimeField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\IdField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\TextareaField;
@@ -44,7 +44,6 @@ final class PaymentGatewayCrudController extends AbstractCrudController
 {
     public function __construct(
         private readonly PaymentGatewayModuleRegistry $moduleRegistry,
-        private readonly ConfigSchemaChoiceNormalizer $choiceNormalizer,
         private readonly AdminUrlGeneratorInterface $adminUrlGenerator,
         private readonly EntityManagerInterface $entityManager,
     ) {
@@ -126,15 +125,9 @@ final class PaymentGatewayCrudController extends AbstractCrudController
 
     public function configureFields(string $pageName): iterable
     {
-        $configuredField = ChoiceField::new('configured', 'payment_gateway.configured')
-            ->setChoices($this->choiceNormalizer->normalize([
-                'common.yes' => true,
-                'common.no' => false,
-            ], 'payment_gateway.configured'))
-            ->renderAsBadges([
-                '1' => 'success',
-                '0' => 'secondary',
-            ])
+        $configuredField = TextField::new('configured', 'payment_gateway.configured')
+            ->formatValue(static fn (mixed $value): string => AdminStatusBadge::boolHtml($value))
+            ->renderAsHtml()
             ->onlyOnIndex();
 
         return [
@@ -153,9 +146,8 @@ final class PaymentGatewayCrudController extends AbstractCrudController
             TextareaField::new('configJson', 'payment_gateway.json_config')
                 ->hideOnForm()
                 ->hideOnIndex()
-                ->formatValue(static fn (mixed $value): string => is_array($value)
-                    ? (json_encode($value, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '')
-                    : (string) $value),
+                ->formatValue(static fn (mixed $value): string => AdminJsonFormatter::toPrettyHtml($value))
+                ->renderAsHtml(),
             DateTimeField::new('createdAt', 'common.created_at')->hideOnForm()->hideOnIndex(),
         ];
     }

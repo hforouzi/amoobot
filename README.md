@@ -1063,3 +1063,70 @@ php bin/console doctrine:migrations:migrate
 
 New columns added to `payment` table:
 `crypto_price_currency`, `crypto_pay_currency`, `crypto_pay_amount`, `crypto_actually_paid`, `crypto_outcome_amount`, `crypto_payment_status`, `crypto_payment_id`, `crypto_purchase_id`, `crypto_address`, `crypto_network`, `crypto_expires_at`, `ipn_payload`
+
+## Plugin System
+
+Phase 1.10.1 adds plugin installation infrastructure only. Plugins are installed and registered, but payment gateway execution bridge will be implemented in Phase 1.10.2.
+
+### ZIP Structure
+
+Each plugin ZIP must contain `plugin.json` at the ZIP root. The installer currently allows these paths only:
+
+- `plugin.json`
+- `src/`
+- `templates/`
+- `translations/`
+- `README.md`
+- `assets/`
+
+Example package source is available at `docs/plugins/demo-payment-gateway/`.
+
+### plugin.json
+
+```json
+{
+  "manifestVersion": 1,
+  "type": "payment_gateway",
+  "code": "example_gateway",
+  "name": {
+    "fa": "درگاه نمونه",
+    "en": "Example Gateway"
+  },
+  "version": "1.0.0",
+  "mainClass": "Amoobot\\Plugin\\ExampleGateway\\ExampleGatewayPlugin",
+  "permissions": [
+    "payment.create",
+    "payment.verify"
+  ],
+  "configSchema": []
+}
+```
+
+Rules:
+- `manifestVersion` must be `1`.
+- `type` currently supports `payment_gateway` only.
+- `code` may contain lowercase letters, numbers, underscore, and dash.
+- `mainClass` is required but is not instantiated in this phase.
+
+### Install And Manage
+
+Admin:
+- Open Admin -> System -> Plugins.
+- Upload a trusted plugin `.zip`.
+- Enable or disable the installed plugin from the plugin list.
+
+CLI:
+
+```bash
+php bin/console app:plugin:list
+php bin/console app:plugin:install path/to/plugin.zip
+php bin/console app:plugin:install path/to/plugin.zip --enable
+php bin/console app:plugin:enable demo_payment_gateway
+php bin/console app:plugin:disable demo_payment_gateway
+```
+
+Security notes:
+- Only install trusted plugins.
+- Plugin ZIPs are extracted under `var/plugins/{code}`.
+- Plugin code is not executed during upload validation or installation.
+- Existing payment gateways and bot payment flow do not depend on plugins in this phase.
