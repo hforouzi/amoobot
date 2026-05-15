@@ -1066,7 +1066,7 @@ New columns added to `payment` table:
 
 ## Plugin System
 
-Phase 1.10.1 adds plugin installation infrastructure only. Plugins are installed and registered, but payment gateway execution bridge will be implemented in Phase 1.10.2.
+Phase 1.10 adds plugin installation infrastructure and the payment gateway plugin bridge. Plugins are installed and registered separately from core gateway drivers.
 
 ### ZIP Structure
 
@@ -1079,7 +1079,7 @@ Each plugin ZIP must contain `plugin.json` at the ZIP root. The installer curren
 - `README.md`
 - `assets/`
 
-Example package source is available at `docs/plugins/demo-payment-gateway/`.
+Example package sources are available under `docs/plugins/`.
 
 ### plugin.json
 
@@ -1171,6 +1171,45 @@ php bin/console app:payment:test-plugin-gateway {gatewayId}
 The demo plugin does not process real payments, does not call external HTTP, and does not call `PaymentApprovalService`.
 
 For a clean development reinstall, the installer intentionally rejects duplicate plugin codes. Disable the plugin, delete its `plugin` table row, and remove `var/plugins/demo_payment_gateway`, or test with a bumped plugin code.
+
+### NovinoPay Payment Gateway Plugin
+
+Source path:
+
+```text
+docs/plugins/novinopay-gateway
+```
+
+Build ZIP:
+
+```bash
+cd docs/plugins/novinopay-gateway
+zip -r /tmp/novinopay-gateway.zip plugin.json README.md src
+```
+
+Install and enable:
+
+```bash
+php bin/console app:plugin:install /tmp/novinopay-gateway.zip
+php bin/console app:plugin:enable novinopay
+php bin/console app:payment:list-modules
+```
+
+Admin setup:
+- Open Admin -> Payment Gateways -> Add Payment Gateway.
+- Install `novinopay`.
+- Configure `merchant_id`, `api_base_url`, `callback_base_url`, and optional description.
+- Create a `StorePaymentMethod` for the created gateway if it should appear in bot payment selection.
+
+NovinoPay uses the documented IPG request endpoint `/payment/ipg/v2/request` and verification endpoint `/payment/ipg/v2/verification`. Callback status is not trusted by itself; payment is marked paid only after verification succeeds.
+
+Driver loading test:
+
+```bash
+php bin/console app:payment:test-plugin-gateway {gatewayId}
+```
+
+For a clean development reinstall, disable the plugin, delete its `plugin` table row, and remove `var/plugins/novinopay`, or test with a bumped plugin code.
 
 Security notes:
 - Only install trusted plugins.

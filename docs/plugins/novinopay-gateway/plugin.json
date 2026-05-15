@@ -1,0 +1,84 @@
+{
+  "manifestVersion": 1,
+  "type": "payment_gateway",
+  "code": "novinopay",
+  "name": {
+    "fa": "نوینوپی",
+    "en": "NovinoPay"
+  },
+  "version": "1.0.0",
+  "description": {
+    "fa": "درگاه پرداخت ریالی نوینوپی برای آموبات.",
+    "en": "NovinoPay rial payment gateway for Amoobot."
+  },
+  "mainClass": "Amoobot\\Plugin\\NovinoPay\\NovinoPayGatewayPlugin",
+  "category": "rial",
+  "permissions": [
+    "payment.create",
+    "payment.verify",
+    "payment.webhook",
+    "http.outbound"
+  ],
+  "supportsWebhook": false,
+  "supportsOnlinePayment": true,
+  "supportsManualConfirmation": false,
+  "configSchema": [
+    {
+      "key": "api_key",
+      "type": "password",
+      "required": true,
+      "label": {
+        "fa": "کلید API",
+        "en": "API Key"
+      }
+    },
+    {
+      "key": "merchant_id",
+      "type": "text",
+      "required": false,
+      "label": {
+        "fa": "شناسه پذیرنده",
+        "en": "Merchant ID"
+      }
+    },
+    {
+      "key": "sandbox",
+      "type": "boolean",
+      "required": false,
+      "default": false,
+      "label": {
+        "fa": "حالت آزمایشی",
+        "en": "Sandbox"
+      }
+    },
+    {
+      "key": "api_base_url",
+      "type": "url",
+      "required": true,
+      "default": "https://api.novinopay.com",
+      "label": {
+        "fa": "آدرس پایه API",
+        "en": "API Base URL"
+      }
+    },
+    {
+      "key": "callback_base_url",
+      "type": "url",
+      "required": true,
+      "label": {
+        "fa": "آدرس پایه Callback",
+        "en": "Callback Base URL"
+      }
+    },
+    {
+      "key": "description",
+      "type": "text",
+      "required": false,
+      "default": "Amoobot order payment",
+      "label": {
+        "fa": "توضیحات پرداخت",
+        "en": "Payment Description"
+      }
+    }
+  ]
+}
