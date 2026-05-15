@@ -9,6 +9,12 @@
             <h2>{{ module.displayName }}</h2>
             <p class="admin-muted">{{ module.description }}</p>
             <span class="badge badge-secondary">{{ module.category }}</span>
+            <span class="badge {{ module.isPlugin|default(false) ? 'badge-warning' : 'badge-success' }}">
+                {{ module.isPlugin|default(false) ? 'Plugin' : 'Core' }}
+            </span>
+            {% if module.version|default('') %}
+                <span class="badge badge-secondary">{{ module.version }}</span>
+            {% endif %}
         </div>
 
         {{ form_start(form) }}

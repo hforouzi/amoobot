@@ -1,13 +1,33 @@
 # Demo Payment Gateway Plugin
 
-This is a placeholder plugin package for Phase 1.10.1 plugin infrastructure testing.
+Demo plugin for testing Amoobot payment gateway plugin installation and runtime loading.
 
-The plugin can be zipped and installed from the admin Plugins page or the CLI:
+This plugin never processes real money, never calls external HTTP services, and never calls `PaymentApprovalService`.
+
+## Build ZIP
+
+From this directory:
 
 ```bash
-cd docs/plugins/demo-payment-gateway
-zip -r demo-payment-gateway.zip plugin.json README.md src
-php ../../../bin/console app:plugin:install demo-payment-gateway.zip
+zip -r /tmp/demo-payment-gateway.zip plugin.json README.md src
 ```
 
-The class is not executed in Phase 1.10.1. Payment gateway runtime integration is reserved for Phase 1.10.2.
+On Windows PowerShell from the repository root:
+
+```powershell
+Compress-Archive -Path docs\plugins\demo-payment-gateway\plugin.json,docs\plugins\demo-payment-gateway\README.md,docs\plugins\demo-payment-gateway\src -DestinationPath var\demo-payment-gateway.zip -Force
+```
+
+The ZIP root must contain `plugin.json`, `README.md`, and `src/DemoPaymentGatewayPlugin.php`.
+
+## Test
+
+```bash
+php bin/console app:plugin:install /tmp/demo-payment-gateway.zip
+php bin/console app:plugin:enable demo_payment_gateway
+php bin/console app:payment:list-modules
+```
+
+Then install `demo_payment_gateway` from Admin -> Payment Gateways -> Add Payment Gateway.
+
+If the plugin is already installed in a development database, the installer will correctly reject the ZIP with `Plugin already installed.` For a clean reinstall test, disable the plugin, delete its `plugin` table row, and remove `var/plugins/demo_payment_gateway`, or temporarily test with a different plugin code.

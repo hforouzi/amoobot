@@ -116,6 +116,7 @@ payment_gateway:
   currency: ارز
   description: توضیحات
   json_config: تنظیمات JSON
+  plugin_code: کد پلاگین
   invalid_json: JSON نامعتبر است. لطفاً یک شیء JSON معتبر وارد کنید.
   install_action: افزودن درگاه پرداخت
   install_submit: نصب درگاه

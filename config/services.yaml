@@ -67,6 +67,8 @@ services:
 
     App\:
         resource: '../src/'
+        exclude:
+            - '../src/Payment/Plugin/PluginPaymentGatewayDriverAdapter.php'
 
     App\EventSubscriber\AdminLocaleSubscriber:
         arguments:

@@ -14,7 +14,18 @@
                         <p class="admin-muted">{{ module.description }}</p>
                     </div>
                     <div class="admin-card-footer">
-                        <span class="badge badge-secondary">{{ module.category }}</span>
+                        <div>
+                            <span class="badge badge-secondary">{{ module.category }}</span>
+                            <span class="badge {{ module.isPlugin|default(false) ? 'badge-warning' : 'badge-success' }}">
+                                {{ module.isPlugin|default(false) ? 'Plugin' : 'Core' }}
+                            </span>
+                            {% if module.version|default('') %}
+                                <span class="badge badge-secondary">{{ module.version }}</span>
+                            {% endif %}
+                            {% if module.pluginCode|default('') %}
+                                <span class="admin-muted">{{ module.pluginCode }}</span>
+                            {% endif %}
+                        </div>
                         <a class="btn btn-primary" href="{{ path('admin_payment_gateways_install_type', {type: module.type}) }}">
                             <i class="fa fa-plus"></i>
                             {{ 'payment_gateway.install_submit'|trans }}

@@ -30,9 +30,11 @@ use EasyCorp\Bundle\EasyAdminBundle\Router\AdminUrlGeneratorInterface;
 use Symfony\Component\Form\Extension\Core\Type\CheckboxType;
 use Symfony\Component\Form\Extension\Core\Type\ChoiceType;
 use Symfony\Component\Form\Extension\Core\Type\IntegerType;
+use Symfony\Component\Form\Extension\Core\Type\NumberType;
 use Symfony\Component\Form\Extension\Core\Type\PasswordType;
 use Symfony\Component\Form\Extension\Core\Type\TextareaType;
 use Symfony\Component\Form\Extension\Core\Type\TextType;
+use Symfony\Component\Form\Extension\Core\Type\UrlType;
 use Symfony\Component\HttpFoundation\RedirectResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -125,10 +127,10 @@ final class PaymentGatewayCrudController extends AbstractCrudController
 
     public function configureFields(string $pageName): iterable
     {
-        $configuredField = TextField::new('configured', 'payment_gateway.configured')
-            ->formatValue(static fn (mixed $value): string => AdminStatusBadge::boolHtml($value))
+        $configuredField = TextField::new('configuredStatus', 'payment_gateway.configured')
+            ->formatValue(fn (mixed $value, PaymentGateway $gateway): string => AdminStatusBadge::boolHtml($this->moduleRegistry->isConfigured($gateway)))
             ->renderAsHtml()
-            ->onlyOnIndex();
+            ->hideOnForm();
 
         return [
             IdField::new('id')->onlyOnIndex(),
@@ -137,6 +139,9 @@ final class PaymentGatewayCrudController extends AbstractCrudController
                 ->setFormTypeOption('attr', ['readonly' => 'readonly'])
                 ->formatValue(fn (mixed $value): string => $this->moduleRegistry->displayName((string) $value))
                 ->setHelp('payment_gateway.type_help'),
+            TextField::new('pluginCode', 'payment_gateway.plugin_code')
+                ->hideOnForm()
+                ->hideOnIndex(),
             $configuredField,
             BooleanField::new('isActive', 'payment_gateway.active'),
             TextField::new('currency', 'payment_gateway.currency'),
@@ -182,6 +187,7 @@ final class PaymentGatewayCrudController extends AbstractCrudController
 
             $gateway = (new PaymentGateway())
                 ->setType($type)
+                ->setPluginCode(true === ($this->moduleRegistry->get($type)['isPlugin'] ?? false) ? $type : null)
                 ->setTitle($data['title'])
                 ->setCurrency($data['currency'])
                 ->setIsActive($data['isActive'])
@@ -349,7 +355,7 @@ final class PaymentGatewayCrudController extends AbstractCrudController
                 continue;
             }
 
-            $name = (string) ($field['name'] ?? '');
+            $name = (string) ($field['name'] ?? $field['key'] ?? '');
             if ('' === $name) {
                 continue;
             }
@@ -391,11 +397,25 @@ final class PaymentGatewayCrudController extends AbstractCrudController
                 continue;
             }
 
+            if ('number' === $fieldType) {
+                $builder->add($name, NumberType::class, [
+                    'label' => $this->configFieldLabel($name),
+                    'required' => $required,
+                    'constraints' => $required ? [new NotBlank()] : [],
+                ]);
+                continue;
+            }
+
             if ('password' === $fieldType) {
                 $builder->add($name, PasswordType::class, $options + [
                     'always_empty' => false,
                     'empty_data' => '',
                 ]);
+                continue;
+            }
+
+            if ('url' === $fieldType) {
+                $builder->add($name, UrlType::class, $options + ['empty_data' => '']);
                 continue;
             }
 
@@ -437,7 +457,7 @@ final class PaymentGatewayCrudController extends AbstractCrudController
                 continue;
             }
 
-            $name = (string) ($field['name'] ?? '');
+            $name = (string) ($field['name'] ?? $field['key'] ?? '');
             if ('' === $name) {
                 continue;
             }
@@ -453,6 +473,10 @@ final class PaymentGatewayCrudController extends AbstractCrudController
 
             if ('integer' === (string) ($field['type'] ?? '')) {
                 $value = (int) $value;
+            }
+
+            if ('number' === (string) ($field['type'] ?? '')) {
+                $value = (float) $value;
             }
 
             if ('boolean' === (string) ($field['type'] ?? '')) {
