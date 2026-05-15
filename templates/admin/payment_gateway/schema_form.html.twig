@@ -1,0 +1,33 @@
+{% extends 'admin/custom_page.html.twig' %}
+{% trans_default_domain 'admin' %}
+
+{% block page_title %}{{ title|trans }}{% endblock %}
+
+{% block body %}
+    <div class="admin-form-card">
+        <div class="admin-form-heading">
+            <h2>{{ module.displayName }}</h2>
+            <p class="admin-muted">{{ module.description }}</p>
+            <span class="badge badge-secondary">{{ module.category }}</span>
+        </div>
+
+        {{ form_start(form) }}
+            <div class="admin-form-grid">
+                {% for child in form %}
+                    {% if child.vars.name != '_token' %}
+                        {{ form_row(child) }}
+                    {% endif %}
+                {% endfor %}
+            </div>
+            {{ form_rest(form) }}
+
+            <div class="admin-actions">
+                <button class="btn btn-primary" type="submit">
+                    <i class="fa fa-save"></i>
+                    {{ submitLabel|trans }}
+                </button>
+                <a class="btn btn-secondary" href="{{ backUrl }}">{{ 'common.back'|trans }}</a>
+            </div>
+        {{ form_end(form) }}
+    </div>
+{% endblock %}

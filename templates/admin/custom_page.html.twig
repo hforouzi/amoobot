@@ -1,0 +1,50 @@
+{% trans_default_domain 'admin' %}
+{% set currentLocale = app.request.locale|default('fa') %}
+{% set isRtl = currentLocale starts with 'fa' %}
+
+<!DOCTYPE html>
+<html lang="{{ currentLocale }}" dir="{{ isRtl ? 'rtl' : 'ltr' }}" data-turbo="false">
+<head>
+    <meta charset="utf-8">
+    <meta name="robots" content="noindex, nofollow">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}{{ block('page_title')|striptags }}{% endblock %}</title>
+    <link rel="stylesheet" href="{{ asset('bundles/easyadmin/app.459a1f73.css') }}">
+    <link rel="stylesheet" href="{{ asset('assets/admin/admin.css') }}">
+</head>
+<body class="ea admin-custom-shell {{ isRtl ? 'admin-custom-rtl' : 'admin-custom-ltr' }}">
+    <div class="admin-custom-layout">
+        <aside class="admin-custom-sidebar">
+            <a class="admin-custom-brand" href="{{ path('admin') }}">Amoobot Admin</a>
+            <nav class="admin-custom-nav" aria-label="Admin">
+                <a href="{{ path('admin') }}">{{ 'admin.dashboard'|trans }}</a>
+                <a href="{{ path('admin_payment_gateway_index') }}">{{ 'admin.payment_gateways'|trans }}</a>
+                <a href="{{ path('admin_store_payment_method_index') }}">{{ 'admin.store_payment_methods'|trans }}</a>
+            </nav>
+        </aside>
+
+        <div class="admin-custom-content">
+            <header class="admin-custom-header">
+                <div>
+                    <div class="admin-custom-section">{{ 'admin.payment_gateways'|trans }}</div>
+                    <h1 class="admin-page-title">{% block page_title %}{% endblock %}</h1>
+                </div>
+                <div class="admin-custom-header-actions">
+                    {% block actions %}{% endblock %}
+                    <nav class="admin-locale-switcher">
+                        <a href="{{ path('admin_locale_switch', {locale: 'fa', redirect_to: app.request.uri}) }}" class="{{ currentLocale starts with 'fa' ? 'active' : '' }}">فارسی</a>
+                        <span aria-hidden="true">|</span>
+                        <a href="{{ path('admin_locale_switch', {locale: 'en', redirect_to: app.request.uri}) }}" class="{{ currentLocale starts with 'en' ? 'active' : '' }}">English</a>
+                    </nav>
+                </div>
+            </header>
+
+            <main class="admin-custom-page">
+                {% block body %}
+                    {% block main %}{% endblock %}
+                {% endblock %}
+            </main>
+        </div>
+    </div>
+</body>
+</html>

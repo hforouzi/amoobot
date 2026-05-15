@@ -1,0 +1,20 @@
+{% extends 'admin/custom_page.html.twig' %}
+{% trans_default_domain 'admin' %}
+
+{% block page_title %}{{ 'payment_gateway.install_success_title'|trans }}{% endblock %}
+
+{% block body %}
+    <div class="admin-form-card">
+        <p class="admin-success-message admin-muted">{{ 'payment_gateway.install_success_message'|trans }}</p>
+        <div class="admin-actions">
+            <form method="post" action="{{ addStoreMethodUrl }}">
+                <input type="hidden" name="_token" value="{{ csrf_token('add_store_payment_method_' ~ gateway.id) }}">
+                <button class="btn btn-primary" type="submit">
+                    <i class="fa fa-list-ol"></i>
+                    {{ 'payment_gateway.add_store_method'|trans }}
+                </button>
+            </form>
+            <a class="btn btn-secondary" href="{{ listUrl }}">{{ 'payment_gateway.back_to_list'|trans }}</a>
+        </div>
+    </div>
+{% endblock %}
