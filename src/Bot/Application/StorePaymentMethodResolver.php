@@ -9,6 +9,7 @@ use App\Entity\PaymentGateway;
 use App\Entity\StorePaymentMethod;
 use App\Payment\Domain\PaymentGatewayType;
 use App\Payment\Infrastructure\PaymentGatewayRegistry;
+use App\Plugin\PluginRegistry;
 use App\Shared\Infrastructure\SettingValueProvider;
 use App\Shop\Domain\OrderStatus;
 use Doctrine\ORM\EntityManagerInterface;
@@ -18,6 +19,7 @@ final class StorePaymentMethodResolver
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
         private readonly PaymentGatewayRegistry $paymentGatewayRegistry,
+        private readonly PluginRegistry $pluginRegistry,
         private readonly SettingValueProvider $settingValueProvider,
         private readonly string $paymentCardNumber = '',
         private readonly string $paymentCardHolder = '',
@@ -161,8 +163,13 @@ final class StorePaymentMethodResolver
                 $skipReasons[] = 'gateway_inactive';
             }
 
+            $pluginDisabled = $this->isPluginGatewayDisabled($gateway);
+            if ($pluginDisabled) {
+                $skipReasons[] = 'plugin disabled';
+            }
+
             $hasDriver = $this->hasDriver($gatewayType);
-            if (!$hasDriver) {
+            if (!$hasDriver && !$pluginDisabled) {
                 $skipReasons[] = 'gateway_driver_missing';
             }
 
@@ -229,9 +236,7 @@ final class StorePaymentMethodResolver
         }
 
         try {
-            $this->paymentGatewayRegistry->resolveByType($gatewayType);
-
-            return true;
+            return $this->paymentGatewayRegistry->supportsType($gatewayType);
         } catch (\Throwable) {
             return false;
         }
@@ -244,8 +249,54 @@ final class StorePaymentMethodResolver
             PaymentGatewayType::ZIBAL => $this->isZibalConfigured($gateway),
             PaymentGatewayType::CUSTOM_API => $gateway->isConfigured(),
             PaymentGatewayType::NOWPAYMENTS => $gateway->isNowPaymentsConfigured(),
-            default => false,
+            default => $this->isPluginGatewayConfigured($gateway),
         };
+    }
+
+    private function isPluginGatewayDisabled(PaymentGateway $gateway): bool
+    {
+        $pluginCode = $gateway->getPluginCode();
+        if (null === $pluginCode) {
+            return false;
+        }
+
+        $plugin = $this->pluginRegistry->findByCode($pluginCode);
+
+        return null === $plugin || 'enabled' !== $plugin->getStatus();
+    }
+
+    private function isPluginGatewayConfigured(PaymentGateway $gateway): bool
+    {
+        $pluginCode = $gateway->getPluginCode();
+        if (null === $pluginCode) {
+            return false;
+        }
+
+        $plugin = $this->pluginRegistry->findByCode($pluginCode);
+        if (null === $plugin || 'enabled' !== $plugin->getStatus()) {
+            return false;
+        }
+
+        $manifest = $plugin->getManifest();
+        $schema = is_array($manifest['configSchema'] ?? null) ? $manifest['configSchema'] : [];
+        $config = is_array($gateway->getConfig()) ? $gateway->getConfig() : [];
+        foreach ($schema as $field) {
+            if (!is_array($field) || true !== ($field['required'] ?? false)) {
+                continue;
+            }
+
+            $name = trim((string) ($field['name'] ?? $field['key'] ?? ''));
+            if ('' === $name) {
+                continue;
+            }
+
+            $value = $config[$name] ?? null;
+            if (null === $value || '' === trim((string) $value)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private function isManualCardConfiguredForResolver(PaymentGateway $gateway): bool

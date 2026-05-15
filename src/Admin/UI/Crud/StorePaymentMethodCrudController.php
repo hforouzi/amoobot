@@ -81,7 +81,7 @@ final class StorePaymentMethodCrudController extends AbstractCrudController
                 ->setHelp('help.payment_gateway_store_method')
                 ->setFormTypeOption('query_builder', fn (EntityRepository $repository) => $repository
                     ->createQueryBuilder('gateway')
-                    ->andWhere('gateway.type IN (:types)')
+                    ->andWhere('gateway.type IN (:types) OR gateway.pluginCode IS NOT NULL')
                     ->setParameter('types', $this->moduleRegistry->supportedTypes())
                     ->orderBy('gateway.title', 'ASC')),
             BooleanField::new('isActive', 'payment_gateway.active'),

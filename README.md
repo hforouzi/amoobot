@@ -1130,3 +1130,15 @@ Security notes:
 - Plugin ZIPs are extracted under `var/plugins/{code}`.
 - Plugin code is not executed during upload validation or installation.
 - Existing payment gateways and bot payment flow do not depend on plugins in this phase.
+
+### Phase 1.10.2: Payment Gateway Plugin Bridge
+
+Enabled plugins with `type: "payment_gateway"` now appear in Admin -> Payment Gateways -> Add Payment Gateway. Installing one creates a normal `PaymentGateway` row with:
+
+- `type` equal to the plugin code
+- `pluginCode` equal to the plugin code
+- `config` populated from the plugin manifest `configSchema`
+
+Core gateways (`manual_card`, `zibal`, `nowpayments`) are unchanged and still use the built-in drivers. `StorePaymentMethod` continues to control what the bot shows to users. If a plugin is disabled, its payment methods are skipped without deleting them.
+
+Runtime plugin gateways must implement `App\Payment\Plugin\PaymentGatewayPluginInterface`. Plugin code is not executed while listing modules or rendering the install wizard; it is loaded only when testing or resolving a configured plugin gateway.

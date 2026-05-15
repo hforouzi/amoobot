@@ -10,6 +10,7 @@ use App\Admin\UI\Support\AdminStatusBadge;
 use App\Entity\PaymentGateway;
 use App\Entity\StorePaymentMethod;
 use App\Payment\Application\PaymentGatewayModuleRegistry;
+use App\Payment\Infrastructure\PaymentGatewayRegistry;
 use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\ORM\QueryBuilder;
 use EasyCorp\Bundle\EasyAdminBundle\Collection\FieldCollection;
@@ -29,10 +30,12 @@ use EasyCorp\Bundle\EasyAdminBundle\Field\TextField;
 use EasyCorp\Bundle\EasyAdminBundle\Router\AdminUrlGeneratorInterface;
 use Symfony\Component\Form\Extension\Core\Type\CheckboxType;
 use Symfony\Component\Form\Extension\Core\Type\ChoiceType;
+use Symfony\Component\Form\Extension\Core\Type\NumberType;
 use Symfony\Component\Form\Extension\Core\Type\IntegerType;
 use Symfony\Component\Form\Extension\Core\Type\PasswordType;
 use Symfony\Component\Form\Extension\Core\Type\TextareaType;
 use Symfony\Component\Form\Extension\Core\Type\TextType;
+use Symfony\Component\Form\Extension\Core\Type\UrlType;
 use Symfony\Component\HttpFoundation\RedirectResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -46,6 +49,7 @@ final class PaymentGatewayCrudController extends AbstractCrudController
         private readonly PaymentGatewayModuleRegistry $moduleRegistry,
         private readonly AdminUrlGeneratorInterface $adminUrlGenerator,
         private readonly EntityManagerInterface $entityManager,
+        private readonly PaymentGatewayRegistry $paymentGatewayRegistry,
     ) {
     }
 
@@ -84,6 +88,12 @@ final class PaymentGatewayCrudController extends AbstractCrudController
                 ->generateUrl())
             ->displayIf(fn (PaymentGateway $gateway): bool => $this->moduleRegistry->supports($gateway->getType()));
 
+        $testPluginGateway = Action::new('testPluginGateway', 'payment_gateway.test_plugin_gateway', 'fa fa-plug')
+            ->linkToRoute('admin_payment_gateways_test_plugin', fn (PaymentGateway $gateway): array => [
+                'id' => $gateway->getId(),
+            ])
+            ->displayIf(fn (PaymentGateway $gateway): bool => null !== $gateway->getPluginCode());
+
         return $actions
             ->remove(Crud::PAGE_INDEX, Action::NEW)
             ->update(Crud::PAGE_INDEX, Action::EDIT, fn (Action $action): Action => $action->setLabel('common.edit'))
@@ -92,8 +102,10 @@ final class PaymentGatewayCrudController extends AbstractCrudController
             ->add(Crud::PAGE_INDEX, Action::DETAIL)
             ->add(Crud::PAGE_INDEX, $editConfig)
             ->add(Crud::PAGE_INDEX, $addStoreMethod)
+            ->add(Crud::PAGE_INDEX, $testPluginGateway)
             ->add(Crud::PAGE_DETAIL, $editConfig)
-            ->add(Crud::PAGE_DETAIL, $addStoreMethod);
+            ->add(Crud::PAGE_DETAIL, $addStoreMethod)
+            ->add(Crud::PAGE_DETAIL, $testPluginGateway);
     }
 
     public function new(AdminContext $context): Response
@@ -125,10 +137,10 @@ final class PaymentGatewayCrudController extends AbstractCrudController
 
     public function configureFields(string $pageName): iterable
     {
-        $configuredField = TextField::new('configured', 'payment_gateway.configured')
-            ->formatValue(static fn (mixed $value): string => AdminStatusBadge::boolHtml($value))
+        $configuredField = TextField::new('configuredStatus', 'payment_gateway.configured')
+            ->formatValue(fn (mixed $value, PaymentGateway $gateway): string => AdminStatusBadge::boolHtml($this->moduleRegistry->isConfigured($gateway)))
             ->renderAsHtml()
-            ->onlyOnIndex();
+            ->hideOnForm();
 
         return [
             IdField::new('id')->onlyOnIndex(),
@@ -137,6 +149,9 @@ final class PaymentGatewayCrudController extends AbstractCrudController
                 ->setFormTypeOption('attr', ['readonly' => 'readonly'])
                 ->formatValue(fn (mixed $value): string => $this->moduleRegistry->displayName((string) $value))
                 ->setHelp('payment_gateway.type_help'),
+            TextField::new('pluginCode', 'payment_gateway.plugin_code')
+                ->hideOnForm()
+                ->hideOnIndex(),
             $configuredField,
             BooleanField::new('isActive', 'payment_gateway.active'),
             TextField::new('currency', 'payment_gateway.currency'),
@@ -182,6 +197,7 @@ final class PaymentGatewayCrudController extends AbstractCrudController
 
             $gateway = (new PaymentGateway())
                 ->setType($type)
+                ->setPluginCode(true === ($this->moduleRegistry->get($type)['isPlugin'] ?? false) ? $type : null)
                 ->setTitle($data['title'])
                 ->setCurrency($data['currency'])
                 ->setIsActive($data['isActive'])
@@ -245,6 +261,25 @@ final class PaymentGatewayCrudController extends AbstractCrudController
             ->generateUrl());
     }
 
+    #[Route('/admin/payment-gateways/{id}/test-plugin', name: 'admin_payment_gateways_test_plugin', methods: ['GET'])]
+    public function testPluginGateway(PaymentGateway $gateway): RedirectResponse
+    {
+        if (null === $gateway->getPluginCode()) {
+            $this->addFlash('danger', 'This payment gateway is not a plugin gateway.');
+
+            return $this->redirect($this->gatewayListUrl());
+        }
+
+        try {
+            $this->paymentGatewayRegistry->resolve($gateway);
+            $this->addFlash('success', 'Plugin gateway loaded successfully.');
+        } catch (\Throwable $exception) {
+            $this->addFlash('danger', $exception->getMessage());
+        }
+
+        return $this->redirect($this->gatewayListUrl());
+    }
+
     #[Route('/admin/payment-gateways/{id}/config', name: 'admin_payment_gateways_config', methods: ['GET', 'POST'])]
     public function config(Request $request, PaymentGateway $gateway): Response
     {
@@ -295,7 +330,7 @@ final class PaymentGatewayCrudController extends AbstractCrudController
         $qb = parent::createIndexQueryBuilder($searchDto, $entityDto, $fields, $filters);
 
         return $qb
-            ->andWhere('entity.type IN (:supportedTypes)')
+            ->andWhere('entity.type IN (:supportedTypes) OR entity.pluginCode IS NOT NULL')
             ->setParameter('supportedTypes', $this->moduleRegistry->supportedTypes());
     }
 
@@ -349,7 +384,7 @@ final class PaymentGatewayCrudController extends AbstractCrudController
                 continue;
             }
 
-            $name = (string) ($field['name'] ?? '');
+            $name = (string) ($field['name'] ?? $field['key'] ?? '');
             if ('' === $name) {
                 continue;
             }
@@ -391,11 +426,25 @@ final class PaymentGatewayCrudController extends AbstractCrudController
                 continue;
             }
 
+            if ('number' === $fieldType) {
+                $builder->add($name, NumberType::class, [
+                    'label' => $this->configFieldLabel($name),
+                    'required' => $required,
+                    'constraints' => $required ? [new NotBlank()] : [],
+                ]);
+                continue;
+            }
+
             if ('password' === $fieldType) {
                 $builder->add($name, PasswordType::class, $options + [
                     'always_empty' => false,
                     'empty_data' => '',
                 ]);
+                continue;
+            }
+
+            if ('url' === $fieldType) {
+                $builder->add($name, UrlType::class, $options + ['empty_data' => '']);
                 continue;
             }
 
@@ -437,7 +486,7 @@ final class PaymentGatewayCrudController extends AbstractCrudController
                 continue;
             }
 
-            $name = (string) ($field['name'] ?? '');
+            $name = (string) ($field['name'] ?? $field['key'] ?? '');
             if ('' === $name) {
                 continue;
             }
@@ -453,6 +502,10 @@ final class PaymentGatewayCrudController extends AbstractCrudController
 
             if ('integer' === (string) ($field['type'] ?? '')) {
                 $value = (int) $value;
+            }
+
+            if ('number' === (string) ($field['type'] ?? '')) {
+                $value = (float) $value;
             }
 
             if ('boolean' === (string) ($field['type'] ?? '')) {

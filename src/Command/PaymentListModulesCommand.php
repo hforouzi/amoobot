@@ -30,13 +30,15 @@ final class PaymentListModulesCommand extends Command
             $rows[] = [
                 $type,
                 (string) $module['displayName'],
+                (string) ($module['source'] ?? 'core'),
+                (string) ($module['version'] ?? ''),
+                true === ($module['isPlugin'] ?? false) ? 'yes' : 'yes',
                 (string) $module['category'],
-                $this->moduleRegistry->isImplemented($type) ? 'yes' : 'no',
                 implode(', ', $this->moduleRegistry->requiredConfigFields($type)),
             ];
         }
 
-        $io->table(['type', 'name', 'category', 'implemented', 'required_config_fields'], $rows);
+        $io->table(['type', 'name', 'source', 'version', 'enabled', 'category', 'required_config_keys'], $rows);
 
         return Command::SUCCESS;
     }

@@ -34,7 +34,7 @@ final class PluginAutoloader
         return $this->projectDir.\DIRECTORY_SEPARATOR.$plugin->getPath().\DIRECTORY_SEPARATOR.'src';
     }
 
-    private function register(Plugin $plugin): void
+    public function register(Plugin $plugin): void
     {
         $namespace = $this->namespaceFor($plugin);
         $sourcePath = $this->sourcePathFor($plugin);

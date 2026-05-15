@@ -116,6 +116,7 @@ payment_gateway:
   currency: Currency
   description: Description
   json_config: JSON Configuration
+  plugin_code: Plugin Code
   invalid_json: Invalid JSON. Enter a valid JSON object.
   install_action: Add Payment Gateway
   install_submit: Install Gateway
@@ -124,6 +125,7 @@ payment_gateway:
   install_success_message: Payment gateway was installed successfully.
   back_to_list: Back to gateway list
   add_store_method: Add to Store Payment Methods
+  test_plugin_gateway: Test Plugin Gateway
   edit_config: Edit Gateway Config
   config_title: Gateway Config
   sort_order: Sort Order

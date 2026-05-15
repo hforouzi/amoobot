@@ -8,6 +8,8 @@ use App\Admin\Form\ConfigSchemaChoiceNormalizer;
 use App\Entity\PaymentGateway;
 use App\Payment\Domain\PaymentGatewayType;
 use App\Payment\Infrastructure\PaymentGatewayRegistry;
+use App\Payment\Plugin\PluginPaymentGatewayModule;
+use App\Plugin\PluginRegistry;
 
 final class PaymentGatewayModuleRegistry
 {
@@ -30,6 +32,7 @@ final class PaymentGatewayModuleRegistry
     public function __construct(
         private readonly PaymentGatewayRegistry $gatewayRegistry,
         private readonly ConfigSchemaChoiceNormalizer $choiceNormalizer,
+        private readonly PluginRegistry $pluginRegistry,
     ) {
         $this->modules = [
             PaymentGatewayType::MANUAL_CARD => [
@@ -40,6 +43,9 @@ final class PaymentGatewayModuleRegistry
                 'category' => 'offline',
                 'supportsWebhook' => false,
                 'supportsOnlinePayment' => false,
+                'source' => 'core',
+                'isPlugin' => false,
+                'version' => '',
                 'defaults' => [
                     'card_number' => '',
                     'card_holder' => '',
@@ -61,6 +67,9 @@ final class PaymentGatewayModuleRegistry
                 'category' => 'online',
                 'supportsWebhook' => true,
                 'supportsOnlinePayment' => true,
+                'source' => 'core',
+                'isPlugin' => false,
+                'version' => '',
                 'defaults' => [
                     'merchant' => 'zibal',
                     'sandbox' => false,
@@ -80,6 +89,9 @@ final class PaymentGatewayModuleRegistry
                 'category' => 'crypto',
                 'supportsWebhook' => true,
                 'supportsOnlinePayment' => true,
+                'source' => 'core',
+                'isPlugin' => false,
+                'version' => '',
                 'defaults' => [
                     'api_key' => '',
                     'ipn_secret' => '',
@@ -135,7 +147,23 @@ final class PaymentGatewayModuleRegistry
      */
     public function all(): array
     {
+        return array_values($this->modules + $this->pluginModulesByType());
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    public function coreModules(): array
+    {
         return array_values($this->modules);
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    public function pluginModules(): array
+    {
+        return array_values($this->pluginModulesByType());
     }
 
     /**
@@ -143,12 +171,12 @@ final class PaymentGatewayModuleRegistry
      */
     public function supportedTypes(): array
     {
-        return array_keys($this->modules);
+        return array_keys($this->modules + $this->pluginModulesByType());
     }
 
     public function supports(string $type): bool
     {
-        return isset($this->modules[$type]);
+        return isset($this->modules[$type]) || isset($this->pluginModulesByType()[$type]);
     }
 
     /**
@@ -160,7 +188,7 @@ final class PaymentGatewayModuleRegistry
             throw new \InvalidArgumentException(sprintf('Unsupported payment gateway module "%s".', $type));
         }
 
-        return $this->modules[$type];
+        return $this->modules[$type] ?? $this->pluginModulesByType()[$type];
     }
 
     /**
@@ -177,7 +205,9 @@ final class PaymentGatewayModuleRegistry
 
     public function displayName(string $type): string
     {
-        return (string) ($this->modules[$type]['displayName'] ?? $type);
+        $modules = $this->modules + $this->pluginModulesByType();
+
+        return (string) ($modules[$type]['displayName'] ?? $type);
     }
 
     public function defaultTitle(string $type): string
@@ -190,7 +220,9 @@ final class PaymentGatewayModuleRegistry
      */
     public function defaultConfig(string $type): array
     {
-        return (array) ($this->modules[$type]['defaults'] ?? []);
+        $modules = $this->modules + $this->pluginModulesByType();
+
+        return (array) ($modules[$type]['defaults'] ?? []);
     }
 
     /**
@@ -199,7 +231,8 @@ final class PaymentGatewayModuleRegistry
     public function requiredConfigFields(string $type): array
     {
         $required = [];
-        foreach ((array) ($this->modules[$type]['schema'] ?? []) as $field) {
+        $modules = $this->modules + $this->pluginModulesByType();
+        foreach ((array) ($modules[$type]['schema'] ?? []) as $field) {
             if (true === ($field['required'] ?? false)) {
                 $required[] = (string) ($field['name'] ?? '');
             }
@@ -275,6 +308,9 @@ final class PaymentGatewayModuleRegistry
     public function isImplemented(string $type): bool
     {
         try {
+            if (isset($this->pluginModulesByType()[$type])) {
+                return true;
+            }
             $this->gatewayRegistry->resolveByType($type);
 
             return true;
@@ -295,8 +331,13 @@ final class PaymentGatewayModuleRegistry
             PaymentGatewayType::ZIBAL => null !== $gateway->getZibalMerchant()
                 && null !== $gateway->getZibalCallbackBaseUrl(),
             PaymentGatewayType::NOWPAYMENTS => $this->isNowPaymentsConfigured($gateway),
-            default => false,
+            default => $this->isPluginGatewayConfigured($gateway),
         };
+    }
+
+    public function isPluginType(string $type): bool
+    {
+        return isset($this->pluginModulesByType()[$type]);
     }
 
     private function isNowPaymentsConfigured(PaymentGateway $gateway): bool
@@ -353,5 +394,69 @@ final class PaymentGatewayModuleRegistry
         foreach ($this->modules as $moduleType => $module) {
             $this->modules[$moduleType]['configSchema'] = is_array($module['schema'] ?? null) ? $module['schema'] : [];
         }
+    }
+
+    /**
+     * @return array<string, array<string, mixed>>
+     */
+    private function pluginModulesByType(): array
+    {
+        $modules = [];
+        foreach ($this->pluginRegistry->paymentGatewayPlugins() as $plugin) {
+            $module = PluginPaymentGatewayModule::fromPlugin($plugin)->toArray();
+            $modules[(string) $module['type']] = $this->normalizePluginModuleChoices($module);
+        }
+
+        return $modules;
+    }
+
+    /**
+     * @param array<string, mixed> $module
+     *
+     * @return array<string, mixed>
+     */
+    private function normalizePluginModuleChoices(array $module): array
+    {
+        $schema = is_array($module['schema'] ?? null) ? $module['schema'] : [];
+        foreach ($schema as $index => $field) {
+            if (!is_array($field) || 'choice' !== (string) ($field['type'] ?? '')) {
+                continue;
+            }
+            $schema[$index]['choices'] = $this->choiceNormalizer->normalize(
+                is_array($field['choices'] ?? null) ? $field['choices'] : [],
+                sprintf('%s.%s', (string) $module['type'], (string) ($field['name'] ?? $index))
+            );
+        }
+        $module['schema'] = $schema;
+        $module['configSchema'] = $schema;
+
+        return $module;
+    }
+
+    private function isPluginGatewayConfigured(PaymentGateway $gateway): bool
+    {
+        $module = $this->pluginModulesByType()[$gateway->getType()] ?? null;
+        if (!is_array($module)) {
+            return false;
+        }
+
+        $config = is_array($gateway->getConfig()) ? $gateway->getConfig() : [];
+        foreach ((array) ($module['configSchema'] ?? []) as $field) {
+            if (!is_array($field) || true !== ($field['required'] ?? false)) {
+                continue;
+            }
+
+            $name = (string) ($field['name'] ?? '');
+            if ('' === $name) {
+                continue;
+            }
+
+            $value = $config[$name] ?? null;
+            if (null === $value || '' === trim((string) $value)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 }

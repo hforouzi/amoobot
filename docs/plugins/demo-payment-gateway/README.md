@@ -10,4 +10,4 @@ zip -r demo-payment-gateway.zip plugin.json README.md src
 php ../../../bin/console app:plugin:install demo-payment-gateway.zip
 ```
 
-The class is not executed in Phase 1.10.1. Payment gateway runtime integration is reserved for Phase 1.10.2.
+The class implements `PaymentGatewayPluginInterface` for bridge testing, but it does not process real payments.

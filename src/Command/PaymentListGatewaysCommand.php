@@ -28,7 +28,7 @@ final class PaymentListGatewaysCommand extends Command
         $io = new SymfonyStyle($input, $output);
         $gateways = $this->entityManager->getRepository(PaymentGateway::class)
             ->createQueryBuilder('gateway')
-            ->andWhere('gateway.type IN (:types)')
+            ->andWhere('gateway.type IN (:types) OR gateway.pluginCode IS NOT NULL')
             ->setParameter('types', $this->moduleRegistry->supportedTypes())
             ->orderBy('gateway.sortOrder', 'ASC')
             ->addOrderBy('gateway.id', 'ASC')
