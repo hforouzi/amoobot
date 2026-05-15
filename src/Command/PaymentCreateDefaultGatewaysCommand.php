@@ -6,6 +6,7 @@ namespace App\Command;
 
 use App\Entity\PaymentGateway;
 use App\Entity\StorePaymentMethod;
+use App\Payment\Application\PaymentGatewayModuleRegistry;
 use App\Payment\Domain\PaymentGatewayType;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\Console\Attribute\AsCommand;
@@ -19,6 +20,7 @@ final class PaymentCreateDefaultGatewaysCommand extends Command
 {
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
+        private readonly PaymentGatewayModuleRegistry $moduleRegistry,
     ) {
         parent::__construct();
     }
@@ -26,54 +28,13 @@ final class PaymentCreateDefaultGatewaysCommand extends Command
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $io = new SymfonyStyle($input, $output);
-        $repo = $this->entityManager->getRepository(PaymentGateway::class);
+        $gatewayRepo = $this->entityManager->getRepository(PaymentGateway::class);
 
-        $manual = $repo->findOneBy(['type' => PaymentGatewayType::MANUAL_CARD]);
-        if (!$manual instanceof PaymentGateway) {
-            $manual = (new PaymentGateway())
-                ->setType(PaymentGatewayType::MANUAL_CARD)
-                ->setTitle('Manual Card')
-                ->setDescription('Manual card-to-card flow')
-                ->setIsActive(true)
-                ->setIsDefault(true)
-                ->setSortOrder(0)
-                ->setCurrency('IRR')
-                ->setConfig([
-                    'card_number' => '',
-                    'card_holder' => '',
-                    'bank_name' => '',
-                    'instructions' => '',
-                ]);
-            $this->entityManager->persist($manual);
-            $io->writeln('Created manual_card gateway.');
-        } else {
-            $io->writeln('manual_card gateway already exists.');
-        }
-
-        $zibal = $repo->findOneBy(['type' => PaymentGatewayType::ZIBAL]);
-        if (!$zibal instanceof PaymentGateway) {
-            $zibal = (new PaymentGateway())
-                ->setType(PaymentGatewayType::ZIBAL)
-                ->setTitle('Zibal')
-                ->setDescription('Online payment via Zibal')
-                ->setIsActive(false)
-                ->setIsDefault(false)
-                ->setSortOrder(10)
-                ->setCurrency('IRR')
-                ->setConfig([
-                    'merchant' => 'zibal',
-                    'sandbox' => true,
-                    'callback_base_url' => '',
-                    'description' => 'Amoobot order payment',
-                ]);
-            $this->entityManager->persist($zibal);
-            $io->writeln('Created zibal gateway (inactive).');
-        } else {
-            $io->writeln('zibal gateway already exists.');
-        }
+        $manual = $this->ensureGateway($io, $gatewayRepo, PaymentGatewayType::MANUAL_CARD, true, 0, 'IRR');
+        $this->ensureGateway($io, $gatewayRepo, PaymentGatewayType::ZIBAL, false, 10, 'IRR');
+        $this->ensureGateway($io, $gatewayRepo, PaymentGatewayType::NOWPAYMENTS, false, 20, 'IRR');
 
         $methodRepo = $this->entityManager->getRepository(StorePaymentMethod::class);
-
         $manualMethod = $methodRepo->findOneBy(['gateway' => $manual], ['id' => 'ASC']);
         if (!$manualMethod instanceof StorePaymentMethod) {
             $manualMethod = (new StorePaymentMethod())
@@ -88,23 +49,35 @@ final class PaymentCreateDefaultGatewaysCommand extends Command
             $io->writeln('Store method for manual_card already exists.');
         }
 
-        $zibalMethod = $methodRepo->findOneBy(['gateway' => $zibal], ['id' => 'ASC']);
-        if (!$zibalMethod instanceof StorePaymentMethod) {
-            $zibalMethod = (new StorePaymentMethod())
-                ->setGateway($zibal)
-                ->setTitle('پرداخت آنلاین زیبال')
-                ->setIsActive(false)
-                ->setSortOrder(2)
-                ->setCurrency('IRR');
-            $this->entityManager->persist($zibalMethod);
-            $io->writeln('Created store payment method for zibal (inactive).');
-        } else {
-            $io->writeln('Store method for zibal already exists.');
-        }
-
         $this->entityManager->flush();
-        $io->success('Default gateways and store methods ensured.');
+        $io->success('Default gateways ensured.');
 
         return Command::SUCCESS;
+    }
+
+    private function ensureGateway(SymfonyStyle $io, object $gatewayRepo, string $type, bool $active, int $sortOrder, string $currency): PaymentGateway
+    {
+        $gateway = $gatewayRepo->findOneBy(['type' => $type], ['id' => 'ASC']);
+        if ($gateway instanceof PaymentGateway) {
+            $io->writeln(sprintf('%s gateway already exists.', $type));
+
+            return $gateway;
+        }
+
+        $gateway = (new PaymentGateway())
+            ->setType($type)
+            ->setTitle($this->moduleRegistry->defaultTitle($type))
+            ->setDescription((string) $this->moduleRegistry->get($type)['description'])
+            ->setIsActive($active)
+            ->setIsDefault(PaymentGatewayType::MANUAL_CARD === $type)
+            ->setSortOrder($sortOrder)
+            ->setCurrency($currency)
+            ->setConfig($this->moduleRegistry->defaultConfig($type))
+            ->setUpdatedAt(new \DateTimeImmutable());
+
+        $this->entityManager->persist($gateway);
+        $io->writeln(sprintf('Created %s gateway.', $type));
+
+        return $gateway;
     }
 }

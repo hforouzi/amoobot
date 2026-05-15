@@ -1,6 +1,8 @@
 # yaml-language-server: $schema=../vendor/symfony/dependency-injection/Loader/schema/services.schema.json
 
 parameters:
+    app.default_locale: '%env(APP_DEFAULT_LOCALE)%'
+    app.supported_locales: ['fa', 'en']
     default_telegram_mode: long_polling
     default_telegram_proxy: ''
     default_panel_proxy_enabled: 'false'
@@ -62,6 +64,11 @@ services:
 
     App\:
         resource: '../src/'
+
+    App\EventSubscriber\AdminLocaleSubscriber:
+        arguments:
+            $defaultLocale: '%app.default_locale%'
+            $supportedLocales: '%app.supported_locales%'
 
     App\Provisioning\Infrastructure\VpnPanelDriverRegistry:
         arguments:

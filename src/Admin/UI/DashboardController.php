@@ -20,55 +20,86 @@ use App\Admin\UI\Crud\UserCrudController;
 use App\Admin\UI\Crud\VpnInboundCrudController;
 use App\Admin\UI\Crud\VpnPanelCrudController;
 use App\Admin\UI\Crud\VpnServiceCrudController;
-use App\Admin\UI\Crud\CustomApiPaymentGatewayCrudController;
-use App\Admin\UI\Crud\ManualCardPaymentGatewayCrudController;
-use App\Admin\UI\Crud\NowPaymentsPaymentGatewayCrudController;
-use App\Admin\UI\Crud\ZibalPaymentGatewayCrudController;
+use EasyCorp\Bundle\EasyAdminBundle\Config\Assets;
 use EasyCorp\Bundle\EasyAdminBundle\Attribute\AdminDashboard;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Dashboard;
+use EasyCorp\Bundle\EasyAdminBundle\Config\Locale;
 use EasyCorp\Bundle\EasyAdminBundle\Config\MenuItem;
 use EasyCorp\Bundle\EasyAdminBundle\Controller\AbstractDashboardController;
+use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\Routing\RouterInterface;
 
 #[AdminDashboard(routePath: '/admin', routeName: 'admin')]
 class DashboardController extends AbstractDashboardController
 {
-    public function index(): \Symfony\Component\HttpFoundation\Response
+    public function __construct(
+        private readonly RouterInterface $router,
+    ) {
+    }
+
+    public function index(): Response
     {
         return $this->render('admin/dashboard.html.twig');
     }
 
     public function configureDashboard(): Dashboard
     {
-        return Dashboard::new()->setTitle('Amoobot Admin');
+        return Dashboard::new()
+            ->setTitle('Amoobot Admin')
+            ->setTranslationDomain('admin')
+            ->setLocales([
+                Locale::new('fa', 'فارسی'),
+                Locale::new('en', 'English'),
+            ]);
+    }
+
+    public function configureAssets(): Assets
+    {
+        return Assets::new()->addCssFile('assets/admin/admin.css');
     }
 
     public function configureMenuItems(): iterable
     {
-        yield MenuItem::linkToDashboard('Dashboard', 'fa fa-home');
-        yield MenuItem::linkTo(UserCrudController::class, 'Users', 'fa fa-users');
-        yield MenuItem::linkTo(TelegramAccountCrudController::class, 'Telegram Accounts', 'fa fa-paper-plane');
-        yield MenuItem::linkTo(VpnPanelCrudController::class, 'VPN Panels', 'fa fa-server');
-        yield MenuItem::linkTo(VpnInboundCrudController::class, 'VPN Inbounds', 'fa fa-globe');
-        yield MenuItem::linkTo(PlanCrudController::class, 'Plans', 'fa fa-list');
-        yield MenuItem::linkTo(OrderCrudController::class, 'Orders', 'fa fa-shopping-cart');
+        yield MenuItem::linkToDashboard('admin.dashboard', 'fa fa-home');
+
+        yield MenuItem::section('admin.menu.store', 'fa fa-shopping-bag');
+        yield MenuItem::linkTo(PlanCrudController::class, 'admin.plans', 'fa fa-list');
+        yield MenuItem::linkTo(OrderCrudController::class, 'admin.orders', 'fa fa-shopping-cart');
         yield MenuItem::linkTo(OrderDraftCrudController::class, 'Order Drafts', 'fa fa-list-alt');
-        yield MenuItem::linkTo(PaymentCrudController::class, 'Payments', 'fa fa-credit-card');
-        yield MenuItem::section('درگاههای پرداخت');
-        yield MenuItem::linkTo(PaymentGatewayCrudController::class, 'لیست درگاهها', 'fa fa-exchange');
-        yield MenuItem::linkTo(ManualCardPaymentGatewayCrudController::class, 'کانفیگ کارت به کارت', 'fa fa-credit-card');
-        yield MenuItem::linkTo(ZibalPaymentGatewayCrudController::class, 'کانفیگ زیبال', 'fa fa-globe');
-        yield MenuItem::linkTo(CustomApiPaymentGatewayCrudController::class, 'کانفیگ Custom API', 'fa fa-plug');
-        yield MenuItem::linkTo(NowPaymentsPaymentGatewayCrudController::class, 'کانفیگ NOWPayments', 'fa fa-bitcoin');
-        yield MenuItem::section('روشهای پرداخت فروشگاه');
-        yield MenuItem::linkTo(StorePaymentMethodCrudController::class, 'روشهای پرداخت فروشگاه', 'fa fa-list-ol');
-        yield MenuItem::linkTo(DiscountCodeCrudController::class, 'Discount Codes', 'fa fa-ticket');
-        yield MenuItem::linkTo(DiscountUsageCrudController::class, 'Discount Usage', 'fa fa-bar-chart');
-        yield MenuItem::linkTo(VpnServiceCrudController::class, 'VPN Services', 'fa fa-link');
-        yield MenuItem::linkTo(ServiceNotificationLogCrudController::class, 'Service Notifications', 'fa fa-bell');
-        yield MenuItem::linkTo(BotMessageLogCrudController::class, 'Bot Logs', 'fa fa-file-text');
-        yield MenuItem::linkTo(SettingCrudController::class, 'Settings', 'fa fa-cog');
-        yield MenuItem::linkToRoute('تنظیمات تمدید و قیمتگذاری', 'fa fa-sliders', 'admin_renewal_pricing_settings');
-        yield MenuItem::linkToRoute('تنظیمات اتوماسیون سرویسها', 'fa fa-clock-o', 'admin_automation_settings');
-        yield MenuItem::linkToRoute('تغییر گروهی قیمت پلنها', 'fa fa-percent', 'admin_bulk_plan_price_adjustment');
+        yield MenuItem::linkTo(PaymentCrudController::class, 'admin.payments', 'fa fa-credit-card');
+        yield MenuItem::linkTo(DiscountCodeCrudController::class, 'admin.discount_codes', 'fa fa-ticket');
+        yield MenuItem::linkTo(DiscountUsageCrudController::class, 'admin.discount_usages', 'fa fa-bar-chart');
+        yield MenuItem::linkTo(PaymentGatewayCrudController::class, 'admin.payment_gateways', 'fa fa-exchange');
+        yield MenuItem::linkTo(StorePaymentMethodCrudController::class, 'admin.store_payment_methods', 'fa fa-list-ol');
+
+        yield MenuItem::section('admin.menu.vpn', 'fa fa-server');
+        yield MenuItem::linkTo(VpnPanelCrudController::class, 'admin.vpn_panels', 'fa fa-server');
+        yield MenuItem::linkTo(VpnInboundCrudController::class, 'admin.vpn_inbounds', 'fa fa-globe');
+        yield MenuItem::linkTo(VpnServiceCrudController::class, 'admin.vpn_services', 'fa fa-link');
+
+        yield MenuItem::section('admin.menu.users', 'fa fa-users');
+        yield MenuItem::linkTo(UserCrudController::class, 'admin.users', 'fa fa-users');
+        yield MenuItem::linkTo(TelegramAccountCrudController::class, 'admin.telegram_accounts', 'fa fa-paper-plane');
+
+        yield MenuItem::section('admin.menu.automation', 'fa fa-magic');
+        yield MenuItem::linkTo(ServiceNotificationLogCrudController::class, 'admin.notifications', 'fa fa-bell');
+        if ($this->routeExists('admin_renewal_pricing_settings')) {
+            yield MenuItem::linkToRoute('admin.renewal_pricing_settings', 'fa fa-sliders', 'admin_renewal_pricing_settings');
+        }
+        if ($this->routeExists('admin_automation_settings')) {
+            yield MenuItem::linkToRoute('admin.automation_settings', 'fa fa-clock-o', 'admin_automation_settings');
+        }
+        if ($this->routeExists('admin_bulk_plan_price_adjustment')) {
+            yield MenuItem::linkToRoute('admin.bulk_plan_price_adjustment', 'fa fa-percent', 'admin_bulk_plan_price_adjustment');
+        }
+
+        yield MenuItem::section('admin.menu.system', 'fa fa-cogs');
+        yield MenuItem::linkTo(SettingCrudController::class, 'admin.settings', 'fa fa-cog');
+        yield MenuItem::linkTo(BotMessageLogCrudController::class, 'admin.bot_logs', 'fa fa-file-text');
+    }
+
+    private function routeExists(string $routeName): bool
+    {
+        return null !== $this->router->getRouteCollection()->get($routeName);
     }
 }

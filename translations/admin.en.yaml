@@ -1,0 +1,159 @@
+admin:
+  dashboard: Dashboard
+  menu:
+    store: Store
+    vpn: VPN
+    users: Users
+    automation: Automation
+    system: System
+    payments: Payments
+  users: Users
+  telegram_accounts: Telegram Accounts
+  vpn_panels: VPN Panels
+  vpn_inbounds: VPN Inbounds
+  vpn_services: VPN Services
+  plans: Plans
+  orders: Orders
+  payments: Payments
+  payment_gateways: Payment Gateways
+  store_payment_methods: Store Payment Methods
+  discount_codes: Discount Codes
+  discount_usages: Discount Usage
+  bot_logs: Bot Logs
+  settings: Settings
+  notifications: Service Notification Logs
+  automation: Automation
+  system_status: System Status
+  renewal_pricing_settings: Renewal & Pricing Settings
+  automation_settings: Automation Settings
+  bulk_plan_price_adjustment: Bulk Plan Price Adjustment
+
+status:
+  active: Active
+  inactive: Inactive
+  pending: Pending
+  waiting_payment: Waiting Payment
+  payment_pending: Payment Pending
+  submitted: Submitted
+  paid: Paid
+  confirmed: Confirmed
+  processing: Processing
+  completed: Completed
+  provisioned: Provisioned
+  failed: Failed
+  rejected: Rejected
+  cancelled: Cancelled
+  expired: Expired
+  suspended: Suspended
+  deleted: Deleted
+
+common:
+  save: Save
+  cancel: Cancel
+  back: Back
+  edit: Edit
+  delete: Delete
+  enabled: Enabled
+  disabled: Disabled
+  yes: 'Yes'
+  no: 'No'
+  created_at: Created At
+  updated_at: Updated At
+  actions: Actions
+
+payment:
+  gateway:
+    manual_card: Manual Card Gateway
+    zibal: Zibal Gateway
+    nowpayments: NOWPayments Gateway
+    custom_api: Custom API Gateway
+
+help:
+  payment_gateway_store_method: PaymentGateway stores gateway credentials. StorePaymentMethod controls what users see in the bot.
+  plan_custom_pricing: If enabled, custom pricing is calculated based on traffic and duration values.
+  nowpayments_rate: Set conversion rates based on the selected amount unit (toman or rial).
+  panel_bearer_token: For Sanaei v3 bearer mode, use Settings → Security → API Token and set auth mode to bearer.
+  incomplete_order_expiration: Defines expiration time for incomplete orders in automation settings.
+
+fieldset:
+  general: General
+  metadata: Metadata
+  credentials: Credentials
+  payment_settings: Payment Settings
+  store_payment_method: Store Payment Method
+
+payment_gateway:
+  title: Title
+  type: Gateway Type
+  type_help: "Choose one supported module: manual_card, zibal, nowpayments."
+  configured: Configured
+  active: Active
+  currency: Currency
+  description: Description
+  json_config: JSON Configuration
+  invalid_json: Invalid JSON. Enter a valid JSON object.
+  install_action: Add Payment Gateway
+  install_submit: Install Gateway
+  install_config_title: Install Payment Gateway
+  install_success_title: Installation Complete
+  install_success_message: Payment gateway was installed successfully.
+  back_to_list: Back to gateway list
+  add_store_method: Add to Store Payment Methods
+  edit_config: Edit Gateway Config
+  config_title: Gateway Config
+  sort_order: Sort Order
+  min_amount: Min Amount
+  max_amount: Max Amount
+  display_settings: Store Display Settings
+  config:
+    card_number: Card Number
+    card_holder: Card Holder
+    bank_name: Bank Name
+    instructions: Payment Instructions
+    merchant: Merchant
+    sandbox: Sandbox
+    callback_base_url: Callback Base URL
+    api_key: API Key
+    ipn_secret: IPN Secret
+    api_base_url: API Base URL
+    payment_mode: Payment Mode
+    price_currency: Price Currency
+    pay_currency: Pay Currency
+    amount_unit: Amount Unit
+    toman_per_usd: Toman per USD
+    success_url: Success URL
+    cancel_url: Cancel URL
+
+automation_settings:
+  title: Service Automation Settings
+  subtitle: Manage automated service jobs and incomplete order expiration.
+  sections:
+    tasks: Automation Tasks
+    execution: Execution Settings
+  fields:
+    sync_usage: Enable usage sync
+    check_expiry: Enable expiry check
+    send_notifications: Enable notifications
+    auto_suspend_expired: Auto suspend expired services
+    auto_suspend_traffic_exhausted: Auto suspend traffic exhausted services
+    expire_incomplete_orders: Expire incomplete orders
+    batch_limit: Batch limit
+    incomplete_expire_hours: Incomplete order expiry hours
+
+renewal_pricing_settings:
+  title: Renewal & Pricing Settings
+  sections:
+    renewal: Renewal Settings
+    pricing: Pricing
+    traffic_addon: Traffic Add-on
+  fields:
+    carry_remaining_traffic: Carry remaining traffic on renewal
+    carry_remaining_days: Carry remaining days on renewal
+    expired_start_from_now: Start expired service renewal from today
+    global_discount_percent: Global discount percent
+    traffic_addon_enabled: Enable traffic add-on purchase
+    traffic_addon_min_gb: Minimum add-on traffic
+    traffic_addon_max_gb: Maximum add-on traffic
+    traffic_addon_price_per_gb: Price per GB of add-on traffic
+  help:
+    global_discount_percent: Allowed value is 0 to 100.

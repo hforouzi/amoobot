@@ -1,0 +1,31 @@
+{% extends 'admin/custom_page.html.twig' %}
+{% trans_default_domain 'admin' %}
+
+{% block page_title %}{{ 'payment_gateway.install_action'|trans }}{% endblock %}
+
+{% block body %}
+    <div class="admin-custom-page-inner">
+        <div class="admin-card-grid">
+            {% for module in modules %}
+                <section class="admin-card">
+                    <div>
+                        <div class="admin-card-icon" aria-hidden="true"><i class="fa fa-credit-card"></i></div>
+                        <h2>{{ module.displayName }}</h2>
+                        <p class="admin-muted">{{ module.description }}</p>
+                    </div>
+                    <div class="admin-card-footer">
+                        <span class="badge badge-secondary">{{ module.category }}</span>
+                        <a class="btn btn-primary" href="{{ path('admin_payment_gateways_install_type', {type: module.type}) }}">
+                            <i class="fa fa-plus"></i>
+                            {{ 'payment_gateway.install_submit'|trans }}
+                        </a>
+                    </div>
+                </section>
+            {% endfor %}
+        </div>
+
+        <div class="admin-actions">
+            <a class="btn btn-secondary" href="{{ listUrl }}">{{ 'common.back'|trans }}</a>
+        </div>
+    </div>
+{% endblock %}

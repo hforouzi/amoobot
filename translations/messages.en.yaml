@@ -1,0 +1,11 @@
+login:
+  title: Amoobot Admin Login
+  subtitle: Sign in to manage users, services, orders, and payments.
+  username: Username or Email
+  password: Password
+  remember_me: Remember me
+  submit: Sign in
+  invalid_credentials: Invalid credentials.
+  language: Language
+
+'Use the left menu to manage plans, orders, payments, services and bot logs.': Use the left menu to manage plans, orders, payments, services and bot logs.

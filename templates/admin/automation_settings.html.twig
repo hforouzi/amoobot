@@ -1,41 +1,58 @@
 {% extends '@EasyAdmin/page/content.html.twig' %}
+{% trans_default_domain 'admin' %}
 
-{% block content_title %}تنظیمات اتوماسیون سرویسها{% endblock %}
+{% block content_title %}{{ 'automation_settings.title'|trans }}{% endblock %}
 
 {% block main %}
-    <form method="post" class="content-panel">
-        <div class="mb-3 form-check">
-            <input class="form-check-input" type="checkbox" id="automation_sync_usage_enabled" name="automation_sync_usage_enabled" {% if values.automation_sync_usage_enabled %}checked{% endif %}>
-            <label class="form-check-label" for="automation_sync_usage_enabled">فعال بودن sync usage</label>
+    <div class="admin-custom-page admin-settings-page">
+        <div class="admin-page-header">
+            <div>
+                <h1 class="admin-page-title">{{ 'automation_settings.title'|trans }}</h1>
+                <p class="admin-page-subtitle">{{ 'automation_settings.subtitle'|trans }}</p>
+            </div>
         </div>
-        <div class="mb-3 form-check">
-            <input class="form-check-input" type="checkbox" id="automation_check_expiry_enabled" name="automation_check_expiry_enabled" {% if values.automation_check_expiry_enabled %}checked{% endif %}>
-            <label class="form-check-label" for="automation_check_expiry_enabled">فعال بودن check expiry</label>
-        </div>
-        <div class="mb-3 form-check">
-            <input class="form-check-input" type="checkbox" id="automation_send_notifications_enabled" name="automation_send_notifications_enabled" {% if values.automation_send_notifications_enabled %}checked{% endif %}>
-            <label class="form-check-label" for="automation_send_notifications_enabled">فعال بودن send notifications</label>
-        </div>
-        <div class="mb-3 form-check">
-            <input class="form-check-input" type="checkbox" id="automation_auto_suspend_expired_enabled" name="automation_auto_suspend_expired_enabled" {% if values.automation_auto_suspend_expired_enabled %}checked{% endif %}>
-            <label class="form-check-label" for="automation_auto_suspend_expired_enabled">فعال بودن auto suspend expired services</label>
-        </div>
-        <div class="mb-3 form-check">
-            <input class="form-check-input" type="checkbox" id="automation_auto_suspend_traffic_exhausted_enabled" name="automation_auto_suspend_traffic_exhausted_enabled" {% if values.automation_auto_suspend_traffic_exhausted_enabled %}checked{% endif %}>
-            <label class="form-check-label" for="automation_auto_suspend_traffic_exhausted_enabled">فعال بودن auto suspend traffic exhausted services</label>
-        </div>
-        <div class="mb-3 form-check">
-            <input class="form-check-input" type="checkbox" id="automation_expire_incomplete_orders_enabled" name="automation_expire_incomplete_orders_enabled" {% if values.automation_expire_incomplete_orders_enabled %}checked{% endif %}>
-            <label class="form-check-label" for="automation_expire_incomplete_orders_enabled">فعال بودن expire incomplete orders</label>
-        </div>
-        <div class="mb-3">
-            <label class="form-label" for="automation_batch_limit">Batch limit</label>
-            <input class="form-control" type="number" min="1" step="1" id="automation_batch_limit" name="automation_batch_limit" value="{{ values.automation_batch_limit }}">
-        </div>
-        <div class="mb-3">
-            <label class="form-label" for="orders_incomplete_expire_hours">انقضای سفارش ناقص (ساعت)</label>
-            <input class="form-control" type="number" min="1" step="1" id="orders_incomplete_expire_hours" name="orders_incomplete_expire_hours" value="{{ values.orders_incomplete_expire_hours }}">
-        </div>
-        <button type="submit" class="btn btn-primary">ذخیره تنظیمات</button>
-    </form>
+
+        <form method="post" class="admin-form-card admin-settings-form">
+            <div class="admin-section">
+                <h2>{{ 'automation_settings.sections.tasks'|trans }}</h2>
+
+                {% set checkboxes = {
+                    automation_sync_usage_enabled: 'automation_settings.fields.sync_usage',
+                    automation_check_expiry_enabled: 'automation_settings.fields.check_expiry',
+                    automation_send_notifications_enabled: 'automation_settings.fields.send_notifications',
+                    automation_auto_suspend_expired_enabled: 'automation_settings.fields.auto_suspend_expired',
+                    automation_auto_suspend_traffic_exhausted_enabled: 'automation_settings.fields.auto_suspend_traffic_exhausted',
+                    automation_expire_incomplete_orders_enabled: 'automation_settings.fields.expire_incomplete_orders'
+                } %}
+
+                {% for field, label in checkboxes %}
+                    <div class="admin-checkbox-row">
+                        <input type="checkbox" id="{{ field }}" name="{{ field }}" {% if attribute(values, field) %}checked{% endif %}>
+                        <label for="{{ field }}">{{ label|trans }}</label>
+                    </div>
+                {% endfor %}
+            </div>
+
+            <div class="admin-section">
+                <h2>{{ 'automation_settings.sections.execution'|trans }}</h2>
+
+                <div class="admin-form-grid">
+                    <div class="admin-form-row">
+                        <label class="form-label" for="automation_batch_limit">{{ 'automation_settings.fields.batch_limit'|trans }}</label>
+                        <input class="form-control" type="number" min="1" step="1" id="automation_batch_limit" name="automation_batch_limit" value="{{ values.automation_batch_limit }}">
+                    </div>
+
+                    <div class="admin-form-row">
+                        <label class="form-label" for="orders_incomplete_expire_hours">{{ 'automation_settings.fields.incomplete_expire_hours'|trans }}</label>
+                        <input class="form-control" type="number" min="1" step="1" id="orders_incomplete_expire_hours" name="orders_incomplete_expire_hours" value="{{ values.orders_incomplete_expire_hours }}">
+                        <div class="form-text">{{ 'help.incomplete_order_expiration'|trans }}</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="admin-actions">
+                <button type="submit" class="btn btn-primary">{{ 'common.save'|trans }}</button>
+            </div>
+        </form>
+    </div>
 {% endblock %}

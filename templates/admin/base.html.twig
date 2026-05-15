@@ -1,0 +1,29 @@
+{% trans_default_domain 'admin' %}
+{% set currentLocale = app.request.locale|default('fa') %}
+{% set isRtl = currentLocale == 'fa' %}
+
+<!DOCTYPE html>
+<html lang="{{ currentLocale }}" dir="{{ isRtl ? 'rtl' : 'ltr' }}">
+<head>
+    <meta charset="utf-8">
+    <meta name="robots" content="noindex, nofollow">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block page_title %}{{ block('content_title')|striptags }}{% endblock %}</title>
+    <link rel="stylesheet" href="{{ asset('assets/admin/admin.css') }}">
+</head>
+<body class="admin-standalone {{ isRtl ? 'admin-standalone-rtl' : 'admin-standalone-ltr' }} {% block body_class %}{% endblock %}">
+    <header class="admin-standalone-header">
+        <a class="admin-standalone-brand" href="{{ path('admin') }}">Amoobot Admin</a>
+        <nav class="admin-locale-switcher">
+            <a href="{{ path('admin_locale_switch', {locale: 'fa', redirect_to: app.request.uri}) }}" class="{{ currentLocale starts with 'fa' ? 'active' : '' }}">فارسی</a>
+            <span aria-hidden="true">|</span>
+            <a href="{{ path('admin_locale_switch', {locale: 'en', redirect_to: app.request.uri}) }}" class="{{ currentLocale starts with 'en' ? 'active' : '' }}">English</a>
+        </nav>
+    </header>
+
+    <main class="admin-standalone-main">
+        <h1>{% block content_title %}{% endblock %}</h1>
+        {% block main %}{% endblock %}
+    </main>
+</body>
+</html>

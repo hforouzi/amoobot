@@ -1,0 +1,11 @@
+login:
+  title: ورود مدیریت Amoobot
+  subtitle: برای مدیریت کاربران، سرویس‌ها، سفارش‌ها و پرداخت‌ها وارد شوید.
+  username: نام کاربری یا ایمیل
+  password: رمز عبور
+  remember_me: مرا به خاطر بسپار
+  submit: ورود
+  invalid_credentials: نام کاربری یا رمز عبور نامعتبر است.
+  language: زبان
+
+'Use the left menu to manage plans, orders, payments, services and bot logs.': برای مدیریت پلن‌ها، سفارش‌ها، پرداخت‌ها، سرویس‌ها و لاگ‌ها از منوی کناری استفاده کنید.

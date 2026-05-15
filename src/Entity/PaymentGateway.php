@@ -667,6 +667,7 @@ class PaymentGateway
     {
         $apiKey = $this->getNowPaymentsApiKey();
         $apiBaseUrl = trim($this->getNowPaymentsApiBaseUrl());
+        $callbackBaseUrl = trim((string) ($this->getNowPaymentsCallbackBaseUrl() ?? ''));
         $priceCurrency = trim((string) ($this->getNowPaymentsPriceCurrency() ?? ''));
         $payCurrency = trim((string) ($this->getNowPaymentsPayCurrency() ?? ''));
         $paymentMode = $this->getNowPaymentsPaymentMode();
@@ -675,7 +676,9 @@ class PaymentGateway
         if (
             null === $apiKey
             || '' === $apiBaseUrl
+            || '' === $callbackBaseUrl
             || '' === $priceCurrency
+            || '' === $paymentMode
             || ($payCurrencyRequired && '' === $payCurrency)
         ) {
             return false;

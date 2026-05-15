@@ -1,0 +1,159 @@
+admin:
+  dashboard: داشبورد
+  menu:
+    store: فروشگاه
+    vpn: VPN
+    users: کاربران
+    automation: اتوماسیون
+    system: سیستم
+    payments: پرداخت
+  users: کاربران
+  telegram_accounts: اکانت‌های تلگرام
+  vpn_panels: پنل‌های VPN
+  vpn_inbounds: اینباندهای VPN
+  vpn_services: سرویس‌های VPN
+  plans: پلن‌ها
+  orders: سفارش‌ها
+  payments: پرداخت‌ها
+  payment_gateways: درگاه‌های پرداخت
+  store_payment_methods: روش‌های پرداخت فروشگاه
+  discount_codes: کدهای تخفیف
+  discount_usages: مصرف کد تخفیف
+  bot_logs: لاگ‌های بات
+  settings: تنظیمات
+  notifications: لاگ اعلان سرویس
+  automation: اتوماسیون
+  system_status: وضعیت سیستم
+  renewal_pricing_settings: تنظیمات تمدید و قیمت‌گذاری
+  automation_settings: تنظیمات اتوماسیون
+  bulk_plan_price_adjustment: تغییر گروهی قیمت پلن‌ها
+
+status:
+  active: فعال
+  inactive: غیرفعال
+  pending: در انتظار
+  waiting_payment: در انتظار پرداخت
+  payment_pending: پرداخت در انتظار تایید
+  submitted: ارسال‌شده
+  paid: پرداخت‌شده
+  confirmed: تایید‌شده
+  processing: در حال پردازش
+  completed: تکمیل‌شده
+  provisioned: تحویل‌شده
+  failed: ناموفق
+  rejected: رد‌شده
+  cancelled: لغو‌شده
+  expired: منقضی
+  suspended: تعلیق‌شده
+  deleted: حذف‌شده
+
+common:
+  save: ذخیره
+  cancel: انصراف
+  back: بازگشت
+  edit: ویرایش
+  delete: حذف
+  enabled: فعال
+  disabled: غیرفعال
+  yes: بله
+  no: خیر
+  created_at: ایجاد شده در
+  updated_at: بروزرسانی شده در
+  actions: عملیات
+
+payment:
+  gateway:
+    manual_card: درگاه کارت‌به‌کارت
+    zibal: درگاه زیبال
+    nowpayments: درگاه NOWPayments
+    custom_api: درگاه API سفارشی
+
+help:
+  payment_gateway_store_method: PaymentGateway اطلاعات اتصال و اعتبارنامه درگاه را نگهداری می‌کند. StorePaymentMethod تعیین می‌کند کاربر در بات چه روش‌هایی ببیند.
+  plan_custom_pricing: در صورت فعال بودن، قیمت سفارشی بر اساس حجم و مدت محاسبه می‌شود.
+  nowpayments_rate: نرخ تبدیل را بر اساس amount unit انتخاب‌شده (toman یا rial) تنظیم کنید.
+  panel_bearer_token: برای حالت bearer در Sanaei v3 از Settings → Security → API Token استفاده کنید و auth mode را bearer بگذارید.
+  incomplete_order_expiration: زمان انقضای سفارش ناقص در تنظیمات اتوماسیون را مشخص می‌کند.
+
+fieldset:
+  general: عمومی
+  metadata: اطلاعات ثبتی
+  credentials: اعتبارنامه
+  payment_settings: تنظیمات پرداخت
+  store_payment_method: روش پرداخت فروشگاه
+
+payment_gateway:
+  title: عنوان
+  type: نوع درگاه
+  type_help: "یکی از ماژول‌های پشتیبانی‌شده را انتخاب کنید: manual_card، zibal، nowpayments."
+  configured: پیکربندی شده
+  active: فعال
+  currency: ارز
+  description: توضیحات
+  json_config: تنظیمات JSON
+  invalid_json: JSON نامعتبر است. لطفاً یک شیء JSON معتبر وارد کنید.
+  install_action: افزودن درگاه پرداخت
+  install_submit: نصب درگاه
+  install_config_title: نصب درگاه پرداخت
+  install_success_title: نصب انجام شد
+  install_success_message: درگاه پرداخت با موفقیت نصب شد.
+  back_to_list: بازگشت به لیست درگاه‌ها
+  add_store_method: افزودن به روش‌های پرداخت فروشگاه
+  edit_config: ویرایش تنظیمات درگاه
+  config_title: تنظیمات درگاه
+  sort_order: ترتیب نمایش
+  min_amount: حداقل مبلغ
+  max_amount: حداکثر مبلغ
+  display_settings: تنظیمات نمایش در فروشگاه
+  config:
+    card_number: شماره کارت
+    card_holder: نام صاحب کارت
+    bank_name: نام بانک
+    instructions: راهنمای پرداخت
+    merchant: مرچنت
+    sandbox: سندباکس
+    callback_base_url: آدرس پایه بازگشت
+    api_key: کلید API
+    ipn_secret: رمز IPN
+    api_base_url: آدرس API
+    payment_mode: حالت پرداخت
+    price_currency: ارز قیمت
+    pay_currency: ارز پرداخت
+    amount_unit: واحد مبلغ
+    toman_per_usd: نرخ تومان به دلار
+    success_url: آدرس موفقیت
+    cancel_url: آدرس لغو
+
+automation_settings:
+  title: تنظیمات اتوماسیون سرویس‌ها
+  subtitle: زمان‌بندی و وظایف خودکار مربوط به سرویس‌ها و سفارش‌های ناقص را مدیریت کنید.
+  sections:
+    tasks: وظایف اتوماسیون
+    execution: تنظیمات اجرا
+  fields:
+    sync_usage: فعال‌سازی همگام‌سازی مصرف
+    check_expiry: فعال‌سازی بررسی انقضا
+    send_notifications: فعال‌سازی ارسال اعلان‌ها
+    auto_suspend_expired: تعلیق خودکار سرویس‌های منقضی‌شده
+    auto_suspend_traffic_exhausted: تعلیق خودکار سرویس‌های با حجم تمام‌شده
+    expire_incomplete_orders: منقضی کردن سفارش‌های ناتمام
+    batch_limit: محدودیت پردازش در هر اجرا
+    incomplete_expire_hours: انقضای سفارش ناقص پس از چند ساعت
+
+renewal_pricing_settings:
+  title: تنظیمات تمدید و قیمت‌گذاری
+  sections:
+    renewal: تنظیمات تمدید
+    pricing: قیمت‌گذاری
+    traffic_addon: خرید حجم اضافه
+  fields:
+    carry_remaining_traffic: حفظ حجم باقی‌مانده هنگام تمدید
+    carry_remaining_days: حفظ روزهای باقی‌مانده هنگام تمدید
+    expired_start_from_now: شروع تمدید سرویس منقضی‌شده از امروز
+    global_discount_percent: درصد تخفیف سراسری
+    traffic_addon_enabled: فعال‌سازی خرید حجم اضافه
+    traffic_addon_min_gb: حداقل حجم اضافه
+    traffic_addon_max_gb: حداکثر حجم اضافه
+    traffic_addon_price_per_gb: قیمت هر گیگ حجم اضافه
+  help:
+    global_discount_percent: مقدار مجاز بین ۰ تا ۱۰۰.

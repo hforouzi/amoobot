@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Admin\UI\Crud;
 
+use App\Admin\UI\Support\AdminStatusBadge;
 use App\Entity\Payment;
 use App\Payment\Domain\PaymentStatus;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Action;
@@ -12,6 +13,7 @@ use EasyCorp\Bundle\EasyAdminBundle\Config\Crud;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Filters;
 use EasyCorp\Bundle\EasyAdminBundle\Controller\AbstractCrudController;
 use EasyCorp\Bundle\EasyAdminBundle\Field\AssociationField;
+use EasyCorp\Bundle\EasyAdminBundle\Field\ChoiceField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\DateTimeField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\IdField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\IntegerField;
@@ -36,12 +38,7 @@ class PaymentCrudController extends AbstractCrudController
     {
         return $filters
             ->add(EntityFilter::new('order'))
-            ->add(ChoiceFilter::new('status')->setChoices([
-                PaymentStatus::PENDING => PaymentStatus::PENDING,
-                PaymentStatus::SUBMITTED => PaymentStatus::SUBMITTED,
-                PaymentStatus::CONFIRMED => PaymentStatus::CONFIRMED,
-                PaymentStatus::REJECTED => PaymentStatus::REJECTED,
-            ]));
+            ->add(ChoiceFilter::new('status')->setChoices(AdminStatusBadge::choices(PaymentStatus::ALL)));
     }
 
     public function configureActions(Actions $actions): Actions
@@ -67,16 +64,18 @@ class PaymentCrudController extends AbstractCrudController
     {
         return [
             IdField::new('id')->onlyOnIndex(),
-            AssociationField::new('order'),
+            AssociationField::new('order')->setLabel('admin.orders'),
             TextField::new('order.type', 'orderType')->hideOnForm(),
             AssociationField::new('storePaymentMethod')->hideOnForm(),
-            AssociationField::new('gateway'),
-            TextField::new('method'),
-            TextField::new('gatewayType'),
-            IntegerField::new('amount'),
-            IntegerField::new('payableAmount'),
-            TextField::new('currency'),
-            TextField::new('status'),
+            AssociationField::new('gateway')->setLabel('admin.payment_gateways'),
+            TextField::new('method')->setLabel('Method'),
+            TextField::new('gatewayType')->setLabel('Gateway Type'),
+            IntegerField::new('amount')->setLabel('Amount'),
+            IntegerField::new('payableAmount')->setLabel('Payable Amount'),
+            TextField::new('currency')->setLabel('Currency'),
+            ChoiceField::new('status')
+                ->setChoices(AdminStatusBadge::choices(PaymentStatus::ALL))
+                ->renderAsBadges(AdminStatusBadge::badgeMap()),
             TextField::new('gatewayTransactionId')->hideOnIndex(),
             TextField::new('authority')->hideOnIndex(),
             TextField::new('paymentUrl')->hideOnIndex(),
@@ -86,7 +85,7 @@ class PaymentCrudController extends AbstractCrudController
             TextField::new('receiptFileId'),
             TextareaField::new('receiptMessage')->hideOnIndex(),
             TextareaField::new('adminNote')->hideOnIndex(),
-            DateTimeField::new('createdAt')->hideOnForm(),
+            DateTimeField::new('createdAt')->setLabel('common.created_at')->hideOnForm(),
             DateTimeField::new('submittedAt'),
             DateTimeField::new('confirmedAt'),
             // Crypto fields

@@ -17,4 +17,10 @@ final class PaymentGatewayType
         self::CUSTOM_API,
         self::NOWPAYMENTS,
     ];
+
+    public const SUPPORTED_MODULES = [
+        self::MANUAL_CARD,
+        self::ZIBAL,
+        self::NOWPAYMENTS,
+    ];
 }

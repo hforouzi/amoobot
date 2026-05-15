@@ -16,6 +16,7 @@ use EasyCorp\Bundle\EasyAdminBundle\Dto\EntityDto;
 use EasyCorp\Bundle\EasyAdminBundle\Dto\SearchDto;
 use EasyCorp\Bundle\EasyAdminBundle\Field\BooleanField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\DateTimeField;
+use EasyCorp\Bundle\EasyAdminBundle\Field\FormField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\IdField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\TextareaField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\TextField;
@@ -67,6 +68,7 @@ final class ZibalPaymentGatewayCrudController extends AbstractCrudController
     public function configureFields(string $pageName): iterable
     {
         return [
+            FormField::addFieldset('fieldset.general'),
             IdField::new('id')->onlyOnIndex(),
             TextField::new('title'),
             TextareaField::new('description')->hideOnIndex(),
@@ -81,6 +83,7 @@ final class ZibalPaymentGatewayCrudController extends AbstractCrudController
             TextField::new('zibalPercentMode')->setLabel('percentMode')->hideOnIndex(),
             TextField::new('zibalFeeMode')->setLabel('feeMode')->hideOnIndex(),
             TextField::new('zibalMultiplexingAccountNumber')->setLabel('multiplexingAccountNumber')->hideOnIndex(),
+            FormField::addFieldset('fieldset.metadata'),
             DateTimeField::new('createdAt')->hideOnForm(),
             DateTimeField::new('updatedAt')->hideOnForm(),
         ];

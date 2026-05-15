@@ -94,8 +94,8 @@ class VpnInboundCrudController extends AbstractCrudController
             BooleanField::new('isActive'),
             DateTimeField::new('lastAccessMetadataSyncedAt')->hideOnForm(),
             DateTimeField::new('lastSyncedAt'),
-            DateTimeField::new('createdAt')->hideOnForm(),
-            DateTimeField::new('updatedAt')->hideOnForm(),
+            DateTimeField::new('createdAt')->setLabel('common.created_at')->hideOnForm(),
+            DateTimeField::new('updatedAt')->setLabel('common.updated_at')->hideOnForm(),
         ];
     }
 }

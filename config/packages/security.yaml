@@ -17,10 +17,23 @@ security:
         main:
             lazy: true
             provider: users_in_memory
-            http_basic: ~
+            form_login:
+                login_path: admin_login
+                check_path: admin_login
+                username_parameter: _username
+                password_parameter: _password
+                enable_csrf: true
+                csrf_parameter: _csrf_token
+                csrf_token_id: authenticate
+            remember_me:
+                secret: '%env(APP_SECRET)%'
+                lifetime: 1209600
+                path: /
             logout:
                 path: /logout
-                target: /admin
+                target: /admin/login
 
     access_control:
+        - { path: ^/admin/login$, roles: PUBLIC_ACCESS }
+        - { path: ^/admin/locale/(fa|en)$, roles: PUBLIC_ACCESS }
         - { path: ^/admin, roles: ROLE_ADMIN }

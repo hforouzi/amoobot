@@ -1,7 +1,7 @@
 {% extends '@EasyAdmin/page/content.html.twig' %}
 
-{% block content_title %}Amoobot Admin{% endblock %}
+{% block content_title %}{{ 'admin.dashboard'|trans }}{% endblock %}
 
 {% block main %}
-    <p>Use the left menu to manage plans, orders, payments, services and bot logs.</p>
+    <p>{{ 'Use the left menu to manage plans, orders, payments, services and bot logs.'|trans({}, 'messages') }}</p>
 {% endblock %}
