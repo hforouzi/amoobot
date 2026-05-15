@@ -93,8 +93,67 @@ payment_gateway:
   json_config: تنظیمات JSON
   invalid_json: JSON نامعتبر است. لطفاً یک شیء JSON معتبر وارد کنید.
   install_action: افزودن درگاه پرداخت
+  install_submit: نصب درگاه
+  install_config_title: نصب درگاه پرداخت
+  install_success_title: نصب انجام شد
+  install_success_message: درگاه پرداخت با موفقیت نصب شد.
+  back_to_list: بازگشت به لیست درگاه‌ها
   add_store_method: افزودن به روش‌های پرداخت فروشگاه
+  edit_config: ویرایش تنظیمات درگاه
+  config_title: تنظیمات درگاه
   sort_order: ترتیب نمایش
   min_amount: حداقل مبلغ
   max_amount: حداکثر مبلغ
   display_settings: تنظیمات نمایش در فروشگاه
+  config:
+    card_number: شماره کارت
+    card_holder: نام صاحب کارت
+    bank_name: نام بانک
+    instructions: راهنمای پرداخت
+    merchant: مرچنت
+    sandbox: سندباکس
+    callback_base_url: آدرس پایه بازگشت
+    api_key: کلید API
+    ipn_secret: رمز IPN
+    api_base_url: آدرس API
+    payment_mode: حالت پرداخت
+    price_currency: ارز قیمت
+    pay_currency: ارز پرداخت
+    amount_unit: واحد مبلغ
+    toman_per_usd: نرخ تومان به دلار
+    success_url: آدرس موفقیت
+    cancel_url: آدرس لغو
+
+automation_settings:
+  title: تنظیمات اتوماسیون سرویس‌ها
+  subtitle: زمان‌بندی و وظایف خودکار مربوط به سرویس‌ها و سفارش‌های ناقص را مدیریت کنید.
+  sections:
+    tasks: وظایف اتوماسیون
+    execution: تنظیمات اجرا
+  fields:
+    sync_usage: فعال‌سازی همگام‌سازی مصرف
+    check_expiry: فعال‌سازی بررسی انقضا
+    send_notifications: فعال‌سازی ارسال اعلان‌ها
+    auto_suspend_expired: تعلیق خودکار سرویس‌های منقضی‌شده
+    auto_suspend_traffic_exhausted: تعلیق خودکار سرویس‌های با حجم تمام‌شده
+    expire_incomplete_orders: منقضی کردن سفارش‌های ناتمام
+    batch_limit: محدودیت پردازش در هر اجرا
+    incomplete_expire_hours: انقضای سفارش ناقص پس از چند ساعت
+
+renewal_pricing_settings:
+  title: تنظیمات تمدید و قیمت‌گذاری
+  sections:
+    renewal: تنظیمات تمدید
+    pricing: قیمت‌گذاری
+    traffic_addon: خرید حجم اضافه
+  fields:
+    carry_remaining_traffic: حفظ حجم باقی‌مانده هنگام تمدید
+    carry_remaining_days: حفظ روزهای باقی‌مانده هنگام تمدید
+    expired_start_from_now: شروع تمدید سرویس منقضی‌شده از امروز
+    global_discount_percent: درصد تخفیف سراسری
+    traffic_addon_enabled: فعال‌سازی خرید حجم اضافه
+    traffic_addon_min_gb: حداقل حجم اضافه
+    traffic_addon_max_gb: حداکثر حجم اضافه
+    traffic_addon_price_per_gb: قیمت هر گیگ حجم اضافه
+  help:
+    global_discount_percent: مقدار مجاز بین ۰ تا ۱۰۰.

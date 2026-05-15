@@ -21,7 +21,8 @@ final class PaymentGatewayModuleRegistry
      *   supportsWebhook: bool,
      *   supportsOnlinePayment: bool,
      *   defaults: array<string, mixed>,
-     *   schema: list<array{name: string, type: string, required: bool, default?: mixed, choices?: array<string, string|int>}>
+     *   schema: list<array{name: string, type: string, required: bool, default?: mixed, choices?: array<string, string|int>}>,
+     *   configSchema: list<array{name: string, type: string, required: bool, default?: mixed, choices?: array<string, string|int>}>
      * }>
      */
     private array $modules;
@@ -101,8 +102,8 @@ final class PaymentGatewayModuleRegistry
                         'required' => true,
                         'default' => 'invoice',
                         'choices' => [
-                            ['label' => 'Invoice / صفحه پرداخت', 'value' => 'invoice'],
-                            ['label' => 'Direct Payment / پرداخت مستقیم', 'value' => 'payment'],
+                            'Invoice / صفحه پرداخت' => 'invoice',
+                            'Direct Payment / پرداخت مستقیم' => 'payment',
                         ],
                     ],
                     ['name' => 'price_currency', 'type' => 'text', 'required' => true, 'default' => 'usd'],
@@ -117,7 +118,7 @@ final class PaymentGatewayModuleRegistry
                             'Rial / ریال' => 'rial',
                         ],
                     ],
-                    ['name' => 'toman_per_usd', 'type' => 'integer', 'required' => false],
+                    ['name' => 'toman_per_usd', 'type' => 'integer', 'required' => true],
                     ['name' => 'callback_base_url', 'type' => 'text', 'required' => true],
                     ['name' => 'success_url', 'type' => 'text', 'required' => false],
                     ['name' => 'cancel_url', 'type' => 'text', 'required' => false],
@@ -126,6 +127,7 @@ final class PaymentGatewayModuleRegistry
         ];
 
         $this->normalizeSchemaChoices();
+        $this->syncConfigSchemas();
     }
 
     /**
@@ -343,6 +345,13 @@ final class PaymentGatewayModuleRegistry
             }
 
             $this->modules[$moduleType]['schema'] = $schema;
+        }
+    }
+
+    private function syncConfigSchemas(): void
+    {
+        foreach ($this->modules as $moduleType => $module) {
+            $this->modules[$moduleType]['configSchema'] = is_array($module['schema'] ?? null) ? $module['schema'] : [];
         }
     }
 }

@@ -1,43 +1,67 @@
 {% extends '@EasyAdmin/page/content.html.twig' %}
+{% trans_default_domain 'admin' %}
 
-{% block content_title %}تنظیمات تمدید و قیمتگذاری{% endblock %}
+{% block content_title %}{{ 'renewal_pricing_settings.title'|trans }}{% endblock %}
 
 {% block main %}
-    <form method="post" class="content-panel">
-        <div class="mb-3 form-check">
-            <input class="form-check-input" type="checkbox" id="renewal_carry_remaining_traffic" name="renewal_carry_remaining_traffic" {% if values.renewal_carry_remaining_traffic %}checked{% endif %}>
-            <label class="form-check-label" for="renewal_carry_remaining_traffic">حفظ حجم باقیمانده هنگام تمدید</label>
+    <div class="admin-custom-page admin-settings-page">
+    <form method="post" class="admin-form-card admin-settings-form">
+        <div class="admin-section">
+            <h2>{{ 'renewal_pricing_settings.sections.renewal'|trans }}</h2>
+
+            <div class="admin-checkbox-row">
+                <input class="form-check-input" type="checkbox" id="renewal_carry_remaining_traffic" name="renewal_carry_remaining_traffic" {% if values.renewal_carry_remaining_traffic %}checked{% endif %}>
+                <label class="form-check-label" for="renewal_carry_remaining_traffic">{{ 'renewal_pricing_settings.fields.carry_remaining_traffic'|trans }}</label>
+            </div>
+            <div class="admin-checkbox-row">
+                <input class="form-check-input" type="checkbox" id="renewal_carry_remaining_days" name="renewal_carry_remaining_days" {% if values.renewal_carry_remaining_days %}checked{% endif %}>
+                <label class="form-check-label" for="renewal_carry_remaining_days">{{ 'renewal_pricing_settings.fields.carry_remaining_days'|trans }}</label>
+            </div>
+            <div class="admin-checkbox-row">
+                <input class="form-check-input" type="checkbox" id="renewal_expired_start_from_now" name="renewal_expired_start_from_now" {% if values.renewal_expired_start_from_now %}checked{% endif %}>
+                <label class="form-check-label" for="renewal_expired_start_from_now">{{ 'renewal_pricing_settings.fields.expired_start_from_now'|trans }}</label>
+            </div>
         </div>
-        <div class="mb-3 form-check">
-            <input class="form-check-input" type="checkbox" id="renewal_carry_remaining_days" name="renewal_carry_remaining_days" {% if values.renewal_carry_remaining_days %}checked{% endif %}>
-            <label class="form-check-label" for="renewal_carry_remaining_days">حفظ روزهای باقیمانده هنگام تمدید</label>
+
+        <div class="admin-section">
+            <h2>{{ 'renewal_pricing_settings.sections.pricing'|trans }}</h2>
+
+            <div class="admin-form-grid">
+                <div class="admin-form-row">
+                    <label class="form-label" for="pricing_global_discount_percent">{{ 'renewal_pricing_settings.fields.global_discount_percent'|trans }}</label>
+                    <input class="form-control" type="number" min="0" max="100" step="1" id="pricing_global_discount_percent" name="pricing_global_discount_percent" value="{{ values.pricing_global_discount_percent }}">
+                    <div class="form-text">{{ 'renewal_pricing_settings.help.global_discount_percent'|trans }}</div>
+                </div>
+            </div>
         </div>
-        <div class="mb-3 form-check">
-            <input class="form-check-input" type="checkbox" id="renewal_expired_start_from_now" name="renewal_expired_start_from_now" {% if values.renewal_expired_start_from_now %}checked{% endif %}>
-            <label class="form-check-label" for="renewal_expired_start_from_now">تمدید سرویس منقضیشده از امروز شروع شود</label>
+
+        <div class="admin-section">
+            <h2>{{ 'renewal_pricing_settings.sections.traffic_addon'|trans }}</h2>
+
+            <div class="admin-checkbox-row">
+                <input class="form-check-input" type="checkbox" id="traffic_addon_enabled" name="traffic_addon_enabled" {% if values.traffic_addon_enabled %}checked{% endif %}>
+                <label class="form-check-label" for="traffic_addon_enabled">{{ 'renewal_pricing_settings.fields.traffic_addon_enabled'|trans }}</label>
+            </div>
+
+            <div class="admin-form-grid">
+                <div class="admin-form-row">
+                    <label class="form-label" for="traffic_addon_min_gb">{{ 'renewal_pricing_settings.fields.traffic_addon_min_gb'|trans }}</label>
+                    <input class="form-control" type="number" min="1" step="1" id="traffic_addon_min_gb" name="traffic_addon_min_gb" value="{{ values.traffic_addon_min_gb }}">
+                </div>
+                <div class="admin-form-row">
+                    <label class="form-label" for="traffic_addon_max_gb">{{ 'renewal_pricing_settings.fields.traffic_addon_max_gb'|trans }}</label>
+                    <input class="form-control" type="number" min="1" step="1" id="traffic_addon_max_gb" name="traffic_addon_max_gb" value="{{ values.traffic_addon_max_gb }}">
+                </div>
+                <div class="admin-form-row">
+                    <label class="form-label" for="traffic_addon_price_per_gb">{{ 'renewal_pricing_settings.fields.traffic_addon_price_per_gb'|trans }}</label>
+                    <input class="form-control" type="number" min="0" step="1" id="traffic_addon_price_per_gb" name="traffic_addon_price_per_gb" value="{{ values.traffic_addon_price_per_gb }}">
+                </div>
+            </div>
         </div>
-        <div class="mb-3">
-            <label class="form-label" for="pricing_global_discount_percent">درصد تخفیف سراسری</label>
-            <input class="form-control" type="number" min="0" max="100" step="1" id="pricing_global_discount_percent" name="pricing_global_discount_percent" value="{{ values.pricing_global_discount_percent }}">
-            <div class="form-text">مقدار مجاز بین ۰ تا ۱۰۰.</div>
+
+        <div class="admin-actions">
+            <button type="submit" class="btn btn-primary">{{ 'common.save'|trans }}</button>
         </div>
-        <hr>
-        <div class="mb-3 form-check">
-            <input class="form-check-input" type="checkbox" id="traffic_addon_enabled" name="traffic_addon_enabled" {% if values.traffic_addon_enabled %}checked{% endif %}>
-            <label class="form-check-label" for="traffic_addon_enabled">فعال بودن خرید حجم اضافه</label>
-        </div>
-        <div class="mb-3">
-            <label class="form-label" for="traffic_addon_min_gb">حداقل حجم اضافه</label>
-            <input class="form-control" type="number" min="1" step="1" id="traffic_addon_min_gb" name="traffic_addon_min_gb" value="{{ values.traffic_addon_min_gb }}">
-        </div>
-        <div class="mb-3">
-            <label class="form-label" for="traffic_addon_max_gb">حداکثر حجم اضافه</label>
-            <input class="form-control" type="number" min="1" step="1" id="traffic_addon_max_gb" name="traffic_addon_max_gb" value="{{ values.traffic_addon_max_gb }}">
-        </div>
-        <div class="mb-3">
-            <label class="form-label" for="traffic_addon_price_per_gb">قیمت هر گیگ حجم اضافه</label>
-            <input class="form-control" type="number" min="0" step="1" id="traffic_addon_price_per_gb" name="traffic_addon_price_per_gb" value="{{ values.traffic_addon_price_per_gb }}">
-        </div>
-        <button type="submit" class="btn btn-primary">ذخیره تنظیمات</button>
     </form>
+    </div>
 {% endblock %}

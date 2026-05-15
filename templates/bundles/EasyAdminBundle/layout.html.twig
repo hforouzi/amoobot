@@ -1,11 +1,14 @@
-{% extends '@!EasyAdmin/layout.html.twig' %}
+{% extends ea() is null ? 'admin/custom_page.html.twig' : '@!EasyAdmin/layout.html.twig' %}
 
 {% block settings_dropdown_wrapper %}
     <div class="admin-locale-switcher">
-        <a href="{{ path('admin_locale_switch', {locale: 'fa', redirect_to: app.request.uri}) }}" class="{{ app.request.locale starts with 'fa' ? 'active' : '' }}">فارسی</a>
+        {% set currentLocale = app.request.locale|default('fa') %}
+        <a href="{{ path('admin_locale_switch', {locale: 'fa', redirect_to: app.request.uri}) }}" class="{{ currentLocale starts with 'fa' ? 'active' : '' }}">فارسی</a>
         <span aria-hidden="true">|</span>
-        <a href="{{ path('admin_locale_switch', {locale: 'en', redirect_to: app.request.uri}) }}" class="{{ app.request.locale starts with 'en' ? 'active' : '' }}">English</a>
+        <a href="{{ path('admin_locale_switch', {locale: 'en', redirect_to: app.request.uri}) }}" class="{{ currentLocale starts with 'en' ? 'active' : '' }}">English</a>
     </div>
 
-    {{ parent() }}
+    {% if ea() is not null %}
+        {{ parent() }}
+    {% endif %}
 {% endblock %}

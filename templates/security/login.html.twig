@@ -4,21 +4,21 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ 'login.title'|trans }}</title>
-    <link rel="stylesheet" href="{{ asset('admin.css') }}">
+    <link rel="stylesheet" href="{{ asset('assets/admin/admin.css') }}">
 </head>
-<body class="admin-login-page">
+<body class="admin-login-page login-page">
     <div class="admin-login-wrapper">
-        <div class="admin-login-locale-switcher" aria-label="{{ 'login.language'|trans }}">
+        <div class="admin-login-locale-switcher login-language-switcher" aria-label="{{ 'login.language'|trans }}">
             <span>{{ 'login.language'|trans }}:</span>
             <a href="{{ path('admin_locale_switch', {locale: 'fa', redirect_to: app.request.uri}) }}" class="{{ app.request.locale starts with 'fa' ? 'active' : '' }}">فارسی</a>
             <span aria-hidden="true">|</span>
             <a href="{{ path('admin_locale_switch', {locale: 'en', redirect_to: app.request.uri}) }}" class="{{ app.request.locale starts with 'en' ? 'active' : '' }}">English</a>
         </div>
 
-        <div class="admin-login-card">
+        <div class="admin-login-card login-card">
             <div class="admin-login-brand">Amoobot</div>
-            <h1>{{ 'login.title'|trans }}</h1>
-            <p>{{ 'login.subtitle'|trans }}</p>
+            <h1 class="login-title">{{ 'login.title'|trans }}</h1>
+            <p class="login-subtitle">{{ 'login.subtitle'|trans }}</p>
 
             {% if error %}
                 <div class="admin-login-error">{{ 'login.invalid_credentials'|trans }}</div>

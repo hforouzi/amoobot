@@ -93,8 +93,67 @@ payment_gateway:
   json_config: JSON Configuration
   invalid_json: Invalid JSON. Enter a valid JSON object.
   install_action: Add Payment Gateway
+  install_submit: Install Gateway
+  install_config_title: Install Payment Gateway
+  install_success_title: Installation Complete
+  install_success_message: Payment gateway was installed successfully.
+  back_to_list: Back to gateway list
   add_store_method: Add to Store Payment Methods
+  edit_config: Edit Gateway Config
+  config_title: Gateway Config
   sort_order: Sort Order
   min_amount: Min Amount
   max_amount: Max Amount
   display_settings: Store Display Settings
+  config:
+    card_number: Card Number
+    card_holder: Card Holder
+    bank_name: Bank Name
+    instructions: Payment Instructions
+    merchant: Merchant
+    sandbox: Sandbox
+    callback_base_url: Callback Base URL
+    api_key: API Key
+    ipn_secret: IPN Secret
+    api_base_url: API Base URL
+    payment_mode: Payment Mode
+    price_currency: Price Currency
+    pay_currency: Pay Currency
+    amount_unit: Amount Unit
+    toman_per_usd: Toman per USD
+    success_url: Success URL
+    cancel_url: Cancel URL
+
+automation_settings:
+  title: Service Automation Settings
+  subtitle: Manage automated service jobs and incomplete order expiration.
+  sections:
+    tasks: Automation Tasks
+    execution: Execution Settings
+  fields:
+    sync_usage: Enable usage sync
+    check_expiry: Enable expiry check
+    send_notifications: Enable notifications
+    auto_suspend_expired: Auto suspend expired services
+    auto_suspend_traffic_exhausted: Auto suspend traffic exhausted services
+    expire_incomplete_orders: Expire incomplete orders
+    batch_limit: Batch limit
+    incomplete_expire_hours: Incomplete order expiry hours
+
+renewal_pricing_settings:
+  title: Renewal & Pricing Settings
+  sections:
+    renewal: Renewal Settings
+    pricing: Pricing
+    traffic_addon: Traffic Add-on
+  fields:
+    carry_remaining_traffic: Carry remaining traffic on renewal
+    carry_remaining_days: Carry remaining days on renewal
+    expired_start_from_now: Start expired service renewal from today
+    global_discount_percent: Global discount percent
+    traffic_addon_enabled: Enable traffic add-on purchase
+    traffic_addon_min_gb: Minimum add-on traffic
+    traffic_addon_max_gb: Maximum add-on traffic
+    traffic_addon_price_per_gb: Price per GB of add-on traffic
+  help:
+    global_discount_percent: Allowed value is 0 to 100.
