@@ -8,6 +8,7 @@ use App\Admin\UI\DashboardController;
 use App\Admin\UI\Support\AdminJsonFormatter;
 use App\Admin\UI\Support\AdminStatusBadge;
 use App\Entity\Plugin;
+use App\Plugin\PaymentPluginDoctor;
 use App\Plugin\PluginManager;
 use Doctrine\ORM\EntityManagerInterface;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Action;
@@ -31,6 +32,7 @@ final class PluginCrudController extends AbstractCrudController
 {
     public function __construct(
         private readonly PluginManager $pluginManager,
+        private readonly PaymentPluginDoctor $pluginDoctor,
         private readonly AdminUrlGeneratorInterface $adminUrlGenerator,
         private readonly EntityManagerInterface $entityManager,
     ) {
@@ -97,7 +99,20 @@ final class PluginCrudController extends AbstractCrudController
             TextField::new('permissionsSummary', 'plugin.permissions')
                 ->onlyOnIndex(),
             TextField::new('path', 'plugin.path')->hideOnIndex(),
-            TextField::new('mainClass', 'plugin.main_class')->hideOnIndex(),
+            TextField::new('mainClass', 'plugin.main_class')
+                ->formatValue(function (mixed $value, Plugin $plugin): string {
+                    $doctor = $this->pluginDoctor->inspect($plugin);
+
+                    return sprintf(
+                        '%s<br><span class="text-muted">Doctor: %s | Interface: %s | Config schema: %s</span>',
+                        htmlspecialchars((string) $value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'),
+                        $doctor->ok() ? 'OK' : 'ERROR',
+                        $doctor->implementsInterface ? 'yes' : 'no',
+                        $doctor->configSchemaValid ? 'yes' : 'no'
+                    );
+                })
+                ->renderAsHtml()
+                ->hideOnIndex(),
             TextField::new('permissionsBadges', 'plugin.permissions')
                 ->renderAsHtml()
                 ->onlyOnDetail()
@@ -107,7 +122,14 @@ final class PluginCrudController extends AbstractCrudController
                 ->renderAsHtml()
                 ->onlyOnDetail()
                 ->hideOnForm(),
-            TextareaField::new('errorMessage', 'plugin.error_message')->hideOnIndex(),
+            TextareaField::new('errorMessage', 'plugin.error_message')
+                ->formatValue(function (mixed $value, Plugin $plugin): string {
+                    $doctor = $this->pluginDoctor->inspect($plugin);
+                    $errors = [] === $doctor->errors ? '-' : implode("\n", $doctor->errors);
+
+                    return trim((string) $value."\n".$errors);
+                })
+                ->hideOnIndex(),
             DateTimeField::new('installedAt', 'plugin.installed_at'),
             DateTimeField::new('enabledAt', 'plugin.enabled_at'),
             DateTimeField::new('disabledAt', 'plugin.disabled_at')->hideOnIndex(),

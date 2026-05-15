@@ -6,6 +6,7 @@ namespace App\Command;
 
 use App\Plugin\PluginManager;
 use App\Plugin\PluginRegistry;
+use App\Entity\Plugin;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputArgument;
@@ -39,6 +40,12 @@ final class PluginEnableCommand extends Command
         }
 
         $this->pluginManager->enable($plugin);
+        if (Plugin::STATUS_ERROR === $plugin->getStatus()) {
+            $io->error(sprintf('Plugin %s failed validation: %s', $plugin->getCode(), (string) $plugin->getErrorMessage()));
+
+            return Command::FAILURE;
+        }
+
         $io->success(sprintf('Plugin %s enabled.', $plugin->getCode()));
 
         return Command::SUCCESS;

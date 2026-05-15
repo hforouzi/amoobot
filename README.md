@@ -1211,6 +1211,45 @@ php bin/console app:payment:test-plugin-gateway {gatewayId}
 
 For a clean development reinstall, disable the plugin, delete its `plugin` table row, and remove `var/plugins/novinopay`, or test with a bumped plugin code.
 
+### SwapWallet Payment Gateway Plugin
+
+Source path:
+
+```text
+docs/plugins/swapwallet-gateway
+```
+
+Build ZIP:
+
+```bash
+cd docs/plugins/swapwallet-gateway
+zip -r /tmp/swapwallet-gateway.zip plugin.json README.md src
+```
+
+Install and enable:
+
+```bash
+php bin/console app:plugin:install /tmp/swapwallet-gateway.zip
+php bin/console app:plugin:enable swapwallet
+php bin/console app:payment:list-modules
+```
+
+Admin setup:
+- Open Admin -> Payment Gateways -> Add Payment Gateway.
+- Install `swapwallet`.
+- Configure `api_key`, `api_base_url`, `callback_base_url`, `payment_mode`, `price_currency`, `amount_unit`, and `toman_per_usd`.
+- Create an active `StorePaymentMethod` for the created gateway if it should appear in bot payment selection.
+
+SwapWallet uses Bearer API-key authentication from the official docs. Invoice mode is recommended because it returns a hosted payment link. Direct mode is available for deployments that already display direct crypto payment details.
+
+Driver loading test:
+
+```bash
+php bin/console app:payment:test-plugin-gateway {gatewayId}
+```
+
+The plugin does not process provisioning and does not call `PaymentApprovalService`; it only returns payment bridge DTOs.
+
 Security notes:
 - Only install trusted plugins.
 - Plugin ZIPs are extracted under `var/plugins/{code}`.

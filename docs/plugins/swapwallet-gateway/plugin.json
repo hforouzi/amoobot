@@ -1,0 +1,178 @@
+{
+  "manifestVersion": 1,
+  "type": "payment_gateway",
+  "code": "swapwallet",
+  "name": {
+    "fa": "سواپ‌ولت",
+    "en": "SwapWallet"
+  },
+  "version": "1.0.0",
+  "description": {
+    "fa": "درگاه پرداخت ارز دیجیتال SwapWallet برای آموبات.",
+    "en": "SwapWallet crypto payment gateway for Amoobot."
+  },
+  "mainClass": "Amoobot\\Plugin\\SwapWallet\\SwapWalletGatewayPlugin",
+  "category": "crypto",
+  "permissions": [
+    "payment.create",
+    "payment.verify",
+    "payment.webhook",
+    "http.outbound"
+  ],
+  "supportsWebhook": true,
+  "supportsOnlinePayment": true,
+  "supportsManualConfirmation": false,
+  "configSchema": [
+    {
+      "key": "api_key",
+      "type": "password",
+      "required": true,
+      "label": {
+        "fa": "کلید API",
+        "en": "API Key"
+      }
+    },
+    {
+      "key": "api_secret",
+      "type": "password",
+      "required": false,
+      "label": {
+        "fa": "API Secret",
+        "en": "API Secret"
+      }
+    },
+    {
+      "key": "webhook_secret",
+      "type": "password",
+      "required": false,
+      "label": {
+        "fa": "کلید امنیتی Webhook",
+        "en": "Webhook Secret"
+      }
+    },
+    {
+      "key": "api_base_url",
+      "type": "url",
+      "required": true,
+      "default": "https://api.swapwallet.app",
+      "label": {
+        "fa": "آدرس پایه API",
+        "en": "API Base URL"
+      }
+    },
+    {
+      "key": "callback_base_url",
+      "type": "url",
+      "required": true,
+      "label": {
+        "fa": "آدرس پایه Callback/Webhook",
+        "en": "Callback/Webhook Base URL"
+      }
+    },
+    {
+      "key": "payment_mode",
+      "type": "choice",
+      "required": true,
+      "default": "invoice",
+      "label": {
+        "fa": "حالت پرداخت",
+        "en": "Payment Mode"
+      },
+      "choices": {
+        "صفحه پرداخت / Invoice": "invoice",
+        "پرداخت مستقیم / Direct": "direct"
+      }
+    },
+    {
+      "key": "price_currency",
+      "type": "text",
+      "required": true,
+      "default": "USD",
+      "label": {
+        "fa": "ارز قیمت",
+        "en": "Price Currency"
+      }
+    },
+    {
+      "key": "pay_currency",
+      "type": "text",
+      "required": false,
+      "default": "USDT",
+      "label": {
+        "fa": "ارز پرداخت",
+        "en": "Pay Currency"
+      }
+    },
+    {
+      "key": "network",
+      "type": "text",
+      "required": false,
+      "default": "TRC20",
+      "label": {
+        "fa": "شبکه",
+        "en": "Network"
+      }
+    },
+    {
+      "key": "amount_unit",
+      "type": "choice",
+      "required": true,
+      "default": "toman",
+      "label": {
+        "fa": "واحد مبلغ فروشگاه",
+        "en": "Store Amount Unit"
+      },
+      "choices": {
+        "تومان": "toman",
+        "ریال": "rial"
+      }
+    },
+    {
+      "key": "toman_per_usd",
+      "type": "integer",
+      "required": true,
+      "label": {
+        "fa": "نرخ تومان به دلار",
+        "en": "Toman per USD"
+      }
+    },
+    {
+      "key": "rate_margin_percent",
+      "type": "number",
+      "required": false,
+      "default": 0,
+      "label": {
+        "fa": "درصد حاشیه نرخ",
+        "en": "Rate Margin Percent"
+      }
+    },
+    {
+      "key": "success_url",
+      "type": "url",
+      "required": false,
+      "label": {
+        "fa": "آدرس موفقیت",
+        "en": "Success URL"
+      }
+    },
+    {
+      "key": "cancel_url",
+      "type": "url",
+      "required": false,
+      "label": {
+        "fa": "آدرس لغو",
+        "en": "Cancel URL"
+      }
+    },
+    {
+      "key": "description",
+      "type": "text",
+      "required": false,
+      "default": "Amoobot crypto payment",
+      "label": {
+        "fa": "توضیحات پرداخت",
+        "en": "Payment Description"
+      }
+    }
+  ]
+}

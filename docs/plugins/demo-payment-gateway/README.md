@@ -25,7 +25,14 @@ The ZIP root must contain `plugin.json`, `README.md`, and `src/DemoPaymentGatewa
 ```bash
 php bin/console app:plugin:install /tmp/demo-payment-gateway.zip
 php bin/console app:plugin:enable demo_payment_gateway
+php bin/console app:plugin:doctor demo_payment_gateway
 php bin/console app:payment:list-modules
+```
+
+Validate the ZIP before installing it:
+
+```bash
+php bin/console app:plugin:validate-package /tmp/demo-payment-gateway.zip
 ```
 
 Then install `demo_payment_gateway` from Admin -> Payment Gateways -> Add Payment Gateway.

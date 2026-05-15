@@ -1,0 +1,52 @@
+{
+  "manifestVersion": 1,
+  "type": "payment_gateway",
+  "code": "your_gateway_code",
+  "name": {
+    "en": "Your Gateway"
+  },
+  "version": "1.0.0",
+  "description": {
+    "en": "Installable payment gateway plugin for Amoobot."
+  },
+  "mainClass": "Amoobot\\Plugin\\YourGateway\\GatewayPlugin",
+  "category": "payment",
+  "permissions": [
+    "payment.create",
+    "payment.verify"
+  ],
+  "supportsWebhook": false,
+  "supportsOnlinePayment": true,
+  "supportsManualConfirmation": false,
+  "configSchema": [
+    {
+      "key": "api_key",
+      "type": "password",
+      "required": true,
+      "label": {
+        "en": "API Key"
+      }
+    },
+    {
+      "key": "callback_base_url",
+      "type": "url",
+      "required": true,
+      "label": {
+        "en": "Callback Base URL"
+      }
+    },
+    {
+      "key": "mode",
+      "type": "choice",
+      "required": false,
+      "default": "live",
+      "label": {
+        "en": "Mode"
+      },
+      "choices": {
+        "Live": "live",
+        "Sandbox": "sandbox"
+      }
+    }
+  ]
+}

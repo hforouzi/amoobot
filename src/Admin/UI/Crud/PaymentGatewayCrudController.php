@@ -10,6 +10,9 @@ use App\Admin\UI\Support\AdminStatusBadge;
 use App\Entity\PaymentGateway;
 use App\Entity\StorePaymentMethod;
 use App\Payment\Application\PaymentGatewayModuleRegistry;
+use App\Payment\Plugin\PluginConfigSchemaValidator;
+use App\Plugin\PaymentPluginDoctor;
+use App\Plugin\PluginRegistry;
 use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\ORM\QueryBuilder;
 use EasyCorp\Bundle\EasyAdminBundle\Collection\FieldCollection;
@@ -48,6 +51,9 @@ final class PaymentGatewayCrudController extends AbstractCrudController
         private readonly PaymentGatewayModuleRegistry $moduleRegistry,
         private readonly AdminUrlGeneratorInterface $adminUrlGenerator,
         private readonly EntityManagerInterface $entityManager,
+        private readonly PluginRegistry $pluginRegistry,
+        private readonly PaymentPluginDoctor $pluginDoctor,
+        private readonly PluginConfigSchemaValidator $schemaValidator,
     ) {
     }
 
@@ -140,6 +146,27 @@ final class PaymentGatewayCrudController extends AbstractCrudController
                 ->formatValue(fn (mixed $value): string => $this->moduleRegistry->displayName((string) $value))
                 ->setHelp('payment_gateway.type_help'),
             TextField::new('pluginCode', 'payment_gateway.plugin_code')
+                ->formatValue(function (mixed $value, PaymentGateway $gateway): string {
+                    $pluginCode = trim((string) $value);
+                    if ('' === $pluginCode) {
+                        return '';
+                    }
+
+                    $plugin = $this->pluginRegistry->findByCode($pluginCode);
+                    $doctor = $this->pluginDoctor->inspect($plugin);
+                    $missing = $plugin instanceof \App\Entity\Plugin
+                        ? $this->schemaValidator->missingRequiredKeys($plugin->getManifest()['configSchema'] ?? [], $gateway->getConfig())
+                        : [];
+
+                    return sprintf(
+                        '%s<br><span class="text-muted">Plugin status: %s | Driver available: %s | Missing config: %s</span>',
+                        htmlspecialchars($pluginCode, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'),
+                        null === $plugin ? 'missing' : $plugin->getStatus(),
+                        $doctor->ok() ? 'yes' : 'no',
+                        [] === $missing ? '-' : htmlspecialchars(implode(', ', $missing), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8')
+                    );
+                })
+                ->renderAsHtml()
                 ->hideOnForm()
                 ->hideOnIndex(),
             $configuredField,

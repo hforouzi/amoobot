@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Plugin;
 
 use App\Entity\Plugin;
+use App\Payment\Plugin\PluginConfigSchemaValidator;
 use Doctrine\ORM\EntityManagerInterface;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\File\UploadedFile;
@@ -24,6 +25,8 @@ final class PluginManager
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
         private readonly LoggerInterface $logger,
+        private readonly PaymentPluginDoctor $doctor,
+        private readonly PluginConfigSchemaValidator $schemaValidator,
         private readonly string $projectDir,
         private readonly int $maxUploadBytes = self::MAX_UPLOAD_BYTES,
     ) {
@@ -33,11 +36,14 @@ final class PluginManager
     {
         $sourcePath = $zipPath instanceof UploadedFile ? $zipPath->getPathname() : $zipPath;
         $tmpDir = null;
+        $cleanupDir = null;
 
         try {
             $this->validateZipSource($zipPath);
             $tmpDir = $this->createTempDir();
+            $cleanupDir = $tmpDir;
             $this->extractZipSafely($sourcePath, $tmpDir);
+            $tmpDir = $this->normalizeExtractedRoot($tmpDir);
 
             $manifestPath = $tmpDir.\DIRECTORY_SEPARATOR.'plugin.json';
             if (!is_file($manifestPath)) {
@@ -48,6 +54,10 @@ final class PluginManager
             $validation = $this->validateManifest($manifest);
             if (!$validation->valid) {
                 throw new PluginInstallException($validation->message());
+            }
+            $schemaValidation = $this->schemaValidator->validate($manifest['configSchema'] ?? []);
+            if (!$schemaValidation->valid) {
+                throw new PluginInstallException($schemaValidation->message());
             }
 
             $code = (string) $manifest['code'];
@@ -82,20 +92,32 @@ final class PluginManager
                 ->setCreatedAt($now)
                 ->setUpdatedAt($now);
 
+            if (Plugin::TYPE_PAYMENT_GATEWAY === $plugin->getType()) {
+                $doctor = $this->doctor->inspect($plugin);
+                if (!$doctor->ok()) {
+                    $plugin
+                        ->setStatus(Plugin::STATUS_ERROR)
+                        ->setErrorMessage($doctor->errorMessage());
+                }
+            }
+
             $this->entityManager->persist($plugin);
             $this->entityManager->flush();
+            if (null !== $cleanupDir && is_dir($cleanupDir)) {
+                $this->removeDirectory($cleanupDir);
+            }
 
             return PluginInstallResult::success($plugin);
         } catch (PluginInstallException $exception) {
-            if (null !== $tmpDir) {
-                $this->removeDirectory($tmpDir);
+            if (null !== $cleanupDir) {
+                $this->removeDirectory($cleanupDir);
             }
             $this->logger->warning('Plugin installation rejected: '.$exception->getMessage());
 
             return PluginInstallResult::failure($exception->getMessage());
         } catch (\Throwable $exception) {
-            if (null !== $tmpDir) {
-                $this->removeDirectory($tmpDir);
+            if (null !== $cleanupDir) {
+                $this->removeDirectory($cleanupDir);
             }
             $this->logger->error('Plugin installation failed: '.$exception->getMessage());
 
@@ -142,6 +164,19 @@ final class PluginManager
 
     public function enable(Plugin $plugin): void
     {
+        if (Plugin::TYPE_PAYMENT_GATEWAY === $plugin->getType()) {
+            $doctor = $this->doctor->inspect($plugin);
+            if (!$doctor->ok()) {
+                $plugin
+                    ->setStatus(Plugin::STATUS_ERROR)
+                    ->setErrorMessage($doctor->errorMessage())
+                    ->setUpdatedAt(new \DateTimeImmutable());
+                $this->entityManager->flush();
+
+                return;
+            }
+        }
+
         $plugin
             ->setStatus(Plugin::STATUS_ENABLED)
             ->setEnabledAt(new \DateTimeImmutable())
@@ -238,6 +273,9 @@ final class PluginManager
                 if (!is_string($name) || !$this->isSafeArchivePath($name)) {
                     throw new PluginInstallException('Plugin ZIP contains an unsafe path.');
                 }
+                if ($this->isIgnoredArchivePath($name)) {
+                    continue;
+                }
                 if (!$this->isAllowedPluginPath($name)) {
                     throw new PluginInstallException('Plugin ZIP contains a disallowed path: '.$name);
                 }
@@ -271,6 +309,10 @@ final class PluginManager
             return true;
         }
 
+        if ($this->isIgnoredArchivePath($normalized)) {
+            return true;
+        }
+
         $parts = explode('/', $normalized);
         if (array_intersect($parts, ['.git', 'vendor', 'public', 'var', 'cache'])) {
             return false;
@@ -281,7 +323,46 @@ final class PluginManager
             return 1 === count($parts);
         }
 
-        return in_array($root, self::ALLOWED_ROOTS, true);
+        if (in_array($root, self::ALLOWED_ROOTS, true)) {
+            return true;
+        }
+
+        if (count($parts) >= 2) {
+            $nestedRoot = $parts[1];
+            if ('plugin.json' === $nestedRoot || 'README.md' === $nestedRoot) {
+                return 2 === count($parts);
+            }
+
+            return in_array($nestedRoot, self::ALLOWED_ROOTS, true);
+        }
+
+        return false;
+    }
+
+    private function isIgnoredArchivePath(string $path): bool
+    {
+        $normalized = trim(str_replace('\\', '/', $path), '/');
+        $basename = basename($normalized);
+
+        return '' === $normalized
+            || '__MACOSX' === $normalized
+            || str_starts_with($normalized, '__MACOSX/')
+            || '.DS_Store' === $basename
+            || str_starts_with($basename, '._');
+    }
+
+    private function normalizeExtractedRoot(string $tmpDir): string
+    {
+        if (is_file($tmpDir.\DIRECTORY_SEPARATOR.'plugin.json')) {
+            return $tmpDir;
+        }
+
+        $entries = array_values(array_filter(scandir($tmpDir) ?: [], fn (string $entry): bool => !in_array($entry, ['.', '..', '__MACOSX', '.DS_Store'], true) && !str_starts_with($entry, '._')));
+        if (1 === count($entries) && is_dir($tmpDir.\DIRECTORY_SEPARATOR.$entries[0])) {
+            return $tmpDir.\DIRECTORY_SEPARATOR.$entries[0];
+        }
+
+        return $tmpDir;
     }
 
     /**

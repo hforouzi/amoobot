@@ -9,6 +9,8 @@ use App\Entity\PaymentGateway;
 use App\Entity\Plugin;
 use App\Payment\Domain\PaymentGatewayType;
 use App\Payment\Infrastructure\PaymentGatewayRegistry;
+use App\Payment\Plugin\PluginConfigSchemaValidator;
+use App\Plugin\PaymentPluginDoctor;
 use App\Plugin\PluginRegistry;
 
 final class PaymentGatewayModuleRegistry
@@ -33,6 +35,8 @@ final class PaymentGatewayModuleRegistry
         private readonly PaymentGatewayRegistry $gatewayRegistry,
         private readonly ConfigSchemaChoiceNormalizer $choiceNormalizer,
         private readonly PluginRegistry $pluginRegistry,
+        private readonly PaymentPluginDoctor $pluginDoctor,
+        private readonly PluginConfigSchemaValidator $schemaValidator,
     ) {
         $this->modules = [
             PaymentGatewayType::MANUAL_CARD => [
@@ -218,13 +222,7 @@ final class PaymentGatewayModuleRegistry
     {
         $required = [];
         $modules = $this->modules + $this->pluginModulesByType();
-        foreach ((array) ($modules[$type]['schema'] ?? []) as $field) {
-            if (true === ($field['required'] ?? false)) {
-                $required[] = (string) ($field['name'] ?? $field['key'] ?? '');
-            }
-        }
-
-        return array_values(array_filter($required, static fn (string $name): bool => '' !== $name));
+        return $this->schemaValidator->requiredKeys($modules[$type]['schema'] ?? []);
     }
 
     public function exampleJson(?string $type = null): string
@@ -384,8 +382,12 @@ final class PaymentGatewayModuleRegistry
     {
         $modules = [];
         foreach ($this->pluginRegistry->paymentGatewayPlugins() as $plugin) {
+            $doctor = $this->pluginDoctor->inspect($plugin);
+            if (!$doctor->ok()) {
+                continue;
+            }
             $manifest = $plugin->getManifest();
-            $schema = $this->normalizePluginSchema(is_array($manifest['configSchema'] ?? null) ? $manifest['configSchema'] : []);
+            $schema = $this->schemaValidator->normalize($manifest['configSchema'] ?? []);
             $description = $plugin->getDescription();
             $modules[$plugin->getCode()] = [
                 'type' => $plugin->getCode(),
@@ -400,7 +402,7 @@ final class PaymentGatewayModuleRegistry
                 'source' => 'plugin',
                 'isPlugin' => true,
                 'version' => $plugin->getVersion(),
-                'defaults' => $this->defaultsFromSchema($schema),
+                'defaults' => $this->schemaValidator->defaultConfig($schema),
                 'schema' => $schema,
                 'configSchema' => $schema,
                 'permissions' => is_array($plugin->getPermissions()) ? $plugin->getPermissions() : [],
@@ -413,66 +415,6 @@ final class PaymentGatewayModuleRegistry
         return $modules;
     }
 
-    /**
-     * @param list<array<string, mixed>> $schema
-     *
-     * @return list<array<string, mixed>>
-     */
-    private function normalizePluginSchema(array $schema): array
-    {
-        $normalized = [];
-        foreach ($schema as $field) {
-            if (!is_array($field)) {
-                continue;
-            }
-
-            $name = trim((string) ($field['name'] ?? $field['key'] ?? ''));
-            if ('' === $name) {
-                continue;
-            }
-
-            $type = strtolower(trim((string) ($field['type'] ?? 'text')));
-            if (!in_array($type, ['text', 'password', 'textarea', 'boolean', 'number', 'integer', 'url', 'choice'], true)) {
-                $type = 'text';
-            }
-
-            $normalizedField = $field;
-            $normalizedField['name'] = $name;
-            $normalizedField['type'] = $type;
-            $normalizedField['required'] = true === ($field['required'] ?? false);
-            unset($normalizedField['key']);
-
-            if ('choice' === $type) {
-                $normalizedField['choices'] = $this->choiceNormalizer->normalize(
-                    is_array($field['choices'] ?? null) ? $field['choices'] : [],
-                    $name
-                );
-            }
-
-            $normalized[] = $normalizedField;
-        }
-
-        return $normalized;
-    }
-
-    /**
-     * @param list<array<string, mixed>> $schema
-     *
-     * @return array<string, mixed>
-     */
-    private function defaultsFromSchema(array $schema): array
-    {
-        $defaults = [];
-        foreach ($schema as $field) {
-            $name = (string) ($field['name'] ?? '');
-            if ('' !== $name && array_key_exists('default', $field)) {
-                $defaults[$name] = $field['default'];
-            }
-        }
-
-        return $defaults;
-    }
-
     private function isPluginGatewayConfigured(PaymentGateway $gateway): bool
     {
         $module = $this->pluginModulesByType()[$gateway->getType()] ?? null;
@@ -480,23 +422,6 @@ final class PaymentGatewayModuleRegistry
             return false;
         }
 
-        $config = is_array($gateway->getConfig()) ? $gateway->getConfig() : [];
-        foreach ((array) ($module['configSchema'] ?? []) as $field) {
-            if (!is_array($field) || true !== ($field['required'] ?? false)) {
-                continue;
-            }
-
-            $name = (string) ($field['name'] ?? '');
-            if ('' === $name) {
-                continue;
-            }
-
-            $value = $config[$name] ?? null;
-            if (null === $value || '' === trim((string) $value)) {
-                return false;
-            }
-        }
-
-        return true;
+        return $this->schemaValidator->isConfigured($module['configSchema'] ?? [], $gateway->getConfig());
     }
 }

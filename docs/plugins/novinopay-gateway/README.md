@@ -42,7 +42,14 @@ The ZIP root must contain `plugin.json`, `README.md`, and `src/NovinoPayGatewayP
 ```bash
 php bin/console app:plugin:install /tmp/novinopay-gateway.zip
 php bin/console app:plugin:enable novinopay
+php bin/console app:plugin:doctor novinopay
 php bin/console app:payment:list-modules
+```
+
+Validate the ZIP before installing it:
+
+```bash
+php bin/console app:plugin:validate-package /tmp/novinopay-gateway.zip
 ```
 
 After enabling, open Admin -> Payment Gateways -> Add Payment Gateway and install the `NovinoPay` module.
