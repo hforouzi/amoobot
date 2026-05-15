@@ -26,12 +26,38 @@ final class PluginAutoloader
 
     public function namespaceFor(Plugin $plugin): string
     {
+        $mainClass = trim((string) $plugin->getMainClass());
+        $lastSeparator = strrpos($mainClass, '\\');
+        if (false !== $lastSeparator) {
+            return substr($mainClass, 0, $lastSeparator + 1);
+        }
+
         return 'Amoobot\\Plugin\\'.$this->studlyCode($plugin->getCode()).'\\';
     }
 
     public function sourcePathFor(Plugin $plugin): string
     {
-        return $this->projectDir.\DIRECTORY_SEPARATOR.$plugin->getPath().\DIRECTORY_SEPARATOR.'src';
+        $path = $plugin->getPath();
+        if (str_starts_with($path, \DIRECTORY_SEPARATOR) || preg_match('/^[A-Za-z]:[\\\\\/]/', $path)) {
+            return $path.\DIRECTORY_SEPARATOR.'src';
+        }
+
+        return $this->projectDir.\DIRECTORY_SEPARATOR.$path.\DIRECTORY_SEPARATOR.'src';
+    }
+
+    public function expectedFilePathFor(Plugin $plugin): string
+    {
+        $mainClass = trim((string) $plugin->getMainClass());
+        $namespace = $this->namespaceFor($plugin);
+        $sourcePath = $this->sourcePathFor($plugin);
+
+        if ('' === $mainClass || !str_starts_with($mainClass, $namespace)) {
+            return $sourcePath;
+        }
+
+        $relative = substr($mainClass, strlen($namespace));
+
+        return $sourcePath.\DIRECTORY_SEPARATOR.str_replace('\\', \DIRECTORY_SEPARATOR, $relative).'.php';
     }
 
     public function register(Plugin $plugin): void

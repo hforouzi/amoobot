@@ -5,9 +5,13 @@ declare(strict_types=1);
 namespace App\Command;
 
 use App\Entity\PaymentGateway;
+use App\Entity\Plugin;
 use App\Payment\Application\PaymentGatewayModuleRegistry;
 use App\Payment\Infrastructure\PaymentGatewayRegistry;
+use App\Payment\Plugin\PluginConfigSchemaValidator;
 use App\Payment\Plugin\PluginPaymentGatewayDriverAdapter;
+use App\Plugin\PaymentPluginDoctor;
+use App\Plugin\PluginRegistry;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
@@ -23,6 +27,9 @@ final class PaymentTestPluginGatewayCommand extends Command
         private readonly EntityManagerInterface $entityManager,
         private readonly PaymentGatewayRegistry $paymentGatewayRegistry,
         private readonly PaymentGatewayModuleRegistry $moduleRegistry,
+        private readonly PluginRegistry $pluginRegistry,
+        private readonly PaymentPluginDoctor $pluginDoctor,
+        private readonly PluginConfigSchemaValidator $schemaValidator,
     ) {
         parent::__construct();
     }
@@ -48,6 +55,30 @@ final class PaymentTestPluginGatewayCommand extends Command
             return Command::FAILURE;
         }
 
+        $pluginCode = trim((string) ($gateway->getPluginCode() ?? $gateway->getType()));
+        $plugin = '' !== $pluginCode ? $this->pluginRegistry->findByCode($pluginCode) : null;
+        $doctor = $this->pluginDoctor->inspect($plugin);
+        $missingConfigKeys = $this->schemaValidator->missingRequiredKeys($plugin instanceof Plugin ? ($plugin->getManifest()['configSchema'] ?? []) : [], $gateway->getConfig());
+        $io->section('Plugin gateway diagnostics');
+        $io->table(['field', 'value'], [
+            ['gateway id', (string) ($gateway->getId() ?? '')],
+            ['gateway type', $gateway->getType()],
+            ['pluginCode', (string) $gateway->getPluginCode()],
+            ['plugin found', $doctor->pluginFound ? 'yes' : 'no'],
+            ['plugin status', $doctor->status ?? '-'],
+            ['plugin path', $doctor->path],
+            ['manifest mainClass', $doctor->mainClass],
+            ['namespace prefix', $doctor->namespacePrefix],
+            ['expected file path', $doctor->classFileCandidate],
+            ['class_exists', $doctor->classExists ? 'yes' : 'no'],
+            ['interface FQCN expected', $doctor->expectedInterface],
+            ['implements PaymentGatewayPluginInterface', $doctor->implementsInterface ? 'yes' : 'no'],
+            ['configSchema valid', $doctor->configSchemaValid ? 'yes' : 'no'],
+            ['configured', $this->moduleRegistry->isConfigured($gateway) ? 'yes' : 'no'],
+            ['missing config keys', [] === $missingConfigKeys ? '-' : implode(', ', $missingConfigKeys)],
+            ['errors', [] === $doctor->errors ? '-' : implode('; ', $doctor->errors)],
+        ]);
+
         try {
             $driver = $this->paymentGatewayRegistry->resolve($gateway);
         } catch (\Throwable $exception) {
@@ -72,4 +103,5 @@ final class PaymentTestPluginGatewayCommand extends Command
 
         return Command::SUCCESS;
     }
+
 }

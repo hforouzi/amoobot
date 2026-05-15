@@ -9,6 +9,8 @@ use App\Entity\PaymentGateway;
 use App\Entity\StorePaymentMethod;
 use App\Payment\Domain\PaymentGatewayType;
 use App\Payment\Infrastructure\PaymentGatewayRegistry;
+use App\Payment\Plugin\PluginConfigSchemaValidator;
+use App\Plugin\PaymentPluginDoctor;
 use App\Plugin\PluginRegistry;
 use App\Shared\Infrastructure\SettingValueProvider;
 use App\Shop\Domain\OrderStatus;
@@ -20,6 +22,8 @@ final class StorePaymentMethodResolver
         private readonly EntityManagerInterface $entityManager,
         private readonly PaymentGatewayRegistry $paymentGatewayRegistry,
         private readonly PluginRegistry $pluginRegistry,
+        private readonly PaymentPluginDoctor $pluginDoctor,
+        private readonly PluginConfigSchemaValidator $schemaValidator,
         private readonly SettingValueProvider $settingValueProvider,
         private readonly string $paymentCardNumber = '',
         private readonly string $paymentCardHolder = '',
@@ -163,14 +167,15 @@ final class StorePaymentMethodResolver
                 $skipReasons[] = 'gateway_inactive';
             }
 
-            $pluginDisabled = $this->isPluginGatewayDisabled($gateway);
-            if ($pluginDisabled) {
-                $skipReasons[] = 'plugin disabled';
+            $pluginStatusReason = $this->pluginStatusReason($gateway);
+            if (null !== $pluginStatusReason) {
+                $skipReasons[] = $pluginStatusReason;
             }
 
-            $hasDriver = $this->hasDriver($gatewayType);
-            if (!$hasDriver && !$pluginDisabled) {
-                $skipReasons[] = 'gateway_driver_missing';
+            $driverError = $this->driverError($gateway);
+            $hasDriver = null === $driverError;
+            if (!$hasDriver && null === $pluginStatusReason) {
+                $skipReasons[] = $driverError ?? 'gateway_driver_missing';
             }
 
             $gatewayConfigured = $this->isGatewayConfiguredForResolver($gateway);
@@ -229,18 +234,22 @@ final class StorePaymentMethodResolver
         return $results;
     }
 
-    private function hasDriver(string $gatewayType): bool
+    private function driverError(PaymentGateway $gateway): ?string
     {
+        $gatewayType = trim($gateway->getType());
         if ('' === $gatewayType) {
-            return false;
+            return 'gateway_driver_missing';
         }
 
         try {
-            $this->paymentGatewayRegistry->resolveByType($gatewayType);
+            $this->paymentGatewayRegistry->resolve($gateway);
 
-            return true;
-        } catch (\Throwable) {
-            return false;
+            return null;
+        } catch (\Throwable $exception) {
+            $message = $exception->getMessage();
+            $reason = trim((string) strtok($message, ':'));
+
+            return '' === $reason ? 'gateway_driver_missing' : $reason;
         }
     }
 
@@ -255,16 +264,37 @@ final class StorePaymentMethodResolver
         };
     }
 
-    private function isPluginGatewayDisabled(PaymentGateway $gateway): bool
+    private function pluginStatusReason(PaymentGateway $gateway): ?string
     {
         $pluginCode = $gateway->getPluginCode();
         if (null === $pluginCode) {
-            return false;
+            return null;
         }
 
         $plugin = $this->pluginRegistry->findByCode($pluginCode);
+        if (null === $plugin) {
+            return 'plugin_missing';
+        }
+        if ('error' === $plugin->getStatus()) {
+            return 'plugin_error';
+        }
+        if ('enabled' !== $plugin->getStatus()) {
+            return 'plugin_disabled';
+        }
 
-        return null === $plugin || 'enabled' !== $plugin->getStatus();
+        $doctor = $this->pluginDoctor->inspect($plugin);
+        if (!$doctor->ok()) {
+            if (in_array('class_not_found', $doctor->errors, true)) {
+                return 'class_not_found';
+            }
+            if (in_array('interface_not_implemented', $doctor->errors, true)) {
+                return 'interface_not_implemented';
+            }
+
+            return 'plugin_error';
+        }
+
+        return null;
     }
 
     private function isPluginGatewayConfigured(PaymentGateway $gateway): bool
@@ -280,26 +310,7 @@ final class StorePaymentMethodResolver
         }
 
         $manifest = $plugin->getManifest();
-        $schema = is_array($manifest['configSchema'] ?? null) ? $manifest['configSchema'] : [];
-        $config = is_array($gateway->getConfig()) ? $gateway->getConfig() : [];
-
-        foreach ($schema as $field) {
-            if (!is_array($field) || true !== ($field['required'] ?? false)) {
-                continue;
-            }
-
-            $name = trim((string) ($field['name'] ?? $field['key'] ?? ''));
-            if ('' === $name) {
-                continue;
-            }
-
-            $value = $config[$name] ?? null;
-            if (null === $value || '' === trim((string) $value)) {
-                return false;
-            }
-        }
-
-        return true;
+        return $this->schemaValidator->isConfigured($manifest['configSchema'] ?? [], $gateway->getConfig());
     }
 
     private function isManualCardConfiguredForResolver(PaymentGateway $gateway): bool
