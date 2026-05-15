@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Admin\UI\Crud;
 
+use App\Admin\UI\Support\AdminJsonFormatter;
 use App\Entity\DiscountUsage;
 use EasyCorp\Bundle\EasyAdminBundle\Controller\AbstractCrudController;
 use EasyCorp\Bundle\EasyAdminBundle\Field\AssociationField;
@@ -31,7 +32,8 @@ final class DiscountUsageCrudController extends AbstractCrudController
             IntegerField::new('amountAfter', 'مبلغ بعد'),
             DateTimeField::new('usedAt', 'زمان استفاده'),
             TextareaField::new('metadata', 'اطلاعات')
-                ->formatValue(static fn (mixed $value): string => json_encode($value, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '')
+                ->formatValue(static fn (mixed $value): string => AdminJsonFormatter::toPrettyHtml($value))
+                ->renderAsHtml()
                 ->hideOnIndex()
                 ->hideOnForm(),
         ];

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Admin\UI\Crud;
 
+use App\Admin\UI\Support\AdminJsonFormatter;
 use App\Entity\VpnInbound;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Action;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Actions;
@@ -12,9 +13,9 @@ use EasyCorp\Bundle\EasyAdminBundle\Controller\AbstractCrudController;
 use EasyCorp\Bundle\EasyAdminBundle\Field\AssociationField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\BooleanField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\DateTimeField;
-use EasyCorp\Bundle\EasyAdminBundle\Field\Field;
 use EasyCorp\Bundle\EasyAdminBundle\Field\IdField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\IntegerField;
+use EasyCorp\Bundle\EasyAdminBundle\Field\TextareaField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\TextField;
 
 class VpnInboundCrudController extends AbstractCrudController
@@ -87,8 +88,9 @@ class VpnInboundCrudController extends AbstractCrudController
             TextField::new('serviceName')->hideOnIndex(),
             TextField::new('fingerprint')->hideOnIndex(),
             TextField::new('alpn')->hideOnIndex(),
-            Field::new('config')
-                ->formatValue(static fn (mixed $value): string => json_encode($value, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '')
+            TextareaField::new('config')
+                ->formatValue(static fn (mixed $value): string => AdminJsonFormatter::toPrettyHtml($value))
+                ->renderAsHtml()
                 ->hideOnForm()
                 ->hideOnIndex(),
             BooleanField::new('isActive'),

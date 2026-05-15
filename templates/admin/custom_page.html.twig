@@ -26,7 +26,7 @@
         <div class="admin-custom-content">
             <header class="admin-custom-header">
                 <div>
-                    <div class="admin-custom-section">{{ 'admin.payment_gateways'|trans }}</div>
+                    <div class="admin-custom-section">{% block page_section %}{{ 'admin.payment_gateways'|trans }}{% endblock %}</div>
                     <h1 class="admin-page-title">{% block page_title %}{% endblock %}</h1>
                 </div>
                 <div class="admin-custom-header-actions">

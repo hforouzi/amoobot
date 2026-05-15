@@ -11,6 +11,7 @@ use App\Admin\UI\Crud\OrderCrudController;
 use App\Admin\UI\Crud\OrderDraftCrudController;
 use App\Admin\UI\Crud\PaymentCrudController;
 use App\Admin\UI\Crud\PaymentGatewayCrudController;
+use App\Admin\UI\Crud\PluginCrudController;
 use App\Admin\UI\Crud\PlanCrudController;
 use App\Admin\UI\Crud\ServiceNotificationLogCrudController;
 use App\Admin\UI\Crud\SettingCrudController;
@@ -94,6 +95,7 @@ class DashboardController extends AbstractDashboardController
         }
 
         yield MenuItem::section('admin.menu.system', 'fa fa-cogs');
+        yield MenuItem::linkTo(PluginCrudController::class, 'admin.plugins', 'fa fa-plug');
         yield MenuItem::linkTo(SettingCrudController::class, 'admin.settings', 'fa fa-cog');
         yield MenuItem::linkTo(BotMessageLogCrudController::class, 'admin.bot_logs', 'fa fa-file-text');
     }

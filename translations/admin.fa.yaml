@@ -27,6 +27,7 @@ admin:
   renewal_pricing_settings: تنظیمات تمدید و قیمت‌گذاری
   automation_settings: تنظیمات اتوماسیون
   bulk_plan_price_adjustment: تغییر گروهی قیمت پلن‌ها
+  plugins: پلاگین‌ها
 
 status:
   active: فعال
@@ -60,6 +61,30 @@ common:
   created_at: ایجاد شده در
   updated_at: بروزرسانی شده در
   actions: عملیات
+
+plugin:
+  singular: پلاگین
+  plural: پلاگین‌ها
+  code: کد
+  type: نوع
+  name: نام
+  version: نسخه
+  status: وضعیت
+  path: مسیر
+  main_class: کلاس اصلی
+  manifest: مانیفست
+  permissions: مجوزها
+  error_message: پیام خطا
+  installed_at: زمان نصب
+  enabled_at: زمان فعال‌سازی
+  disabled_at: زمان غیرفعال‌سازی
+  upload_action: بارگذاری پلاگین
+  upload_title: بارگذاری فایل ZIP پلاگین
+  upload_help: یک بسته .zip قابل اعتماد بارگذاری کنید که plugin.json در ریشه آن باشد. کد پلاگین در زمان نصب اجرا نمی‌شود.
+  zip_file: فایل ZIP پلاگین
+  install: نصب پلاگین
+  enable: فعال‌سازی
+  disable: غیرفعال‌سازی
 
 payment:
   gateway:

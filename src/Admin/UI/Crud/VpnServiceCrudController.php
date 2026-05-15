@@ -57,9 +57,9 @@ class VpnServiceCrudController extends AbstractCrudController
             IntegerField::new('ipLimit')->setLabel('IP Limit'),
             TextareaField::new('subscriptionUrl')->hideOnIndex(),
             TextareaField::new('configText')->hideOnIndex(),
-            ChoiceField::new('status')
-                ->setChoices(AdminStatusBadge::choices(VpnServiceStatus::ALL))
-                ->renderAsBadges(AdminStatusBadge::badgeMap()),
+            TextField::new('status')
+                ->formatValue(static fn (mixed $value): string => AdminStatusBadge::html($value))
+                ->renderAsHtml(),
             DateTimeField::new('startsAt')->setLabel('Starts At'),
             DateTimeField::new('expiresAt')->setLabel('Expires At'),
             IntegerField::new('trafficLimitGb')->setLabel('Traffic Limit (GB)'),

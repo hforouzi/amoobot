@@ -27,6 +27,7 @@ admin:
   renewal_pricing_settings: Renewal & Pricing Settings
   automation_settings: Automation Settings
   bulk_plan_price_adjustment: Bulk Plan Price Adjustment
+  plugins: Plugins
 
 status:
   active: Active
@@ -60,6 +61,30 @@ common:
   created_at: Created At
   updated_at: Updated At
   actions: Actions
+
+plugin:
+  singular: Plugin
+  plural: Plugins
+  code: Code
+  type: Type
+  name: Name
+  version: Version
+  status: Status
+  path: Path
+  main_class: Main Class
+  manifest: Manifest
+  permissions: Permissions
+  error_message: Error Message
+  installed_at: Installed At
+  enabled_at: Enabled At
+  disabled_at: Disabled At
+  upload_action: Upload Plugin
+  upload_title: Upload Plugin ZIP
+  upload_help: Upload a trusted .zip package containing plugin.json at the ZIP root. Plugin code is not executed during installation.
+  zip_file: Plugin ZIP
+  install: Install Plugin
+  enable: Enable
+  disable: Disable
 
 payment:
   gateway:
