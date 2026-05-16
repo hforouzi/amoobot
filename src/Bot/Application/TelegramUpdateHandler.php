@@ -65,6 +65,8 @@ class TelegramUpdateHandler
         private readonly DiscountCodeService $discountCodeService,
         private readonly PaymentGatewayRegistry $paymentGatewayRegistry,
         private readonly StorePaymentMethodResolver $storePaymentMethodResolver,
+        private readonly BotTextResolver $botTextResolver,
+        private readonly BotButtonMatcher $botButtonMatcher,
         private readonly ?string $adminChatId = null,
         private readonly string $paymentCardNumber = '',
         private readonly string $paymentCardHolder = '',
@@ -100,6 +102,7 @@ class TelegramUpdateHandler
         $account = $this->telegramUserResolver->resolveFromTelegramUser($telegramUser);
         $text = trim((string) ($message['text'] ?? ''));
         $isAdmin = $this->isAdminUserId($actorId);
+        $replyButtonKey = $this->botButtonMatcher->matchReplyButton($text);
 
         if ('/start' === $text) {
             $this->handleStart($account, $chatId, $isAdmin);
@@ -107,46 +110,46 @@ class TelegramUpdateHandler
             return;
         }
 
-        if (self::BUTTON_BUY_SERVICE === $text) {
+        if ('button.main.buy_service' === $replyButtonKey || self::BUTTON_BUY_SERVICE === $text) {
             $this->handleBuyService($chatId);
 
             return;
         }
 
-        if (self::BUTTON_RESUME_ORDER === $text) {
+        if ('button.main.continue_order' === $replyButtonKey || self::BUTTON_RESUME_ORDER === $text) {
             $this->handleResumeIncompleteOrderByText($account, $chatId, $isAdmin);
 
             return;
         }
 
-        if (self::BUTTON_CANCEL_INCOMPLETE === $text) {
+        if ('button.main.cancel_incomplete_order' === $replyButtonKey || self::BUTTON_CANCEL_INCOMPLETE === $text) {
             $this->handleCancelIncompleteOrderByText($account, $chatId, $isAdmin);
 
             return;
         }
 
-        if (self::BUTTON_TRACK_ORDER === $text) {
+        if ('button.main.track_order' === $replyButtonKey || self::BUTTON_TRACK_ORDER === $text) {
             $this->handleTrackOrdersByText($account, $chatId, $isAdmin);
 
             return;
         }
 
-        if (self::BUTTON_MY_SERVICES === $text) {
+        if ('button.main.my_services' === $replyButtonKey || self::BUTTON_MY_SERVICES === $text) {
             $this->serviceManagementService->handleMyServices($account, $chatId);
 
             return;
         }
 
-        if (self::BUTTON_SUPPORT === $text) {
+        if ('button.main.support' === $replyButtonKey || self::BUTTON_SUPPORT === $text) {
             $this->handleSupport($chatId);
 
             return;
         }
 
-        if (self::BUTTON_ADMIN_MENU === $text) {
+        if ('button.main.admin' === $replyButtonKey || self::BUTTON_ADMIN_MENU === $text) {
             if (!$isAdmin) {
                 $this->debugLog(sprintf('admin_text_unauthorized actor_id="%s"', $actorId));
-                $this->telegramApiClient->sendMessage($chatId, BotTexts::ADMIN_UNAUTHORIZED, $this->keyboardFactory->mainReplyKeyboard(false, $this->hasActiveIncompleteOrder($account), $this->hasTrackableOrders($account)));
+                $this->telegramApiClient->sendMessage($chatId, $this->botTextResolver->message('admin.unauthorized'), $this->keyboardFactory->mainReplyKeyboard(false, $this->hasActiveIncompleteOrder($account), $this->hasTrackableOrders($account)));
 
                 return;
             }
@@ -203,7 +206,7 @@ class TelegramUpdateHandler
         }
 
         if ('' !== $text && !($openPayment instanceof Payment)) {
-            $this->telegramApiClient->sendMessage($chatId, BotTexts::UNKNOWN_COMMAND, $this->keyboardFactory->mainReplyKeyboard($isAdmin, $this->hasActiveIncompleteOrder($account), $this->hasTrackableOrders($account)));
+            $this->telegramApiClient->sendMessage($chatId, $this->botTextResolver->message('bot.unknown_message'), $this->keyboardFactory->mainReplyKeyboard($isAdmin, $this->hasActiveIncompleteOrder($account), $this->hasTrackableOrders($account)));
         }
     }
 
@@ -226,7 +229,7 @@ class TelegramUpdateHandler
         if (str_starts_with($data, 'admin_')) {
             if (!$this->isAdminUserId($actorId)) {
                 $this->debugLog(sprintf('admin_callback_unauthorized data="%s" actor_id="%s" chat_id="%s"', $data, $actorId, $chatId));
-                $this->telegramApiClient->answerCallbackQuery($callbackId, BotTexts::ADMIN_UNAUTHORIZED, true);
+                $this->telegramApiClient->answerCallbackQuery($callbackId, $this->botTextResolver->message('admin.unauthorized'), true);
 
                 return;
             }
@@ -297,7 +300,7 @@ class TelegramUpdateHandler
         if ('main_menu' === $data) {
             $this->acknowledgeCallback($callbackId);
             $hasIncomplete = $this->hasActiveIncompleteOrder($account);
-            $this->telegramApiClient->sendMessage($chatId, BotTexts::MAIN_MENU, $this->keyboardFactory->mainReplyKeyboard($isAdmin, $hasIncomplete, $this->hasTrackableOrders($account)));
+            $this->telegramApiClient->sendMessage($chatId, $this->botTextResolver->message('bot.main_menu'), $this->keyboardFactory->mainReplyKeyboard($isAdmin, $hasIncomplete, $this->hasTrackableOrders($account)));
             $this->sendIncompleteOrderPromptIfAny($account, $chatId);
 
             return;
@@ -513,7 +516,7 @@ class TelegramUpdateHandler
     private function handleStart(TelegramAccount $account, string $chatId, bool $isAdmin): void
     {
         $hasIncomplete = $this->hasActiveIncompleteOrder($account);
-        $this->telegramApiClient->sendMessage($chatId, BotTexts::WELCOME, $this->keyboardFactory->mainReplyKeyboard($isAdmin, $hasIncomplete, $this->hasTrackableOrders($account)));
+        $this->telegramApiClient->sendMessage($chatId, $this->botTextResolver->message('bot.welcome'), $this->keyboardFactory->mainReplyKeyboard($isAdmin, $hasIncomplete, $this->hasTrackableOrders($account)));
         $this->sendIncompleteOrderPromptIfAny($account, $chatId);
     }
 
@@ -521,13 +524,13 @@ class TelegramUpdateHandler
     {
         $plans = $this->entityManager->getRepository(Plan::class)->findBy(['isActive' => true], ['id' => 'ASC']);
         if ([] === $plans) {
-            $this->showPopupOrMessage($chatId, $callbackId, 'در حال حاضر سرویسی برای خرید موجود نیست.', 'popup_no_active_plans');
+            $this->showPopupOrMessage($chatId, $callbackId, $this->botTextResolver->message('plan.list_empty'), 'popup_no_active_plans');
 
             return;
         }
 
         $this->acknowledgeCallback($callbackId);
-        $this->telegramApiClient->sendMessage($chatId, BotTexts::SELECT_PLAN, $this->keyboardFactory->plansMenu($plans));
+        $this->telegramApiClient->sendMessage($chatId, $this->botTextResolver->message('plan.select'), $this->keyboardFactory->plansMenu($plans));
     }
 
     private function handleSelectPlan(TelegramAccount $account, string $chatId, int $planId, ?string $callbackId = null): void
@@ -1739,7 +1742,7 @@ class TelegramUpdateHandler
     {
         $payment = $this->entityManager->getRepository(Payment::class)->find($paymentId);
         if (!$payment instanceof Payment) {
-            $this->showPopupOrMessage($chatId, $callbackId, BotTexts::ADMIN_PAYMENT_NOT_FOUND, 'popup_payment_submit_receipt_not_found');
+            $this->showPopupOrMessage($chatId, $callbackId, $this->botTextResolver->message('payment.failed'), 'popup_payment_submit_receipt_not_found');
 
             return;
         }
@@ -1772,7 +1775,7 @@ class TelegramUpdateHandler
     {
         $payment = $this->entityManager->getRepository(Payment::class)->find($paymentId);
         if (!$payment instanceof Payment) {
-            $this->showPopupOrMessage($chatId, $callbackId, BotTexts::ADMIN_PAYMENT_NOT_FOUND, 'popup_payment_cancel_not_found');
+            $this->showPopupOrMessage($chatId, $callbackId, $this->botTextResolver->message('payment.failed'), 'popup_payment_cancel_not_found');
 
             return;
         }
@@ -1807,7 +1810,7 @@ class TelegramUpdateHandler
     private function handleSupport(string $chatId, ?string $callbackId = null): void
     {
         $this->acknowledgeCallback($callbackId);
-        $this->telegramApiClient->sendMessage($chatId, BotTexts::SUPPORT, $this->keyboardFactory->backToMainMenu());
+        $this->telegramApiClient->sendMessage($chatId, $this->botTextResolver->message('bot.support'), $this->keyboardFactory->backToMainMenu());
     }
 
     private function handleAdminMenu(string $chatId, ?string $callbackId = null): void
@@ -1884,7 +1887,7 @@ class TelegramUpdateHandler
         $payment = $this->entityManager->getRepository(Payment::class)->find($paymentId);
         if (!$payment instanceof Payment) {
             $this->acknowledgeCallback($callbackId);
-            $this->telegramApiClient->sendMessage($chatId, BotTexts::ADMIN_PAYMENT_NOT_FOUND);
+            $this->telegramApiClient->sendMessage($chatId, $this->botTextResolver->message('payment.failed'));
 
             return;
         }
@@ -2021,7 +2024,7 @@ class TelegramUpdateHandler
         $payment = $this->entityManager->getRepository(Payment::class)->find($paymentId);
         if (!$payment instanceof Payment) {
             $this->acknowledgeCallback($callbackId);
-            $this->telegramApiClient->sendMessage($chatId, BotTexts::ADMIN_PAYMENT_NOT_FOUND);
+            $this->telegramApiClient->sendMessage($chatId, $this->botTextResolver->message('payment.failed'));
 
             return;
         }
@@ -2047,7 +2050,7 @@ class TelegramUpdateHandler
         }
 
         $this->acknowledgeCallback($callbackId);
-        $this->telegramApiClient->sendMessage($chatId, BotTexts::ADMIN_PAYMENT_CONFIRMED);
+        $this->telegramApiClient->sendMessage($chatId, $this->botTextResolver->message('admin.payment_confirmed'));
     }
 
     private function handleAdminRejectPayment(string $chatId, int $paymentId, ?string $callbackId = null): void
@@ -2055,7 +2058,7 @@ class TelegramUpdateHandler
         $payment = $this->entityManager->getRepository(Payment::class)->find($paymentId);
         if (!$payment instanceof Payment) {
             $this->acknowledgeCallback($callbackId);
-            $this->telegramApiClient->sendMessage($chatId, BotTexts::ADMIN_PAYMENT_NOT_FOUND);
+            $this->telegramApiClient->sendMessage($chatId, $this->botTextResolver->message('payment.failed'));
 
             return;
         }
@@ -2081,7 +2084,7 @@ class TelegramUpdateHandler
         }
 
         $this->acknowledgeCallback($callbackId);
-        $this->telegramApiClient->sendMessage($chatId, BotTexts::ADMIN_PAYMENT_REJECTED);
+        $this->telegramApiClient->sendMessage($chatId, $this->botTextResolver->message('admin.payment_rejected'));
     }
 
     private function handleReceiptPhoto(Payment $openPayment, array $message, string $chatId): void
@@ -2100,7 +2103,7 @@ class TelegramUpdateHandler
         $openPayment->getOrder()->setStatus(OrderStatus::WAITING_PAYMENT);
         $this->entityManager->flush();
         $this->notifyAdmin($openPayment, 'receipt_photo');
-        $this->telegramApiClient->sendMessage($chatId, BotTexts::RECEIPT_SUBMITTED);
+        $this->telegramApiClient->sendMessage($chatId, $this->botTextResolver->message('payment.receipt_received'));
     }
 
     private function handleAdminUsers(string $chatId, ?string $callbackId = null): void
@@ -2184,7 +2187,7 @@ class TelegramUpdateHandler
         $openPayment->getOrder()->setStatus(OrderStatus::WAITING_PAYMENT);
         $this->entityManager->flush();
         $this->notifyAdmin($openPayment, 'tracking_code');
-        $this->telegramApiClient->sendMessage($chatId, BotTexts::RECEIPT_SUBMITTED);
+        $this->telegramApiClient->sendMessage($chatId, $this->botTextResolver->message('payment.receipt_received'));
     }
 
     private function findOpenPayment(TelegramAccount $account): ?Payment

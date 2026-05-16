@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Admin\UI;
 
 use App\Admin\UI\Crud\BotMessageLogCrudController;
+use App\Admin\UI\Crud\BotButtonLabelCrudController;
+use App\Admin\UI\Crud\BotMessageTemplateCrudController;
 use App\Admin\UI\Crud\DiscountCodeCrudController;
 use App\Admin\UI\Crud\DiscountUsageCrudController;
 use App\Admin\UI\Crud\OrderCrudController;
@@ -98,6 +100,10 @@ class DashboardController extends AbstractDashboardController
         yield MenuItem::linkTo(PluginCrudController::class, 'admin.plugins', 'fa fa-plug');
         yield MenuItem::linkTo(SettingCrudController::class, 'admin.settings', 'fa fa-cog');
         yield MenuItem::linkTo(BotMessageLogCrudController::class, 'admin.bot_logs', 'fa fa-file-text');
+
+        yield MenuItem::section('admin.menu.bot_content', 'fa fa-commenting');
+        yield MenuItem::linkTo(BotMessageTemplateCrudController::class, 'admin.bot_message_templates', 'fa fa-comment');
+        yield MenuItem::linkTo(BotButtonLabelCrudController::class, 'admin.bot_button_labels', 'fa fa-keyboard-o');
     }
 
     private function routeExists(string $routeName): bool
