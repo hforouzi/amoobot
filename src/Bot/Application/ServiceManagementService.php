@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Bot\Application;
 
+use App\Bot\Application\BotTextResolver;
 use App\Bot\Infrastructure\TelegramApiClient;
 use App\Entity\Order;
 use App\Entity\OrderDraft;
@@ -49,6 +50,7 @@ class ServiceManagementService
         private readonly EntityManagerInterface $entityManager,
         private readonly TelegramApiClient $telegramApiClient,
         private readonly TelegramKeyboardFactory $keyboardFactory,
+        private readonly BotTextResolver $botTextResolver,
         private readonly VpnPanelDriverRegistry $driverRegistry,
         private readonly ServiceUsageSyncService $serviceUsageSyncService,
         private readonly SettingValueProvider $settingValueProvider,
@@ -753,7 +755,7 @@ class ServiceManagementService
             ->setUpdatedAt(new \DateTimeImmutable());
         $this->entityManager->flush();
 
-        $this->sendPaymentGatewaySelection($draft, $chatId, $callbackId);
+        $this->sendPaymentGatewaySelection($draft, $chatId, $callbackId, 'skipped');
     }
 
     public function handleDiscountCodeInput(TelegramAccount $account, OrderDraft $draft, string $codeInput, string $chatId): void
@@ -775,10 +777,14 @@ class ServiceManagementService
         $amountBeforeCode = (int) ($draft->getCalculatedAmount() ?? 0);
         $result = $this->discountCodeService->validateCode($codeInput, $draft->getUser(), $orderType, $draft->getPlan(), $amountBeforeCode);
         if (!$result->valid || null === $result->discountCode) {
-            $cancelCallback = 'renewal' === $draftType
-                ? ((bool) ($data['adminMode'] ?? false) ? 'admin_service_view:'.((int) ($data['targetServiceId'] ?? 0)) : 'service_view:'.((int) ($data['targetServiceId'] ?? 0)))
-                : 'service_view:'.((int) ($data['targetServiceId'] ?? 0));
-            $this->telegramApiClient->sendMessage($chatId, $result->message, $this->keyboardFactory->discountCodePrompt((int) ($draft->getId() ?? 0), $cancelCallback));
+            $draft
+                ->setDiscountCode(null)
+                ->setDiscountAmount(0)
+                ->setFinalAmount($amountBeforeCode)
+                ->setStep(self::STEP_WAITING_DISCOUNT_DECISION)
+                ->setUpdatedAt(new \DateTimeImmutable());
+            $this->entityManager->flush();
+            $this->sendPaymentGatewaySelection($draft, $chatId, null, 'invalid', $result->message);
 
             return;
         }
@@ -797,7 +803,7 @@ class ServiceManagementService
             ->setUpdatedAt(new \DateTimeImmutable());
         $this->entityManager->flush();
 
-        $this->sendPaymentGatewaySelection($draft, $chatId, null);
+        $this->sendPaymentGatewaySelection($draft, $chatId, null, 'applied');
     }
 
     public function handleSelectStorePaymentMethodForOrder(TelegramAccount $account, int $orderId, int $storePaymentMethodId, string $chatId, ?string $callbackId = null): bool
@@ -867,7 +873,7 @@ class ServiceManagementService
 
         $methods = $this->findAvailableStorePaymentMethods($order);
         if ([] === $methods) {
-            $this->showPopupOrMessage($chatId, $callbackId, 'در حال حاضر روش پرداخت فعالی وجود ندارد.', 'no_active_store_method_order_resume');
+            $this->showPopupOrMessage($chatId, $callbackId, $this->botTextResolver->message('payment.no_methods'), 'no_active_store_method_order_resume');
 
             return true;
         }
@@ -875,7 +881,7 @@ class ServiceManagementService
         $this->acknowledgeCallback($callbackId);
         $this->telegramApiClient->sendMessage(
             $chatId,
-            'روش پرداخت را انتخاب کنید:',
+            $this->botTextResolver->message('payment.method_select'),
             $this->keyboardFactory->paymentGatewaySelectionMenu(
                 (int) ($order->getId() ?? 0),
                 $methods,
@@ -887,7 +893,7 @@ class ServiceManagementService
         return true;
     }
 
-    private function sendPaymentGatewaySelection(OrderDraft $draft, string $chatId, ?string $callbackId): void
+    private function sendPaymentGatewaySelection(OrderDraft $draft, string $chatId, ?string $callbackId, ?string $discountResult = null, ?string $discountReason = null): void
     {
         $order = $this->createOrderFromDraft($draft);
         if (!$order instanceof Order) {
@@ -911,15 +917,20 @@ class ServiceManagementService
                 false === $encodedReasons ? '[]' : $encodedReasons,
                 false === $encodedMethods ? '[]' : $encodedMethods
             ));
-            $this->showPopupOrMessage($chatId, $callbackId, 'در حال حاضر روش پرداخت فعالی وجود ندارد.', 'no_active_payment_gateway');
+            $this->showPopupOrMessage($chatId, $callbackId, $this->botTextResolver->message('payment.no_methods'), 'no_active_payment_gateway');
 
             return;
         }
 
         $this->acknowledgeCallback($callbackId);
+        $message = $this->botTextResolver->message('payment.method_select');
+        if (null !== $discountResult) {
+            $message = $this->buildDiscountResultPaymentMethodMessage($order, $discountResult, $discountReason);
+        }
+
         $this->telegramApiClient->sendMessage(
             $chatId,
-            'روش پرداخت را انتخاب کنید:',
+            $message,
             $this->keyboardFactory->paymentGatewaySelectionMenu(
                 (int) ($order->getId() ?? 0),
                 $methods,
@@ -1035,6 +1046,122 @@ class ServiceManagementService
         $this->entityManager->flush();
 
         return $order;
+    }
+
+    private function buildDiscountResultPaymentMethodMessage(Order $order, string $discountResult, ?string $discountReason = null): string
+    {
+        $variables = $this->buildDiscountSummaryVariables($order, $discountResult, $discountReason);
+        $parts = [];
+
+        if ('applied' === $discountResult) {
+            $parts[] = $this->botTextResolver->message('discount.applied', $variables);
+        } elseif ('invalid' === $discountResult) {
+            $parts[] = $this->botTextResolver->message('discount.invalid', $variables);
+        } elseif ('skipped' === $discountResult) {
+            $parts[] = $this->botTextResolver->message('discount.skipped', $variables);
+        }
+
+        $parts[] = $this->botTextResolver->message('order.summary_after_discount', $variables);
+        $parts[] = $this->botTextResolver->message('payment.method_select', $variables);
+
+        return trim(implode("\n\n", array_filter($parts, static fn (string $part): bool => '' !== trim($part))));
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function buildDiscountSummaryVariables(Order $order, string $discountResult, ?string $discountReason = null): array
+    {
+        $metadata = is_array($order->getMetadata()) ? $order->getMetadata() : [];
+        $priceSnapshot = is_array($metadata['priceSnapshot'] ?? null) ? $metadata['priceSnapshot'] : [];
+        $originalAmount = (int) ($priceSnapshot['afterGlobalDiscountAmount'] ?? $order->getAmount());
+        $discountAmount = (int) ($priceSnapshot['discountCodeAmount'] ?? 0);
+        $payableAmount = (int) ($priceSnapshot['finalAmount'] ?? $order->getAmount());
+
+        return [
+            'discount' => [
+                'code' => (string) ($priceSnapshot['discountCode'] ?? '-'),
+                'amount' => $this->formatMoney($discountAmount),
+                'reason' => trim((string) $discountReason),
+            ],
+            'payment' => [
+                'originalAmount' => $this->formatMoney($originalAmount),
+                'discountAmount' => $this->formatMoney($discountAmount),
+                'payableAmount' => $this->formatMoney($payableAmount),
+                'amountBlock' => $this->buildPaymentAmountBlock($discountResult, $originalAmount, $discountAmount, $payableAmount),
+            ],
+            'order' => [
+                'id' => (int) ($order->getId() ?? 0),
+                'accountName' => $this->resolveOrderAccountName($order),
+                'volume' => $this->resolveOrderVolume($order, $metadata),
+                'duration' => $this->resolveOrderDuration($order, $metadata),
+                'trackingCode' => (string) ($order->getTrackingCode() ?? '-'),
+            ],
+            'plan' => [
+                'title' => $order->getPlan()->getTitle(),
+            ],
+        ];
+    }
+
+    private function buildPaymentAmountBlock(string $discountResult, int $originalAmount, int $discountAmount, int $payableAmount): string
+    {
+        if ('applied' === $discountResult) {
+            return implode("\n", [
+                '💰 مبلغ اولیه: '.$this->formatMoney($originalAmount).' تومان',
+                '🎁 میزان تخفیف: '.$this->formatMoney($discountAmount).' تومان',
+                '💳 مبلغ نهایی: '.$this->formatMoney($payableAmount).' تومان',
+            ]);
+        }
+
+        return '💰 مبلغ نهایی: '.$this->formatMoney($payableAmount).' تومان';
+    }
+
+    private function formatMoney(int $amount): string
+    {
+        return number_format($amount, 0, '.', ',');
+    }
+
+    private function resolveOrderAccountName(Order $order): string
+    {
+        $targetService = $order->getTargetService();
+        if ($targetService instanceof VpnService && '' !== trim((string) $targetService->getUsername())) {
+            return (string) $targetService->getUsername();
+        }
+
+        return '-';
+    }
+
+    /**
+     * @param array<string, mixed> $metadata
+     */
+    private function resolveOrderVolume(Order $order, array $metadata): string
+    {
+        if (OrderType::ADD_TRAFFIC === $order->getType()) {
+            return ((string) ((int) ($metadata['trafficGb'] ?? 0))).' گیگ';
+        }
+
+        $planTraffic = $order->getPlan()->getTrafficGb();
+        if (null !== $planTraffic) {
+            return ((string) $planTraffic).' گیگ';
+        }
+
+        return 'نامحدود';
+    }
+
+    /**
+     * @param array<string, mixed> $metadata
+     */
+    private function resolveOrderDuration(Order $order, array $metadata): string
+    {
+        if ((bool) ($metadata['unlimitedDuration'] ?? false) || $order->getPlan()->isUnlimitedDuration()) {
+            return 'نامحدود';
+        }
+
+        if (array_key_exists('durationDays', $metadata) && null !== $metadata['durationDays']) {
+            return ((string) $metadata['durationDays']).' روز';
+        }
+
+        return ((string) $order->getPlan()->getDurationDays()).' روز';
     }
 
     private function createOrReuseOrderPayment(Order $order, PaymentGateway $gateway, StorePaymentMethod $storePaymentMethod, string $chatId, ?string $callbackId): void

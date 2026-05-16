@@ -1154,7 +1154,7 @@ class TelegramUpdateHandler
         $this->setDraftCurrentStep($draft, self::STEP_WAITING_PAYMENT_METHOD);
         $this->entityManager->flush();
 
-        $this->sendPaymentGatewaySelectionForNewServiceDraft($draft, $chatId, $callbackId);
+        $this->sendPaymentGatewaySelectionForNewServiceDraft($draft, $chatId, $callbackId, 'skipped');
     }
 
     private function handleDiscountEnterOrder(TelegramAccount $account, string $chatId, int $orderId, ?string $callbackId = null): void
@@ -1198,7 +1198,7 @@ class TelegramUpdateHandler
             ->setAmount($baseFinal);
 
         $this->entityManager->flush();
-        $this->sendPaymentGatewaySelectionForOrder($order, $chatId, $callbackId);
+        $this->sendPaymentGatewaySelectionForOrder($order, $chatId, $callbackId, null, null, 'skipped');
     }
 
     private function handleNewServiceDraftDiscountCodeInput(TelegramAccount $account, OrderDraft $draft, string $codeInput, string $chatId): void
@@ -1210,11 +1210,14 @@ class TelegramUpdateHandler
         $amountBeforeCode = (int) ($draft->getCalculatedAmount() ?? 0);
         $result = $this->discountCodeService->validateCode($codeInput, $draft->getUser(), OrderType::NEW_SERVICE, $draft->getPlan(), $amountBeforeCode);
         if (!$result->valid || !$result->discountCode instanceof \App\Entity\DiscountCode) {
-            $this->telegramApiClient->sendMessage(
-                $chatId,
-                $result->message,
-                $this->keyboardFactory->discountCodeInputMenu((int) ($draft->getId() ?? 0))
-            );
+            $draft
+                ->setDiscountCode(null)
+                ->setDiscountAmount(0)
+                ->setFinalAmount($amountBeforeCode)
+                ->setUpdatedAt(new \DateTimeImmutable());
+            $this->setDraftCurrentStep($draft, self::STEP_WAITING_PAYMENT_METHOD);
+            $this->entityManager->flush();
+            $this->sendPaymentGatewaySelectionForNewServiceDraft($draft, $chatId, null, 'invalid', $result->message);
 
             return;
         }
@@ -1233,7 +1236,7 @@ class TelegramUpdateHandler
         $this->setDraftCurrentStep($draft, self::STEP_WAITING_PAYMENT_METHOD);
         $this->entityManager->flush();
 
-        $this->sendPaymentGatewaySelectionForNewServiceDraft($draft, $chatId, null);
+        $this->sendPaymentGatewaySelectionForNewServiceDraft($draft, $chatId, null, 'applied');
     }
 
     private function handleOrderDiscountCodeInput(TelegramAccount $account, Order $order, string $codeInput, string $chatId): void
@@ -1250,11 +1253,20 @@ class TelegramUpdateHandler
         $amountBeforeCode = (int) ($priceSnapshot['afterGlobalDiscountAmount'] ?? $order->getAmount());
         $result = $this->discountCodeService->validateCode($codeInput, $order->getUser(), $order->getType(), $order->getPlan(), $amountBeforeCode);
         if (!$result->valid || !$result->discountCode instanceof \App\Entity\DiscountCode) {
-            $this->telegramApiClient->sendMessage(
-                $chatId,
-                $result->message,
-                $this->keyboardFactory->discountCodeInputMenuForOrder((int) ($order->getId() ?? 0))
-            );
+            $priceSnapshot['discountCode'] = null;
+            $priceSnapshot['discountCodeAmount'] = 0;
+            $priceSnapshot['finalAmount'] = $amountBeforeCode;
+            $metadata['priceSnapshot'] = $priceSnapshot;
+            $metadata['discountCode'] = null;
+            $metadata['discountAmount'] = 0;
+            unset($metadata['inputState']);
+
+            $order
+                ->setMetadata($metadata)
+                ->setAmount($amountBeforeCode);
+
+            $this->entityManager->flush();
+            $this->sendPaymentGatewaySelectionForOrder($order, $chatId, null, null, null, 'invalid', $result->message);
 
             return;
         }
@@ -1272,7 +1284,7 @@ class TelegramUpdateHandler
             ->setAmount($result->finalAmount);
 
         $this->entityManager->flush();
-        $this->sendPaymentGatewaySelectionForOrder($order, $chatId, null);
+        $this->sendPaymentGatewaySelectionForOrder($order, $chatId, null, null, null, 'applied');
     }
 
     private function createOrReuseNewServiceOrderPayment(Order $order, PaymentGateway $gateway, StorePaymentMethod $storePaymentMethod, string $chatId, ?string $callbackId = null): void
@@ -1410,7 +1422,7 @@ class TelegramUpdateHandler
         $this->telegramApiClient->sendMessage($chatId, trim($message), $this->keyboardFactory->paymentActionMenu((int) $payment->getId(), (int) ($order->getId() ?? 0)));
     }
 
-    private function sendPaymentGatewaySelectionForNewServiceDraft(OrderDraft $draft, string $chatId, ?string $callbackId): void
+    private function sendPaymentGatewaySelectionForNewServiceDraft(OrderDraft $draft, string $chatId, ?string $callbackId, ?string $discountResult = null, ?string $discountReason = null): void
     {
         $order = $this->createOrderFromNewServiceDraft($draft);
         if (!$order instanceof Order) {
@@ -1419,7 +1431,7 @@ class TelegramUpdateHandler
             return;
         }
 
-        $this->sendPaymentGatewaySelectionForOrder($order, $chatId, $callbackId);
+        $this->sendPaymentGatewaySelectionForOrder($order, $chatId, $callbackId, null, null, $discountResult, $discountReason);
     }
 
     private function markRejectedFailedNowPaymentsPayment(Payment $payment, bool $paymentWasCreated): void
@@ -1447,7 +1459,7 @@ class TelegramUpdateHandler
         }
     }
 
-    private function sendPaymentGatewaySelectionForOrder(Order $order, string $chatId, ?string $callbackId, ?string $backCallback = null, ?string $cancelCallback = null): void
+    private function sendPaymentGatewaySelectionForOrder(Order $order, string $chatId, ?string $callbackId, ?string $backCallback = null, ?string $cancelCallback = null, ?string $discountResult = null, ?string $discountReason = null): void
     {
         $methods = $this->storePaymentMethodResolver->getAvailableMethods($order);
         if ([] === $methods) {
@@ -1464,7 +1476,7 @@ class TelegramUpdateHandler
                 false === $encodedReasons ? '[]' : $encodedReasons,
                 false === $encodedMethods ? '[]' : $encodedMethods
             ));
-            $this->showPopupOrMessage($chatId, $callbackId, 'در حال حاضر روش پرداخت فعالی وجود ندارد.', 'no_active_store_payment_method_new_service');
+            $this->showPopupOrMessage($chatId, $callbackId, $this->botTextResolver->message('payment.no_methods'), 'no_active_store_payment_method_new_service');
 
             return;
         }
@@ -1472,9 +1484,14 @@ class TelegramUpdateHandler
         $this->acknowledgeCallback($callbackId);
         $backCallback ??= 'order_summary:'.((int) ($order->getId() ?? 0));
         $cancelCallback ??= 'order_cancel:'.((int) ($order->getId() ?? 0));
+        $message = $this->botTextResolver->message('payment.method_select');
+        if (null !== $discountResult) {
+            $message = $this->buildDiscountResultPaymentMethodMessage($order, $discountResult, $discountReason);
+        }
+
         $this->telegramApiClient->sendMessage(
             $chatId,
-            'روش پرداخت را انتخاب کنید:',
+            $message,
             $this->keyboardFactory->paymentGatewaySelectionMenu((int) ($order->getId() ?? 0), $methods, $backCallback, $cancelCallback)
         );
     }
@@ -1538,6 +1555,131 @@ class TelegramUpdateHandler
         $this->entityManager->flush();
 
         return $order;
+    }
+
+    private function buildDiscountResultPaymentMethodMessage(Order $order, string $discountResult, ?string $discountReason = null): string
+    {
+        $variables = $this->buildDiscountSummaryVariables($order, $discountResult, $discountReason);
+        $parts = [];
+
+        if ('applied' === $discountResult) {
+            $parts[] = $this->botTextResolver->message('discount.applied', $variables);
+        } elseif ('invalid' === $discountResult) {
+            $parts[] = $this->botTextResolver->message('discount.invalid', $variables);
+        } elseif ('skipped' === $discountResult) {
+            $parts[] = $this->botTextResolver->message('discount.skipped', $variables);
+        }
+
+        $parts[] = $this->botTextResolver->message('order.summary_after_discount', $variables);
+        $parts[] = $this->botTextResolver->message('payment.method_select', $variables);
+
+        return trim(implode("\n\n", array_filter($parts, static fn (string $part): bool => '' !== trim($part))));
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function buildDiscountSummaryVariables(Order $order, string $discountResult, ?string $discountReason = null): array
+    {
+        $metadata = is_array($order->getMetadata()) ? $order->getMetadata() : [];
+        $priceSnapshot = is_array($metadata['priceSnapshot'] ?? null) ? $metadata['priceSnapshot'] : [];
+        $originalAmount = (int) ($priceSnapshot['afterGlobalDiscountAmount'] ?? $order->getAmount());
+        $discountAmount = (int) ($priceSnapshot['discountCodeAmount'] ?? 0);
+        $payableAmount = (int) ($priceSnapshot['finalAmount'] ?? $order->getAmount());
+        $plan = $order->getPlan();
+
+        return [
+            'discount' => [
+                'code' => (string) ($priceSnapshot['discountCode'] ?? $metadata['discountCode'] ?? '-'),
+                'amount' => $this->formatMoney($discountAmount),
+                'reason' => trim((string) $discountReason),
+            ],
+            'payment' => [
+                'originalAmount' => $this->formatMoney($originalAmount),
+                'discountAmount' => $this->formatMoney($discountAmount),
+                'payableAmount' => $this->formatMoney($payableAmount),
+                'amountBlock' => $this->buildPaymentAmountBlock($discountResult, $originalAmount, $discountAmount, $payableAmount),
+            ],
+            'order' => [
+                'id' => (int) ($order->getId() ?? 0),
+                'accountName' => $this->resolveOrderAccountName($order, $metadata),
+                'volume' => $this->resolveOrderVolume($order, $metadata),
+                'duration' => $this->resolveOrderDuration($order, $metadata),
+                'trackingCode' => (string) ($order->getTrackingCode() ?? '-'),
+            ],
+            'plan' => [
+                'title' => $plan->getTitle(),
+            ],
+        ];
+    }
+
+    private function buildPaymentAmountBlock(string $discountResult, int $originalAmount, int $discountAmount, int $payableAmount): string
+    {
+        if ('applied' === $discountResult) {
+            return implode("\n", [
+                '💰 مبلغ اولیه: '.$this->formatMoney($originalAmount).' تومان',
+                '🎁 میزان تخفیف: '.$this->formatMoney($discountAmount).' تومان',
+                '💳 مبلغ نهایی: '.$this->formatMoney($payableAmount).' تومان',
+            ]);
+        }
+
+        return '💰 مبلغ نهایی: '.$this->formatMoney($payableAmount).' تومان';
+    }
+
+    private function formatMoney(int $amount): string
+    {
+        return number_format($amount, 0, '.', ',');
+    }
+
+    /**
+     * @param array<string, mixed> $metadata
+     */
+    private function resolveOrderAccountName(Order $order, array $metadata): string
+    {
+        $candidate = trim((string) ($metadata['finalUsername'] ?? $metadata['customUsername'] ?? ''));
+        if ('' !== $candidate) {
+            return $candidate;
+        }
+
+        $targetService = $order->getTargetService();
+        if (null !== $targetService && '' !== trim((string) $targetService->getUsername())) {
+            return (string) $targetService->getUsername();
+        }
+
+        return '-';
+    }
+
+    /**
+     * @param array<string, mixed> $metadata
+     */
+    private function resolveOrderVolume(Order $order, array $metadata): string
+    {
+        if (array_key_exists('trafficGb', $metadata) && null !== $metadata['trafficGb']) {
+            return ((string) $metadata['trafficGb']).' گیگ';
+        }
+
+        $planTraffic = $order->getPlan()->getTrafficGb();
+        if (null !== $planTraffic) {
+            return ((string) $planTraffic).' گیگ';
+        }
+
+        return 'نامحدود';
+    }
+
+    /**
+     * @param array<string, mixed> $metadata
+     */
+    private function resolveOrderDuration(Order $order, array $metadata): string
+    {
+        if ((bool) ($metadata['unlimitedDuration'] ?? false) || $order->getPlan()->isUnlimitedDuration()) {
+            return 'نامحدود';
+        }
+
+        if (array_key_exists('durationDays', $metadata) && null !== $metadata['durationDays']) {
+            return ((string) $metadata['durationDays']).' روز';
+        }
+
+        return ((string) $order->getPlan()->getDurationDays()).' روز';
     }
 
     private function handleSelectStorePaymentMethod(TelegramAccount $account, string $chatId, string $data, ?string $callbackId = null): void
