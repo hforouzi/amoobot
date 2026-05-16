@@ -10,6 +10,10 @@ use App\Entity\Plan;
 
 class TelegramKeyboardFactory
 {
+    public function __construct(private readonly BotTextResolver $botTextResolver)
+    {
+    }
+
     /**
      * @return array<string, mixed>
      */
@@ -19,25 +23,25 @@ class TelegramKeyboardFactory
 
         if ($hasIncompleteOrder) {
             $keyboard[] = [
-                ['text' => '▶️ ادامه سفارش قبلی'],
-                ['text' => '🗑 حذف سفارش ناتمام'],
+                ['text' => $this->button('button.main.continue_order')],
+                ['text' => $this->button('button.main.cancel_incomplete_order')],
             ];
         }
 
         if ($hasTrackableOrder) {
             $keyboard[] = [
-                ['text' => '🔎 پیگیری سفارش'],
+                ['text' => $this->button('button.main.track_order')],
             ];
         }
 
         $keyboard[] = [
-            ['text' => '🛒 خرید سرویس'],
-            ['text' => '📦 سرویسهای من'],
+            ['text' => $this->button('button.main.buy_service')],
+            ['text' => $this->button('button.main.my_services')],
         ];
 
-        $supportRow = [['text' => '🎧 پشتیبانی']];
+        $supportRow = [['text' => $this->button('button.main.support')]];
         if ($isAdmin) {
-            $supportRow[] = ['text' => '🛠 مدیریت'];
+            $supportRow[] = ['text' => $this->button('button.main.admin')];
         }
         $keyboard[] = $supportRow;
 
@@ -77,19 +81,19 @@ class TelegramKeyboardFactory
     {
         $rows = [
             [
-                ['text' => '🛒 خرید سرویس', 'callback_data' => 'buy_service'],
+                ['text' => $this->button('button.main.buy_service'), 'callback_data' => 'buy_service'],
             ],
             [
-                ['text' => '📦 سرویسهای من', 'callback_data' => 'my_services'],
+                ['text' => $this->button('button.main.my_services'), 'callback_data' => 'my_services'],
             ],
             [
-                ['text' => '🎧 پشتیبانی', 'callback_data' => 'support'],
+                ['text' => $this->button('button.main.support'), 'callback_data' => 'support'],
             ],
         ];
 
         if ($isAdmin) {
             $rows[] = [
-                ['text' => '🛠 مدیریت', 'callback_data' => 'admin_menu'],
+                ['text' => $this->button('button.main.admin'), 'callback_data' => 'admin_menu'],
             ];
         }
 
@@ -121,7 +125,7 @@ class TelegramKeyboardFactory
         }
 
         $rows[] = [[
-            'text' => '⬅️ منوی اصلی',
+            'text' => $this->button('button.common.back'),
             'callback_data' => 'main_menu',
         ]];
 
@@ -135,7 +139,7 @@ class TelegramKeyboardFactory
     {
         return [
             'inline_keyboard' => [[
-                ['text' => '⬅️ منوی اصلی', 'callback_data' => 'main_menu'],
+                ['text' => $this->button('button.common.back'), 'callback_data' => 'main_menu'],
             ]],
         ];
     }
@@ -148,10 +152,10 @@ class TelegramKeyboardFactory
         return [
             'inline_keyboard' => [
                 [
-                    ['text' => '⬅️ بازگشت به پلن‌ها', 'callback_data' => 'buy_service'],
+                    ['text' => $this->button('button.common.back'), 'callback_data' => 'buy_service'],
                 ],
                 [
-                    ['text' => '🏠 منوی اصلی', 'callback_data' => 'main_menu'],
+                    ['text' => $this->button('button.common.back'), 'callback_data' => 'main_menu'],
                 ],
             ],
         ];
@@ -165,11 +169,11 @@ class TelegramKeyboardFactory
         return [
             'inline_keyboard' => [
                 [[
-                    'text' => '💳 کارت به کارت',
+                    'text' => $this->button('button.payment.manual_card'),
                     'callback_data' => 'select_payment_method:'.$planId.':manual_card',
                 ]],
                 [[
-                    'text' => '🔙 بازگشت به پلنها',
+                    'text' => $this->button('button.common.back'),
                     'callback_data' => 'buy_service',
                 ]],
             ],
@@ -184,11 +188,11 @@ class TelegramKeyboardFactory
         return [
             'inline_keyboard' => [
                 [[
-                    'text' => '💳 کارت به کارت',
+                    'text' => $this->button('button.payment.manual_card'),
                     'callback_data' => 'select_payment_method_draft:'.$draftId.':manual_card',
                 ]],
                 [[
-                    'text' => '❌ انصراف',
+                    'text' => $this->button('button.common.cancel'),
                     'callback_data' => 'custom_order_cancel:'.$draftId,
                 ]],
             ],
@@ -211,9 +215,9 @@ class TelegramKeyboardFactory
 
             $gateway = $method->getGateway();
             $text = '' !== trim($method->getTitle()) ? $method->getTitle() : match ($gateway->getType()) {
-                PaymentGatewayType::MANUAL_CARD => '💳 کارت به کارت',
+                PaymentGatewayType::MANUAL_CARD => $this->button('button.payment.manual_card'),
                 PaymentGatewayType::ZIBAL => '🌐 پرداخت آنلاین (زیبال)',
-                PaymentGatewayType::CUSTOM_API => '🌐 پرداخت آنلاین',
+                PaymentGatewayType::CUSTOM_API => $this->button('button.payment.online'),
                 PaymentGatewayType::NOWPAYMENTS => '₿ پرداخت ارز دیجیتال',
                 default => $gateway->getTitle(),
             };
@@ -226,8 +230,8 @@ class TelegramKeyboardFactory
         }
 
         $rows[] = [
-            ['text' => '🔙 بازگشت', 'callback_data' => $backCallback],
-            ['text' => '❌ انصراف', 'callback_data' => $cancelCallback],
+            ['text' => $this->button('button.common.back'), 'callback_data' => $backCallback],
+            ['text' => $this->button('button.common.cancel'), 'callback_data' => $cancelCallback],
         ];
 
         return ['inline_keyboard' => $rows];
@@ -241,12 +245,12 @@ class TelegramKeyboardFactory
         return [
             'inline_keyboard' => [
                 [[
-                    'text' => '✅ تایید و انتخاب روش پرداخت',
+                    'text' => $this->button('button.order.confirm'),
                     'callback_data' => 'custom_order_confirm:'.$draftId,
                 ]],
                 [
-                    ['text' => '🔙 بازگشت', 'callback_data' => 'draft_back:'.$draftId],
-                    ['text' => '❌ انصراف', 'callback_data' => 'draft_cancel:'.$draftId],
+                    ['text' => $this->button('button.common.back'), 'callback_data' => 'draft_back:'.$draftId],
+                    ['text' => $this->button('button.common.cancel'), 'callback_data' => 'draft_cancel:'.$draftId],
                 ],
             ],
         ];
@@ -260,8 +264,8 @@ class TelegramKeyboardFactory
         return [
             'inline_keyboard' => [
                 [
-                    ['text' => '🔙 بازگشت', 'callback_data' => 'buy_service'],
-                    ['text' => '❌ انصراف', 'callback_data' => 'custom_order_cancel:'.$draftId],
+                    ['text' => $this->button('button.common.back'), 'callback_data' => 'buy_service'],
+                    ['text' => $this->button('button.common.cancel'), 'callback_data' => 'custom_order_cancel:'.$draftId],
                 ],
             ],
         ];
@@ -275,7 +279,7 @@ class TelegramKeyboardFactory
         return [
             'inline_keyboard' => [
                 [[
-                    'text' => '❌ انصراف',
+                    'text' => $this->button('button.common.cancel'),
                     'callback_data' => 'draft_cancel:'.$draftId,
                 ]],
             ],
@@ -290,11 +294,11 @@ class TelegramKeyboardFactory
         return [
             'inline_keyboard' => [
                 [[
-                    'text' => '🔙 بازگشت',
+                    'text' => $this->button('button.common.back'),
                     'callback_data' => 'draft_back:'.$draftId,
                 ]],
                 [[
-                    'text' => '❌ انصراف',
+                    'text' => $this->button('button.common.cancel'),
                     'callback_data' => 'draft_cancel:'.$draftId,
                 ]],
             ],
@@ -309,15 +313,15 @@ class TelegramKeyboardFactory
         return [
             'inline_keyboard' => [
                 [[
-                    'text' => '✅ تایید و ارسال رسید',
+                    'text' => $this->button('button.payment.upload_receipt'),
                     'callback_data' => 'payment_submit_receipt:'.$paymentId,
                 ]],
                 [
-                    ['text' => '🔙 بازگشت به روشهای پرداخت', 'callback_data' => 'order_payment_methods:'.$orderId],
-                    ['text' => '🔙 بازگشت به خلاصه سفارش', 'callback_data' => 'order_summary:'.$orderId],
+                    ['text' => $this->button('button.common.back'), 'callback_data' => 'order_payment_methods:'.$orderId],
+                    ['text' => $this->button('button.common.back'), 'callback_data' => 'order_summary:'.$orderId],
                 ],
                 [[
-                    'text' => '❌ انصراف سفارش',
+                    'text' => $this->button('button.payment.cancel'),
                     'callback_data' => 'order_cancel:'.$orderId,
                 ]],
             ],
@@ -332,19 +336,19 @@ class TelegramKeyboardFactory
         return [
             'inline_keyboard' => [
                 [[
-                    'text' => 'پرداخت آنلاین',
+                    'text' => $this->button('button.payment.open_url'),
                     'url' => $paymentUrl,
                 ]],
                 [[
-                    'text' => '🔄 بررسی پرداخت',
+                    'text' => $this->button('button.payment.check'),
                     'callback_data' => 'payment_check:'.$paymentId,
                 ]],
                 [
-                    ['text' => '🔙 بازگشت به روشهای پرداخت', 'callback_data' => 'order_payment_methods:'.$orderId],
-                    ['text' => '🔙 بازگشت به خلاصه سفارش', 'callback_data' => 'order_summary:'.$orderId],
+                    ['text' => $this->button('button.common.back'), 'callback_data' => 'order_payment_methods:'.$orderId],
+                    ['text' => $this->button('button.common.back'), 'callback_data' => 'order_summary:'.$orderId],
                 ],
                 [[
-                    'text' => '❌ انصراف سفارش',
+                    'text' => $this->button('button.payment.cancel'),
                     'callback_data' => 'order_cancel:'.$orderId,
                 ]],
             ],
@@ -395,7 +399,7 @@ class TelegramKeyboardFactory
                     'callback_data' => 'admin_orders',
                 ]],
                 [[
-                    'text' => '🔙 بازگشت به منوی اصلی',
+                    'text' => $this->button('button.common.back'),
                     'callback_data' => 'main_menu',
                 ]],
             ],
@@ -418,7 +422,7 @@ class TelegramKeyboardFactory
         }
 
         $rows[] = [[
-            'text' => '🔙 بازگشت به مدیریت',
+            'text' => $this->button('button.common.back'),
             'callback_data' => 'admin_menu',
         ]];
 
@@ -432,7 +436,7 @@ class TelegramKeyboardFactory
     {
         return [
             'inline_keyboard' => [[
-                ['text' => '🔙 بازگشت به مدیریت', 'callback_data' => 'admin_menu'],
+                ['text' => $this->button('button.common.back'), 'callback_data' => 'admin_menu'],
             ]],
         ];
     }
@@ -453,7 +457,7 @@ class TelegramKeyboardFactory
         }
 
         $rows[] = [[
-            'text' => '🏠 منوی اصلی',
+            'text' => $this->button('button.common.back'),
             'callback_data' => 'main_menu',
         ]];
 
@@ -467,28 +471,28 @@ class TelegramKeyboardFactory
     {
         $rows = [
             [
-                ['text' => '🔗 لینک اشتراک', 'callback_data' => 'service_subscription:'.$serviceId],
-                ['text' => '📷 QR لینک اشتراک', 'callback_data' => 'service_subscription_qr:'.$serviceId],
+                ['text' => $this->button('button.service.subscription'), 'callback_data' => 'service_subscription:'.$serviceId],
+                ['text' => $this->button('button.service.qr'), 'callback_data' => 'service_subscription_qr:'.$serviceId],
             ],
             [
-                ['text' => '📨 ارسال مجدد کانفیگ', 'callback_data' => 'service_resend_config:'.$serviceId],
-                ['text' => '🔄 بروزرسانی مصرف', 'callback_data' => 'service_sync_usage:'.$serviceId],
+                ['text' => $this->button('button.service.configs'), 'callback_data' => 'service_resend_config:'.$serviceId],
+                ['text' => $this->button('button.service.refresh_usage'), 'callback_data' => 'service_sync_usage:'.$serviceId],
             ],
         ];
 
         $actionButtons = [];
         if ($canRenew) {
-            $actionButtons[] = ['text' => '🔄 تمدید سرویس', 'callback_data' => 'service_renew:'.$serviceId];
+            $actionButtons[] = ['text' => $this->button('button.service.renew'), 'callback_data' => 'service_renew:'.$serviceId];
         }
         if ($canAddTraffic) {
-            $actionButtons[] = ['text' => '➕ خرید حجم اضافه', 'callback_data' => 'service_add_traffic_order:'.$serviceId];
+            $actionButtons[] = ['text' => $this->button('button.service.add_traffic'), 'callback_data' => 'service_add_traffic_order:'.$serviceId];
         }
         foreach ($this->inlineKeyboardRows($actionButtons, 2) as $row) {
             $rows[] = $row;
         }
 
         $rows[] = [[
-            'text' => '🔙 بازگشت',
+            'text' => $this->button('button.common.back'),
             'callback_data' => 'my_services',
         ]];
 
@@ -511,7 +515,7 @@ class TelegramKeyboardFactory
         }
 
         $rows[] = [[
-            'text' => '🔙 بازگشت به مدیریت',
+            'text' => $this->button('button.common.back'),
             'callback_data' => 'admin_menu',
         ]];
 
@@ -540,18 +544,18 @@ class TelegramKeyboardFactory
                     'callback_data' => 'service_add_traffic_menu:'.$serviceId,
                 ]],
                 [[
-                    'text' => '🔄 تمدید سرویس',
+                    'text' => $this->button('button.service.renew'),
                     'callback_data' => 'service_renew:'.$serviceId,
                 ]],
                 [[
                     'text' => '🔄 ریست مصرف',
                     'callback_data' => 'service_reset_usage:'.$serviceId,
                 ], [
-                    'text' => '🔄 بروزرسانی مصرف',
+                    'text' => $this->button('button.service.refresh_usage'),
                     'callback_data' => 'service_sync_usage:'.$serviceId,
                 ]],
                 [[
-                    'text' => '📨 ارسال مجدد',
+                    'text' => $this->button('button.service.configs'),
                     'callback_data' => 'service_resend_config:'.$serviceId,
                 ]],
                 [[
@@ -562,7 +566,7 @@ class TelegramKeyboardFactory
                     'text' => '👤 مشاهده کاربر',
                     'callback_data' => 'admin_user_view:'.$userId.':'.$serviceId,
                 ], [
-                    'text' => '🔙 بازگشت',
+                    'text' => $this->button('button.common.back'),
                     'callback_data' => 'admin_services',
                 ]],
             ],
@@ -589,7 +593,7 @@ class TelegramKeyboardFactory
                     'callback_data' => 'service_extend:'.$serviceId.':90',
                 ]],
                 [[
-                    'text' => '🔙 بازگشت به سرویس',
+                    'text' => $this->button('button.common.back'),
                     'callback_data' => 'admin_service_view:'.$serviceId,
                 ]],
             ],
@@ -616,7 +620,7 @@ class TelegramKeyboardFactory
                     'callback_data' => 'service_add_traffic:'.$serviceId.':100',
                 ]],
                 [[
-                    'text' => '🔙 بازگشت به سرویس',
+                    'text' => $this->button('button.common.back'),
                     'callback_data' => 'admin_service_view:'.$serviceId,
                 ]],
             ],
@@ -642,7 +646,7 @@ class TelegramKeyboardFactory
                     'callback_data' => 'admin_user_orders:'.$userId.$suffix,
                 ]],
                 [[
-                    'text' => '🔙 بازگشت',
+                    'text' => $this->button('button.common.back'),
                     'callback_data' => $backCallback,
                 ]],
             ],
@@ -658,7 +662,7 @@ class TelegramKeyboardFactory
             'inline_keyboard' => [
                 [
                     ['text' => '✅ بله، حذف کن', 'callback_data' => 'service_delete_confirm:'.$serviceId],
-                    ['text' => '❌ انصراف', 'callback_data' => 'admin_service_view:'.$serviceId],
+                    ['text' => $this->button('button.common.cancel'), 'callback_data' => 'admin_service_view:'.$serviceId],
                 ],
             ],
         ];
@@ -674,8 +678,8 @@ class TelegramKeyboardFactory
         return [
             'inline_keyboard' => [
                 [
-                    ['text' => '✅ تایید و پرداخت تمدید', 'callback_data' => 'renewal_confirm:'.$serviceId],
-                    ['text' => '❌ انصراف', 'callback_data' => $cancelCallback],
+                    ['text' => $this->button('button.order.confirm'), 'callback_data' => 'renewal_confirm:'.$serviceId],
+                    ['text' => $this->button('button.common.cancel'), 'callback_data' => $cancelCallback],
                 ],
             ],
         ];
@@ -689,8 +693,8 @@ class TelegramKeyboardFactory
         return [
             'inline_keyboard' => [
                 [
-                    ['text' => '✅ تایید و پرداخت', 'callback_data' => 'add_traffic_confirm:'.$draftId],
-                    ['text' => '❌ انصراف', 'callback_data' => 'service_view:'.$serviceId],
+                    ['text' => $this->button('button.order.confirm'), 'callback_data' => 'add_traffic_confirm:'.$draftId],
+                    ['text' => $this->button('button.common.cancel'), 'callback_data' => 'service_view:'.$serviceId],
                 ],
             ],
         ];
@@ -704,7 +708,7 @@ class TelegramKeyboardFactory
         $rows = [];
         if (str_starts_with($cancelCallback, 'draft_cancel:')) {
             $rows[] = [[
-                'text' => '🔙 بازگشت به خلاصه سفارش',
+                'text' => $this->button('button.common.back'),
                 'callback_data' => 'draft_back:'.$draftId,
             ]];
         }
@@ -714,7 +718,7 @@ class TelegramKeyboardFactory
             ['text' => 'ادامه بدون کد تخفیف', 'callback_data' => 'discount_skip:'.$draftId],
         ];
         $rows[] = [[
-            'text' => '❌ انصراف',
+            'text' => $this->button('button.common.cancel'),
             'callback_data' => $cancelCallback,
         ]];
 
@@ -731,7 +735,7 @@ class TelegramKeyboardFactory
         return [
             'inline_keyboard' => [
                 [[
-                    'text' => '🔙 بازگشت به خلاصه سفارش',
+                    'text' => $this->button('button.common.back'),
                     'callback_data' => 'order_summary:'.$orderId,
                 ]],
                 [
@@ -739,7 +743,7 @@ class TelegramKeyboardFactory
                     ['text' => 'ادامه بدون کد تخفیف', 'callback_data' => 'discount_skip_order:'.$orderId],
                 ],
                 [[
-                    'text' => '❌ انصراف',
+                    'text' => $this->button('button.common.cancel'),
                     'callback_data' => $cancelCallback,
                 ]],
             ],
@@ -754,11 +758,11 @@ class TelegramKeyboardFactory
         return [
             'inline_keyboard' => [
                 [[
-                    'text' => '🔙 بازگشت به انتخاب تخفیف',
+                    'text' => $this->button('button.common.back'),
                     'callback_data' => 'draft_back:'.$draftId,
                 ]],
                 [[
-                    'text' => '❌ انصراف',
+                    'text' => $this->button('button.common.cancel'),
                     'callback_data' => 'draft_cancel:'.$draftId,
                 ]],
             ],
@@ -773,8 +777,8 @@ class TelegramKeyboardFactory
         return [
             'inline_keyboard' => [
                 [
-                    ['text' => '🔙 بازگشت به خلاصه سفارش', 'callback_data' => 'order_summary:'.$orderId],
-                    ['text' => '❌ انصراف', 'callback_data' => 'order_cancel:'.$orderId],
+                    ['text' => $this->button('button.common.back'), 'callback_data' => 'order_summary:'.$orderId],
+                    ['text' => $this->button('button.common.cancel'), 'callback_data' => 'order_cancel:'.$orderId],
                 ],
             ],
         ];
@@ -788,8 +792,8 @@ class TelegramKeyboardFactory
         return [
             'inline_keyboard' => [
                 [
-                    ['text' => '▶️ ادامه سفارش', 'callback_data' => 'resume_incomplete_order:'.$id],
-                    ['text' => '🗑 حذف سفارش ناتمام', 'callback_data' => 'cancel_incomplete_order:'.$id],
+                    ['text' => $this->button('button.main.continue_order'), 'callback_data' => 'resume_incomplete_order:'.$id],
+                    ['text' => $this->button('button.main.cancel_incomplete_order'), 'callback_data' => 'cancel_incomplete_order:'.$id],
                 ],
                 [[
                     'text' => '➕ سفارش جدید',
@@ -811,7 +815,7 @@ class TelegramKeyboardFactory
                     ['text' => 'ادامه بدون کد تخفیف', 'callback_data' => 'discount_skip_order:'.$orderId],
                 ],
                 [[
-                    'text' => '❌ انصراف',
+                    'text' => $this->button('button.common.cancel'),
                     'callback_data' => 'order_cancel:'.$orderId,
                 ]],
             ],
@@ -833,7 +837,7 @@ class TelegramKeyboardFactory
             ]];
         }
         $inlineRows[] = [[
-            'text' => '🔙 بازگشت',
+            'text' => $this->button('button.common.back'),
             'callback_data' => 'main_menu',
         ]];
 
@@ -849,18 +853,18 @@ class TelegramKeyboardFactory
         if ($canResume || null !== $serviceId) {
             $row = [];
             if ($canResume) {
-                $row[] = ['text' => 'ادامه پرداخت', 'callback_data' => 'order_resume:'.$orderId];
+                $row[] = ['text' => $this->button('button.order.resume'), 'callback_data' => 'order_resume:'.$orderId];
             }
             if (null !== $serviceId) {
-                $row[] = ['text' => 'مشاهده سرویس', 'callback_data' => 'service_view:'.$serviceId];
+                $row[] = ['text' => $this->button('button.service.view'), 'callback_data' => 'service_view:'.$serviceId];
             }
             if ([] !== $row) {
                 $rows[] = $row;
             }
         }
         $rows[] = [
-            ['text' => '🔙 بازگشت', 'callback_data' => 'track_orders'],
-            ['text' => '❌ بستن', 'callback_data' => 'main_menu'],
+            ['text' => $this->button('button.common.back'), 'callback_data' => 'track_orders'],
+            ['text' => $this->button('button.common.close'), 'callback_data' => 'main_menu'],
         ];
 
         return ['inline_keyboard' => $rows];
@@ -878,20 +882,25 @@ class TelegramKeyboardFactory
 
         if (null !== $paymentUrl && '' !== $paymentUrl) {
             $rows[] = [[
-                'text' => '💳 پرداخت در صفحه پرداخت',
+                'text' => $this->button('button.payment.open_url'),
                 'url' => $paymentUrl,
             ]];
         }
 
         $rows[] = [[
-            'text' => '🔄 بررسی پرداخت',
+            'text' => $this->button('button.payment.check'),
             'callback_data' => 'payment_check:'.$paymentId,
         ]];
         $rows[] = [[
-            'text' => '❌ انصراف',
+            'text' => $this->button('button.common.cancel'),
             'callback_data' => 'payment_cancel:'.$paymentId,
         ]];
 
         return ['inline_keyboard' => $rows];
+    }
+
+    private function button(string $key): string
+    {
+        return $this->botTextResolver->button($key);
     }
 }

@@ -1,4 +1,8 @@
 admin:
+  bot_button_label: متن دکمه
+  bot_button_labels: متن دکمه‌ها
+  bot_message_template: قالب پیام
+  bot_message_templates: قالب پیام‌ها
   dashboard: داشبورد
   menu:
     store: فروشگاه
@@ -7,6 +11,7 @@ admin:
     automation: اتوماسیون
     system: سیستم
     payments: پرداخت
+    bot_content: محتوای بات
   users: کاربران
   telegram_accounts: اکانت‌های تلگرام
   vpn_panels: پنل‌های VPN

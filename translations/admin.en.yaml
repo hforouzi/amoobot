@@ -1,4 +1,8 @@
 admin:
+  bot_button_label: Button Label
+  bot_button_labels: Button Labels
+  bot_message_template: Message Template
+  bot_message_templates: Message Templates
   dashboard: Dashboard
   menu:
     store: Store
@@ -7,6 +11,7 @@ admin:
     automation: Automation
     system: System
     payments: Payments
+    bot_content: Bot Content
   users: Users
   telegram_accounts: Telegram Accounts
   vpn_panels: VPN Panels

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Provisioning\Application;
 
+use App\Bot\Application\BotTextResolver;
 use App\Bot\Infrastructure\TelegramApiClient;
 use App\Entity\ServiceNotificationLog;
 use App\Entity\TelegramAccount;
@@ -20,6 +21,7 @@ final class ServiceNotificationService
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
         private readonly TelegramApiClient $telegramApiClient,
+        private readonly BotTextResolver $botTextResolver,
         private readonly SettingValueProvider $settingValueProvider,
         private readonly string $serviceNotifyExpiryDays = '3,1',
         private readonly string $serviceNotifyTrafficThresholds = '80,95,100',
@@ -83,10 +85,12 @@ final class ServiceNotificationService
                     $service,
                     'expiry_warning',
                     sprintf('expiry_%d_days', $days),
-                    sprintf(
-                        "⏰ سرویس شما تا %d روز دیگر منقضی میشود.\nبرای جلوگیری از قطع شدن، سرویس خود را تمدید کنید.",
-                        $days
-                    ),
+                    $this->botTextResolver->message('service.expiring', [
+                        'service' => [
+                            'id' => (int) ($service->getId() ?? 0),
+                            'expiresAt' => $expiresAt->format('Y-m-d H:i:s'),
+                        ],
+                    ]),
                     [
                         'thresholdDays' => $days,
                         'daysLeft' => $daysLeft,
@@ -154,7 +158,13 @@ final class ServiceNotificationService
                     $service,
                     $type,
                     $keyName,
-                    $this->buildTrafficMessage($threshold),
+                    $threshold >= 100
+                        ? $this->botTextResolver->message('service.traffic_exhausted', [
+                            'service' => ['id' => (int) ($service->getId() ?? 0), 'trafficUsedPercent' => round($usagePercent, 2)],
+                        ])
+                        : $this->botTextResolver->message('service.traffic_low', [
+                            'service' => ['id' => (int) ($service->getId() ?? 0), 'trafficUsedPercent' => round($usagePercent, 2)],
+                        ]),
                     [
                         'thresholdPercent' => $threshold,
                         'usagePercent' => round($usagePercent, 2),
@@ -212,7 +222,12 @@ final class ServiceNotificationService
                 $service,
                 'expired',
                 'expired',
-                '🔴 سرویس شما منقضی شده است.',
+                $this->botTextResolver->message('service.expired', [
+                    'service' => [
+                        'id' => (int) ($service->getId() ?? 0),
+                        'expiresAt' => $service->getExpiresAt()?->format('Y-m-d H:i:s') ?? '',
+                    ],
+                ]),
                 [
                     'status' => $service->getStatus(),
                     'expiresAt' => $service->getExpiresAt()?->format('Y-m-d H:i:s'),

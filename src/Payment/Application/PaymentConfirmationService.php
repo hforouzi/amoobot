@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Payment\Application;
 
-use App\Bot\Application\BotTexts;
+use App\Bot\Application\BotTextResolver;
 use App\Entity\VpnService;
 use App\Bot\Infrastructure\TelegramApiClient;
 use App\Entity\Payment;
@@ -18,6 +18,7 @@ class PaymentConfirmationService
         private readonly EntityManagerInterface $entityManager,
         private readonly PaymentApprovalService $paymentApprovalService,
         private readonly TelegramApiClient $telegramApiClient,
+        private readonly BotTextResolver $botTextResolver,
     ) {
     }
 
@@ -52,7 +53,7 @@ class PaymentConfirmationService
         if ($result->processed) {
             $telegramAccount = $this->entityManager->getRepository(TelegramAccount::class)->findOneBy(['user' => $payment->getOrder()->getUser()]);
             if ($telegramAccount instanceof TelegramAccount) {
-                $this->telegramApiClient->sendMessage($telegramAccount->getTelegramId(), BotTexts::PAYMENT_REJECTED);
+                $this->telegramApiClient->sendMessage($telegramAccount->getTelegramId(), $this->botTextResolver->message('payment.rejected'));
             }
         }
 
@@ -65,7 +66,7 @@ class PaymentConfirmationService
     private function buildPaymentConfirmedMessages(?VpnService $vpnService): array
     {
         if (!$vpnService instanceof VpnService) {
-            return ['✅ پرداخت شما تایید شد.'];
+            return [$this->botTextResolver->message('payment.confirmed')];
         }
 
         $subscriptionUrl = trim((string) ($vpnService->getSubscriptionUrl() ?? ''));
@@ -82,7 +83,7 @@ class PaymentConfirmationService
         }
 
         $lines = [
-            '✅ پرداخت شما تایید شد.',
+            $this->botTextResolver->message('payment.confirmed'),
             '',
             '📦 خلاصه سرویس',
             sprintf('شناسه سرویس: %d', $vpnService->getId() ?? 0),
@@ -117,11 +118,11 @@ class PaymentConfirmationService
     private function buildRenewalConfirmedMessages(?VpnService $vpnService): array
     {
         if (!$vpnService instanceof VpnService) {
-            return ['✅ سرویس شما با موفقیت تمدید شد.'];
+            return [$this->botTextResolver->message('service.renewed')];
         }
 
         $lines = [
-            '✅ سرویس شما با موفقیت تمدید شد.',
+            $this->botTextResolver->message('service.renewed'),
             sprintf('شناسه سرویس: %d', $vpnService->getId() ?? 0),
             sprintf('تاریخ انقضای جدید: %s', $vpnService->getExpiresAt()?->format('Y-m-d H:i:s') ?? 'نامحدود'),
             sprintf('حجم کل جدید: %s', null === $vpnService->getTrafficLimitGb() ? 'نامحدود' : ((string) $vpnService->getTrafficLimitGb().' گیگ')),
@@ -151,11 +152,11 @@ class PaymentConfirmationService
     private function buildAddTrafficConfirmedMessages(?VpnService $vpnService, int $addedTrafficGb): array
     {
         if (!$vpnService instanceof VpnService) {
-            return ['✅ حجم اضافه با موفقیت به سرویس شما اضافه شد.'];
+            return [$this->botTextResolver->message('service.add_traffic_done')];
         }
 
         $lines = [
-            '✅ حجم اضافه با موفقیت به سرویس شما اضافه شد.',
+            $this->botTextResolver->message('service.add_traffic_done'),
             sprintf('شناسه سرویس: %d', $vpnService->getId() ?? 0),
             sprintf('حجم افزوده: %d گیگ', max(0, $addedTrafficGb)),
             sprintf('حجم کل جدید: %s', null === $vpnService->getTrafficLimitGb() ? 'نامحدود' : ((string) $vpnService->getTrafficLimitGb().' گیگ')),
