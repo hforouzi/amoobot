@@ -23,7 +23,7 @@ class VpnInbound
     private string $remoteInboundId;
 
     #[ORM\Column(length: 255)]
-    private string $title;
+    private string $title = '';
 
     #[ORM\Column(length: 255, nullable: true)]
     private ?string $remark = null;
@@ -458,7 +458,7 @@ class VpnInbound
     public function __toString(): string
     {
         $country = trim((string) ($this->country ?? ''));
-        $title = trim((string) $this->title);
+        $title = isset($this->title) ? trim($this->title) : '';
         $protocol = trim((string) ($this->protocol ?? ''));
 
         return sprintf(
