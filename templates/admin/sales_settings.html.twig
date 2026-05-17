@@ -1,0 +1,45 @@
+{% extends '@EasyAdmin/page/content.html.twig' %}
+{% trans_default_domain 'admin' %}
+
+{% block content_title %}{{ 'sales_settings.title'|trans }}{% endblock %}
+
+{% block main %}
+    <div class="admin-custom-page admin-settings-page">
+        <form method="post" class="admin-form-card admin-settings-form">
+            <div class="admin-section">
+                <h2>{{ 'sales_settings.sections.availability'|trans }}</h2>
+
+                <div class="admin-checkbox-row">
+                    <input class="form-check-input" type="checkbox" id="sales_new_orders_enabled" name="sales_new_orders_enabled" {% if values.sales_new_orders_enabled %}checked{% endif %}>
+                    <label class="form-check-label" for="sales_new_orders_enabled">{{ 'sales_settings.fields.new_orders_enabled'|trans }}</label>
+                    <div class="form-text">{{ keys.sales_new_orders_enabled }}</div>
+                </div>
+
+                <div class="admin-checkbox-row">
+                    <input class="form-check-input" type="checkbox" id="sales_renewals_enabled" name="sales_renewals_enabled" {% if values.sales_renewals_enabled %}checked{% endif %}>
+                    <label class="form-check-label" for="sales_renewals_enabled">{{ 'sales_settings.fields.renewals_enabled'|trans }}</label>
+                    <div class="form-text">{{ keys.sales_renewals_enabled }}</div>
+                </div>
+
+                <div class="admin-checkbox-row">
+                    <input class="form-check-input" type="checkbox" id="sales_add_traffic_enabled" name="sales_add_traffic_enabled" {% if values.sales_add_traffic_enabled %}checked{% endif %}>
+                    <label class="form-check-label" for="sales_add_traffic_enabled">{{ 'sales_settings.fields.add_traffic_enabled'|trans }}</label>
+                    <div class="form-text">{{ keys.sales_add_traffic_enabled }}</div>
+                </div>
+            </div>
+
+            <div class="admin-section">
+                <h2>{{ 'sales_settings.sections.message'|trans }}</h2>
+                <div class="admin-form-row">
+                    <label class="form-label" for="sales_disabled_message">{{ 'sales_settings.fields.disabled_message'|trans }}</label>
+                    <textarea class="form-control" id="sales_disabled_message" name="sales_disabled_message" rows="4">{{ values.sales_disabled_message }}</textarea>
+                    <div class="form-text">{{ keys.sales_disabled_message }}</div>
+                </div>
+            </div>
+
+            <div class="admin-actions">
+                <button type="submit" class="btn btn-primary">{{ 'common.save'|trans }}</button>
+            </div>
+        </form>
+    </div>
+{% endblock %}
