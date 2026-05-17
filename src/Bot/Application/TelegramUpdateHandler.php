@@ -27,6 +27,7 @@ use App\Shop\Application\IncompleteOrderContext;
 use App\Shop\Application\OrderTrackingCodeService;
 use App\Shop\Application\DiscountCodeService;
 use App\Shop\Application\PlanPricingService;
+use App\Shop\Application\SalesSettingsProvider;
 use App\Shop\Domain\OrderDraftStatus;
 use App\Shop\Domain\OrderStatus;
 use App\Shop\Domain\OrderType;
@@ -63,6 +64,7 @@ class TelegramUpdateHandler
         private readonly OrderTrackingCodeService $orderTrackingCodeService,
         private readonly PlanPricingService $planPricingService,
         private readonly DiscountCodeService $discountCodeService,
+        private readonly SalesSettingsProvider $salesSettingsProvider,
         private readonly PaymentGatewayRegistry $paymentGatewayRegistry,
         private readonly StorePaymentMethodResolver $storePaymentMethodResolver,
         private readonly BotTextResolver $botTextResolver,
@@ -111,7 +113,7 @@ class TelegramUpdateHandler
         }
 
         if ('button.main.buy_service' === $replyButtonKey || self::BUTTON_BUY_SERVICE === $text) {
-            $this->handleBuyService($chatId);
+            $this->handleBuyService($account, $chatId, null, $isAdmin);
 
             return;
         }
@@ -307,7 +309,7 @@ class TelegramUpdateHandler
         }
 
         if ('buy_service' === $data) {
-            $this->handleBuyService($chatId, $callbackId);
+            $this->handleBuyService($account, $chatId, $callbackId, $isAdmin);
 
             return;
         }
@@ -487,7 +489,7 @@ class TelegramUpdateHandler
         }
 
         if ('start_new_order' === $data) {
-            $this->handleBuyService($chatId, $callbackId);
+            $this->handleBuyService($account, $chatId, $callbackId, $isAdmin);
 
             return;
         }
@@ -520,8 +522,14 @@ class TelegramUpdateHandler
         $this->sendIncompleteOrderPromptIfAny($account, $chatId);
     }
 
-    private function handleBuyService(string $chatId, ?string $callbackId = null): void
+    private function handleBuyService(TelegramAccount $account, string $chatId, ?string $callbackId = null, bool $isAdmin = false): void
     {
+        if (!$this->salesSettingsProvider->newOrdersEnabled()) {
+            $this->sendSalesDisabledMessage($account, $chatId, $callbackId, $isAdmin, 'new_order', SalesSettingsProvider::NEW_ORDERS_ENABLED);
+
+            return;
+        }
+
         $plans = $this->entityManager->getRepository(Plan::class)->findBy(['isActive' => true], ['id' => 'ASC']);
         if ([] === $plans) {
             $this->showPopupOrMessage($chatId, $callbackId, $this->botTextResolver->message('plan.list_empty'), 'popup_no_active_plans');
@@ -535,6 +543,12 @@ class TelegramUpdateHandler
 
     private function handleSelectPlan(TelegramAccount $account, string $chatId, int $planId, ?string $callbackId = null): void
     {
+        if (!$this->salesSettingsProvider->newOrdersEnabled()) {
+            $this->sendSalesDisabledMessage($account, $chatId, $callbackId, false, 'new_order', SalesSettingsProvider::NEW_ORDERS_ENABLED);
+
+            return;
+        }
+
         $plan = $this->entityManager->getRepository(Plan::class)->find($planId);
         if (!$plan instanceof Plan || !$plan->isActive()) {
             $this->showPopupOrMessage($chatId, $callbackId, 'این پلن دیگر فعال نیست یا وجود ندارد.', 'popup_invalid_plan');
@@ -831,6 +845,12 @@ class TelegramUpdateHandler
 
         if (null === $draft->getCalculatedAmount() || $draft->getCalculatedAmount() <= 0 || null === $draft->getFinalUsername()) {
             $this->showPopupOrMessage($chatId, $callbackId, 'اطلاعات سفارش ناقص است.', 'popup_custom_order_confirm_incomplete');
+
+            return;
+        }
+
+        if (!$this->salesSettingsProvider->newOrdersEnabled()) {
+            $this->sendSalesDisabledMessage($account, $chatId, $callbackId, false, 'new_order', SalesSettingsProvider::NEW_ORDERS_ENABLED);
 
             return;
         }
@@ -1424,6 +1444,15 @@ class TelegramUpdateHandler
 
     private function sendPaymentGatewaySelectionForNewServiceDraft(OrderDraft $draft, string $chatId, ?string $callbackId, ?string $discountResult = null, ?string $discountReason = null): void
     {
+        $existingOrder = $this->findOrderByDraftIdForAnyOpenStatus($draft);
+        if (!$existingOrder instanceof Order && !$this->salesSettingsProvider->newOrdersEnabled()) {
+            $this->logSalesBlocked((int) ($draft->getUser()->getId() ?? 0), 'new_order', SalesSettingsProvider::NEW_ORDERS_ENABLED);
+            $this->acknowledgeCallback($callbackId);
+            $this->telegramApiClient->sendMessage($chatId, $this->salesDisabledMessage());
+
+            return;
+        }
+
         $order = $this->createOrderFromNewServiceDraft($draft);
         if (!$order instanceof Order) {
             $this->showPopupOrMessage($chatId, $callbackId, 'سفارش نامعتبر است.', 'invalid_order_from_new_service_draft');
@@ -3453,6 +3482,36 @@ class TelegramUpdateHandler
 
         $this->debugLog(sprintf('%s text_message="%s"', $logKey, $text));
         $this->telegramApiClient->sendMessage($chatId, $text);
+    }
+
+    private function sendSalesDisabledMessage(TelegramAccount $account, string $chatId, ?string $callbackId, bool $isAdmin, string $action, string $settingKey): void
+    {
+        $this->logSalesBlocked((int) ($account->getUser()->getId() ?? 0), $action, $settingKey);
+        $this->acknowledgeCallback($callbackId);
+        $this->telegramApiClient->sendMessage(
+            $chatId,
+            $this->salesDisabledMessage(),
+            $this->keyboardFactory->mainReplyKeyboard($isAdmin, $this->hasActiveIncompleteOrder($account), $this->hasTrackableOrders($account))
+        );
+    }
+
+    private function salesDisabledMessage(): string
+    {
+        return $this->botTextResolver->message('sales.disabled', [
+            'sales' => [
+                'disabledMessage' => $this->salesSettingsProvider->disabledMessage(),
+            ],
+        ]);
+    }
+
+    private function logSalesBlocked(int $userId, string $action, string $settingKey): void
+    {
+        $this->debugLog(sprintf(
+            'sales_blocked user_id=%d action=%s setting_key=%s result=blocked',
+            $userId,
+            $action,
+            $settingKey
+        ));
     }
 
     private function isAdminUserId(string $actorId): bool

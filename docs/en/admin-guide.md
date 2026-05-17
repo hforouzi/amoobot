@@ -30,6 +30,10 @@ The admin panel is built with EasyAdmin and supports Persian and English. Persia
 6. Track orders by status and tracking code.
 7. Check bot message logs, payment diagnostics, and panel test commands when a flow fails.
 
+## Sales Controls
+
+Use `Settings -> Sales` to enable or disable new service sales, renewals, and extra traffic purchases independently. Closing sales does not block existing waiting-payment orders, service viewing, config delivery, or approval of already-submitted payments.
+
 ## Language
 
 Use the admin language switcher for `fa` and `en`. Persian UI is RTL and English UI is LTR.

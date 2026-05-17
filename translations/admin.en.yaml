@@ -30,6 +30,7 @@ admin:
   automation: Automation
   system_status: System Status
   renewal_pricing_settings: Renewal & Pricing Settings
+  sales_settings: Sales Settings
   automation_settings: Automation Settings
   bulk_plan_price_adjustment: Bulk Plan Price Adjustment
   plugins: Plugins
@@ -188,3 +189,14 @@ renewal_pricing_settings:
     traffic_addon_price_per_gb: Price per GB of add-on traffic
   help:
     global_discount_percent: Allowed value is 0 to 100.
+
+sales_settings:
+  title: Sales Settings
+  sections:
+    availability: Sales Availability
+    message: Disabled Message
+  fields:
+    new_orders_enabled: New service sales enabled?
+    renewals_enabled: Renewals enabled?
+    add_traffic_enabled: Extra traffic purchases enabled?
+    disabled_message: Sales disabled message
