@@ -6,6 +6,7 @@ namespace App\Admin\UI\Crud;
 
 use App\Admin\UI\Support\AdminStatusBadge;
 use App\Entity\VpnService;
+use App\Provisioning\Application\FinalConfigLinkProvider;
 use App\Provisioning\Domain\VpnServiceStatus;
 use Doctrine\ORM\QueryBuilder;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Action;
@@ -25,6 +26,11 @@ use EasyCorp\Bundle\EasyAdminBundle\Field\TextareaField;
 
 class VpnServiceCrudController extends AbstractCrudController
 {
+    public function __construct(
+        private readonly FinalConfigLinkProvider $finalConfigLinkProvider,
+    ) {
+    }
+
     public static function getEntityFqcn(): string
     {
         return VpnService::class;
@@ -56,7 +62,17 @@ class VpnServiceCrudController extends AbstractCrudController
             TextField::new('subId')->hideOnIndex(),
             IntegerField::new('ipLimit')->setLabel('IP Limit'),
             TextareaField::new('subscriptionUrl')->hideOnIndex(),
-            TextareaField::new('configText')->hideOnIndex(),
+            TextareaField::new('configText')
+                ->formatValue(function (mixed $value, ?VpnService $service): string {
+                    if (!$service instanceof VpnService) {
+                        return (string) $value;
+                    }
+
+                    $finalLinks = $this->finalConfigLinkProvider->getFinalLinksForService($service, 'admin_vpn_service_crud');
+
+                    return [] !== $finalLinks ? implode("\n", $finalLinks) : (string) $value;
+                })
+                ->hideOnIndex(),
             TextField::new('status')
                 ->formatValue(static fn (mixed $value): string => AdminStatusBadge::html($value))
                 ->renderAsHtml(),

@@ -22,6 +22,7 @@ class VpnProvisioningService
         private readonly EntityManagerInterface $entityManager,
         private readonly VpnPanelDriverRegistry $driverRegistry,
         private readonly VpnAccessLinkGenerator $vpnAccessLinkGenerator,
+        private readonly FinalConfigLinkProvider $finalConfigLinkProvider,
     ) {
     }
 
@@ -117,15 +118,22 @@ class VpnProvisioningService
 
         $configWarning = [] !== $missing ? '⚠️ لینک اتصال قابل تولید نیست. فیلدهای ناقص: '.implode(', ', $missing) : null;
         $existingConfigText = trim((string) ($vpnService->getConfigText() ?? ''));
-        $finalConfigText = [] !== $configLinks
-            ? implode("\n", $configLinks)
+        $finalLinkSet = $this->finalConfigLinkProvider->deduplicateAndPreferFormattedForService(
+            $vpnService,
+            $createdConfigLinks,
+            $configLinks,
+            'provisioning_service_created'
+        );
+        $finalLinks = $finalLinkSet->finalLinks;
+        $finalConfigText = [] !== $finalLinks
+            ? implode("\n", $finalLinks)
             : ('' !== $existingConfigText ? $existingConfigText : $configWarning);
 
         $finalSubscriptionUrl = $subscriptionUrl ?? $vpnService->getSubscriptionUrl();
 
         $vpnService
             ->setSubscriptionUrl($finalSubscriptionUrl)
-            ->setConfigLinks($configLinks)
+            ->setConfigLinks($finalLinks)
             ->setConfigText($finalConfigText)
             ->setLastAccessInfoSyncedAt(new \DateTimeImmutable());
 
@@ -136,7 +144,7 @@ class VpnProvisioningService
             inboundId: $planInbound?->getId(),
             uuid: (string) ($vpnService->getClientUuid() ?? ''),
             subId: (string) ($vpnService->getSubId() ?? ''),
-            generatedConfigLinkCount: count($configLinks),
+            generatedConfigLinkCount: count($finalLinks),
             configTextEmpty: '' === trim((string) ($finalConfigText ?? '')),
             subscriptionUrl: (string) ($finalSubscriptionUrl ?? ''),
             configTextPreview: (string) ($finalConfigText ?? ''),

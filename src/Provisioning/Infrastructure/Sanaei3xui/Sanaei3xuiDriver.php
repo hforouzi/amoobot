@@ -166,12 +166,18 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
             }
         }
 
-        if ([] === $configLinks) {
-            $configText = trim($this->configGenerator->generateConfigText($inbound, $clientUuid, $email, $subId));
-            $configLinks = array_values(array_filter(
-                array_map('trim', explode("\n", $configText)),
-                static fn (string $line): bool => '' !== $line
-            ));
+        $generatedConfigText = trim($this->configGenerator->generateConfigText($inbound, $clientUuid, $email, $subId));
+        $generatedConfigLinks = array_values(array_filter(
+            array_map('trim', explode("\n", $generatedConfigText)),
+            static fn (string $line): bool => '' !== $line
+        ));
+
+        if ([] !== $generatedConfigLinks && $this->hasExternalProxyConfig($inboundConfig)) {
+            $configText = $generatedConfigText;
+            $configLinks = $generatedConfigLinks;
+        } elseif ([] === $configLinks) {
+            $configText = $generatedConfigText;
+            $configLinks = $generatedConfigLinks;
         } else {
             $configText = implode("\n", $configLinks);
         }
@@ -1075,6 +1081,19 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
         }
 
         return $name;
+    }
+
+    /**
+     * @param array<string, mixed> $inboundConfig
+     */
+    private function hasExternalProxyConfig(array $inboundConfig): bool
+    {
+        $stream = $this->toArray($inboundConfig['streamSettings'] ?? []);
+
+        return [] !== $this->toArray($stream['externalProxy'] ?? null)
+            || [] !== $this->toArray($stream['external_proxy'] ?? null)
+            || [] !== $this->toArray($inboundConfig['externalProxy'] ?? null)
+            || [] !== $this->toArray($inboundConfig['externalProxyList'] ?? null);
     }
 
     /**

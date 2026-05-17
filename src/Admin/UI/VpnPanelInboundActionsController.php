@@ -10,6 +10,7 @@ use App\Admin\UI\Crud\VpnServiceCrudController;
 use App\Entity\VpnInbound;
 use App\Entity\VpnPanel;
 use App\Entity\VpnService;
+use App\Provisioning\Application\FinalConfigLinkProvider;
 use App\Provisioning\Application\VpnAccessLinkGenerator;
 use App\Provisioning\Application\VpnInboundSyncService;
 use App\Provisioning\Domain\Dto\CreateVpnServiceRequest;
@@ -27,6 +28,7 @@ final class VpnPanelInboundActionsController extends AbstractController
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
         private readonly VpnAccessLinkGenerator $vpnAccessLinkGenerator,
+        private readonly FinalConfigLinkProvider $finalConfigLinkProvider,
     ) {
     }
 
@@ -186,11 +188,16 @@ final class VpnPanelInboundActionsController extends AbstractController
             }
 
             try {
+                $rawLinks = $this->normalizedLinks($service->getConfigLinks() ?? []);
                 $links = $this->vpnAccessLinkGenerator->generate($service);
-                $configLinks = array_values(array_filter(
-                    (array) ($links['configLinks'] ?? []),
-                    static fn (mixed $link): bool => '' !== trim((string) $link)
-                ));
+                $generatedLinks = $this->normalizedLinks((array) ($links['configLinks'] ?? []));
+                $finalLinkSet = $this->finalConfigLinkProvider->deduplicateAndPreferFormattedForService(
+                    $service,
+                    $rawLinks,
+                    $generatedLinks,
+                    'admin_inbound_regenerate_configs'
+                );
+                $configLinks = $finalLinkSet->finalLinks;
                 $subscriptionUrl = $links['subscriptionUrl'] ?? null;
                 $finalConfigText = [] !== $configLinks ? implode("\n", $configLinks) : null;
 
@@ -235,11 +242,16 @@ final class VpnPanelInboundActionsController extends AbstractController
         }
 
         try {
+            $rawLinks = $this->normalizedLinks($service->getConfigLinks() ?? []);
             $links = $this->vpnAccessLinkGenerator->generate($service);
-            $configLinks = array_values(array_filter(
-                (array) ($links['configLinks'] ?? []),
-                static fn (mixed $link): bool => '' !== trim((string) $link)
-            ));
+            $generatedLinks = $this->normalizedLinks((array) ($links['configLinks'] ?? []));
+            $finalLinkSet = $this->finalConfigLinkProvider->deduplicateAndPreferFormattedForService(
+                $service,
+                $rawLinks,
+                $generatedLinks,
+                'admin_service_regenerate_config'
+            );
+            $configLinks = $finalLinkSet->finalLinks;
             $subscriptionUrl = $links['subscriptionUrl'] ?? null;
             $finalConfigText = [] !== $configLinks ? implode("\n", $configLinks) : null;
 
@@ -297,5 +309,23 @@ final class VpnPanelInboundActionsController extends AbstractController
             'crudAction' => 'index',
             'crudControllerFqcn' => VpnServiceCrudController::class,
         ]);
+    }
+
+    /**
+     * @param iterable<mixed> $links
+     *
+     * @return list<string>
+     */
+    private function normalizedLinks(iterable $links): array
+    {
+        $normalized = [];
+        foreach ($links as $link) {
+            $candidate = trim((string) $link);
+            if ('' !== $candidate) {
+                $normalized[] = $candidate;
+            }
+        }
+
+        return $normalized;
     }
 }
