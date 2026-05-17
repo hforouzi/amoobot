@@ -11,6 +11,7 @@ use App\Entity\Payment;
 use App\Entity\TelegramAccount;
 use Doctrine\ORM\EntityManagerInterface;
 use App\Shop\Domain\OrderType;
+use App\Provisioning\Application\FinalConfigLinkProvider;
 
 class PaymentConfirmationService
 {
@@ -19,6 +20,7 @@ class PaymentConfirmationService
         private readonly PaymentApprovalService $paymentApprovalService,
         private readonly TelegramApiClient $telegramApiClient,
         private readonly BotTextResolver $botTextResolver,
+        private readonly FinalConfigLinkProvider $finalConfigLinkProvider,
     ) {
     }
 
@@ -39,7 +41,11 @@ class PaymentConfirmationService
                     $messages = $this->buildPaymentConfirmedMessages($vpnService);
                 }
                 foreach ($messages as $message) {
-                    $this->telegramApiClient->sendMessage($telegramAccount->getTelegramId(), $message);
+                    if (str_contains($message, '<code>')) {
+                        $this->telegramApiClient->sendHtmlMessage($telegramAccount->getTelegramId(), $message);
+                    } else {
+                        $this->telegramApiClient->sendMessage($telegramAccount->getTelegramId(), $message);
+                    }
                 }
             }
         }
@@ -70,43 +76,28 @@ class PaymentConfirmationService
         }
 
         $subscriptionUrl = trim((string) ($vpnService->getSubscriptionUrl() ?? ''));
-        $configText = trim((string) ($vpnService->getConfigText() ?? ''));
-        $allConfigLinks = [];
-        foreach ((array) ($vpnService->getConfigLinks() ?? []) as $link) {
-            $candidate = trim((string) $link);
-            if ('' !== $candidate) {
-                $allConfigLinks[] = $candidate;
-            }
-        }
-        if ([] === $allConfigLinks && preg_match('/^(vless|vmess|trojan):\/\//i', $configText) === 1) {
-            $allConfigLinks = [$configText];
-        }
+        $allConfigLinks = $this->finalConfigLinkProvider->getFinalLinksForService($vpnService, 'payment_confirmed_new_service');
 
         $lines = [
             $this->botTextResolver->message('payment.confirmed'),
             '',
             '📦 خلاصه سرویس',
             sprintf('شناسه سرویس: %d', $vpnService->getId() ?? 0),
-            sprintf('کاربری: %s', (string) ($vpnService->getUsername() ?? '-')),
+            sprintf('کاربری: %s', $this->html((string) ($vpnService->getUsername() ?? '-'))),
         ];
 
         if ('' !== $subscriptionUrl) {
             $lines[] = '';
             $lines[] = '🔗 لینک اشتراک:';
-            $lines[] = $subscriptionUrl;
+            $lines[] = $this->htmlCode($subscriptionUrl);
         }
 
         if ([] !== $allConfigLinks) {
             $lines[] = '';
             $lines[] = '📡 لینکهای اتصال:';
             foreach ($allConfigLinks as $i => $link) {
-                $lines[] = sprintf('%d. %s', $i + 1, $link);
+                $lines[] = sprintf("%d.\n%s", $i + 1, $this->htmlCode($link));
             }
-        }
-
-        if ([] === $allConfigLinks && '' === $subscriptionUrl && '' !== $configText) {
-            $lines[] = '';
-            $lines[] = $configText;
         }
 
         return $this->splitLongMessage(implode("\n", $lines));
@@ -124,22 +115,16 @@ class PaymentConfirmationService
         $lines = [
             $this->botTextResolver->message('service.renewed'),
             sprintf('شناسه سرویس: %d', $vpnService->getId() ?? 0),
-            sprintf('تاریخ انقضای جدید: %s', $vpnService->getExpiresAt()?->format('Y-m-d H:i:s') ?? 'نامحدود'),
+            sprintf('تاریخ انقضای جدید: %s', $this->html($vpnService->getExpiresAt()?->format('Y-m-d H:i:s') ?? 'نامحدود')),
             sprintf('حجم کل جدید: %s', null === $vpnService->getTrafficLimitGb() ? 'نامحدود' : ((string) $vpnService->getTrafficLimitGb().' گیگ')),
-            sprintf('لینک اشتراک: %s', $vpnService->getSubscriptionUrl() ?: '-'),
+            sprintf('لینک اشتراک: %s', $vpnService->getSubscriptionUrl() ? $this->htmlCode($vpnService->getSubscriptionUrl()) : '-'),
         ];
 
-        $configLinks = [];
-        foreach ((array) ($vpnService->getConfigLinks() ?? []) as $link) {
-            $candidate = trim((string) $link);
-            if ('' !== $candidate) {
-                $configLinks[] = $candidate;
-            }
-        }
+        $configLinks = $this->finalConfigLinkProvider->getFinalLinksForService($vpnService, 'payment_confirmed_renewal');
         if ([] !== $configLinks) {
             $lines[] = 'لینکهای اتصال:';
             foreach ($configLinks as $index => $link) {
-                $lines[] = sprintf('%d. %s', $index + 1, $link);
+                $lines[] = sprintf("%d.\n%s", $index + 1, $this->htmlCode($link));
             }
         }
 
@@ -160,20 +145,14 @@ class PaymentConfirmationService
             sprintf('شناسه سرویس: %d', $vpnService->getId() ?? 0),
             sprintf('حجم افزوده: %d گیگ', max(0, $addedTrafficGb)),
             sprintf('حجم کل جدید: %s', null === $vpnService->getTrafficLimitGb() ? 'نامحدود' : ((string) $vpnService->getTrafficLimitGb().' گیگ')),
-            sprintf('لینک اشتراک: %s', $vpnService->getSubscriptionUrl() ?: '-'),
+            sprintf('لینک اشتراک: %s', $vpnService->getSubscriptionUrl() ? $this->htmlCode($vpnService->getSubscriptionUrl()) : '-'),
         ];
 
-        $configLinks = [];
-        foreach ((array) ($vpnService->getConfigLinks() ?? []) as $link) {
-            $candidate = trim((string) $link);
-            if ('' !== $candidate) {
-                $configLinks[] = $candidate;
-            }
-        }
+        $configLinks = $this->finalConfigLinkProvider->getFinalLinksForService($vpnService, 'payment_confirmed_add_traffic');
         if ([] !== $configLinks) {
             $lines[] = 'لینکهای اتصال:';
             foreach ($configLinks as $index => $link) {
-                $lines[] = sprintf('%d. %s', $index + 1, $link);
+                $lines[] = sprintf("%d.\n%s", $index + 1, $this->htmlCode($link));
             }
         }
 
@@ -206,5 +185,15 @@ class PaymentConfirmationService
         }
 
         return $chunks;
+    }
+
+    private function html(string $value): string
+    {
+        return htmlspecialchars($value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+    }
+
+    private function htmlCode(string $value): string
+    {
+        return '<code>'.$this->html($value).'</code>';
     }
 }

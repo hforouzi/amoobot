@@ -39,6 +39,26 @@ class TelegramApiClient
         $this->botMessageLogger->log(BotMessageDirection::OUTGOING, ['method' => 'sendMessage', 'payload' => $payload], $chatId, 'message');
     }
 
+    public function sendHtmlMessage(string $chatId, string $text, ?array $replyMarkup = null): void
+    {
+        $payload = [
+            'chat_id' => $chatId,
+            'text' => $text,
+            'parse_mode' => 'HTML',
+            'disable_web_page_preview' => true,
+        ];
+
+        if (null !== $replyMarkup) {
+            $payload['reply_markup'] = $replyMarkup;
+        }
+
+        try {
+            $this->callApi('sendMessage', $payload);
+        } catch (\Throwable) {
+        }
+        $this->botMessageLogger->log(BotMessageDirection::OUTGOING, ['method' => 'sendMessage', 'payload' => $payload], $chatId, 'message');
+    }
+
     public function sendMessageStrict(string $chatId, string $text, ?array $replyMarkup = null): void
     {
         $payload = [

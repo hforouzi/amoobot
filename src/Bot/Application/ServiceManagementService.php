@@ -22,6 +22,7 @@ use App\Payment\Infrastructure\PaymentGatewayRegistry;
 use App\Provisioning\Application\RenewalSettingsProvider;
 use App\Provisioning\Application\ServiceUsageSyncService;
 use App\Provisioning\Application\TrafficAddonSettingsProvider;
+use App\Provisioning\Application\FinalConfigLinkProvider;
 use App\Provisioning\Domain\Dto\RenewVpnServiceRequest;
 use App\Provisioning\Domain\VpnServiceStatus;
 use App\Provisioning\Infrastructure\VpnPanelDriverRegistry;
@@ -56,6 +57,7 @@ class ServiceManagementService
         private readonly SettingValueProvider $settingValueProvider,
         private readonly RenewalSettingsProvider $renewalSettingsProvider,
         private readonly TrafficAddonSettingsProvider $trafficAddonSettingsProvider,
+        private readonly FinalConfigLinkProvider $finalConfigLinkProvider,
         private readonly PlanPricingService $planPricingService,
         private readonly TrafficAddonPricingService $trafficAddonPricingService,
         private readonly DiscountCodeService $discountCodeService,
@@ -149,15 +151,7 @@ class ServiceManagementService
         }
 
         $this->acknowledgeCallback($callbackId);
-        $this->telegramApiClient->sendMessage(
-            $chatId,
-            $this->formatServiceDetailForUser($service),
-            $this->keyboardFactory->userServiceDetail(
-                (int) $service->getId(),
-                VpnServiceStatus::DELETED !== $service->getStatus(),
-                VpnServiceStatus::DELETED !== $service->getStatus()
-            )
-        );
+        $this->sendUserServiceDetail($chatId, $service, 'telegram_user_service_detail');
     }
 
     public function showAdminServiceDetail(int $serviceId, string $chatId, ?string $callbackId): void
@@ -213,12 +207,20 @@ class ServiceManagementService
         $subscriptionUrl = trim((string) $service->getSubscriptionUrl());
         if ('' === $subscriptionUrl) {
             $this->showPopupOrMessage($chatId, $callbackId, 'لینک اشتراک برای این سرویس موجود نیست.', 'missing_subscription_url');
-            $configLinks = $this->collectConfigLinks($service);
-            if ([] !== $configLinks) {
-                $this->telegramApiClient->sendMessage(
+            $configLinkSet = $this->collectConfigLinks($service, 'telegram_subscription_fallback_config');
+            if ([] !== $configLinkSet->finalLinks) {
+                $this->telegramApiClient->sendHtmlMessage(
                     $chatId,
-                    "لینک اشتراک موجود نیست، ولی کانفیگ‌ها در دسترس است:\n".implode("\n", $configLinks)
+                    $this->formatConfigLinksMessage($configLinkSet->finalLinks, 'لینک اشتراک موجود نیست، ولی کانفیگ‌ها در دسترس است:')
                 );
+                $this->debugLog(sprintf(
+                    'service_subscription_fallback_configs service_id=%d raw_link_count=%d formatted_link_count=%d final_sent_count=%d dropped_duplicate_count=%d',
+                    $serviceId,
+                    $configLinkSet->rawCount,
+                    $configLinkSet->formattedCount,
+                    count($configLinkSet->finalLinks),
+                    $configLinkSet->droppedDuplicateCount
+                ));
             }
 
             return;
@@ -244,16 +246,25 @@ class ServiceManagementService
             return;
         }
 
-        $configLinks = $service->getConfigLinks();
-        if (!is_array($configLinks) || [] === $configLinks) {
+        $configLinkSet = $this->collectConfigLinks($service, 'telegram_resend_config');
+        if ([] === $configLinkSet->finalLinks) {
             $this->showPopupOrMessage($chatId, $callbackId, 'اطلاعات اتصال کامل نیست. لطفاً با پشتیبانی تماس بگیرید.', 'missing_config');
 
             return;
         }
 
         $this->acknowledgeCallback($callbackId);
-        $this->telegramApiClient->sendMessage($chatId, "کانفیگهای سرویس #{$serviceId}:\n".implode("\n", $configLinks));
-        $this->debugLog(sprintf('service_resend_config service_id=%d actor_user_id=%d admin_mode=%s', $serviceId, $account->getUser()->getId(), $adminMode ? 'true' : 'false'));
+        $this->telegramApiClient->sendHtmlMessage($chatId, $this->formatConfigLinksMessage($configLinkSet->finalLinks));
+        $this->debugLog(sprintf(
+            'service_resend_config service_id=%d actor_user_id=%d admin_mode=%s raw_link_count=%d formatted_link_count=%d final_sent_count=%d dropped_duplicate_count=%d',
+            $serviceId,
+            $account->getUser()->getId(),
+            $adminMode ? 'true' : 'false',
+            $configLinkSet->rawCount,
+            $configLinkSet->formattedCount,
+            count($configLinkSet->finalLinks),
+            $configLinkSet->droppedDuplicateCount
+        ));
     }
 
     public function sendSubscriptionQr(TelegramAccount $account, int $serviceId, string $chatId, string $callbackId): void
@@ -267,12 +278,56 @@ class ServiceManagementService
 
         $subscriptionUrl = trim((string) ($service->getSubscriptionUrl() ?? ''));
         if ('' === $subscriptionUrl) {
-            $this->showPopupOrMessage($chatId, $callbackId, 'لینک اشتراک برای ساخت QR موجود نیست.', 'missing_subscription_qr');
+            $configLinkSet = $this->collectConfigLinks($service, 'telegram_qr_fallback_config');
+            if ([] === $configLinkSet->finalLinks) {
+                $this->showPopupOrMessage($chatId, $callbackId, 'برای این سرویس هنوز لینک اشتراک یا کانفیگ قابل ساخت QR موجود نیست.', 'missing_subscription_and_config_qr');
+
+                return;
+            }
+
+            $this->acknowledgeCallback($callbackId);
+            $this->telegramApiClient->sendMessage($chatId, 'لینک اشتراک برای این سرویس موجود نیست. QR کانفیگ‌ها ارسال می‌شود.');
+
+            $failedCount = 0;
+            $total = count($configLinkSet->finalLinks);
+            foreach ($configLinkSet->finalLinks as $index => $configLink) {
+                $qrPath = $this->createQrTempFile($configLink, (int) ($service->getId() ?? 0), sprintf('config-%d', $index + 1));
+                if (null === $qrPath) {
+                    ++$failedCount;
+                    continue;
+                }
+
+                try {
+                    $this->telegramApiClient->sendPhotoFile($chatId, $qrPath, sprintf('QR کانفیگ %d از %d', $index + 1, $total));
+                } catch (\Throwable $e) {
+                    ++$failedCount;
+                    $this->debugLog(sprintf(
+                        'config_qr_send_failed service_id=%d user_id=%d index=%d message="%s"',
+                        $serviceId,
+                        $account->getUser()->getId(),
+                        $index + 1,
+                        $e->getMessage()
+                    ));
+                } finally {
+                    $this->deleteTempQrFile($qrPath);
+                }
+            }
+
+            $this->debugLog(sprintf(
+                'service_config_qr_fallback service_id=%d user_id=%d raw_link_count=%d formatted_link_count=%d final_link_count=%d dropped_duplicate_count=%d failed_count=%d',
+                $serviceId,
+                $account->getUser()->getId(),
+                $configLinkSet->rawCount,
+                $configLinkSet->formattedCount,
+                $total,
+                $configLinkSet->droppedDuplicateCount,
+                $failedCount
+            ));
 
             return;
         }
 
-        $qrPath = $this->createSubscriptionQrTempFile($subscriptionUrl, (int) ($service->getId() ?? 0));
+        $qrPath = $this->createQrTempFile($subscriptionUrl, (int) ($service->getId() ?? 0), 'subscription');
         if (null === $qrPath) {
             $this->showPopupOrMessage($chatId, $callbackId, 'ساخت QR انجام نشد. لطفاً دوباره تلاش کنید.', 'subscription_qr_create_failed');
 
@@ -280,7 +335,12 @@ class ServiceManagementService
         }
 
         $this->acknowledgeCallback($callbackId);
-        $this->telegramApiClient->sendPhotoFile($chatId, $qrPath, 'QR لینک اشتراک سرویس شما');
+        try {
+            $this->telegramApiClient->sendPhotoFile($chatId, $qrPath, 'QR لینک اشتراک شما');
+            $this->debugLog(sprintf('service_subscription_qr_sent service_id=%d user_id=%d link_count=1 failed_count=0', $serviceId, $account->getUser()->getId()));
+        } finally {
+            $this->deleteTempQrFile($qrPath);
+        }
     }
 
     public function sendConfigLinks(TelegramAccount $account, int $serviceId, string $chatId, string $callbackId): void
@@ -335,15 +395,7 @@ class ServiceManagementService
             return;
         }
 
-        $this->telegramApiClient->sendMessage(
-            $chatId,
-            $this->formatServiceDetailForUser($service),
-            $this->keyboardFactory->userServiceDetail(
-                (int) $service->getId(),
-                VpnServiceStatus::DELETED !== $service->getStatus(),
-                VpnServiceStatus::DELETED !== $service->getStatus()
-            )
-        );
+        $this->sendUserServiceDetail($chatId, $service, 'telegram_user_service_detail_after_refresh');
     }
 
     public function showRenewalSummary(TelegramAccount $account, int $serviceId, string $chatId, string $callbackId, bool $adminMode): void
@@ -1731,8 +1783,39 @@ class ServiceManagementService
         );
     }
 
+    private function sendUserServiceDetail(string $chatId, VpnService $service, string $sourceFlow): void
+    {
+        $this->telegramApiClient->sendMessage(
+            $chatId,
+            $this->formatServiceDetailForUser($service),
+            $this->keyboardFactory->userServiceDetail(
+                (int) $service->getId(),
+                VpnServiceStatus::DELETED !== $service->getStatus(),
+                VpnServiceStatus::DELETED !== $service->getStatus()
+            )
+        );
+
+        $configLinkSet = $this->collectConfigLinks($service, $sourceFlow);
+        if ([] === $configLinkSet->finalLinks) {
+            return;
+        }
+
+        $this->telegramApiClient->sendHtmlMessage($chatId, $this->formatConfigLinksMessage($configLinkSet->finalLinks, 'لینک‌های اتصال:'));
+        $this->debugLog(sprintf(
+            'service_detail_configs service_id=%d source_flow=%s raw_link_count=%d formatted_link_count=%d final_sent_count=%d dropped_duplicate_count=%d',
+            $service->getId() ?? 0,
+            $sourceFlow,
+            $configLinkSet->rawCount,
+            $configLinkSet->formattedCount,
+            count($configLinkSet->finalLinks),
+            $configLinkSet->droppedDuplicateCount
+        ));
+    }
+
     private function formatServiceDetailForAdmin(VpnService $service): string
     {
+        $finalLinks = $this->finalConfigLinkProvider->getFinalLinksForService($service, 'telegram_admin_service_detail');
+
         return sprintf(
             "سرویس #%d\nکاربر: %s\nوضعیت: %s\nانقضا: %s\nحجم کل: %s\nمصرف: %s\nباقیمانده: %s\nآخرین بروزرسانی مصرف: %s\nآخرین بررسی وضعیت: %s\nاشتراک: %s\nپیشنمایش کانفیگ: %s\nایجاد: %s",
             $service->getId(),
@@ -1745,7 +1828,7 @@ class ServiceManagementService
             $service->getLastUsageSyncedAt()?->format('Y-m-d H:i:s') ?? '-',
             $service->getLastStatusCheckedAt()?->format('Y-m-d H:i:s') ?? '-',
             $this->preview($service->getSubscriptionUrl(), 80),
-            $this->preview($service->getConfigText(), 120),
+            $this->preview([] === $finalLinks ? $service->getConfigText() : implode("\n", $finalLinks), 120),
             $service->getCreatedAt()->format('Y-m-d H:i:s')
         );
     }
@@ -1882,20 +1965,29 @@ class ServiceManagementService
     /**
      * @return list<string>
      */
-    private function collectConfigLinks(VpnService $service): array
+    private function collectConfigLinks(VpnService $service, string $sourceFlow): \App\Provisioning\Application\VpnConfigLinkSetResult
     {
-        $configLinks = $service->getConfigLinks();
-        if (!is_array($configLinks)) {
-            return [];
-        }
-
-        return array_values(array_filter(array_map(
-            static fn (mixed $link): string => trim((string) $link),
-            $configLinks
-        ), static fn (string $link): bool => '' !== $link));
+        return $this->finalConfigLinkProvider->getFinalLinkSetForService($service, $sourceFlow);
     }
 
-    private function createSubscriptionQrTempFile(string $subscriptionUrl, int $serviceId): ?string
+    /**
+     * @param list<string> $configLinks
+     */
+    private function formatConfigLinksMessage(array $configLinks, string $title = 'کانفیگ‌های شما:'): string
+    {
+        $parts = [htmlspecialchars($title, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8')];
+        foreach ($configLinks as $index => $link) {
+            $parts[] = sprintf(
+                "%d.\n<code>%s</code>",
+                $index + 1,
+                htmlspecialchars($link, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8')
+            );
+        }
+
+        return implode("\n\n", $parts);
+    }
+
+    private function createQrTempFile(string $content, int $serviceId, string $suffix): ?string
     {
         $tmpDir = '/tmp/amoobot-qr';
         if (!is_dir($tmpDir)) {
@@ -1905,19 +1997,27 @@ class ServiceManagementService
             return null;
         }
 
-        $targetPath = sprintf('%s/service-subscription-%d-%d.png', $tmpDir, $serviceId, time());
+        $safeSuffix = preg_replace('/[^a-zA-Z0-9_-]+/', '-', $suffix) ?: 'qr';
+        $targetPath = sprintf('%s/service-%d-%s-%s.png', $tmpDir, $serviceId, $safeSuffix, bin2hex(random_bytes(4)));
         try {
             $writer = new PngWriter();
-            $qrCode = QrCode::create($subscriptionUrl)
+            $qrCode = QrCode::create($content)
                 ->setSize(420)
                 ->setMargin(12);
             $writer->write($qrCode)->saveToFile($targetPath);
         } catch (\Throwable $e) {
-            $this->debugLog(sprintf('subscription_qr_generation_failed service_id=%d message="%s"', $serviceId, $e->getMessage()));
+            $this->debugLog(sprintf('qr_generation_failed service_id=%d suffix="%s" message="%s"', $serviceId, $suffix, $e->getMessage()));
 
             return null;
         }
 
         return is_file($targetPath) ? $targetPath : null;
+    }
+
+    private function deleteTempQrFile(string $path): void
+    {
+        if (is_file($path)) {
+            @unlink($path);
+        }
     }
 }
