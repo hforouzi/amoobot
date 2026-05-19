@@ -172,7 +172,7 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
             static fn (string $line): bool => '' !== $line
         ));
 
-        if ([] !== $generatedConfigLinks && $this->hasExternalProxyConfig($inboundConfig)) {
+        if ([] === $configLinks && [] !== $generatedConfigLinks && $this->hasExternalProxyConfig($inboundConfig)) {
             $configText = $generatedConfigText;
             $configLinks = $generatedConfigLinks;
         } elseif ([] === $configLinks) {
