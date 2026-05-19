@@ -59,6 +59,32 @@
             </div>
         </div>
 
+        <div class="admin-section">
+            <h2>{{ 'renewal_pricing_settings.sections.sales_status'|trans }}</h2>
+
+            <div class="admin-checkbox-row">
+                <input class="form-check-input" type="checkbox" id="sales_new_orders_enabled" name="sales_new_orders_enabled" {% if values.sales_new_orders_enabled %}checked{% endif %}>
+                <label class="form-check-label" for="sales_new_orders_enabled">{{ 'renewal_pricing_settings.fields.sales_new_orders_enabled'|trans }}</label>
+                <div class="form-text">{{ keys.sales_new_orders_enabled }}</div>
+            </div>
+            <div class="admin-checkbox-row">
+                <input class="form-check-input" type="checkbox" id="sales_renewals_enabled" name="sales_renewals_enabled" {% if values.sales_renewals_enabled %}checked{% endif %}>
+                <label class="form-check-label" for="sales_renewals_enabled">{{ 'renewal_pricing_settings.fields.sales_renewals_enabled'|trans }}</label>
+                <div class="form-text">{{ keys.sales_renewals_enabled }}</div>
+            </div>
+            <div class="admin-checkbox-row">
+                <input class="form-check-input" type="checkbox" id="sales_add_traffic_enabled" name="sales_add_traffic_enabled" {% if values.sales_add_traffic_enabled %}checked{% endif %}>
+                <label class="form-check-label" for="sales_add_traffic_enabled">{{ 'renewal_pricing_settings.fields.sales_add_traffic_enabled'|trans }}</label>
+                <div class="form-text">{{ keys.sales_add_traffic_enabled }}</div>
+            </div>
+
+            <div class="admin-form-row">
+                <label class="form-label" for="sales_disabled_message">{{ 'renewal_pricing_settings.fields.sales_disabled_message'|trans }}</label>
+                <textarea class="form-control" id="sales_disabled_message" name="sales_disabled_message" rows="4">{{ values.sales_disabled_message }}</textarea>
+                <div class="form-text">{{ keys.sales_disabled_message }}</div>
+            </div>
+        </div>
+
         <div class="admin-actions">
             <button type="submit" class="btn btn-primary">{{ 'common.save'|trans }}</button>
         </div>

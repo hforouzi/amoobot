@@ -5,13 +5,14 @@ declare(strict_types=1);
 namespace App\Command;
 
 use App\Entity\Setting;
+use App\Shop\Application\SalesSettingsProvider;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
 
-#[AsCommand(name: 'app:create-default-settings', description: 'Create default Setting rows')]
+#[AsCommand(name: 'app:settings:seed', description: 'Create default Setting rows', aliases: ['app:create-default-settings'])]
 class CreateDefaultSettingsCommand extends Command
 {
     public function __construct(
@@ -55,6 +56,10 @@ class CreateDefaultSettingsCommand extends Command
             'traffic_addon.min_gb' => $this->trafficAddonMinGb,
             'traffic_addon.max_gb' => $this->trafficAddonMaxGb,
             'traffic_addon.price_per_gb' => $this->trafficAddonPricePerGb,
+            SalesSettingsProvider::NEW_ORDERS_ENABLED => 'true',
+            SalesSettingsProvider::RENEWALS_ENABLED => 'true',
+            SalesSettingsProvider::ADD_TRAFFIC_ENABLED => 'true',
+            SalesSettingsProvider::DISABLED_MESSAGE => SalesSettingsProvider::DEFAULT_DISABLED_MESSAGE,
         ];
         $types = [
             'automation.sync_usage_enabled' => 'boolean',
@@ -73,6 +78,10 @@ class CreateDefaultSettingsCommand extends Command
             'traffic_addon.min_gb' => 'number',
             'traffic_addon.max_gb' => 'number',
             'traffic_addon.price_per_gb' => 'number',
+            SalesSettingsProvider::NEW_ORDERS_ENABLED => 'boolean',
+            SalesSettingsProvider::RENEWALS_ENABLED => 'boolean',
+            SalesSettingsProvider::ADD_TRAFFIC_ENABLED => 'boolean',
+            SalesSettingsProvider::DISABLED_MESSAGE => 'text',
         ];
 
         foreach ($defaults as $key => $value) {

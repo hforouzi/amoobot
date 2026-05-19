@@ -29,6 +29,7 @@ use App\Provisioning\Infrastructure\VpnPanelDriverRegistry;
 use App\Shared\Infrastructure\SettingValueProvider;
 use App\Shop\Application\PlanPricingService;
 use App\Shop\Application\RenewalPriceResult;
+use App\Shop\Application\SalesSettingsProvider;
 use App\Shop\Application\TrafficAddonPricingService;
 use App\Shop\Application\DiscountCodeService;
 use App\Shop\Application\IncompleteOrderSettingsProvider;
@@ -59,6 +60,7 @@ class ServiceManagementService
         private readonly TrafficAddonSettingsProvider $trafficAddonSettingsProvider,
         private readonly FinalConfigLinkProvider $finalConfigLinkProvider,
         private readonly PlanPricingService $planPricingService,
+        private readonly SalesSettingsProvider $salesSettingsProvider,
         private readonly TrafficAddonPricingService $trafficAddonPricingService,
         private readonly DiscountCodeService $discountCodeService,
         private readonly IncompleteOrderSettingsProvider $incompleteOrderSettingsProvider,
@@ -400,6 +402,12 @@ class ServiceManagementService
 
     public function showRenewalSummary(TelegramAccount $account, int $serviceId, string $chatId, string $callbackId, bool $adminMode): void
     {
+        if (!$this->salesSettingsProvider->renewalsEnabled()) {
+            $this->sendSalesDisabledMessage($account, $chatId, $callbackId, 'renewal', SalesSettingsProvider::RENEWALS_ENABLED);
+
+            return;
+        }
+
         $service = $this->findServiceOrPopup($serviceId, $chatId, $callbackId, 'invalid_service_renew');
         if (!$service instanceof VpnService) {
             return;
@@ -449,6 +457,12 @@ class ServiceManagementService
 
     public function confirmRenewal(TelegramAccount $account, int $serviceId, string $chatId, string $callbackId, bool $adminMode): void
     {
+        if (!$this->salesSettingsProvider->renewalsEnabled()) {
+            $this->sendSalesDisabledMessage($account, $chatId, $callbackId, 'renewal', SalesSettingsProvider::RENEWALS_ENABLED);
+
+            return;
+        }
+
         $service = $this->findServiceOrPopup($serviceId, $chatId, $callbackId, 'invalid_service_renew_confirm');
         if (!$service instanceof VpnService) {
             return;
@@ -528,6 +542,12 @@ class ServiceManagementService
 
     public function startAddTrafficOrder(TelegramAccount $account, int $serviceId, string $chatId, string $callbackId): void
     {
+        if (!$this->salesSettingsProvider->addTrafficEnabled()) {
+            $this->sendSalesDisabledMessage($account, $chatId, $callbackId, 'add_traffic', SalesSettingsProvider::ADD_TRAFFIC_ENABLED);
+
+            return;
+        }
+
         $service = $this->findServiceOrPopup($serviceId, $chatId, $callbackId, 'invalid_service_add_traffic_order');
         if (!$service instanceof VpnService) {
             return;
@@ -681,6 +701,12 @@ class ServiceManagementService
 
     public function confirmAddTrafficOrder(TelegramAccount $account, int $draftId, string $chatId, string $callbackId): void
     {
+        if (!$this->salesSettingsProvider->addTrafficEnabled()) {
+            $this->sendSalesDisabledMessage($account, $chatId, $callbackId, 'add_traffic', SalesSettingsProvider::ADD_TRAFFIC_ENABLED);
+
+            return;
+        }
+
         $draft = $this->entityManager->getRepository(OrderDraft::class)->find($draftId);
         if (!$draft instanceof OrderDraft || $draft->getUser()->getId() !== $account->getUser()->getId() || OrderDraftStatus::PENDING !== $draft->getStatus()) {
             $this->showPopupOrMessage($chatId, $callbackId, 'درخواست نامعتبر است.', 'invalid_add_traffic_draft');
@@ -947,6 +973,19 @@ class ServiceManagementService
 
     private function sendPaymentGatewaySelection(OrderDraft $draft, string $chatId, ?string $callbackId, ?string $discountResult = null, ?string $discountReason = null): void
     {
+        $data = is_array($draft->getData()) ? $draft->getData() : [];
+        $draftType = (string) ($data['draftType'] ?? '');
+        if ('renewal' === $draftType && !$this->salesSettingsProvider->renewalsEnabled()) {
+            $this->sendSalesDisabledMessageForUserId((int) ($draft->getUser()->getId() ?? 0), $chatId, $callbackId, 'renewal', SalesSettingsProvider::RENEWALS_ENABLED);
+
+            return;
+        }
+        if ('add_traffic' === $draftType && !$this->salesSettingsProvider->addTrafficEnabled()) {
+            $this->sendSalesDisabledMessageForUserId((int) ($draft->getUser()->getId() ?? 0), $chatId, $callbackId, 'add_traffic', SalesSettingsProvider::ADD_TRAFFIC_ENABLED);
+
+            return;
+        }
+
         $order = $this->createOrderFromDraft($draft);
         if (!$order instanceof Order) {
             $this->showPopupOrMessage($chatId, $callbackId, 'سفارش نامعتبر است.', 'invalid_order_from_draft');
@@ -1790,8 +1829,8 @@ class ServiceManagementService
             $this->formatServiceDetailForUser($service),
             $this->keyboardFactory->userServiceDetail(
                 (int) $service->getId(),
-                VpnServiceStatus::DELETED !== $service->getStatus(),
-                VpnServiceStatus::DELETED !== $service->getStatus()
+                VpnServiceStatus::DELETED !== $service->getStatus() && $this->salesSettingsProvider->renewalsEnabled(),
+                VpnServiceStatus::DELETED !== $service->getStatus() && $this->salesSettingsProvider->addTrafficEnabled()
             )
         );
 
@@ -1869,6 +1908,32 @@ class ServiceManagementService
 
         $this->debugLog(sprintf('%s text_message="%s"', $logKey, $text));
         $this->telegramApiClient->sendMessage($chatId, $text);
+    }
+
+    private function sendSalesDisabledMessage(TelegramAccount $account, string $chatId, ?string $callbackId, string $action, string $settingKey): void
+    {
+        $this->sendSalesDisabledMessageForUserId((int) ($account->getUser()->getId() ?? 0), $chatId, $callbackId, $action, $settingKey);
+    }
+
+    private function sendSalesDisabledMessageForUserId(int $userId, string $chatId, ?string $callbackId, string $action, string $settingKey): void
+    {
+        $this->debugLog(sprintf(
+            'sales_blocked user_id=%d action=%s setting_key=%s result=blocked',
+            $userId,
+            $action,
+            $settingKey
+        ));
+        $this->acknowledgeCallback($callbackId);
+        $this->telegramApiClient->sendMessage($chatId, $this->salesDisabledMessage());
+    }
+
+    private function salesDisabledMessage(): string
+    {
+        return $this->botTextResolver->message('sales.disabled', [
+            'sales' => [
+                'disabledMessage' => $this->salesSettingsProvider->disabledMessage(),
+            ],
+        ]);
     }
 
     private function acknowledgeCallback(?string $callbackId): void
