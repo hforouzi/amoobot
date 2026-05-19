@@ -1829,8 +1829,8 @@ class ServiceManagementService
             $this->formatServiceDetailForUser($service),
             $this->keyboardFactory->userServiceDetail(
                 (int) $service->getId(),
-                VpnServiceStatus::DELETED !== $service->getStatus(),
-                VpnServiceStatus::DELETED !== $service->getStatus()
+                VpnServiceStatus::DELETED !== $service->getStatus() && $this->salesSettingsProvider->renewalsEnabled(),
+                VpnServiceStatus::DELETED !== $service->getStatus() && $this->salesSettingsProvider->addTrafficEnabled()
             )
         );
 

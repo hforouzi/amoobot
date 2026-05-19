@@ -178,6 +178,7 @@ renewal_pricing_settings:
     renewal: تنظیمات تمدید
     pricing: قیمت‌گذاری
     traffic_addon: خرید حجم اضافه
+    sales_status: وضعیت فروش
   fields:
     carry_remaining_traffic: حفظ حجم باقی‌مانده هنگام تمدید
     carry_remaining_days: حفظ روزهای باقی‌مانده هنگام تمدید
@@ -187,6 +188,10 @@ renewal_pricing_settings:
     traffic_addon_min_gb: حداقل حجم اضافه
     traffic_addon_max_gb: حداکثر حجم اضافه
     traffic_addon_price_per_gb: قیمت هر گیگ حجم اضافه
+    sales_new_orders_enabled: فروش سرویس جدید فعال است؟
+    sales_renewals_enabled: تمدید سرویس فعال است؟
+    sales_add_traffic_enabled: خرید حجم اضافه فعال است؟
+    sales_disabled_message: پیام غیرفعال بودن فروش
   help:
     global_discount_percent: مقدار مجاز بین ۰ تا ۱۰۰.
 

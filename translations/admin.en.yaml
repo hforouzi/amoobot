@@ -178,6 +178,7 @@ renewal_pricing_settings:
     renewal: Renewal Settings
     pricing: Pricing
     traffic_addon: Traffic Add-on
+    sales_status: Sales Status
   fields:
     carry_remaining_traffic: Carry remaining traffic on renewal
     carry_remaining_days: Carry remaining days on renewal
@@ -187,6 +188,10 @@ renewal_pricing_settings:
     traffic_addon_min_gb: Minimum add-on traffic
     traffic_addon_max_gb: Maximum add-on traffic
     traffic_addon_price_per_gb: Price per GB of add-on traffic
+    sales_new_orders_enabled: New service sales enabled?
+    sales_renewals_enabled: Renewals enabled?
+    sales_add_traffic_enabled: Extra traffic purchases enabled?
+    sales_disabled_message: Sales disabled message
   help:
     global_discount_percent: Allowed value is 0 to 100.
 

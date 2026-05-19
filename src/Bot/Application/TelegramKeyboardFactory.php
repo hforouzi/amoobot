@@ -7,10 +7,14 @@ namespace App\Bot\Application;
 use App\Entity\StorePaymentMethod;
 use App\Payment\Domain\PaymentGatewayType;
 use App\Entity\Plan;
+use App\Shop\Application\SalesSettingsProvider;
 
 class TelegramKeyboardFactory
 {
-    public function __construct(private readonly BotTextResolver $botTextResolver)
+    public function __construct(
+        private readonly BotTextResolver $botTextResolver,
+        private readonly SalesSettingsProvider $salesSettingsProvider,
+    )
     {
     }
 
@@ -34,10 +38,12 @@ class TelegramKeyboardFactory
             ];
         }
 
-        $keyboard[] = [
-            ['text' => $this->button('button.main.buy_service')],
-            ['text' => $this->button('button.main.my_services')],
-        ];
+        $mainRow = [];
+        if ($this->salesSettingsProvider->newOrdersEnabled()) {
+            $mainRow[] = ['text' => $this->button('button.main.buy_service')];
+        }
+        $mainRow[] = ['text' => $this->button('button.main.my_services')];
+        $keyboard[] = $mainRow;
 
         $supportRow = [['text' => $this->button('button.main.support')]];
         if ($isAdmin) {

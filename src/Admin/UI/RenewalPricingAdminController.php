@@ -10,6 +10,7 @@ use App\Provisioning\Application\RenewalSettingsProvider;
 use App\Provisioning\Application\TrafficAddonSettingsProvider;
 use App\Shop\Application\IncompleteOrderSettingsProvider;
 use App\Shop\Application\PlanPriceAdjustmentService;
+use App\Shop\Application\SalesSettingsProvider;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\Request;
@@ -26,6 +27,7 @@ final class RenewalPricingAdminController extends AbstractController
         private readonly TrafficAddonSettingsProvider $trafficAddonSettingsProvider,
         private readonly IncompleteOrderSettingsProvider $incompleteOrderSettingsProvider,
         private readonly PlanPriceAdjustmentService $planPriceAdjustmentService,
+        private readonly SalesSettingsProvider $salesSettingsProvider,
     ) {
     }
 
@@ -38,12 +40,15 @@ final class RenewalPricingAdminController extends AbstractController
             $trafficMinRaw = trim((string) $request->request->get('traffic_addon_min_gb', '1'));
             $trafficMaxRaw = trim((string) $request->request->get('traffic_addon_max_gb', '100'));
             $trafficPriceRaw = trim((string) $request->request->get('traffic_addon_price_per_gb', '0'));
+            $disabledMessage = trim((string) $request->request->get('sales_disabled_message', ''));
             $trafficMinGb = is_numeric($trafficMinRaw) ? (int) floor((float) $trafficMinRaw) : 0;
             $trafficMaxGb = is_numeric($trafficMaxRaw) ? (int) floor((float) $trafficMaxRaw) : 0;
             $trafficPricePerGb = is_numeric($trafficPriceRaw) ? (int) floor((float) $trafficPriceRaw) : -1;
 
             if ($discountPercent < 0 || $discountPercent > 100) {
                 $this->addFlash('danger', 'درصد تخفیف باید بین ۰ تا ۱۰۰ باشد.');
+            } elseif ('' === $disabledMessage) {
+                $this->addFlash('danger', 'پیام غیرفعال بودن فروش نمی‌تواند خالی باشد.');
             } elseif ($trafficMinGb <= 0 || $trafficMaxGb <= 0 || $trafficMaxGb < $trafficMinGb) {
                 $this->addFlash('danger', 'حداقل و حداکثر حجم اضافه معتبر نیست.');
             } elseif ($trafficPricePerGb < 0) {
@@ -57,6 +62,10 @@ final class RenewalPricingAdminController extends AbstractController
                 $this->upsertSetting('traffic_addon.min_gb', (string) $trafficMinGb, 'number');
                 $this->upsertSetting('traffic_addon.max_gb', (string) $trafficMaxGb, 'number');
                 $this->upsertSetting('traffic_addon.price_per_gb', (string) $trafficPricePerGb, 'number');
+                $this->upsertSetting(SalesSettingsProvider::NEW_ORDERS_ENABLED, $request->request->has('sales_new_orders_enabled') ? 'true' : 'false', 'boolean');
+                $this->upsertSetting(SalesSettingsProvider::RENEWALS_ENABLED, $request->request->has('sales_renewals_enabled') ? 'true' : 'false', 'boolean');
+                $this->upsertSetting(SalesSettingsProvider::ADD_TRAFFIC_ENABLED, $request->request->has('sales_add_traffic_enabled') ? 'true' : 'false', 'boolean');
+                $this->upsertSetting(SalesSettingsProvider::DISABLED_MESSAGE, $disabledMessage, 'text');
                 $this->entityManager->flush();
                 $this->addFlash('success', 'تنظیمات تمدید و قیمتگذاری بروزرسانی شد.');
             }
@@ -72,6 +81,16 @@ final class RenewalPricingAdminController extends AbstractController
                 'traffic_addon_min_gb' => $this->trafficAddonSettingsProvider->minGb(),
                 'traffic_addon_max_gb' => $this->trafficAddonSettingsProvider->maxGb(),
                 'traffic_addon_price_per_gb' => $this->trafficAddonSettingsProvider->pricePerGb(),
+                'sales_new_orders_enabled' => $this->salesSettingsProvider->newOrdersEnabled(),
+                'sales_renewals_enabled' => $this->salesSettingsProvider->renewalsEnabled(),
+                'sales_add_traffic_enabled' => $this->salesSettingsProvider->addTrafficEnabled(),
+                'sales_disabled_message' => $this->salesSettingsProvider->disabledMessage(),
+            ],
+            'keys' => [
+                'sales_new_orders_enabled' => SalesSettingsProvider::NEW_ORDERS_ENABLED,
+                'sales_renewals_enabled' => SalesSettingsProvider::RENEWALS_ENABLED,
+                'sales_add_traffic_enabled' => SalesSettingsProvider::ADD_TRAFFIC_ENABLED,
+                'sales_disabled_message' => SalesSettingsProvider::DISABLED_MESSAGE,
             ],
         ]);
     }

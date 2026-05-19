@@ -89,9 +89,6 @@ class DashboardController extends AbstractDashboardController
         if ($this->routeExists('admin_renewal_pricing_settings')) {
             yield MenuItem::linkToRoute('admin.renewal_pricing_settings', 'fa fa-sliders', 'admin_renewal_pricing_settings');
         }
-        if ($this->routeExists('admin_sales_settings')) {
-            yield MenuItem::linkToRoute('admin.sales_settings', 'fa fa-toggle-on', 'admin_sales_settings');
-        }
         if ($this->routeExists('admin_automation_settings')) {
             yield MenuItem::linkToRoute('admin.automation_settings', 'fa fa-clock-o', 'admin_automation_settings');
         }
