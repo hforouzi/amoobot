@@ -296,6 +296,7 @@ class ServiceManagementService
                 $qrPath = $this->createQrTempFile($configLink, (int) ($service->getId() ?? 0), sprintf('config-%d', $index + 1));
                 if (null === $qrPath) {
                     ++$failedCount;
+                    $this->telegramApiClient->sendMessage($chatId, 'ساخت QR Code با خطا مواجه شد. لطفاً از لینک متنی استفاده کنید.');
                     continue;
                 }
 
@@ -331,7 +332,8 @@ class ServiceManagementService
 
         $qrPath = $this->createQrTempFile($subscriptionUrl, (int) ($service->getId() ?? 0), 'subscription');
         if (null === $qrPath) {
-            $this->showPopupOrMessage($chatId, $callbackId, 'ساخت QR انجام نشد. لطفاً دوباره تلاش کنید.', 'subscription_qr_create_failed');
+            $this->acknowledgeCallback($callbackId);
+            $this->telegramApiClient->sendMessage($chatId, 'ساخت QR Code با خطا مواجه شد. لطفاً از لینک متنی استفاده کنید.');
 
             return;
         }
@@ -2054,21 +2056,31 @@ class ServiceManagementService
 
     private function createQrTempFile(string $content, int $serviceId, string $suffix): ?string
     {
-        $tmpDir = '/tmp/amoobot-qr';
+        $tmpDir = dirname(__DIR__, 3).'/var/cache/qr';
         if (!is_dir($tmpDir)) {
             @mkdir($tmpDir, 0775, true);
         }
         if (!is_dir($tmpDir)) {
+            $error = error_get_last();
+            $this->debugLog(sprintf(
+                'qr_generation_failed service_id=%d suffix="%s" message="%s"',
+                $serviceId,
+                $suffix,
+                is_array($error) ? (string) ($error['message'] ?? 'QR cache directory could not be created') : 'QR cache directory could not be created'
+            ));
+
             return null;
         }
 
-        $safeSuffix = preg_replace('/[^a-zA-Z0-9_-]+/', '-', $suffix) ?: 'qr';
-        $targetPath = sprintf('%s/service-%d-%s-%s.png', $tmpDir, $serviceId, $safeSuffix, bin2hex(random_bytes(4)));
         try {
+            $safeSuffix = preg_replace('/[^a-zA-Z0-9_-]+/', '-', $suffix) ?: 'qr';
+            $targetPath = sprintf('%s/service-%d-%s-%s.png', $tmpDir, $serviceId, $safeSuffix, bin2hex(random_bytes(4)));
             $writer = new PngWriter();
-            $qrCode = QrCode::create($content)
-                ->setSize(420)
-                ->setMargin(12);
+            $qrCode = new QrCode(
+                data: $content,
+                size: 420,
+                margin: 12
+            );
             $writer->write($qrCode)->saveToFile($targetPath);
         } catch (\Throwable $e) {
             $this->debugLog(sprintf('qr_generation_failed service_id=%d suffix="%s" message="%s"', $serviceId, $suffix, $e->getMessage()));
