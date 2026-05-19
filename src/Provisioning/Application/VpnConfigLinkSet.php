@@ -65,24 +65,8 @@ final class VpnConfigLinkSet
     private function dedupeKey(string $link): string
     {
         $scheme = strtolower((string) (parse_url($link, PHP_URL_SCHEME) ?? ''));
-        if (!in_array($scheme, ['vless', 'trojan'], true)) {
-            $withoutFragment = preg_replace('/#.*$/', '', $link) ?? $link;
+        $withoutFragment = preg_replace('/#.*$/', '', $link) ?? $link;
 
-            return $scheme.':'.hash('sha256', $withoutFragment);
-        }
-
-        $query = [];
-        parse_str((string) (parse_url($link, PHP_URL_QUERY) ?? ''), $query);
-
-        return implode('|', [
-            $scheme,
-            rawurldecode((string) (parse_url($link, PHP_URL_USER) ?? '')),
-            strtolower((string) (parse_url($link, PHP_URL_HOST) ?? '')),
-            (string) ((int) (parse_url($link, PHP_URL_PORT) ?? 0)),
-            (string) (parse_url($link, PHP_URL_PATH) ?? ''),
-            strtolower((string) ($query['type'] ?? '')),
-            strtolower((string) ($query['security'] ?? '')),
-            (string) ($query['path'] ?? ''),
-        ]);
+        return $scheme.':'.hash('sha256', $withoutFragment);
     }
 }

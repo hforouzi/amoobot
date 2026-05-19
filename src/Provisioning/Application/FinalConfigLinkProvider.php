@@ -24,22 +24,24 @@ final class FinalConfigLinkProvider
 
     public function getFinalLinkSetForService(VpnService $service, string $sourceFlow = 'unknown'): VpnConfigLinkSetResult
     {
-        $rawLinks = $this->storedLinks($service);
+        $rawLinks = $this->withFallbackFragments($this->storedLinks($service), (string) ($service->getUsername() ?? ''));
         $formattedLinks = [];
 
-        try {
-            $generated = $this->vpnAccessLinkGenerator->generate($service);
-            $formattedLinks = array_values(array_filter(
-                (array) ($generated['configLinks'] ?? []),
-                static fn (mixed $link): bool => '' !== trim((string) $link)
-            ));
-        } catch (\Throwable $e) {
-            error_log(sprintf(
-                '[FinalConfigLinkProvider] generate_failed service_id=%d source_flow="%s" message="%s"',
-                (int) ($service->getId() ?? 0),
-                $sourceFlow,
-                $e->getMessage()
-            ));
+        if (!$this->shouldUseStoredLinksOnly($service, $rawLinks)) {
+            try {
+                $generated = $this->vpnAccessLinkGenerator->generate($service);
+                $formattedLinks = $this->withFallbackFragments(array_values(array_filter(
+                    (array) ($generated['configLinks'] ?? []),
+                    static fn (mixed $link): bool => '' !== trim((string) $link)
+                )), (string) ($service->getUsername() ?? ''));
+            } catch (\Throwable $e) {
+                error_log(sprintf(
+                    '[FinalConfigLinkProvider] generate_failed service_id=%d source_flow="%s" message="%s"',
+                    (int) ($service->getId() ?? 0),
+                    $sourceFlow,
+                    $e->getMessage()
+                ));
+            }
         }
 
         $result = $this->deduplicateAndPreferFormattedWithStats($rawLinks, $formattedLinks);
@@ -91,6 +93,42 @@ final class FinalConfigLinkProvider
             array_map(static fn (mixed $link): string => trim((string) $link), (array) ($service->getConfigLinks() ?? [])),
             static fn (string $link): bool => '' !== $link
         ));
+    }
+
+    /**
+     * @param list<string> $links
+     *
+     * @return list<string>
+     */
+    private function withFallbackFragments(array $links, string $fallbackName): array
+    {
+        $fallbackName = trim($fallbackName);
+        if ('' === $fallbackName) {
+            return $links;
+        }
+
+        return array_values(array_map(static function (string $link) use ($fallbackName): string {
+            $fragment = parse_url($link, PHP_URL_FRAGMENT);
+            if (is_string($fragment) && '' !== trim($fragment)) {
+                return $link;
+            }
+
+            $withoutFragment = preg_replace('/#.*$/', '', $link) ?? $link;
+
+            return $withoutFragment.'#'.rawurlencode($fallbackName);
+        }, $links));
+    }
+
+    /**
+     * @param list<string> $storedLinks
+     */
+    private function shouldUseStoredLinksOnly(VpnService $service, array $storedLinks): bool
+    {
+        if ([] === $storedLinks) {
+            return false;
+        }
+
+        return 'sanaei_3xui' === strtolower(trim((string) ($service->getPanel()?->getType() ?? '')));
     }
 
     private function logResult(VpnService $service, string $sourceFlow, int $rawCount, int $formattedCount, VpnConfigLinkSetResult $result): void
