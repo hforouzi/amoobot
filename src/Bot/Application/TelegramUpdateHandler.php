@@ -4,6 +4,13 @@ declare(strict_types=1);
 
 namespace App\Bot\Application;
 
+use App\Admin\UI\Crud\DiscountCodeCrudController;
+use App\Admin\UI\Crud\OrderCrudController;
+use App\Admin\UI\Crud\PaymentGatewayCrudController;
+use App\Admin\UI\Crud\PlanCrudController;
+use App\Admin\UI\Crud\SettingCrudController;
+use App\Admin\UI\Crud\StorePaymentMethodCrudController;
+use App\Admin\UI\DashboardController;
 use App\Bot\Application\ServiceAction\ServiceActionContext;
 use App\Bot\Application\ServiceAction\ServiceActionResolver;
 use App\Bot\Infrastructure\TelegramApiClient;
@@ -32,6 +39,9 @@ use App\Shop\Domain\OrderDraftStatus;
 use App\Shop\Domain\OrderStatus;
 use App\Shop\Domain\OrderType;
 use Doctrine\ORM\EntityManagerInterface;
+use EasyCorp\Bundle\EasyAdminBundle\Config\Action;
+use EasyCorp\Bundle\EasyAdminBundle\Router\AdminUrlGeneratorInterface;
+use Symfony\Component\HttpFoundation\RequestStack;
 
 class TelegramUpdateHandler
 {
@@ -69,6 +79,8 @@ class TelegramUpdateHandler
         private readonly StorePaymentMethodResolver $storePaymentMethodResolver,
         private readonly BotTextResolver $botTextResolver,
         private readonly BotButtonMatcher $botButtonMatcher,
+        private readonly AdminUrlGeneratorInterface $adminUrlGenerator,
+        private readonly RequestStack $requestStack,
         private readonly ?string $adminChatId = null,
         private readonly string $paymentCardNumber = '',
         private readonly string $paymentCardHolder = '',
@@ -228,7 +240,7 @@ class TelegramUpdateHandler
 
         $account = $this->telegramUserResolver->resolveFromTelegramUser($telegramUser);
 
-        if (str_starts_with($data, 'admin_')) {
+        if ($this->isAdminCallback($data)) {
             if (!$this->isAdminUserId($actorId)) {
                 $this->debugLog(sprintf('admin_callback_unauthorized data="%s" actor_id="%s" chat_id="%s"', $data, $actorId, $chatId));
                 $this->telegramApiClient->answerCallbackQuery($callbackId, $this->botTextResolver->message('admin.unauthorized'), true);
@@ -238,8 +250,20 @@ class TelegramUpdateHandler
 
             $this->debugLog(sprintf('admin_callback_execute data="%s" actor_id="%s"', $data, $actorId));
 
-            if ('admin_menu' === $data) {
+            if ('admin_menu' === $data || 'admin.menu' === $data) {
                 $this->handleAdminMenu($chatId, $callbackId);
+
+                return;
+            }
+
+            if ('admin.store_menu' === $data) {
+                $this->handleAdminStoreMenu($chatId, $callbackId);
+
+                return;
+            }
+
+            if (str_starts_with($data, 'admin.store.')) {
+                $this->handleAdminStoreAction($chatId, $data, $callbackId);
 
                 return;
             }
@@ -1990,6 +2014,137 @@ class TelegramUpdateHandler
         $this->telegramApiClient->sendMessage($chatId, 'منوی مدیریت:', $this->keyboardFactory->adminMenu());
     }
 
+    private function handleAdminStoreMenu(string $chatId, ?string $callbackId = null): void
+    {
+        $this->acknowledgeCallback($callbackId);
+        $this->telegramApiClient->sendMessage($chatId, 'مدیریت فروشگاه:', $this->keyboardFactory->adminStoreManagementMenu());
+    }
+
+    private function handleAdminStoreAction(string $chatId, string $action, ?string $callbackId = null): void
+    {
+        $sections = $this->adminStoreSections();
+        if (!isset($sections[$action])) {
+            $this->acknowledgeCallback($callbackId);
+            $this->telegramApiClient->sendMessage($chatId, 'این بخش از پنل ادمین قابل مدیریت است.', $this->keyboardFactory->backToAdminStoreManagementMenu());
+
+            return;
+        }
+
+        $this->acknowledgeCallback($callbackId);
+
+        try {
+            $url = $this->adminCrudUrl($sections[$action]['controller']);
+        } catch (\Throwable $e) {
+            $this->debugLog(sprintf('admin_store_url_failed action="%s" message="%s"', $action, $e->getMessage()));
+            $url = $this->manualAdminCrudUrl($sections[$action]['controller']);
+        }
+
+        if (null === $url) {
+            $this->telegramApiClient->sendMessage($chatId, 'این بخش از پنل ادمین قابل مدیریت است.', $this->keyboardFactory->backToAdminStoreManagementMenu());
+
+            return;
+        }
+
+        $label = $this->botTextResolver->button($sections[$action]['button']);
+        $message = sprintf(
+            "%s:\n%s",
+            $this->html($label),
+            $this->formatAdminUrl($url)
+        );
+
+        $this->telegramApiClient->sendHtmlMessage($chatId, $message, $this->keyboardFactory->backToAdminStoreManagementMenu());
+    }
+
+    /**
+     * @return array<string, array{button:string, controller:class-string}>
+     */
+    private function adminStoreSections(): array
+    {
+        return [
+            'admin.store.settings' => [
+                'button' => 'button.admin.store.settings',
+                'controller' => SettingCrudController::class,
+            ],
+            'admin.store.plans' => [
+                'button' => 'button.admin.store.plans',
+                'controller' => PlanCrudController::class,
+            ],
+            'admin.store.discounts' => [
+                'button' => 'button.admin.store.discounts',
+                'controller' => DiscountCodeCrudController::class,
+            ],
+            'admin.store.payment_methods' => [
+                'button' => 'button.admin.store.payment_methods',
+                'controller' => StorePaymentMethodCrudController::class,
+            ],
+            'admin.store.payment_gateways' => [
+                'button' => 'button.admin.store.payment_gateways',
+                'controller' => PaymentGatewayCrudController::class,
+            ],
+            'admin.store.orders' => [
+                'button' => 'button.admin.store.orders',
+                'controller' => OrderCrudController::class,
+            ],
+        ];
+    }
+
+    /**
+     * @param class-string $crudController
+     */
+    private function adminCrudUrl(string $crudController): ?string
+    {
+        $relativeUrl = $this->adminUrlGenerator
+            ->unsetAll()
+            ->setDashboard(DashboardController::class)
+            ->setController($crudController)
+            ->setAction(Action::INDEX)
+            ->generateUrl();
+
+        $relativeUrl = trim($relativeUrl);
+        if ('' === $relativeUrl) {
+            return null;
+        }
+
+        if (str_starts_with($relativeUrl, 'http://') || str_starts_with($relativeUrl, 'https://')) {
+            return $relativeUrl;
+        }
+
+        $request = $this->requestStack->getCurrentRequest();
+        if (null === $request) {
+            return $relativeUrl;
+        }
+
+        return rtrim($request->getSchemeAndHttpHost(), '/').'/'.ltrim($relativeUrl, '/');
+    }
+
+    /**
+     * @param class-string $crudController
+     */
+    private function manualAdminCrudUrl(string $crudController): string
+    {
+        $path = '/admin?'.http_build_query([
+            'crudAction' => Action::INDEX,
+            'crudControllerFqcn' => $crudController,
+        ], '', '&', PHP_QUERY_RFC3986);
+
+        $request = $this->requestStack->getCurrentRequest();
+        if (null === $request) {
+            return $path;
+        }
+
+        return rtrim($request->getSchemeAndHttpHost(), '/').$path;
+    }
+
+    private function formatAdminUrl(string $url): string
+    {
+        $escaped = $this->html($url);
+        if (str_starts_with($url, 'http://') || str_starts_with($url, 'https://')) {
+            return sprintf('<a href="%s">%s</a>', $escaped, $escaped);
+        }
+
+        return sprintf('<code>%s</code>', $escaped);
+    }
+
     private function handleAdminPendingPayments(string $chatId, ?string $callbackId = null): void
     {
         $payments = $this->entityManager->getRepository(Payment::class)->findBy([
@@ -3525,6 +3680,11 @@ class TelegramUpdateHandler
         return $actorId === $adminChatId;
     }
 
+    private function isAdminCallback(string $data): bool
+    {
+        return str_starts_with($data, 'admin_') || str_starts_with($data, 'admin.');
+    }
+
     private function formatTelegramIdentity(?TelegramAccount $telegramAccount): string
     {
         if (!$telegramAccount instanceof TelegramAccount) {
@@ -3532,6 +3692,11 @@ class TelegramUpdateHandler
         }
 
         return sprintf('@%s / %s', $telegramAccount->getUsername() ?: '-', $telegramAccount->getTelegramId());
+    }
+
+    private function html(string $value): string
+    {
+        return htmlspecialchars($value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
     }
 
     private function debugLog(string $message): void
