@@ -391,21 +391,61 @@ class TelegramKeyboardFactory
         return [
             'inline_keyboard' => [
                 [[
-                    'text' => '💳 پرداختهای در انتظار',
-                    'callback_data' => 'admin_pending_payments',
+                    'text' => $this->button('button.admin.store_management'),
+                    'callback_data' => 'admin.store_menu',
                 ], [
-                    'text' => '👥 لیست کاربران',
+                    'text' => $this->button('button.admin.payments'),
+                    'callback_data' => 'admin_pending_payments',
+                ]],
+                [[
+                    'text' => $this->button('button.admin.services'),
+                    'callback_data' => 'admin_services',
+                ], [
+                    'text' => $this->button('button.admin.users'),
                     'callback_data' => 'admin_users',
                 ]],
                 [[
-                    'text' => '📦 لیست سرویسها',
-                    'callback_data' => 'admin_services',
+                    'text' => $this->button('button.common.back_to_main_menu'),
+                    'callback_data' => 'main_menu',
+                ]],
+            ],
+        ];
+    }
+
+    /**
+     * @return array<string, array<array<array<string, string>>>>
+     */
+    public function adminStoreManagementMenu(): array
+    {
+        return [
+            'inline_keyboard' => [
+                [[
+                    'text' => $this->button('button.admin.store.settings'),
+                    'callback_data' => 'admin.store.settings',
                 ], [
-                    'text' => '🧾 آخرین سفارشها',
-                    'callback_data' => 'admin_orders',
+                    'text' => $this->button('button.admin.store.plans'),
+                    'callback_data' => 'admin.store.plans',
                 ]],
                 [[
-                    'text' => $this->button('button.common.back'),
+                    'text' => $this->button('button.admin.store.discounts'),
+                    'callback_data' => 'admin.store.discounts',
+                ], [
+                    'text' => $this->button('button.admin.store.payment_methods'),
+                    'callback_data' => 'admin.store.payment_methods',
+                ]],
+                [[
+                    'text' => $this->button('button.admin.store.payment_gateways'),
+                    'callback_data' => 'admin.store.payment_gateways',
+                ], [
+                    'text' => $this->button('button.admin.store.orders'),
+                    'callback_data' => 'admin.store.orders',
+                ]],
+                [[
+                    'text' => $this->button('button.admin.back_to_management'),
+                    'callback_data' => 'admin.menu',
+                ]],
+                [[
+                    'text' => $this->button('button.common.back_to_main_menu'),
                     'callback_data' => 'main_menu',
                 ]],
             ],
@@ -442,7 +482,19 @@ class TelegramKeyboardFactory
     {
         return [
             'inline_keyboard' => [[
-                ['text' => $this->button('button.common.back'), 'callback_data' => 'admin_menu'],
+                ['text' => $this->button('button.admin.back_to_management'), 'callback_data' => 'admin.menu'],
+            ]],
+        ];
+    }
+
+    /**
+     * @return array<string, array<array<array<string, string>>>>
+     */
+    public function backToAdminStoreManagementMenu(): array
+    {
+        return [
+            'inline_keyboard' => [[
+                ['text' => $this->button('button.admin.back_to_management'), 'callback_data' => 'admin.store_menu'],
             ]],
         ];
     }
