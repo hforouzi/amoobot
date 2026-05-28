@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Payment\Application;
 
 use App\Bot\Application\BotTextResolver;
+use App\Bot\Application\VpnAccessMessageFormatter;
 use App\Entity\VpnService;
 use App\Bot\Infrastructure\TelegramApiClient;
 use App\Entity\Payment;
@@ -20,6 +21,7 @@ class PaymentConfirmationService
         private readonly PaymentApprovalService $paymentApprovalService,
         private readonly TelegramApiClient $telegramApiClient,
         private readonly BotTextResolver $botTextResolver,
+        private readonly VpnAccessMessageFormatter $vpnAccessMessageFormatter,
         private readonly FinalConfigLinkProvider $finalConfigLinkProvider,
     ) {
     }
@@ -75,32 +77,11 @@ class PaymentConfirmationService
             return [$headline ?? $this->botTextResolver->message('payment.confirmed')];
         }
 
-        $subscriptionUrl = trim((string) ($vpnService->getSubscriptionUrl() ?? ''));
-        $allConfigLinks = $this->finalConfigLinkProvider->getFinalLinksForService($vpnService, 'payment_confirmed_new_service');
-
-        $lines = [
-            $headline ?? $this->botTextResolver->message('payment.confirmed'),
-            '',
-            '📦 خلاصه سرویس',
-            sprintf('شناسه سرویس: %d', $vpnService->getId() ?? 0),
-            sprintf('کاربری: %s', $this->html((string) ($vpnService->getUsername() ?? '-'))),
-        ];
-
-        if ('' !== $subscriptionUrl) {
-            $lines[] = '';
-            $lines[] = '🔗 لینک اشتراک:';
-            $lines[] = $this->htmlCode($subscriptionUrl);
-        }
-
-        if ([] !== $allConfigLinks) {
-            $lines[] = '';
-            $lines[] = '📡 لینکهای اتصال:';
-            foreach ($allConfigLinks as $i => $link) {
-                $lines[] = sprintf("%d.\n%s", $i + 1, $this->htmlCode($link));
-            }
-        }
-
-        return $this->splitLongMessage(implode("\n", $lines));
+        return $this->vpnAccessMessageFormatter->formatServiceAccessMessages(
+            $vpnService,
+            $headline ?? '✅ سرویس شما آماده شد',
+            'payment_confirmed_new_service'
+        );
     }
 
     /**

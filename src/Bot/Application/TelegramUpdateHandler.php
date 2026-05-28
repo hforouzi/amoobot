@@ -715,7 +715,7 @@ class TelegramUpdateHandler
             return;
         }
 
-        foreach ($this->paymentConfirmationService->buildNewServiceConfirmedMessages($result->vpnService, 'اکانت تست شما آماده شد.') as $message) {
+        foreach ($this->paymentConfirmationService->buildNewServiceConfirmedMessages($result->vpnService, '🎁 اکانت تست شما آماده شد') as $message) {
             if (str_contains($message, '<code>')) {
                 $this->telegramApiClient->sendHtmlMessage($chatId, $message);
             } else {
