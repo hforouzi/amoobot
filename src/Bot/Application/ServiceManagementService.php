@@ -67,6 +67,7 @@ class ServiceManagementService
         private readonly OrderTrackingCodeService $orderTrackingCodeService,
         private readonly PaymentGatewayRegistry $paymentGatewayRegistry,
         private readonly StorePaymentMethodResolver $storePaymentMethodResolver,
+        private readonly VpnAccessMessageFormatter $vpnAccessMessageFormatter,
         private readonly string $paymentCardNumber = '',
         private readonly string $paymentCardHolder = '',
         private readonly ?string $paymentDescription = null,
@@ -211,10 +212,7 @@ class ServiceManagementService
             $this->showPopupOrMessage($chatId, $callbackId, 'لینک اشتراک برای این سرویس موجود نیست.', 'missing_subscription_url');
             $configLinkSet = $this->collectConfigLinks($service, 'telegram_subscription_fallback_config');
             if ([] !== $configLinkSet->finalLinks) {
-                $this->telegramApiClient->sendHtmlMessage(
-                    $chatId,
-                    $this->formatConfigLinksMessage($configLinkSet->finalLinks, 'لینک اشتراک موجود نیست، ولی کانفیگ‌ها در دسترس است:')
-                );
+                $this->sendAccessMessages($chatId, $service, '✅ سرویس شما آماده شد', 'telegram_subscription_fallback_config');
                 $this->debugLog(sprintf(
                     'service_subscription_fallback_configs service_id=%d raw_link_count=%d formatted_link_count=%d final_sent_count=%d dropped_duplicate_count=%d',
                     $serviceId,
@@ -229,7 +227,7 @@ class ServiceManagementService
         }
 
         $this->acknowledgeCallback($callbackId);
-        $this->telegramApiClient->sendMessage($chatId, "🔗 لینک اشتراک شما:\n{$subscriptionUrl}");
+        $this->sendAccessMessages($chatId, $service, '✅ سرویس شما آماده شد', 'telegram_subscription_only');
         $this->debugLog(sprintf('service_subscription_sent service_id=%d user_id=%d', $serviceId, $account->getUser()->getId()));
     }
 
@@ -256,7 +254,7 @@ class ServiceManagementService
         }
 
         $this->acknowledgeCallback($callbackId);
-        $this->telegramApiClient->sendHtmlMessage($chatId, $this->formatConfigLinksMessage($configLinkSet->finalLinks));
+        $this->sendAccessMessages($chatId, $service, '✅ سرویس شما آماده شد', 'telegram_resend_config');
         $this->debugLog(sprintf(
             'service_resend_config service_id=%d actor_user_id=%d admin_mode=%s raw_link_count=%d formatted_link_count=%d final_sent_count=%d dropped_duplicate_count=%d',
             $serviceId,
@@ -1841,7 +1839,7 @@ class ServiceManagementService
             return;
         }
 
-        $this->telegramApiClient->sendHtmlMessage($chatId, $this->formatConfigLinksMessage($configLinkSet->finalLinks, 'لینک‌های اتصال:'));
+        $this->sendAccessMessages($chatId, $service, '✅ سرویس شما آماده شد', $sourceFlow);
         $this->debugLog(sprintf(
             'service_detail_configs service_id=%d source_flow=%s raw_link_count=%d formatted_link_count=%d final_sent_count=%d dropped_duplicate_count=%d',
             $service->getId() ?? 0,
@@ -1851,6 +1849,13 @@ class ServiceManagementService
             count($configLinkSet->finalLinks),
             $configLinkSet->droppedDuplicateCount
         ));
+    }
+
+    private function sendAccessMessages(string $chatId, VpnService $service, string $headline, string $sourceFlow): void
+    {
+        foreach ($this->vpnAccessMessageFormatter->formatServiceAccessMessages($service, $headline, $sourceFlow) as $message) {
+            $this->telegramApiClient->sendHtmlMessage($chatId, $message);
+        }
     }
 
     private function formatServiceDetailForAdmin(VpnService $service): string
