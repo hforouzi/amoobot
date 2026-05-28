@@ -57,6 +57,7 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
         $expiryTime = $this->durationToMs($request->durationDays);
         $ipLimit = $request->ipLimit;
 
+        $inboundConfig = $this->inboundConfig($inbound);
         $protocol = $this->resolveInboundProtocol($inbound);
         $network = (string) ($inbound->getNetwork() ?? '');
         $security = (string) ($inbound->getSecurity() ?? '');

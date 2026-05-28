@@ -23,7 +23,7 @@ class VpnInbound
     private string $remoteInboundId;
 
     #[ORM\Column(length: 255)]
-    private string $title;
+    private string $title="";
 
     #[ORM\Column(length: 255, nullable: true)]
     private ?string $remark = null;
