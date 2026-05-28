@@ -143,6 +143,7 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
         $subscriptionUrl = $this->buildSubscriptionUrl($panel, $config, $subId);
         $configLinks = [];
         $configText = '';
+        $isLegacyPanel = !$this->isV3Panel($panel);
 
         if ($this->isV3Panel($panel)) {
             $officialClientLinksResult = $this->apiClient->getClientLinks($panel, $inboundIdInt, $email);
@@ -167,6 +168,41 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
             }
         }
 
+        if ($isLegacyPanel && [] === $configLinks) {
+            $this->log(sprintf(
+                'legacy_link_generation_attempted panel_id=%d inbound_id=%d yes',
+                $panel->getId() ?? 0,
+                $inbound->getId() ?? 0
+            ));
+            $remoteInbound = $this->fetchLegacyInboundById($panel, $inboundIdInt);
+            $clientMatch = is_array($remoteInbound) ? $this->findLegacyClient($remoteInbound, $clientUuid, $email) : ['client' => null, 'matchedBy' => 'none'];
+            $legacyClient = $clientMatch['client'];
+            $legacyGeneratedLink = is_array($remoteInbound) && is_array($legacyClient)
+                ? trim($this->configGenerator->generateLegacyConfigTextFromRemoteInbound($remoteInbound, $legacyClient, $panel, $inbound))
+                : '';
+            $legacyGeneratedLinks = array_values(array_filter(
+                array_map('trim', explode("\n", $legacyGeneratedLink)),
+                static fn (string $line): bool => '' !== $line
+            ));
+            if ([] !== $legacyGeneratedLinks) {
+                $configLinks = $legacyGeneratedLinks;
+                $configText = implode("\n", $legacyGeneratedLinks);
+            }
+
+            $this->log(sprintf(
+                'legacy_config_link_generation panel_id=%d inbound_id=%d legacy_client_found=%s legacy_client_matched_by="%s" generated_link_count=%d legacy_generated_link_has_encryption=%s legacy_generated_link_has_fp=%s legacy_generated_link_has_alpn=%s legacy_generated_link_has_sni=%s',
+                $panel->getId() ?? 0,
+                $inbound->getId() ?? 0,
+                is_array($legacyClient) ? 'yes' : 'no',
+                (string) ($clientMatch['matchedBy'] ?? 'none'),
+                count($legacyGeneratedLinks),
+                $this->linksHaveQueryKey($legacyGeneratedLinks, 'encryption') ? 'yes' : 'no',
+                $this->linksHaveQueryKey($legacyGeneratedLinks, 'fp') ? 'yes' : 'no',
+                $this->linksHaveQueryKey($legacyGeneratedLinks, 'alpn') ? 'yes' : 'no',
+                $this->linksHaveQueryKey($legacyGeneratedLinks, 'sni') ? 'yes' : 'no'
+            ));
+        }
+
         $generatedConfigText = trim($this->configGenerator->generateConfigText($inbound, $clientUuid, $email, $subId));
         $generatedConfigLinks = array_values(array_filter(
             array_map('trim', explode("\n", $generatedConfigText)),
@@ -174,12 +210,21 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
         ));
 
         if ([] === $configLinks && [] !== $generatedConfigLinks && $this->hasExternalProxyConfig($inboundConfig)) {
+            if ($isLegacyPanel) {
+                $this->log(sprintf('legacy_old_fallback_used panel_id=%d inbound_id=%d yes', $panel->getId() ?? 0, $inbound->getId() ?? 0));
+            }
             $configText = $generatedConfigText;
             $configLinks = $generatedConfigLinks;
         } elseif ([] === $configLinks) {
+            if ($isLegacyPanel) {
+                $this->log(sprintf('legacy_old_fallback_used panel_id=%d inbound_id=%d yes', $panel->getId() ?? 0, $inbound->getId() ?? 0));
+            }
             $configText = $generatedConfigText;
             $configLinks = $generatedConfigLinks;
         } else {
+            if ($isLegacyPanel) {
+                $this->log(sprintf('legacy_old_fallback_used panel_id=%d inbound_id=%d no', $panel->getId() ?? 0, $inbound->getId() ?? 0));
+            }
             $configText = implode("\n", $configLinks);
         }
 
@@ -722,6 +767,25 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
 
     private function verifyClientExists(VpnPanel $panel, string $remoteInboundId, string $email): bool
     {
+        if (!$this->isV3Panel($panel)) {
+            $remoteInbound = $this->fetchLegacyInboundById($panel, $this->toInboundIdIntOrFail($remoteInboundId));
+            if (null === $remoteInbound) {
+                return false;
+            }
+
+            $clientMatch = $this->findLegacyClient($remoteInbound, '', $email);
+            $exists = is_array($clientMatch['client']);
+            $this->log(sprintf(
+                'add_client_verified_by_legacy_inbounds remote_inbound_id="%s" email="%s" matched_by="%s" exists=%s',
+                $remoteInboundId,
+                $email,
+                (string) $clientMatch['matchedBy'],
+                $exists ? 'yes' : 'no'
+            ));
+
+            return $exists;
+        }
+
         $trafficResult = $this->apiClient->getClientTraffic($panel, $email);
         if (($trafficResult['ok'] ?? false) === true && ($trafficResult['empty'] ?? false) !== true) {
             $payload = is_array($trafficResult['data'] ?? null) ? $trafficResult['data'] : [];
@@ -779,6 +843,126 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
             $email,
             (string) ($inboundResult['bodyPreview'] ?? '')
         ));
+
+        return false;
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function fetchLegacyInboundById(VpnPanel $panel, int $remoteInboundId): ?array
+    {
+        $panelApiResult = $this->apiClient->getInbound($panel, (string) $remoteInboundId);
+        if (($panelApiResult['ok'] ?? false) === true && ($panelApiResult['empty'] ?? false) !== true) {
+            $payload = is_array($panelApiResult['data'] ?? null) ? $panelApiResult['data'] : [];
+            $inbound = is_array($payload['obj'] ?? null) ? $payload['obj'] : $payload;
+            if (is_array($inbound) && (int) ($inbound['id'] ?? 0) === $remoteInboundId) {
+                $this->log(sprintf('legacy_read_inbound_found panel_id=%d remote_inbound_id=%d yes source="panel_api_get"', $panel->getId() ?? 0, $remoteInboundId));
+
+                return $inbound;
+            }
+        }
+
+        $this->log(sprintf(
+            'legacy_read_inbounds_endpoint_attempted="/xui/API/inbounds" panel_id=%d remote_inbound_id=%d yes',
+            $panel->getId() ?? 0,
+            $remoteInboundId
+        ));
+        $result = $this->apiClient->listLegacyInbounds($panel);
+        $this->log(sprintf(
+            'legacy_read_inbounds_status panel_id=%d status=%s',
+            $panel->getId() ?? 0,
+            (string) ($result['status'] ?? 'null')
+        ));
+        $fetchOk = ($result['ok'] ?? false) === true && ($result['empty'] ?? false) !== true;
+        $payload = is_array($result['data'] ?? null) ? $result['data'] : [];
+        $inbounds = $this->extractLegacyInboundList($payload);
+
+        $this->log(sprintf(
+            'legacy_inbounds_fetch_ok panel_id=%d ok=%s legacy_inbounds_count=%d',
+            $panel->getId() ?? 0,
+            $fetchOk ? 'yes' : 'no',
+            count($inbounds)
+        ));
+
+        foreach ($inbounds as $inbound) {
+            if ((int) ($inbound['id'] ?? 0) === $remoteInboundId) {
+                $this->log(sprintf('legacy_read_inbound_found panel_id=%d remote_inbound_id=%d yes source="xui_api_inbounds"', $panel->getId() ?? 0, $remoteInboundId));
+
+                return $inbound;
+            }
+        }
+
+        $this->log(sprintf('legacy_read_inbound_found panel_id=%d remote_inbound_id=%d no', $panel->getId() ?? 0, $remoteInboundId));
+
+        return null;
+    }
+
+    /**
+     * @param array<string, mixed> $payload
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function extractLegacyInboundList(array $payload): array
+    {
+        $candidate = $payload['obj'] ?? $payload;
+        if (is_array($candidate) && isset($candidate['inbounds']) && is_array($candidate['inbounds'])) {
+            $candidate = $candidate['inbounds'];
+        }
+        if (!is_array($candidate)) {
+            return [];
+        }
+
+        $items = array_is_list($candidate) ? $candidate : array_values($candidate);
+        $inbounds = [];
+        foreach ($items as $item) {
+            if (is_array($item)) {
+                $inbounds[] = $item;
+            }
+        }
+
+        return $inbounds;
+    }
+
+    /**
+     * @param array<string, mixed> $remoteInbound
+     *
+     * @return array{client: array<string, mixed>|null, matchedBy: string}
+     */
+    private function findLegacyClient(array $remoteInbound, string $clientUuid, string $email): array
+    {
+        $settings = $this->decodeSettings($remoteInbound['settings'] ?? null);
+        $clients = is_array($settings['clients'] ?? null) ? $settings['clients'] : [];
+
+        if ('' !== trim($clientUuid)) {
+            foreach ($clients as $client) {
+                if (is_array($client) && trim((string) ($client['id'] ?? '')) === $clientUuid) {
+                    return ['client' => $client, 'matchedBy' => 'uuid'];
+                }
+            }
+        }
+
+        foreach ($clients as $client) {
+            if (is_array($client) && trim((string) ($client['email'] ?? '')) === $email) {
+                return ['client' => $client, 'matchedBy' => 'email'];
+            }
+        }
+
+        return ['client' => null, 'matchedBy' => 'none'];
+    }
+
+    /**
+     * @param list<string> $links
+     */
+    private function linksHaveQueryKey(array $links, string $key): bool
+    {
+        foreach ($links as $link) {
+            $params = [];
+            parse_str((string) (parse_url($link, PHP_URL_QUERY) ?? ''), $params);
+            if (array_key_exists($key, $params) && '' !== trim((string) $params[$key])) {
+                return true;
+            }
+        }
 
         return false;
     }

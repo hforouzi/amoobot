@@ -82,6 +82,17 @@ final class Sanaei3xuiApiClient
         return $this->request($panel, 'GET', '/panel/api/inbounds/list');
     }
 
+    public function listLegacyInbounds(VpnPanel $panel): array
+    {
+        if (!$this->ensureLogin($panel)) {
+            $this->log(sprintf('legacy_inbounds_list_failure panel_id=%s reason="login_failed"', $panel->getId() ?? 'null'));
+
+            return $this->errorResult('login_failed');
+        }
+
+        return $this->request($panel, 'GET', '/xui/API/inbounds');
+    }
+
     public function getInbound(VpnPanel $panel, string $id): array
     {
         if (!$this->ensureLogin($panel)) {
@@ -116,7 +127,7 @@ final class Sanaei3xuiApiClient
         }
 
         $this->log(sprintf(
-            'add_client_request panel_id=%s inbound_id="%s" %s',
+            'add_client_request panel_id=%s inbound_id="%s" add_client_endpoint="/panel/api/inbounds/addClient" %s',
             $panel->getId() ?? 'null',
             $inboundId,
             $this->formatDiagnosticContext($context)
