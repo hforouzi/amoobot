@@ -15,6 +15,7 @@ use App\Admin\UI\Crud\PaymentCrudController;
 use App\Admin\UI\Crud\PaymentGatewayCrudController;
 use App\Admin\UI\Crud\PluginCrudController;
 use App\Admin\UI\Crud\PlanCrudController;
+use App\Admin\UI\Crud\RequiredChannelCrudController;
 use App\Admin\UI\Crud\ServiceNotificationLogCrudController;
 use App\Admin\UI\Crud\SettingCrudController;
 use App\Admin\UI\Crud\StorePaymentMethodCrudController;
@@ -83,6 +84,7 @@ class DashboardController extends AbstractDashboardController
         yield MenuItem::section('admin.menu.users', 'fa fa-users');
         yield MenuItem::linkTo(UserCrudController::class, 'admin.users', 'fa fa-users');
         yield MenuItem::linkTo(TelegramAccountCrudController::class, 'admin.telegram_accounts', 'fa fa-paper-plane');
+        yield MenuItem::linkTo(RequiredChannelCrudController::class, 'Required Channels', 'fa fa-bullhorn');
 
         yield MenuItem::section('admin.menu.automation', 'fa fa-magic');
         yield MenuItem::linkTo(ServiceNotificationLogCrudController::class, 'admin.notifications', 'fa fa-bell');

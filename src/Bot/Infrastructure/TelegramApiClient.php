@@ -202,6 +202,17 @@ class TelegramApiClient
         return $this->callApi('getWebhookInfo', []);
     }
 
+    public function getChatMember(string $chatId, int|string $userId): array
+    {
+        $data = $this->callApi('getChatMember', [
+            'chat_id' => $chatId,
+            'user_id' => (string) $userId,
+        ]);
+        $result = $data['result'] ?? [];
+
+        return is_array($result) ? $result : [];
+    }
+
     private function callApi(string $method, array $payload): array
     {
         $options = ['json' => $payload];
