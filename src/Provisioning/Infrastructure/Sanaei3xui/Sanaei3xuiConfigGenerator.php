@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Provisioning\Infrastructure\Sanaei3xui;
 
 use App\Entity\VpnInbound;
+use App\Entity\VpnPanel;
 
 final class Sanaei3xuiConfigGenerator
 {
@@ -108,6 +109,114 @@ final class Sanaei3xuiConfigGenerator
     }
 
     /**
+     * @param array<string, mixed> $remoteInbound
+     * @param array<string, mixed> $client
+     */
+    public function generateLegacyConfigTextFromRemoteInbound(array $remoteInbound, array $client, VpnPanel $panel, VpnInbound $localInbound): string
+    {
+        $protocol = strtolower(trim((string) ($remoteInbound['protocol'] ?? $localInbound->getProtocol() ?? '')));
+        if ('vless' !== $protocol) {
+            return '';
+        }
+
+        $settings = $this->toArray($remoteInbound['settings'] ?? null);
+        $streamSettings = $this->toArray($remoteInbound['streamSettings'] ?? null);
+        $network = strtolower(trim((string) ($streamSettings['network'] ?? $localInbound->getNetwork() ?? '')));
+        if ('ws' !== $network) {
+            return '';
+        }
+
+        $clientId = trim((string) ($client['id'] ?? $client['uuid'] ?? ''));
+        $email = trim((string) ($client['email'] ?? ''));
+        if ('' === $clientId) {
+            return '';
+        }
+
+        [, $externalProxies] = $this->normalizeConfig($localInbound);
+        $wsSettings = $this->toArray($streamSettings['wsSettings'] ?? null);
+        $wsHeaders = $this->toArray($wsSettings['headers'] ?? null);
+        $tlsSettings = $this->toArray($streamSettings['tlsSettings'] ?? null);
+        $security = strtolower(trim((string) ($streamSettings['security'] ?? $localInbound->getSecurity() ?? 'none')));
+        if ('' === $security) {
+            $security = 'none';
+        }
+
+        $query = ['type' => 'ws'];
+        $encryption = $this->firstNonEmpty(
+            $client['encryption'] ?? null,
+            $client['decryption'] ?? null,
+            $settings['encryption'] ?? null,
+            $settings['decryption'] ?? null
+        );
+        if (null !== $encryption) {
+            $query['encryption'] = $encryption;
+        }
+
+        $path = $this->firstNonEmpty($wsSettings['path'] ?? null, $localInbound->getPath(), '/');
+        if (null !== $path) {
+            $query['path'] = $path;
+        }
+
+        $host = $this->firstNonEmpty($wsSettings['host'] ?? null, $wsHeaders['Host'] ?? null, $wsHeaders['host'] ?? null, $localInbound->getHostHeader());
+        if (null !== $host) {
+            $query['host'] = $host;
+        }
+
+        $query['security'] = $security;
+
+        $fingerprint = $this->firstNonEmpty($tlsSettings['fingerprint'] ?? null, $tlsSettings['fp'] ?? null);
+        if (null !== $fingerprint) {
+            $query['fp'] = $fingerprint;
+        }
+
+        $alpn = $this->normalizeAlpn($tlsSettings['alpn'] ?? null);
+        if (null !== $alpn) {
+            $query['alpn'] = $alpn;
+        }
+
+        $sni = $this->firstNonEmpty($tlsSettings['serverName'] ?? null, $tlsSettings['sni'] ?? null, $localInbound->getSni());
+        if (null !== $sni) {
+            $query['sni'] = $sni;
+        }
+
+        $remark = $this->firstNonEmpty($remoteInbound['remark'] ?? null, $localInbound->getRemark(), $localInbound->getTitle(), 'service') ?? 'service';
+        $fragment = trim($remark.('' !== $email ? ' '.$email : ''));
+
+        $targets = [] !== $externalProxies ? $externalProxies : [[
+            'dest' => $this->firstNonEmpty($localInbound->getHost(), $panel->getPublicHost(), $this->hostFromUrl($panel->getSubscriptionBaseUrl()), $this->hostFromUrl($panel->getBaseUrl())),
+            'port' => $this->toPort($remoteInbound['port'] ?? null) ?? $localInbound->getPort(),
+        ]];
+
+        $links = [];
+        foreach ($targets as $target) {
+            $address = trim((string) ($target['dest'] ?? ''));
+            $port = $this->toPort($target['port'] ?? null);
+            if ('' === $address || null === $port) {
+                continue;
+            }
+
+            $links[] = sprintf(
+                'vless://%s@%s:%d?%s#%s',
+                rawurlencode($clientId),
+                $address,
+                $port,
+                http_build_query($query, '', '&', PHP_QUERY_RFC3986),
+                rawurlencode($fragment)
+            );
+        }
+
+        error_log(sprintf(
+            '[Sanaei3xuiConfigGenerator] legacy_external_proxy_count=%d legacy_link_generation_address_source=%s generated_link_count=%d generated_link_has_host_param=%s',
+            count($externalProxies),
+            [] !== $externalProxies ? 'external_proxy' : 'panel',
+            count($links),
+            array_key_exists('host', $query) ? 'yes' : 'no'
+        ));
+
+        return implode("\n", $links);
+    }
+
+    /**
      * @return array{0: array<string, mixed>, 1: list<array<string, mixed>>}
      */
     private function normalizeConfig(VpnInbound $inbound): array
@@ -173,6 +282,56 @@ final class Sanaei3xuiConfigGenerator
         }
 
         return $result;
+    }
+
+    private function firstNonEmpty(mixed ...$values): ?string
+    {
+        foreach ($values as $value) {
+            if (is_array($value)) {
+                continue;
+            }
+
+            $candidate = trim((string) $value);
+            if ('' !== $candidate) {
+                return $candidate;
+            }
+        }
+
+        return null;
+    }
+
+    private function hostFromUrl(?string $url): ?string
+    {
+        $host = parse_url(trim((string) $url), PHP_URL_HOST);
+
+        return is_string($host) && '' !== trim($host) ? trim($host) : null;
+    }
+
+    private function toPort(mixed $value): ?int
+    {
+        if (!is_scalar($value) || !is_numeric($value)) {
+            return null;
+        }
+
+        $port = (int) $value;
+
+        return $port >= 1 && $port <= 65535 ? $port : null;
+    }
+
+    private function normalizeAlpn(mixed $value): ?string
+    {
+        if (is_array($value)) {
+            $items = array_values(array_filter(
+                array_map(static fn (mixed $item): string => trim((string) $item), $value),
+                static fn (string $item): bool => '' !== $item
+            ));
+
+            return [] === $items ? null : implode(',', $items);
+        }
+
+        $candidate = trim((string) $value);
+
+        return '' === $candidate ? null : $candidate;
     }
 
     /**
