@@ -77,6 +77,7 @@ class TelegramUpdateHandler
         private readonly SalesSettingsProvider $salesSettingsProvider,
         private readonly PaymentGatewayRegistry $paymentGatewayRegistry,
         private readonly StorePaymentMethodResolver $storePaymentMethodResolver,
+        private readonly TelegramChannelMembershipGate $membershipGate,
         private readonly BotTextResolver $botTextResolver,
         private readonly BotButtonMatcher $botButtonMatcher,
         private readonly AdminUrlGeneratorInterface $adminUrlGenerator,
@@ -338,6 +339,12 @@ class TelegramUpdateHandler
             return;
         }
 
+        if (str_starts_with($data, 'membership_check:')) {
+            $this->handleMembershipCheck($account, $chatId, (string) str_replace('membership_check:', '', $data), $callbackId);
+
+            return;
+        }
+
         if (str_starts_with($data, 'select_plan:')) {
             $this->handleSelectPlan($account, $chatId, (int) str_replace('select_plan:', '', $data), $callbackId);
 
@@ -546,11 +553,81 @@ class TelegramUpdateHandler
         $this->sendIncompleteOrderPromptIfAny($account, $chatId);
     }
 
+    private function ensureMembershipGateAllowed(TelegramAccount $account, string $chatId, ?string $callbackId, string $context): bool
+    {
+        $result = $this->membershipGate->check($account->getTelegramId(), $context);
+        if ($result->allowed) {
+            return true;
+        }
+
+        $this->sendMembershipGateMessage($chatId, $callbackId, $context, $result);
+
+        return false;
+    }
+
+    private function handleMembershipCheck(TelegramAccount $account, string $chatId, string $context, ?string $callbackId): void
+    {
+        $context = TelegramChannelMembershipGate::CONTEXT_TRIAL === $context
+            ? TelegramChannelMembershipGate::CONTEXT_TRIAL
+            : TelegramChannelMembershipGate::CONTEXT_PURCHASE;
+
+        $result = $this->membershipGate->check($account->getTelegramId(), $context);
+        if (!$result->allowed) {
+            $this->sendMembershipGateMessage($chatId, $callbackId, $context, $result);
+
+            return;
+        }
+
+        $this->acknowledgeCallback($callbackId);
+        $message = TelegramChannelMembershipGate::CONTEXT_PURCHASE === $context
+            ? 'عضویت شما تایید شد. برای ادامه خرید، دوباره روی «خرید سرویس» بزنید.'
+            : 'عضویت شما تایید شد.';
+        $this->telegramApiClient->sendMessage($chatId, $message);
+    }
+
+    private function sendMembershipGateMessage(string $chatId, ?string $callbackId, string $context, MembershipGateResult $result): void
+    {
+        $this->acknowledgeCallback($callbackId);
+        $lines = ['برای ادامه، ابتدا باید عضو کانال‌های زیر باشید. بعد از عضویت، روی «بررسی عضویت» بزنید.', ''];
+        foreach ($result->missingChannels as $channel) {
+            $lines[] = sprintf('- %s (%s)', $channel->getTitle(), $channel->getChatId());
+        }
+
+        $this->telegramApiClient->sendMessage($chatId, implode("\n", $lines), $this->membershipGateKeyboard($context, $result));
+    }
+
+    private function membershipGateKeyboard(string $context, MembershipGateResult $result): array
+    {
+        $rows = [];
+        foreach ($result->missingChannels as $channel) {
+            $inviteUrl = trim((string) ($channel->getInviteUrl() ?? ''));
+            if ('' === $inviteUrl) {
+                continue;
+            }
+
+            $rows[] = [[
+                'text' => sprintf('عضویت در %s', $channel->getTitle()),
+                'url' => $inviteUrl,
+            ]];
+        }
+
+        $rows[] = [[
+            'text' => '✅ بررسی عضویت',
+            'callback_data' => 'membership_check:'.$context,
+        ]];
+
+        return ['inline_keyboard' => $rows];
+    }
+
     private function handleBuyService(TelegramAccount $account, string $chatId, ?string $callbackId = null, bool $isAdmin = false): void
     {
         if (!$this->salesSettingsProvider->newOrdersEnabled()) {
             $this->sendSalesDisabledMessage($account, $chatId, $callbackId, $isAdmin, 'new_order', SalesSettingsProvider::NEW_ORDERS_ENABLED);
 
+            return;
+        }
+
+        if (!$this->ensureMembershipGateAllowed($account, $chatId, $callbackId, TelegramChannelMembershipGate::CONTEXT_PURCHASE)) {
             return;
         }
 
@@ -570,6 +647,10 @@ class TelegramUpdateHandler
         if (!$this->salesSettingsProvider->newOrdersEnabled()) {
             $this->sendSalesDisabledMessage($account, $chatId, $callbackId, false, 'new_order', SalesSettingsProvider::NEW_ORDERS_ENABLED);
 
+            return;
+        }
+
+        if (!$this->ensureMembershipGateAllowed($account, $chatId, $callbackId, TelegramChannelMembershipGate::CONTEXT_PURCHASE)) {
             return;
         }
 
@@ -879,6 +960,10 @@ class TelegramUpdateHandler
             return;
         }
 
+        if (!$this->ensureMembershipGateAllowed($account, $chatId, $callbackId, TelegramChannelMembershipGate::CONTEXT_PURCHASE)) {
+            return;
+        }
+
         $price = $this->planPricingService->calculateNewOrderPrice($draft->getPlan(), [
             'trafficGb' => $draft->getTrafficGb(),
             'durationDays' => $draft->getDurationDays(),
@@ -961,6 +1046,10 @@ class TelegramUpdateHandler
         if (!$plan->isActive()) {
             $this->showPopupOrMessage($chatId, $callbackId, 'این پلن دیگر فعال نیست یا وجود ندارد.', 'popup_invalid_plan_select_payment_method_draft');
 
+            return;
+        }
+
+        if (!$this->ensureMembershipGateAllowed($account, $chatId, $callbackId, TelegramChannelMembershipGate::CONTEXT_PURCHASE)) {
             return;
         }
 
@@ -1065,6 +1154,10 @@ class TelegramUpdateHandler
         if (!$plan instanceof Plan || !$plan->isActive()) {
             $this->showPopupOrMessage($chatId, $callbackId, 'این پلن دیگر فعال نیست یا وجود ندارد.', 'popup_invalid_plan_select_payment_method');
 
+            return;
+        }
+
+        if (!$this->ensureMembershipGateAllowed($account, $chatId, $callbackId, TelegramChannelMembershipGate::CONTEXT_PURCHASE)) {
             return;
         }
 
@@ -1514,6 +1607,13 @@ class TelegramUpdateHandler
 
     private function sendPaymentGatewaySelectionForOrder(Order $order, string $chatId, ?string $callbackId, ?string $backCallback = null, ?string $cancelCallback = null, ?string $discountResult = null, ?string $discountReason = null): void
     {
+        if (OrderType::NEW_SERVICE === $order->getType()) {
+            $telegramAccount = $this->entityManager->getRepository(TelegramAccount::class)->findOneBy(['user' => $order->getUser()]);
+            if ($telegramAccount instanceof TelegramAccount && !$this->ensureMembershipGateAllowed($telegramAccount, $chatId, $callbackId, TelegramChannelMembershipGate::CONTEXT_PURCHASE)) {
+                return;
+            }
+        }
+
         $methods = $this->storePaymentMethodResolver->getAvailableMethods($order);
         if ([] === $methods) {
             $diagnostics = $this->storePaymentMethodResolver->getDiagnostics($order);
@@ -1781,6 +1881,10 @@ class TelegramUpdateHandler
         if (!$storePaymentMethod instanceof StorePaymentMethod) {
             $this->showPopupOrMessage($chatId, $callbackId, 'روش پرداخت نامعتبر است.', 'popup_invalid_store_payment_method');
 
+            return;
+        }
+
+        if (!$this->ensureMembershipGateAllowed($account, $chatId, $callbackId, TelegramChannelMembershipGate::CONTEXT_PURCHASE)) {
             return;
         }
 
@@ -2775,6 +2879,10 @@ class TelegramUpdateHandler
         }
 
         if (OrderType::NEW_SERVICE === $order->getType()) {
+            if (!$this->ensureMembershipGateAllowed($account, $chatId, $callbackId, TelegramChannelMembershipGate::CONTEXT_PURCHASE)) {
+                return;
+            }
+
             $this->sendPaymentGatewaySelectionForOrder($order, $chatId, $callbackId, 'order_summary:'.$orderId, 'order_cancel:'.$orderId);
 
             return;
@@ -2829,6 +2937,10 @@ class TelegramUpdateHandler
         ) {
             $this->showPopupOrMessage($chatId, $callbackId, 'سفارش ناتمام یافت نشد.', 'resume_order_not_found');
 
+            return;
+        }
+
+        if (OrderType::NEW_SERVICE === $order->getType() && !$this->ensureMembershipGateAllowed($account, $chatId, $callbackId, TelegramChannelMembershipGate::CONTEXT_PURCHASE)) {
             return;
         }
 
@@ -2985,6 +3097,10 @@ class TelegramUpdateHandler
             && $draft->getUser()->getId() === $account->getUser()->getId()
             && OrderDraftStatus::PENDING === $draft->getStatus()
         ) {
+            if (!$this->ensureMembershipGateAllowed($account, $chatId, $callbackId, TelegramChannelMembershipGate::CONTEXT_PURCHASE)) {
+                return;
+            }
+
             $this->acknowledgeCallback($callbackId);
             $this->renderDraftStep($account, $draft, $chatId);
 
@@ -3056,6 +3172,10 @@ class TelegramUpdateHandler
             $draft = $this->entityManager->getRepository(OrderDraft::class)->find($context->id);
             if ($draft instanceof OrderDraft) {
                 $this->debugLog(sprintf('resume_action_target user_id=%d type=draft id=%d', (int) ($account->getUser()->getId() ?? 0), $context->id));
+                if (!$this->ensureMembershipGateAllowed($account, $chatId, null, TelegramChannelMembershipGate::CONTEXT_PURCHASE)) {
+                    return;
+                }
+
                 $this->renderDraftStep($account, $draft, $chatId);
 
                 return;
