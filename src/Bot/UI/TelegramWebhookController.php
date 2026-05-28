@@ -7,6 +7,7 @@ namespace App\Bot\UI;
 use App\Bot\Application\BotMessageLogger;
 use App\Bot\Application\TelegramUpdateHandler;
 use App\Bot\Domain\BotMessageDirection;
+use Psr\Log\LoggerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -18,6 +19,7 @@ class TelegramWebhookController extends AbstractController
         private readonly TelegramUpdateHandler $telegramUpdateHandler,
         private readonly BotMessageLogger $botMessageLogger,
         private readonly string $webhookSecret,
+        private readonly LoggerInterface $logger,
     ) {
     }
 
@@ -43,7 +45,15 @@ class TelegramWebhookController extends AbstractController
             $updateType
         );
 
-        $this->telegramUpdateHandler->handle($payload);
+        try {
+            $this->telegramUpdateHandler->handle($payload);
+        } catch (\Throwable $e) {
+            $this->logger->error('Telegram webhook handler failed', [
+                'exception' => $e,
+                'update_id' => $payload['update_id'] ?? null,
+                'payload_keys' => array_keys($payload),
+            ]);
+        }
 
         return new JsonResponse(['ok' => true]);
     }

@@ -131,6 +131,11 @@ final class NowPaymentsWebhookController extends AbstractController
             $result = $this->paymentConfirmationService->confirm($payment, 'nowpayments_webhook');
             if (!$result->processed && !$result->alreadyProcessed) {
                 error_log(sprintf('[NowPaymentsWebhookController] confirm_failed payment_id=%s message="%s"', $paymentId, (string) ($result->message ?? '')));
+
+                return new JsonResponse([
+                    'status' => 'error',
+                    'message' => 'payment_confirmation_failed',
+                ], Response::HTTP_INTERNAL_SERVER_ERROR);
             }
 
             return new JsonResponse(['status' => 'ok', 'message' => 'confirmed']);
