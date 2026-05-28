@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Admin\UI\Crud;
 
-use App\Admin\UI\Support\AdminJsonFormatter;
 use App\Entity\VpnInbound;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Action;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Actions;
@@ -12,10 +11,10 @@ use EasyCorp\Bundle\EasyAdminBundle\Config\Filters;
 use EasyCorp\Bundle\EasyAdminBundle\Controller\AbstractCrudController;
 use EasyCorp\Bundle\EasyAdminBundle\Field\AssociationField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\BooleanField;
+use EasyCorp\Bundle\EasyAdminBundle\Field\CodeEditorField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\DateTimeField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\IdField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\IntegerField;
-use EasyCorp\Bundle\EasyAdminBundle\Field\TextareaField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\TextField;
 
 class VpnInboundCrudController extends AbstractCrudController
@@ -88,9 +87,9 @@ class VpnInboundCrudController extends AbstractCrudController
             TextField::new('serviceName')->hideOnIndex(),
             TextField::new('fingerprint')->hideOnIndex(),
             TextField::new('alpn')->hideOnIndex(),
-            TextareaField::new('config')
-                ->formatValue(static fn (mixed $value): string => AdminJsonFormatter::toPrettyHtml($value))
-                ->renderAsHtml()
+            CodeEditorField::new('config')
+                ->setCustomOption(CodeEditorField::OPTION_LANGUAGE, 'json')
+                ->formatValue(static fn (mixed $value): string => self::formatJsonConfig($value))
                 ->hideOnForm()
                 ->hideOnIndex(),
             BooleanField::new('isActive'),
@@ -99,5 +98,32 @@ class VpnInboundCrudController extends AbstractCrudController
             DateTimeField::new('createdAt')->setLabel('common.created_at')->hideOnForm(),
             DateTimeField::new('updatedAt')->setLabel('common.updated_at')->hideOnForm(),
         ];
+    }
+
+    private static function formatJsonConfig(mixed $value): string
+    {
+        if (null === $value) {
+            return '';
+        }
+
+        if (is_array($value)) {
+            if ([] === $value) {
+                return '';
+            }
+
+            return json_encode($value, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '';
+        }
+
+        $text = trim((string) $value);
+        if ('' === $text) {
+            return '';
+        }
+
+        $decoded = json_decode($text, true);
+        if (JSON_ERROR_NONE === json_last_error()) {
+            return json_encode($decoded, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: $text;
+        }
+
+        return $text;
     }
 }

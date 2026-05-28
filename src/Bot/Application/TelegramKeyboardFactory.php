@@ -7,6 +7,7 @@ namespace App\Bot\Application;
 use App\Entity\StorePaymentMethod;
 use App\Payment\Domain\PaymentGatewayType;
 use App\Entity\Plan;
+use App\Entity\TrialPlan;
 use App\Shop\Application\SalesSettingsProvider;
 
 class TelegramKeyboardFactory
@@ -42,6 +43,7 @@ class TelegramKeyboardFactory
         if ($this->salesSettingsProvider->newOrdersEnabled()) {
             $mainRow[] = ['text' => $this->button('button.main.buy_service')];
         }
+        $mainRow[] = ['text' => $this->button('button.main.trial_account')];
         $mainRow[] = ['text' => $this->button('button.main.my_services')];
         $keyboard[] = $mainRow;
 
@@ -90,6 +92,9 @@ class TelegramKeyboardFactory
                 ['text' => $this->button('button.main.buy_service'), 'callback_data' => 'buy_service'],
             ],
             [
+                ['text' => $this->button('button.main.trial_account'), 'callback_data' => 'trial_account'],
+            ],
+            [
                 ['text' => $this->button('button.main.my_services'), 'callback_data' => 'my_services'],
             ],
             [
@@ -127,6 +132,34 @@ class TelegramKeyboardFactory
         }
 
         foreach ($this->inlineKeyboardRows($planButtons, 2) as $row) {
+            $rows[] = $row;
+        }
+
+        $rows[] = [[
+            'text' => $this->button('button.common.back'),
+            'callback_data' => 'main_menu',
+        ]];
+
+        return ['inline_keyboard' => $rows];
+    }
+
+    /**
+     * @param list<TrialPlan> $trialPlans
+     *
+     * @return array<string, array<array<array<string, string>>>>
+     */
+    public function trialPlansMenu(array $trialPlans): array
+    {
+        $rows = [];
+        $buttons = [];
+        foreach ($trialPlans as $trialPlan) {
+            $buttons[] = [
+                'text' => sprintf('%s - تست رایگان', $trialPlan->getTitle()),
+                'callback_data' => 'select_trial_plan:'.$trialPlan->getId(),
+            ];
+        }
+
+        foreach ($this->inlineKeyboardRows($buttons, 2) as $row) {
             $rows[] = $row;
         }
 

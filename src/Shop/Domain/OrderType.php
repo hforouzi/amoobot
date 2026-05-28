@@ -9,10 +9,12 @@ final class OrderType
     public const NEW_SERVICE = 'new_service';
     public const RENEWAL = 'renewal';
     public const ADD_TRAFFIC = 'add_traffic';
+    public const TRIAL = 'trial';
 
     public const ALL = [
         self::NEW_SERVICE,
         self::RENEWAL,
         self::ADD_TRAFFIC,
+        self::TRIAL,
     ];
 }
