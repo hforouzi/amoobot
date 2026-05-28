@@ -21,6 +21,7 @@ use App\Entity\PaymentGateway;
 use App\Entity\Plan;
 use App\Entity\StorePaymentMethod;
 use App\Entity\TelegramAccount;
+use App\Entity\TrialPlan;
 use App\Entity\User;
 use App\Payment\Application\PaymentConfirmationService;
 use App\Payment\Domain\PaymentGatewayType;
@@ -35,6 +36,7 @@ use App\Shop\Application\OrderTrackingCodeService;
 use App\Shop\Application\DiscountCodeService;
 use App\Shop\Application\PlanPricingService;
 use App\Shop\Application\SalesSettingsProvider;
+use App\Shop\Application\TrialAccountService;
 use App\Shop\Domain\OrderDraftStatus;
 use App\Shop\Domain\OrderStatus;
 use App\Shop\Domain\OrderType;
@@ -46,6 +48,7 @@ use Symfony\Component\HttpFoundation\RequestStack;
 class TelegramUpdateHandler
 {
     private const BUTTON_BUY_SERVICE = '🛒 خرید سرویس';
+    private const BUTTON_TRIAL_ACCOUNT = '🎁 اکانت تست';
     private const BUTTON_MY_SERVICES = '📦 سرویسهای من';
     private const BUTTON_SUPPORT = '🎧 پشتیبانی';
     private const BUTTON_ADMIN_MENU = '🛠 مدیریت';
@@ -77,6 +80,7 @@ class TelegramUpdateHandler
         private readonly SalesSettingsProvider $salesSettingsProvider,
         private readonly PaymentGatewayRegistry $paymentGatewayRegistry,
         private readonly StorePaymentMethodResolver $storePaymentMethodResolver,
+        private readonly TrialAccountService $trialAccountService,
         private readonly TelegramChannelMembershipGate $membershipGate,
         private readonly BotTextResolver $botTextResolver,
         private readonly BotButtonMatcher $botButtonMatcher,
@@ -127,6 +131,12 @@ class TelegramUpdateHandler
 
         if ('button.main.buy_service' === $replyButtonKey || self::BUTTON_BUY_SERVICE === $text) {
             $this->handleBuyService($account, $chatId, null, $isAdmin);
+
+            return;
+        }
+
+        if ('button.main.trial_account' === $replyButtonKey || self::BUTTON_TRIAL_ACCOUNT === $text) {
+            $this->handleTrialAccount($account, $chatId, null);
 
             return;
         }
@@ -339,6 +349,12 @@ class TelegramUpdateHandler
             return;
         }
 
+        if ('trial_account' === $data) {
+            $this->handleTrialAccount($account, $chatId, $callbackId);
+
+            return;
+        }
+
         if (str_starts_with($data, 'membership_check:')) {
             $this->handleMembershipCheck($account, $chatId, (string) str_replace('membership_check:', '', $data), $callbackId);
 
@@ -347,6 +363,12 @@ class TelegramUpdateHandler
 
         if (str_starts_with($data, 'select_plan:')) {
             $this->handleSelectPlan($account, $chatId, (int) str_replace('select_plan:', '', $data), $callbackId);
+
+            return;
+        }
+
+        if (str_starts_with($data, 'select_trial_plan:')) {
+            $this->handleSelectTrialPlan($account, $chatId, (int) str_replace('select_trial_plan:', '', $data), $callbackId);
 
             return;
         }
@@ -640,6 +662,84 @@ class TelegramUpdateHandler
 
         $this->acknowledgeCallback($callbackId);
         $this->telegramApiClient->sendMessage($chatId, $this->botTextResolver->message('plan.select'), $this->keyboardFactory->plansMenu($plans));
+    }
+
+    private function handleTrialAccount(TelegramAccount $account, string $chatId, ?string $callbackId = null): void
+    {
+        if (!$this->ensureMembershipGateAllowed($account, $chatId, $callbackId, TelegramChannelMembershipGate::CONTEXT_TRIAL)) {
+            return;
+        }
+
+        $trialPlans = $this->findActiveTrialPlans();
+        if ([] === $trialPlans) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'در حال حاضر اکانت تست فعالی وجود ندارد.', 'no_active_trial_plans');
+
+            return;
+        }
+
+        if (1 === count($trialPlans)) {
+            $this->provisionTrialPlan($account, $chatId, $trialPlans[0], $callbackId);
+
+            return;
+        }
+
+        $this->acknowledgeCallback($callbackId);
+        $this->telegramApiClient->sendMessage($chatId, 'پلن تست را انتخاب کنید:', $this->keyboardFactory->trialPlansMenu($trialPlans));
+    }
+
+    private function handleSelectTrialPlan(TelegramAccount $account, string $chatId, int $trialPlanId, ?string $callbackId = null): void
+    {
+        if (!$this->ensureMembershipGateAllowed($account, $chatId, $callbackId, TelegramChannelMembershipGate::CONTEXT_TRIAL)) {
+            return;
+        }
+
+        $trialPlan = $this->entityManager->getRepository(TrialPlan::class)->find($trialPlanId);
+        if (!$trialPlan instanceof TrialPlan || !$trialPlan->isActive()) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'در حال حاضر اکانت تست فعالی وجود ندارد.', 'invalid_trial_plan');
+
+            return;
+        }
+
+        $this->provisionTrialPlan($account, $chatId, $trialPlan, $callbackId);
+    }
+
+    private function provisionTrialPlan(TelegramAccount $account, string $chatId, TrialPlan $trialPlan, ?string $callbackId): void
+    {
+        $this->acknowledgeCallback($callbackId);
+        $this->telegramApiClient->sendMessage($chatId, 'در حال ساخت اکانت تست شما هستیم...');
+
+        $result = $this->trialAccountService->claim($account, $trialPlan);
+        if (!$result->isSuccess()) {
+            $this->telegramApiClient->sendMessage($chatId, $result->message);
+
+            return;
+        }
+
+        foreach ($this->paymentConfirmationService->buildNewServiceConfirmedMessages($result->vpnService, 'اکانت تست شما آماده شد.') as $message) {
+            if (str_contains($message, '<code>')) {
+                $this->telegramApiClient->sendHtmlMessage($chatId, $message);
+            } else {
+                $this->telegramApiClient->sendMessage($chatId, $message);
+            }
+        }
+    }
+
+    /**
+     * @return list<TrialPlan>
+     */
+    private function findActiveTrialPlans(): array
+    {
+        /** @var list<TrialPlan> $trialPlans */
+        $trialPlans = $this->entityManager->getRepository(TrialPlan::class)
+            ->createQueryBuilder('plan')
+            ->where('plan.isActive = :active')
+            ->setParameter('active', true)
+            ->orderBy('plan.sortOrder', 'ASC')
+            ->addOrderBy('plan.id', 'ASC')
+            ->getQuery()
+            ->getResult();
+
+        return $trialPlans;
     }
 
     private function handleSelectPlan(TelegramAccount $account, string $chatId, int $planId, ?string $callbackId = null): void
@@ -3054,6 +3154,12 @@ class TelegramUpdateHandler
                 (string) ($metadata['targetServiceId'] ?? ($order->getTargetService()?->getId() ?? '-')),
                 (string) ($metadata['trafficGb'] ?? '-')
             ),
+            OrderType::TRIAL => sprintf(
+                "نوع سفارش: اکانت تست\nپلن تست: %s\nحجم: %s گیگ\nمدت: %s",
+                (string) ($metadata['trialPlanTitle'] ?? $order->getPlan()->getTitle()),
+                (string) ($metadata['trafficGb'] ?? '-'),
+                ((string) ($metadata['durationDays'] ?? '-').' روز')
+            ),
             default => sprintf(
                 "نوع سفارش: خرید سرویس جدید\nنام کاربری: %s\nحجم: %s گیگ\nمدت: %s",
                 (string) ($metadata['finalUsername'] ?? '-'),
@@ -3360,6 +3466,7 @@ class TelegramUpdateHandler
         return match ($type) {
             OrderType::RENEWAL => 'تمدید',
             OrderType::ADD_TRAFFIC => 'خرید حجم',
+            OrderType::TRIAL => 'اکانت تست',
             default => 'خرید سرویس',
         };
     }

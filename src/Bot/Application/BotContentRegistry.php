@@ -172,6 +172,7 @@ final class BotContentRegistry
     {
         return [
             'button.main.buy_service' => ['label' => '🛒 خرید سرویس', 'buttonType' => 'reply_keyboard', 'category' => 'main'],
+            'button.main.trial_account' => ['label' => '🎁 اکانت تست', 'buttonType' => 'reply_keyboard', 'category' => 'main'],
             'button.main.my_services' => ['label' => '📦 سرویسهای من', 'buttonType' => 'reply_keyboard', 'category' => 'main'],
             'button.main.support' => ['label' => '🎧 پشتیبانی', 'buttonType' => 'reply_keyboard', 'category' => 'main'],
             'button.main.track_order' => ['label' => '🔎 پیگیری سفارش', 'buttonType' => 'reply_keyboard', 'category' => 'main'],
@@ -220,6 +221,7 @@ final class BotContentRegistry
         $buttons = $this->persianButtons();
         $labels = [
             'button.main.buy_service' => '🛒 Buy service',
+            'button.main.trial_account' => '🎁 Trial account',
             'button.main.my_services' => '📦 My services',
             'button.main.support' => '🎧 Support',
             'button.main.track_order' => '🔎 Track order',

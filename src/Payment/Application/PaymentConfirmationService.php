@@ -38,7 +38,7 @@ class PaymentConfirmationService
                     $metadata = is_array($payment->getOrder()->getMetadata()) ? $payment->getOrder()->getMetadata() : [];
                     $messages = $this->buildAddTrafficConfirmedMessages($vpnService, (int) ($metadata['trafficGb'] ?? 0));
                 } else {
-                    $messages = $this->buildPaymentConfirmedMessages($vpnService);
+                    $messages = $this->buildNewServiceConfirmedMessages($vpnService);
                 }
                 foreach ($messages as $message) {
                     if (str_contains($message, '<code>')) {
@@ -69,17 +69,17 @@ class PaymentConfirmationService
     /**
      * @return string[]
      */
-    private function buildPaymentConfirmedMessages(?VpnService $vpnService): array
+    public function buildNewServiceConfirmedMessages(?VpnService $vpnService, ?string $headline = null): array
     {
         if (!$vpnService instanceof VpnService) {
-            return [$this->botTextResolver->message('payment.confirmed')];
+            return [$headline ?? $this->botTextResolver->message('payment.confirmed')];
         }
 
         $subscriptionUrl = trim((string) ($vpnService->getSubscriptionUrl() ?? ''));
         $allConfigLinks = $this->finalConfigLinkProvider->getFinalLinksForService($vpnService, 'payment_confirmed_new_service');
 
         $lines = [
-            $this->botTextResolver->message('payment.confirmed'),
+            $headline ?? $this->botTextResolver->message('payment.confirmed'),
             '',
             '📦 خلاصه سرویس',
             sprintf('شناسه سرویس: %d', $vpnService->getId() ?? 0),

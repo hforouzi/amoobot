@@ -20,6 +20,8 @@ use App\Admin\UI\Crud\ServiceNotificationLogCrudController;
 use App\Admin\UI\Crud\SettingCrudController;
 use App\Admin\UI\Crud\StorePaymentMethodCrudController;
 use App\Admin\UI\Crud\TelegramAccountCrudController;
+use App\Admin\UI\Crud\TrialClaimCrudController;
+use App\Admin\UI\Crud\TrialPlanCrudController;
 use App\Admin\UI\Crud\UserCrudController;
 use App\Admin\UI\Crud\VpnInboundCrudController;
 use App\Admin\UI\Crud\VpnPanelCrudController;
@@ -68,6 +70,8 @@ class DashboardController extends AbstractDashboardController
 
         yield MenuItem::section('admin.menu.store', 'fa fa-shopping-bag');
         yield MenuItem::linkTo(PlanCrudController::class, 'admin.plans', 'fa fa-list');
+        yield MenuItem::linkTo(TrialPlanCrudController::class, 'پلن‌های تست', 'fa fa-gift');
+        yield MenuItem::linkTo(TrialClaimCrudController::class, 'درخواست‌های تست', 'fa fa-check-square-o');
         yield MenuItem::linkTo(OrderCrudController::class, 'admin.orders', 'fa fa-shopping-cart');
         yield MenuItem::linkTo(OrderDraftCrudController::class, 'Order Drafts', 'fa fa-list-alt');
         yield MenuItem::linkTo(PaymentCrudController::class, 'admin.payments', 'fa fa-credit-card');
