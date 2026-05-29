@@ -92,8 +92,8 @@ final class NowPaymentsGateway implements PaymentGatewayInterface
         $orderId = (string) ($order->getTrackingCode() ?? $order->getId() ?? $payment->getId() ?? '');
         $description = trim((string) ($config['order_description'] ?? 'Amoobot VPN order'));
         $ipnCallbackUrl = $callbackBaseUrl.'/payment/webhook/nowpayments';
-        $successUrl = trim((string) ($config['success_url'] ?? '')) ?: null;
-        $cancelUrl = trim((string) ($config['cancel_url'] ?? '')) ?: null;
+        $successUrl = $callbackBaseUrl.'/payment/success';
+        $cancelUrl = $callbackBaseUrl.'/payment/cancel';
 
         $requestBody = [
             'price_amount' => $priceAmount,
@@ -105,10 +105,10 @@ final class NowPaymentsGateway implements PaymentGatewayInterface
         if (self::MODE_PAYMENT === $paymentMode || (self::MODE_INVOICE === $paymentMode && $lockPayCurrency && '' !== $payCurrency)) {
             $requestBody['pay_currency'] = $payCurrency;
         }
-        if (null !== $successUrl) {
+        if ('' !== $successUrl) {
             $requestBody['success_url'] = $successUrl;
         }
-        if (null !== $cancelUrl) {
+        if ('' !== $cancelUrl) {
             $requestBody['cancel_url'] = $cancelUrl;
         }
         $partiallyPaidUrl = trim((string) ($config['partially_paid_url'] ?? ''));
