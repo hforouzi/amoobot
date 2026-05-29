@@ -1208,25 +1208,30 @@ class TelegramUpdateHandler
         $cardHolder = $this->settingValueProvider->get('payment.card_holder', $this->paymentCardHolder);
         $description = $this->settingValueProvider->get('payment.description', $this->paymentDescription);
 
-        $discountLine = sprintf(
-            "\nمبلغ پایه: %d تومان\nتخفیف سراسری: %d تومان\nکد تخفیف: -\nمبلغ نهایی: %d تومان",
-            $price->baseAmount,
-            $price->globalDiscountAmount,
-            $amount
-        );
-        $message = sprintf(
-            "کد پیگیری سفارش شما:\n%s\n\nپلن: %s\nنام کاربری: %s\nحجم: %s گیگ\nمدت: %s%s\nمبلغ: %d تومان\nشماره کارت: %s\nبه نام: %s\n%s\n\nبرای ارسال رسید روی «✅ تایید و ارسال رسید» بزنید.",
-            (string) ($order->getTrackingCode() ?? '-'),
-            $plan->getTitle(),
-            (string) ($draft->getFinalUsername() ?? '-'),
-            null === $draft->getTrafficGb() ? '-' : (string) $draft->getTrafficGb(),
-            null === $draft->getDurationDays() || $plan->isUnlimitedDuration() ? 'نامحدود' : ((string) $draft->getDurationDays().' روز'),
-            $discountLine,
-            $amount,
-            $cardNumber ?: '-',
-            $cardHolder ?: '-',
-            $description ? 'توضیحات: '.$description : ''
-        );
+        $message = $this->botTextResolver->message('payment.manual_card.custom_order_instructions', [
+            'order' => [
+                'trackingCode' => (string) ($order->getTrackingCode() ?? '-'),
+                'accountName' => (string) ($draft->getFinalUsername() ?? '-'),
+                'trafficGb' => null === $draft->getTrafficGb() ? '-' : (string) $draft->getTrafficGb(),
+                'duration' => null === $draft->getDurationDays() || $plan->isUnlimitedDuration() ? 'نامحدود' : ((string) $draft->getDurationDays().' روز'),
+                'baseAmount' => $price->baseAmount,
+                'globalDiscount' => $price->globalDiscountAmount,
+                'discountCode' => 'ندارد',
+                'discountAmount' => 0,
+                'finalAmount' => $amount,
+            ],
+            'plan' => [
+                'title' => $plan->getTitle(),
+            ],
+            'payment' => [
+                'cardNumber' => $cardNumber ?: '-',
+                'cardHolder' => $cardHolder ?: '-',
+                'extraInstructions' => $description ?: '',
+            ],
+            'button' => [
+                'confirmAndSendReceipt' => $this->botTextResolver->button('button.confirm_and_send_receipt'),
+            ],
+        ]);
 
         $this->acknowledgeCallback($callbackId);
         $this->telegramApiClient->sendMessage($chatId, trim($message), $this->keyboardFactory->paymentActionMenu((int) $payment->getId(), (int) ($order->getId() ?? 0)));
@@ -1299,21 +1304,27 @@ class TelegramUpdateHandler
         $cardHolder = $this->settingValueProvider->get('payment.card_holder', $this->paymentCardHolder);
         $description = $this->settingValueProvider->get('payment.description', $this->paymentDescription);
 
-        $discountLine = sprintf(
-            "\nمبلغ پایه: %d تومان\nتخفیف سراسری: %d تومان\nکد تخفیف: -\nمبلغ نهایی: %d تومان",
-            $price->baseAmount,
-            $price->globalDiscountAmount,
-            $price->afterGlobalDiscountAmount
-        );
-        $message = sprintf(
-            "کد پیگیری سفارش شما:\n%s\n\nپلن: %s%s\nشماره کارت: %s\nبه نام: %s\n%s\n\nبرای ارسال رسید روی «✅ تایید و ارسال رسید» بزنید.",
-            (string) ($order->getTrackingCode() ?? '-'),
-            $plan->getTitle(),
-            $discountLine,
-            $cardNumber ?: '-',
-            $cardHolder ?: '-',
-            $description ? 'توضیحات: '.$description : ''
-        );
+        $message = $this->botTextResolver->message('payment.manual_card.plan_instructions', [
+            'order' => [
+                'trackingCode' => (string) ($order->getTrackingCode() ?? '-'),
+                'baseAmount' => $price->baseAmount,
+                'globalDiscount' => $price->globalDiscountAmount,
+                'discountCode' => 'ندارد',
+                'discountAmount' => 0,
+                'finalAmount' => $price->afterGlobalDiscountAmount,
+            ],
+            'plan' => [
+                'title' => $plan->getTitle(),
+            ],
+            'payment' => [
+                'cardNumber' => $cardNumber ?: '-',
+                'cardHolder' => $cardHolder ?: '-',
+                'extraInstructions' => $description ?: '',
+            ],
+            'button' => [
+                'confirmAndSendReceipt' => $this->botTextResolver->button('button.confirm_and_send_receipt'),
+            ],
+        ]);
 
         $this->acknowledgeCallback($callbackId);
         $this->telegramApiClient->sendMessage($chatId, trim($message), $this->keyboardFactory->paymentActionMenu((int) $payment->getId(), (int) ($order->getId() ?? 0)));
@@ -1638,22 +1649,31 @@ class TelegramUpdateHandler
         $cardNumber = $gateway->getManualCardNumber() ?? $this->settingValueProvider->get('payment.card_number', $this->paymentCardNumber);
         $cardHolder = $gateway->getManualCardHolder() ?? $this->settingValueProvider->get('payment.card_holder', $this->paymentCardHolder);
         $description = $gateway->getManualInstructions() ?? $this->settingValueProvider->get('payment.description', $this->paymentDescription);
-        $message = sprintf(
-            "کد پیگیری سفارش شما:\n%s\n\nپلن: %s\nنام کاربری: %s\nحجم: %s گیگ\nمدت: %s\nمبلغ پایه: %d تومان\nتخفیف سراسری: %d تومان\nکد تخفیف: %s (%d تومان)\nمبلغ نهایی: %d تومان\nشماره کارت: %s\nبه نام: %s\n%s\n\nبرای ارسال رسید روی «✅ تایید و ارسال رسید» بزنید.",
-            (string) ($order->getTrackingCode() ?? '-'),
-            $plan->getTitle(),
-            (string) ($metadata['finalUsername'] ?? '-'),
-            null === ($metadata['trafficGb'] ?? null) ? '-' : (string) $metadata['trafficGb'],
-            null === ($metadata['durationDays'] ?? null) || $plan->isUnlimitedDuration() ? 'نامحدود' : ((string) $metadata['durationDays'].' روز'),
-            (int) ($priceSnapshot['baseAmount'] ?? 0),
-            (int) ($priceSnapshot['globalDiscountAmount'] ?? 0),
-            (string) ($priceSnapshot['discountCode'] ?? '-'),
-            (int) ($priceSnapshot['discountCodeAmount'] ?? 0),
-            $finalAmount,
-            $cardNumber ?: '-',
-            $cardHolder ?: '-',
-            $description ? 'توضیحات: '.$description : ''
-        );
+        $discountCode = trim((string) ($priceSnapshot['discountCode'] ?? ''));
+        $message = $this->botTextResolver->message('payment.manual_card.custom_order_instructions', [
+            'order' => [
+                'trackingCode' => (string) ($order->getTrackingCode() ?? '-'),
+                'accountName' => (string) ($metadata['finalUsername'] ?? '-'),
+                'trafficGb' => null === ($metadata['trafficGb'] ?? null) ? '-' : (string) $metadata['trafficGb'],
+                'duration' => null === ($metadata['durationDays'] ?? null) || $plan->isUnlimitedDuration() ? 'نامحدود' : ((string) $metadata['durationDays'].' روز'),
+                'baseAmount' => (int) ($priceSnapshot['baseAmount'] ?? 0),
+                'globalDiscount' => (int) ($priceSnapshot['globalDiscountAmount'] ?? 0),
+                'discountCode' => '' === $discountCode ? 'ندارد' : $discountCode,
+                'discountAmount' => (int) ($priceSnapshot['discountCodeAmount'] ?? 0),
+                'finalAmount' => $finalAmount,
+            ],
+            'plan' => [
+                'title' => $plan->getTitle(),
+            ],
+            'payment' => [
+                'cardNumber' => $cardNumber ?: '-',
+                'cardHolder' => $cardHolder ?: '-',
+                'extraInstructions' => $description ?: '',
+            ],
+            'button' => [
+                'confirmAndSendReceipt' => $this->botTextResolver->button('button.confirm_and_send_receipt'),
+            ],
+        ]);
 
         $this->acknowledgeCallback($callbackId);
         $this->telegramApiClient->sendMessage($chatId, trim($message), $this->keyboardFactory->paymentActionMenu((int) $payment->getId(), (int) ($order->getId() ?? 0)));
@@ -3079,14 +3099,20 @@ class TelegramUpdateHandler
         $description = $gateway?->getManualInstructions() ?? $this->settingValueProvider->get('payment.description', $this->paymentDescription);
         $this->telegramApiClient->sendMessage(
             $chatId,
-            sprintf(
-                "سفارش ناتمام شما:\nکد پیگیری: %s\nمبلغ: %d تومان\nشماره کارت: %s\nبه نام: %s\n%s\n\nبرای ارسال رسید روی «✅ تایید و ارسال رسید» بزنید.",
-                (string) ($order->getTrackingCode() ?? '-'),
-                $payment->getAmount(),
-                $cardNumber ?: '-',
-                $cardHolder ?: '-',
-                $description ? 'توضیحات: '.$description : ''
-            ),
+            $this->botTextResolver->message('payment.manual_card.incomplete_instructions', [
+                'order' => [
+                    'trackingCode' => (string) ($order->getTrackingCode() ?? '-'),
+                    'finalAmount' => $payment->getAmount(),
+                ],
+                'payment' => [
+                    'cardNumber' => $cardNumber ?: '-',
+                    'cardHolder' => $cardHolder ?: '-',
+                    'extraInstructions' => $description ?: '',
+                ],
+                'button' => [
+                    'confirmAndSendReceipt' => $this->botTextResolver->button('button.confirm_and_send_receipt'),
+                ],
+            ]),
             $this->keyboardFactory->paymentActionMenu((int) ($payment->getId() ?? 0), (int) ($order->getId() ?? 0))
         );
     }

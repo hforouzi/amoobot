@@ -352,7 +352,7 @@ class TelegramKeyboardFactory
         return [
             'inline_keyboard' => [
                 [[
-                    'text' => $this->button('button.payment.upload_receipt'),
+                    'text' => $this->button('button.confirm_and_send_receipt'),
                     'callback_data' => 'payment_submit_receipt:'.$paymentId,
                 ]],
                 [
