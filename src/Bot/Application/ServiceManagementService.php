@@ -1389,19 +1389,26 @@ class ServiceManagementService
         $cardNumber = $gateway->getManualCardNumber() ?? $this->settingValueProvider->get('payment.card_number', $this->paymentCardNumber);
         $cardHolder = $gateway->getManualCardHolder() ?? $this->settingValueProvider->get('payment.card_holder', $this->paymentCardHolder);
         $description = $gateway->getManualInstructions() ?? $this->settingValueProvider->get('payment.description', $this->paymentDescription);
-        $message = sprintf(
-            "کد پیگیری سفارش شما:\n%s\n\nشناسه سرویس: %d\nمبلغ پایه: %d تومان\nتخفیف سراسری: %d تومان\nکد تخفیف: %s (%d تومان)\nمبلغ نهایی: %d تومان\nشماره کارت: %s\nبه نام: %s\n%s\n\nبرای ارسال رسید روی «✅ تایید و ارسال رسید» بزنید.",
-            (string) ($order->getTrackingCode() ?? '-'),
-            (int) ($metadata['targetServiceId'] ?? 0),
-            (int) ($priceSnapshot['baseAmount'] ?? 0),
-            (int) ($priceSnapshot['globalDiscountAmount'] ?? 0),
-            (string) ($priceSnapshot['discountCode'] ?? '-'),
-            (int) ($priceSnapshot['discountCodeAmount'] ?? 0),
-            (int) ($priceSnapshot['finalAmount'] ?? $order->getAmount()),
-            $cardNumber ?: '-',
-            $cardHolder ?: '-',
-            $description ? 'توضیحات: '.$description : ''
-        );
+        $discountCode = trim((string) ($priceSnapshot['discountCode'] ?? ''));
+        $message = $this->botTextResolver->message('payment.manual_card.instructions', [
+            'order' => [
+                'trackingCode' => (string) ($order->getTrackingCode() ?? '-'),
+                'serviceId' => (int) ($metadata['targetServiceId'] ?? 0),
+                'baseAmount' => (int) ($priceSnapshot['baseAmount'] ?? 0),
+                'globalDiscount' => (int) ($priceSnapshot['globalDiscountAmount'] ?? 0),
+                'discountCode' => '' === $discountCode ? 'ندارد' : $discountCode,
+                'discountAmount' => (int) ($priceSnapshot['discountCodeAmount'] ?? 0),
+                'finalAmount' => (int) ($priceSnapshot['finalAmount'] ?? $order->getAmount()),
+            ],
+            'payment' => [
+                'cardNumber' => $cardNumber ?: '-',
+                'cardHolder' => $cardHolder ?: '-',
+                'extraInstructions' => $description ?: '',
+            ],
+            'button' => [
+                'confirmAndSendReceipt' => $this->botTextResolver->button('button.confirm_and_send_receipt'),
+            ],
+        ]);
 
         $this->acknowledgeCallback($callbackId);
         $this->telegramApiClient->sendMessage($chatId, trim($message), $this->keyboardFactory->paymentActionMenu((int) ($payment->getId() ?? 0), (int) ($order->getId() ?? 0)));
