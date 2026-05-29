@@ -1335,7 +1335,7 @@ class ServiceManagementService
         }
         $this->entityManager->flush();
 
-        if (in_array($gateway->getType(), [PaymentGatewayType::ZIBAL, PaymentGatewayType::CUSTOM_API], true)) {
+        if (in_array($gateway->getType(), [PaymentGatewayType::ZIBAL, PaymentGatewayType::CUSTOM_API], true) || null !== $gateway->getPluginCode()) {
             if (!$requestResult->success || null === $payment->getPaymentUrl()) {
                 $this->showPopupOrMessage($chatId, $callbackId, $requestResult->message ?: 'ایجاد لینک پرداخت آنلاین انجام نشد.', 'zibal_request_failed');
 

@@ -1597,7 +1597,7 @@ class TelegramUpdateHandler
         $this->entityManager->flush();
         $this->debugLog(sprintf('payment_gateway_selected order_id=%d payment_id=%d amount=%d', $order->getId() ?? 0, $payment->getId() ?? 0, $finalAmount));
 
-        if (in_array($gateway->getType(), [PaymentGatewayType::ZIBAL, PaymentGatewayType::CUSTOM_API], true)) {
+        if (in_array($gateway->getType(), [PaymentGatewayType::ZIBAL, PaymentGatewayType::CUSTOM_API], true) || null !== $gateway->getPluginCode()) {
             if (!$requestResult->success || null === $payment->getPaymentUrl()) {
                 $this->showPopupOrMessage($chatId, $callbackId, $requestResult->message ?: 'ایجاد لینک پرداخت آنلاین انجام نشد.', 'zibal_request_failed_new_service');
 
@@ -3062,8 +3062,9 @@ class TelegramUpdateHandler
             return;
         }
 
+        $gateway = $payment->getGateway();
         $this->acknowledgeCallback($callbackId);
-        if (in_array($gatewayType, [PaymentGatewayType::ZIBAL, PaymentGatewayType::CUSTOM_API], true) && null !== $payment->getPaymentUrl()) {
+        if ((in_array($gatewayType, [PaymentGatewayType::ZIBAL, PaymentGatewayType::CUSTOM_API], true) || null !== $gateway?->getPluginCode()) && null !== $payment->getPaymentUrl()) {
             $this->telegramApiClient->sendMessage(
                 $chatId,
                 sprintf("پرداخت آنلاین ناتمام شما آماده است.\nکد پیگیری: %s", (string) ($order->getTrackingCode() ?? '-')),
@@ -3073,7 +3074,6 @@ class TelegramUpdateHandler
             return;
         }
 
-        $gateway = $payment->getGateway();
         $cardNumber = $gateway?->getManualCardNumber() ?? $this->settingValueProvider->get('payment.card_number', $this->paymentCardNumber);
         $cardHolder = $gateway?->getManualCardHolder() ?? $this->settingValueProvider->get('payment.card_holder', $this->paymentCardHolder);
         $description = $gateway?->getManualInstructions() ?? $this->settingValueProvider->get('payment.description', $this->paymentDescription);
