@@ -87,7 +87,7 @@ class VpnProvisioningService
             ->setInbound($planInbound)
             ->setRemoteId($created->remoteId)
             ->setUsername($created->username)
-            ->setSubscriptionUrl($created->subscriptionUrl)
+            ->setSubscriptionUrl($created->subscriptionUrl."/".$created->subId)
             ->setClientUuid($created->clientUuid)
             ->setClientEmail($created->clientEmail)
             ->setSubId($created->subId)

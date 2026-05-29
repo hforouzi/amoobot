@@ -13,6 +13,8 @@ use App\Entity\TelegramAccount;
 use Doctrine\ORM\EntityManagerInterface;
 use App\Shop\Domain\OrderType;
 use App\Provisioning\Application\FinalConfigLinkProvider;
+use App\Provisioning\Application\ServiceConfigDeliveryRefresher;
+use App\Provisioning\Application\ServiceConfigRefreshOutcome;
 
 class PaymentConfirmationService
 {
@@ -23,6 +25,7 @@ class PaymentConfirmationService
         private readonly BotTextResolver $botTextResolver,
         private readonly VpnAccessMessageFormatter $vpnAccessMessageFormatter,
         private readonly FinalConfigLinkProvider $finalConfigLinkProvider,
+        private readonly ServiceConfigDeliveryRefresher $deliveryRefresher,
     ) {
     }
 
@@ -93,6 +96,12 @@ class PaymentConfirmationService
             return [$this->botTextResolver->message('service.renewed')];
         }
 
+        $refreshOutcome = $this->refreshBeforePaymentDelivery($vpnService, 'payment_confirmed_renewal');
+        if (!$refreshOutcome->succeeded && !$refreshOutcome->skipped && !$refreshOutcome->fallbackToStored) {
+            return ['دریافت کانفیگ از پنل با خطا مواجه شد. لطفاً بعداً دوباره تلاش کنید یا با پشتیبانی تماس بگیرید.'];
+        }
+        $refreshWarning = $this->paymentDeliveryRefreshWarning($refreshOutcome);
+
         $lines = [
             $this->botTextResolver->message('service.renewed'),
             sprintf('شناسه سرویس: %d', $vpnService->getId() ?? 0),
@@ -109,6 +118,10 @@ class PaymentConfirmationService
             }
         }
 
+        if (null !== $refreshWarning) {
+            array_unshift($lines, $refreshWarning);
+        }
+
         return $this->splitLongMessage(implode("\n", $lines));
     }
 
@@ -120,6 +133,12 @@ class PaymentConfirmationService
         if (!$vpnService instanceof VpnService) {
             return [$this->botTextResolver->message('service.add_traffic_done')];
         }
+
+        $refreshOutcome = $this->refreshBeforePaymentDelivery($vpnService, 'payment_confirmed_add_traffic');
+        if (!$refreshOutcome->succeeded && !$refreshOutcome->skipped && !$refreshOutcome->fallbackToStored) {
+            return ['دریافت کانفیگ از پنل با خطا مواجه شد. لطفاً بعداً دوباره تلاش کنید یا با پشتیبانی تماس بگیرید.'];
+        }
+        $refreshWarning = $this->paymentDeliveryRefreshWarning($refreshOutcome);
 
         $lines = [
             $this->botTextResolver->message('service.add_traffic_done'),
@@ -135,6 +154,10 @@ class PaymentConfirmationService
             foreach ($configLinks as $index => $link) {
                 $lines[] = sprintf("%d.\n%s", $index + 1, $this->htmlCode($link));
             }
+        }
+
+        if (null !== $refreshWarning) {
+            array_unshift($lines, $refreshWarning);
         }
 
         return $this->splitLongMessage(implode("\n", $lines));
@@ -176,5 +199,28 @@ class PaymentConfirmationService
     private function htmlCode(string $value): string
     {
         return '<code>'.$this->html($value).'</code>';
+    }
+
+    private function refreshBeforePaymentDelivery(VpnService $service, string $sourceFlow): ServiceConfigRefreshOutcome
+    {
+        $outcome = $this->deliveryRefresher->refreshBeforeDelivery($service, $sourceFlow);
+        if ($outcome->succeeded) {
+            $this->entityManager->flush();
+        }
+
+        return $outcome;
+    }
+
+    private function paymentDeliveryRefreshWarning(ServiceConfigRefreshOutcome $outcome): ?string
+    {
+        if ($outcome->skipped) {
+            return null;
+        }
+
+        if ($outcome->fallbackToStored) {
+            return 'دریافت آنلاین کانفیگ از پنل انجام نشد؛ آخرین کانفیگ ذخیره‌شده ارسال می‌شود.';
+        }
+
+        return 'دریافت کانفیگ از پنل با خطا مواجه شد. لطفاً بعداً دوباره تلاش کنید یا با پشتیبانی تماس بگیرید.';
     }
 }

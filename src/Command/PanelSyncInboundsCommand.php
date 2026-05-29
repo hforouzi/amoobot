@@ -9,6 +9,7 @@ use App\Entity\VpnPanel;
 use App\Entity\VpnService;
 use App\Provisioning\Application\VpnAccessLinkGenerator;
 use App\Provisioning\Application\VpnInboundSyncService;
+use App\Provisioning\Application\VpnServiceConfigRefreshService;
 use App\Provisioning\Domain\VpnServiceStatus;
 use App\Provisioning\Infrastructure\Sanaei3xui\Sanaei3xuiApiClient;
 use Doctrine\ORM\EntityManagerInterface;
@@ -28,6 +29,7 @@ final class PanelSyncInboundsCommand extends Command
         private readonly VpnInboundSyncService $inboundSyncService,
         private readonly Sanaei3xuiApiClient $apiClient,
         private readonly VpnAccessLinkGenerator $vpnAccessLinkGenerator,
+        private readonly VpnServiceConfigRefreshService $configRefreshService,
     ) {
         parent::__construct();
     }
@@ -112,13 +114,26 @@ final class PanelSyncInboundsCommand extends Command
                         ++$totalSkipped;
                         continue;
                     }
-                    $uuid = $service->getClientUuid();
-                    $subId = $service->getSubId();
-                    if (null === $uuid || '' === $uuid || null === $subId || '' === $subId) {
+                    $isLegacySanaei = $this->configRefreshService->isSanaeiLegacyService($service);
+                    $uuid = trim((string) ($service->getClientUuid() ?? ''));
+                    $subId = trim((string) ($service->getSubId() ?? ''));
+                    $email = trim((string) ($service->getClientEmail() ?? $service->getUsername() ?? ''));
+                    if ((!$isLegacySanaei && ('' === $uuid || '' === $subId)) || ($isLegacySanaei && '' === $uuid && '' === $email)) {
                         ++$totalSkipped;
                         continue;
                     }
                     try {
+                        if ($isLegacySanaei) {
+                            $refresh = $this->configRefreshService->refreshSanaeiLegacy($service, 'console_panel_sync_regenerate_configs');
+                            if ($refresh->succeeded) {
+                                ++$totalUpdated;
+                            } else {
+                                ++$totalFailed;
+                            }
+
+                            continue;
+                        }
+
                         $links = $this->vpnAccessLinkGenerator->generate($service);
                         $configLinks = array_values(array_filter(
                             (array) ($links['configLinks'] ?? []),

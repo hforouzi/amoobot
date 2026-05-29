@@ -11,8 +11,10 @@ use App\Entity\VpnInbound;
 use App\Entity\VpnPanel;
 use App\Entity\VpnService;
 use App\Provisioning\Application\FinalConfigLinkProvider;
+use App\Provisioning\Application\ServiceConfigDeliveryRefresher;
 use App\Provisioning\Application\VpnAccessLinkGenerator;
 use App\Provisioning\Application\VpnInboundSyncService;
+use App\Provisioning\Application\VpnServiceConfigRefreshService;
 use App\Provisioning\Domain\Dto\CreateVpnServiceRequest;
 use App\Provisioning\Domain\VpnServiceStatus;
 use App\Provisioning\Infrastructure\Sanaei3xui\Sanaei3xuiApiClient;
@@ -29,6 +31,8 @@ final class VpnPanelInboundActionsController extends AbstractController
         private readonly EntityManagerInterface $entityManager,
         private readonly VpnAccessLinkGenerator $vpnAccessLinkGenerator,
         private readonly FinalConfigLinkProvider $finalConfigLinkProvider,
+        private readonly VpnServiceConfigRefreshService $configRefreshService,
+        private readonly ServiceConfigDeliveryRefresher $deliveryRefresher,
     ) {
     }
 
@@ -180,14 +184,33 @@ final class VpnPanelInboundActionsController extends AbstractController
                 continue;
             }
 
-            $uuid = $service->getClientUuid();
-            $subId = $service->getSubId();
-            if (null === $uuid || '' === $uuid || null === $subId || '' === $subId) {
+            $isLegacySanaei = $this->configRefreshService->isSanaeiLegacyService($service);
+            $uuid = trim((string) ($service->getClientUuid() ?? ''));
+            $subId = trim((string) ($service->getSubId() ?? ''));
+            $email = trim((string) ($service->getClientEmail() ?? $service->getUsername() ?? ''));
+            if ((!$isLegacySanaei && ('' === $uuid || '' === $subId)) || ($isLegacySanaei && '' === $uuid && '' === $email)) {
                 ++$skipped;
                 continue;
             }
 
             try {
+                if ($isLegacySanaei) {
+                    $refresh = $this->deliveryRefresher->refreshBeforeDelivery($service, 'admin_inbound_regenerate_configs');
+                    if ($refresh->succeeded) {
+                        $this->log(sprintf('admin_regenerate_config_refresh_success service_id=%d', $service->getId() ?? 0));
+                        ++$updated;
+                    } else {
+                        $this->log(sprintf(
+                            'admin_regenerate_config_refresh_failed service_id=%d reason="%s"',
+                            $service->getId() ?? 0,
+                            (string) ($refresh->reason ?? 'unknown')
+                        ));
+                        ++$failed;
+                    }
+
+                    continue;
+                }
+
                 $rawLinks = $this->normalizedLinks($service->getConfigLinks() ?? []);
                 $links = $this->vpnAccessLinkGenerator->generate($service);
                 $generatedLinks = $this->normalizedLinks((array) ($links['configLinks'] ?? []));
@@ -234,14 +257,36 @@ final class VpnPanelInboundActionsController extends AbstractController
     {
         $uuid = $service->getClientUuid();
         $subId = $service->getSubId();
+        $isLegacySanaei = $this->configRefreshService->isSanaeiLegacyService($service);
+        $email = trim((string) ($service->getClientEmail() ?? $service->getUsername() ?? ''));
 
-        if (null === $uuid || '' === $uuid || null === $subId || '' === $subId) {
+        if ((!$isLegacySanaei && (null === $uuid || '' === $uuid || null === $subId || '' === $subId)) || ($isLegacySanaei && (null === $uuid || '' === $uuid) && '' === $email)) {
             $this->addFlash('danger', 'سرویس uuid یا subId ندارد. بازسازی امکان‌پذیر نیست.');
 
             return $this->redirectToServices();
         }
 
         try {
+            if ($isLegacySanaei) {
+                $refresh = $this->deliveryRefresher->refreshBeforeDelivery($service, 'admin_service_regenerate_config');
+                if (!$refresh->succeeded) {
+                    $this->log(sprintf(
+                        'admin_regenerate_config_refresh_failed service_id=%d reason="%s"',
+                        $service->getId() ?? 0,
+                        (string) ($refresh->reason ?? 'unknown')
+                    ));
+                    $this->addFlash('danger', sprintf('بازسازی کانفیگ ناموفق: %s', (string) ($refresh->reason ?? 'unknown')));
+
+                    return $this->redirectToServices();
+                }
+
+                $this->entityManager->flush();
+                $this->log(sprintf('admin_regenerate_config_refresh_success service_id=%d', $service->getId() ?? 0));
+                $this->addFlash('success', sprintf('کانفیگ سرویس #%d از پنل بروزرسانی شد. %d لینک.', $service->getId() ?? 0, $refresh->refreshedLinkCount));
+
+                return $this->redirectToServices();
+            }
+
             $rawLinks = $this->normalizedLinks($service->getConfigLinks() ?? []);
             $links = $this->vpnAccessLinkGenerator->generate($service);
             $generatedLinks = $this->normalizedLinks((array) ($links['configLinks'] ?? []));
@@ -327,5 +372,10 @@ final class VpnPanelInboundActionsController extends AbstractController
         }
 
         return $normalized;
+    }
+
+    private function log(string $message): void
+    {
+        error_log('[VpnPanelInboundActionsController] '.$message);
     }
 }
