@@ -10,6 +10,7 @@ use App\Entity\Plugin;
 use App\Payment\Domain\Dto\PaymentRequestResult;
 use App\Payment\Domain\Dto\PaymentVerificationResult;
 use App\Payment\Domain\PaymentGatewayInterface;
+use Symfony\Component\HttpFoundation\Request;
 
 final class PluginPaymentGatewayDriverAdapter implements PaymentGatewayInterface
 {
@@ -37,6 +38,19 @@ final class PluginPaymentGatewayDriverAdapter implements PaymentGatewayInterface
     public function verifyPayment(Payment $payment, array $payload = []): PaymentVerificationResult
     {
         return $this->inner->verifyPayment($payment, $payload, $this->gatewayConfig($payment));
+    }
+
+    public function supportsWebhook(): bool
+    {
+        return $this->inner->supportsWebhook();
+    }
+
+    /**
+     * @param array<string, mixed> $payload
+     */
+    public function handleWebhook(Payment $payment, array $payload, Request $request): ?PaymentWebhookResult
+    {
+        return $this->inner->handleWebhook($payload, $request, $this->gatewayConfig($payment));
     }
 
     /**
