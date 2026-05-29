@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>پرداخت لغو شد</title>
+    <style>
+        body {
+            margin: 0;
+            min-height: 100vh;
+            font-family: Tahoma, Arial, sans-serif;
+            background: #f5f7fb;
+            color: #1f2937;
+            display: grid;
+            place-items: center;
+        }
+        main {
+            width: min(640px, calc(100% - 32px));
+            background: #fff;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 28px;
+            box-shadow: 0 10px 28px rgba(15, 23, 42, .08);
+        }
+        h1 { margin: 0 0 16px; font-size: 24px; color: #92400e; }
+        p { line-height: 1.9; }
+        .muted { color: #6b7280; }
+    </style>
+</head>
+<body>
+<main>
+    <h1>پرداخت لغو شد یا کامل نشد</h1>
+    {% if order %}
+        <p>کد پیگیری سفارش: {{ order.trackingCode ?: order.id }}</p>
+        <p class="muted">می‌توانید از داخل ربات با گزینه پیگیری سفارش ادامه دهید.</p>
+    {% else %}
+        <p class="muted">اگر سفارش شما در ربات ثبت شده است، از همانجا پرداخت را دوباره بررسی یا تکرار کنید.</p>
+    {% endif %}
+</main>
+</body>
+</html>

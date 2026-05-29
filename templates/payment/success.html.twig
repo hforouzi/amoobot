@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>نتیجه پرداخت</title>
+    {% if redirectEnabled and subscriptionUrl %}
+        <meta http-equiv="refresh" content="5;url={{ subscriptionUrl }}">
+    {% endif %}
+    <style>
+        body {
+            margin: 0;
+            min-height: 100vh;
+            font-family: Tahoma, Arial, sans-serif;
+            background: #f5f7fb;
+            color: #1f2937;
+            display: grid;
+            place-items: center;
+        }
+        main {
+            width: min(680px, calc(100% - 32px));
+            background: #fff;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 28px;
+            box-shadow: 0 10px 28px rgba(15, 23, 42, .08);
+        }
+        h1 { margin: 0 0 16px; font-size: 24px; }
+        p { line-height: 1.9; }
+        dl { display: grid; grid-template-columns: 140px 1fr; gap: 10px 16px; }
+        dt { color: #6b7280; }
+        dd { margin: 0; overflow-wrap: anywhere; }
+        a.button {
+            display: inline-block;
+            margin-top: 16px;
+            padding: 12px 18px;
+            border-radius: 6px;
+            background: #166534;
+            color: #fff;
+            text-decoration: none;
+        }
+        pre {
+            direction: ltr;
+            text-align: left;
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+            background: #f3f4f6;
+            padding: 14px;
+            border-radius: 6px;
+        }
+        .muted { color: #6b7280; }
+        .danger { color: #b91c1c; }
+        .pending { color: #92400e; }
+    </style>
+</head>
+<body>
+<main>
+    {% if state == 'paid' %}
+        <h1>✅ پرداخت با موفقیت تایید شد</h1>
+        {% if order %}
+            <dl>
+                <dt>کد پیگیری سفارش</dt>
+                <dd>{{ order.trackingCode ?: order.id }}</dd>
+                <dt>وضعیت سفارش</dt>
+                <dd>{{ order.status }}</dd>
+                {% if service %}
+                    <dt>نام کاربری سرویس</dt>
+                    <dd>{{ service.clientEmail ?: service.username ?: '-' }}</dd>
+                {% endif %}
+            </dl>
+        {% endif %}
+
+        {% if subscriptionUrl %}
+            <p>لینک اشتراک شما آماده است.</p>
+            <a class="button" href="{{ subscriptionUrl }}">مشاهده لینک اشتراک</a>
+            {% if redirectEnabled %}
+                <p class="muted">تا چند ثانیه دیگر به لینک اشتراک منتقل می‌شوید.</p>
+            {% endif %}
+        {% elseif configText %}
+            <p>لینک اشتراک برای این سرویس ثبت نشده است. کانفیگ سرویس:</p>
+            <pre>{{ configText }}</pre>
+            <p class="muted">اطلاعات سرویس در تلگرام نیز ارسال می‌شود.</p>
+        {% else %}
+            <p>پرداخت تایید شد و سرویس در حال آماده‌سازی است. اطلاعات سرویس در تلگرام ارسال می‌شود.</p>
+        {% endif %}
+    {% elseif state == 'pending' %}
+        <h1 class="pending">پرداخت در حال بررسی است</h1>
+        <p>پرداخت شما هنوز نهایی نشده است. اگر پرداخت را انجام داده‌اید، چند دقیقه صبر کنید و از داخل ربات گزینه بررسی پرداخت را بزنید.</p>
+        {% if statusText %}<p class="muted">وضعیت فعلی: {{ statusText }}</p>{% endif %}
+    {% elseif state == 'failed' %}
+        <h1 class="danger">پرداخت ناموفق یا منقضی شد</h1>
+        <p>این پرداخت تایید نشد. برای ادامه می‌توانید از داخل ربات دوباره اقدام کنید.</p>
+        {% if statusText %}<p class="muted">وضعیت: {{ statusText }}</p>{% endif %}
+    {% elseif state == 'provision_failed' %}
+        <h1 class="pending">پرداخت تایید شد</h1>
+        <p>پرداخت تایید شد اما آماده‌سازی سرویس کامل نشد. لطفاً از پشتیبانی پیگیری کنید.</p>
+    {% else %}
+        <h1 class="pending">پرداخت دریافت شد</h1>
+        <p>پرداخت دریافت شد اما هنوز در سیستم پیدا نشد. لطفاً از داخل ربات گزینه بررسی پرداخت را بزنید.</p>
+    {% endif %}
+</main>
+</body>
+</html>
