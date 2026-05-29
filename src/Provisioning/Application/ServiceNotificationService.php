@@ -24,7 +24,7 @@ final class ServiceNotificationService
         private readonly BotTextResolver $botTextResolver,
         private readonly SettingValueProvider $settingValueProvider,
         private readonly string $serviceNotifyExpiryDays = '3,1',
-        private readonly string $serviceNotifyTrafficThresholds = '80,95,100',
+        private readonly string $serviceNotifyTrafficThresholds = '50,80,95,100',
     ) {
     }
 
@@ -121,7 +121,7 @@ final class ServiceNotificationService
     public function sendTrafficWarningsWithOptions(bool $dryRun = false, int $limit = 100): NotificationSummary
     {
         $services = $this->loadServices($limit);
-        $thresholds = $this->resolveThresholds(self::SETTING_TRAFFIC_THRESHOLDS, $this->serviceNotifyTrafficThresholds, [80, 95, 100], false);
+        $thresholds = $this->resolveThresholds(self::SETTING_TRAFFIC_THRESHOLDS, $this->serviceNotifyTrafficThresholds, [50,80, 95, 100], false);
 
         $checked = 0;
         $sent = 0;
@@ -372,6 +372,7 @@ final class ServiceNotificationService
     private function buildTrafficMessage(int $threshold): string
     {
         return match ($threshold) {
+            50 => '⚠️ شما 5۰٪ حجم سرویس خود را مصرف کردهاید.',
             80 => '⚠️ شما ۸۰٪ حجم سرویس خود را مصرف کردهاید.',
             95 => '⚠️ حجم سرویس شما تقریباً رو به پایان است.',
             100 => '🔴 حجم سرویس شما به پایان رسیده است.',

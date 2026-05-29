@@ -6,6 +6,8 @@ namespace App\Provisioning\Infrastructure\Sanaei3xui;
 
 use App\Entity\VpnInbound;
 use App\Entity\VpnPanel;
+use App\Entity\VpnService;
+use App\Provisioning\Application\VpnServiceConfigRefreshResult;
 use App\Provisioning\Domain\Dto\CreatedVpnService;
 use App\Provisioning\Domain\Dto\CreateVpnServiceRequest;
 use App\Provisioning\Domain\Dto\RenewVpnServiceRequest;
@@ -174,16 +176,10 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
                 $panel->getId() ?? 0,
                 $inbound->getId() ?? 0
             ));
-            $remoteInbound = $this->fetchLegacyInboundById($panel, $inboundIdInt);
-            $clientMatch = is_array($remoteInbound) ? $this->findLegacyClient($remoteInbound, $clientUuid, $email) : ['client' => null, 'matchedBy' => 'none'];
-            $legacyClient = $clientMatch['client'];
-            $legacyGeneratedLink = is_array($remoteInbound) && is_array($legacyClient)
-                ? trim($this->configGenerator->generateLegacyConfigTextFromRemoteInbound($remoteInbound, $legacyClient, $panel, $inbound))
-                : '';
-            $legacyGeneratedLinks = array_values(array_filter(
-                array_map('trim', explode("\n", $legacyGeneratedLink)),
-                static fn (string $line): bool => '' !== $line
-            ));
+            $legacyResult = $this->generateLegacyConfigLinksFromPanel($panel, $inbound, $inboundIdInt, $clientUuid, $email);
+            $legacyClient = $legacyResult['client'];
+            $clientMatch = ['matchedBy' => $legacyResult['matchedBy']];
+            $legacyGeneratedLinks = $legacyResult['links'];
             if ([] !== $legacyGeneratedLinks) {
                 $configLinks = $legacyGeneratedLinks;
                 $configText = implode("\n", $legacyGeneratedLinks);
@@ -473,6 +469,72 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
             expiresAt: $expiresAt,
             isEnabled: $isEnabled,
         );
+    }
+
+    public function refreshLegacyServiceConfig(VpnService $service): VpnServiceConfigRefreshResult
+    {
+        $panel = $this->requireSupportedPanel($service->getPanel());
+        if ($this->isV3Panel($panel)) {
+            return VpnServiceConfigRefreshResult::skipped();
+        }
+
+        $inbound = $service->getInbound();
+        if (!$inbound instanceof VpnInbound) {
+            return VpnServiceConfigRefreshResult::failed('missing_inbound');
+        }
+
+        $parsedRef = $this->remoteIdParser->parse((string) ($service->getRemoteId() ?? ''));
+        $inboundIdRaw = trim((string) ($parsedRef?->inboundId ?? $inbound->getRemoteInboundId() ?? ''));
+        if ('' === $inboundIdRaw) {
+            return VpnServiceConfigRefreshResult::failed('missing_remote_inbound_id');
+        }
+        $inboundIdInt = $this->toInboundIdIntOrFail($inboundIdRaw);
+
+        $clientUuid = trim((string) ($service->getClientUuid() ?? $parsedRef?->clientId ?? ''));
+        $email = trim((string) ($service->getClientEmail() ?? $service->getUsername() ?? $parsedRef?->email ?? ''));
+        if ('' === $clientUuid && '' === $email) {
+            return VpnServiceConfigRefreshResult::failed('missing_client_identifier');
+        }
+
+        $this->log(sprintf(
+            'service_config_online_refresh_start service_id=%d panel_id=%d inbound_id=%d remote_inbound_id=%d client_uuid="%s" email="%s"',
+            $service->getId() ?? 0,
+            $panel->getId() ?? 0,
+            $inbound->getId() ?? 0,
+            $inboundIdInt,
+            $clientUuid,
+            $email
+        ));
+
+        $legacyResult = $this->generateLegacyConfigLinksFromPanel($panel, $inbound, $inboundIdInt, $clientUuid, $email);
+        $clientFound = is_array($legacyResult['client']);
+        $matchedBy = $legacyResult['matchedBy'];
+        $links = $legacyResult['links'];
+
+        $this->log(sprintf(
+            'service_config_online_refresh_client_found service_id=%d panel_id=%d inbound_id=%d found=%s matched_by="%s"',
+            $service->getId() ?? 0,
+            $panel->getId() ?? 0,
+            $inbound->getId() ?? 0,
+            $clientFound ? 'yes' : 'no',
+            $matchedBy
+        ));
+        $this->log(sprintf(
+            'service_config_online_refresh_link_count service_id=%d panel_id=%d inbound_id=%d count=%d',
+            $service->getId() ?? 0,
+            $panel->getId() ?? 0,
+            $inbound->getId() ?? 0,
+            count($links)
+        ));
+
+        if (!$clientFound) {
+            return VpnServiceConfigRefreshResult::failed('client_not_found_on_panel');
+        }
+        if ([] === $links) {
+            return VpnServiceConfigRefreshResult::failed('no_config_links_generated_from_panel');
+        }
+
+        return VpnServiceConfigRefreshResult::success($links);
     }
 
     private function requireSupportedPanel(?VpnPanel $panel): VpnPanel
@@ -896,6 +958,29 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
         $this->log(sprintf('legacy_read_inbound_found panel_id=%d remote_inbound_id=%d no', $panel->getId() ?? 0, $remoteInboundId));
 
         return null;
+    }
+
+    /**
+     * @return array{links: list<string>, client: array<string, mixed>|null, matchedBy: string}
+     */
+    private function generateLegacyConfigLinksFromPanel(VpnPanel $panel, VpnInbound $inbound, int $remoteInboundId, string $clientUuid, string $email): array
+    {
+        $remoteInbound = $this->fetchLegacyInboundById($panel, $remoteInboundId);
+        $clientMatch = is_array($remoteInbound) ? $this->findLegacyClient($remoteInbound, $clientUuid, $email) : ['client' => null, 'matchedBy' => 'none'];
+        $legacyClient = $clientMatch['client'];
+        $legacyGeneratedLink = is_array($remoteInbound) && is_array($legacyClient)
+            ? trim($this->configGenerator->generateLegacyConfigTextFromRemoteInbound($remoteInbound, $legacyClient, $panel, $inbound))
+            : '';
+        $legacyGeneratedLinks = array_values(array_filter(
+            array_map('trim', explode("\n", $legacyGeneratedLink)),
+            static fn (string $line): bool => '' !== $line
+        ));
+
+        return [
+            'links' => $legacyGeneratedLinks,
+            'client' => is_array($legacyClient) ? $legacyClient : null,
+            'matchedBy' => (string) ($clientMatch['matchedBy'] ?? 'none'),
+        ];
     }
 
     /**

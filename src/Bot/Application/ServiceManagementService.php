@@ -21,8 +21,10 @@ use App\Payment\Infrastructure\NowPaymentsGateway;
 use App\Payment\Infrastructure\PaymentGatewayRegistry;
 use App\Provisioning\Application\RenewalSettingsProvider;
 use App\Provisioning\Application\ServiceUsageSyncService;
+use App\Provisioning\Application\ServiceConfigDeliveryRefresher;
 use App\Provisioning\Application\TrafficAddonSettingsProvider;
 use App\Provisioning\Application\FinalConfigLinkProvider;
+use App\Provisioning\Application\VpnConfigLinkSetResult;
 use App\Provisioning\Domain\Dto\RenewVpnServiceRequest;
 use App\Provisioning\Domain\VpnServiceStatus;
 use App\Provisioning\Infrastructure\VpnPanelDriverRegistry;
@@ -59,6 +61,7 @@ class ServiceManagementService
         private readonly RenewalSettingsProvider $renewalSettingsProvider,
         private readonly TrafficAddonSettingsProvider $trafficAddonSettingsProvider,
         private readonly FinalConfigLinkProvider $finalConfigLinkProvider,
+        private readonly ServiceConfigDeliveryRefresher $deliveryRefresher,
         private readonly PlanPricingService $planPricingService,
         private readonly SalesSettingsProvider $salesSettingsProvider,
         private readonly TrafficAddonPricingService $trafficAddonPricingService,
@@ -167,6 +170,9 @@ class ServiceManagementService
         }
 
         $this->acknowledgeCallback($callbackId);
+        if (!$this->ensureFreshConfigBeforeDelivery($chatId, $service, 'telegram_admin_service_detail')) {
+            return;
+        }
         $this->telegramApiClient->sendMessage(
             $chatId,
             $this->formatServiceDetailForAdmin($service),
@@ -203,6 +209,12 @@ class ServiceManagementService
 
         if ($service->getUser()->getId() !== $account->getUser()->getId()) {
             $this->showPopupOrMessage($chatId, $callbackId, 'دسترسی غیرمجاز.', 'unauthorized_service_subscription');
+
+            return;
+        }
+
+        if (!$this->ensureFreshConfigBeforeDelivery($chatId, $service, 'telegram_subscription')) {
+            $this->acknowledgeCallback($callbackId);
 
             return;
         }
@@ -246,6 +258,12 @@ class ServiceManagementService
             return;
         }
 
+        if (!$this->ensureFreshConfigBeforeDelivery($chatId, $service, 'telegram_resend_config')) {
+            $this->acknowledgeCallback($callbackId);
+
+            return;
+        }
+
         $configLinkSet = $this->collectConfigLinks($service, 'telegram_resend_config');
         if ([] === $configLinkSet->finalLinks) {
             $this->showPopupOrMessage($chatId, $callbackId, 'اطلاعات اتصال کامل نیست. لطفاً با پشتیبانی تماس بگیرید.', 'missing_config');
@@ -272,6 +290,12 @@ class ServiceManagementService
         $service = $this->entityManager->getRepository(VpnService::class)->find($serviceId);
         if (!$service instanceof VpnService || $service->getUser()->getId() !== $account->getUser()->getId()) {
             $this->showPopupOrMessage($chatId, $callbackId, 'سرویس معتبر نیست.', 'invalid_service_subscription_qr');
+
+            return;
+        }
+
+        if (!$this->ensureFreshConfigBeforeDelivery($chatId, $service, 'telegram_subscription_qr')) {
+            $this->acknowledgeCallback($callbackId);
 
             return;
         }
@@ -388,6 +412,9 @@ class ServiceManagementService
         $this->entityManager->refresh($service);
         $this->acknowledgeCallback($callbackId);
         if ($adminMode) {
+            if (!$this->ensureFreshConfigBeforeDelivery($chatId, $service, 'telegram_admin_service_detail_after_refresh')) {
+                return;
+            }
             $this->telegramApiClient->sendMessage(
                 $chatId,
                 $this->formatServiceDetailForAdmin($service),
@@ -1831,6 +1858,10 @@ class ServiceManagementService
 
     private function sendUserServiceDetail(string $chatId, VpnService $service, string $sourceFlow): void
     {
+        if (!$this->ensureFreshConfigBeforeDelivery($chatId, $service, $sourceFlow)) {
+            return;
+        }
+
         $this->telegramApiClient->sendMessage(
             $chatId,
             $this->formatServiceDetailForUser($service),
@@ -1867,7 +1898,7 @@ class ServiceManagementService
 
     private function formatServiceDetailForAdmin(VpnService $service): string
     {
-        $finalLinks = $this->finalConfigLinkProvider->getFinalLinksForService($service, 'telegram_admin_service_detail');
+        $finalLinks = $this->collectConfigLinks($service, 'telegram_admin_service_detail')->finalLinks;
 
         return sprintf(
             "سرویس #%d\nکاربر: %s\nوضعیت: %s\nانقضا: %s\nحجم کل: %s\nمصرف: %s\nباقیمانده: %s\nآخرین بروزرسانی مصرف: %s\nآخرین بررسی وضعیت: %s\nاشتراک: %s\nپیشنمایش کانفیگ: %s\nایجاد: %s",
@@ -2044,9 +2075,47 @@ class ServiceManagementService
     /**
      * @return list<string>
      */
-    private function collectConfigLinks(VpnService $service, string $sourceFlow): \App\Provisioning\Application\VpnConfigLinkSetResult
+    private function collectConfigLinks(VpnService $service, string $sourceFlow): VpnConfigLinkSetResult
     {
         return $this->finalConfigLinkProvider->getFinalLinkSetForService($service, $sourceFlow);
+    }
+
+    private function ensureFreshConfigBeforeDelivery(string $chatId, VpnService $service, string $sourceFlow): bool
+    {
+        $outcome = $this->deliveryRefresher->refreshBeforeDelivery($service, $sourceFlow);
+        if ($outcome->succeeded) {
+            $this->entityManager->flush();
+            $this->debugLog(sprintf(
+                'user_config_refresh_success service_id=%d source_flow="%s" refreshed_link_count=%d',
+                $service->getId() ?? 0,
+                $sourceFlow,
+                $outcome->refreshedLinkCount
+            ));
+
+            return true;
+        }
+
+        if ($outcome->skipped) {
+            return true;
+        }
+
+        $this->debugLog(sprintf(
+            'user_config_refresh_failed_fallback_to_stored service_id=%d source_flow="%s" fallback_to_stored=%s reason="%s"',
+            $service->getId() ?? 0,
+            $sourceFlow,
+            $outcome->fallbackToStored ? 'yes' : 'no',
+            (string) ($outcome->reason ?? 'unknown')
+        ));
+
+        if ($outcome->fallbackToStored) {
+            $this->telegramApiClient->sendMessage($chatId, 'دریافت آنلاین کانفیگ از پنل انجام نشد؛ آخرین کانفیگ ذخیره‌شده ارسال می‌شود.');
+
+            return true;
+        }
+
+        $this->telegramApiClient->sendMessage($chatId, 'دریافت کانفیگ از پنل با خطا مواجه شد. لطفاً بعداً دوباره تلاش کنید یا با پشتیبانی تماس بگیرید.');
+
+        return false;
     }
 
     /**

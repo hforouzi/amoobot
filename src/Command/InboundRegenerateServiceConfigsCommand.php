@@ -7,6 +7,7 @@ namespace App\Command;
 use App\Entity\VpnInbound;
 use App\Entity\VpnService;
 use App\Provisioning\Application\VpnAccessLinkGenerator;
+use App\Provisioning\Application\VpnServiceConfigRefreshService;
 use App\Provisioning\Domain\VpnServiceStatus;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\Console\Attribute\AsCommand;
@@ -22,6 +23,7 @@ final class InboundRegenerateServiceConfigsCommand extends Command
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
         private readonly VpnAccessLinkGenerator $vpnAccessLinkGenerator,
+        private readonly VpnServiceConfigRefreshService $configRefreshService,
     ) {
         parent::__construct();
     }
@@ -74,9 +76,11 @@ final class InboundRegenerateServiceConfigsCommand extends Command
                 continue;
             }
 
-            $uuid = $service->getClientUuid();
-            $subId = $service->getSubId();
-            if (null === $uuid || '' === $uuid || null === $subId || '' === $subId) {
+            $isLegacySanaei = $this->configRefreshService->isSanaeiLegacyService($service);
+            $uuid = trim((string) ($service->getClientUuid() ?? ''));
+            $subId = trim((string) ($service->getSubId() ?? ''));
+            $email = trim((string) ($service->getClientEmail() ?? $service->getUsername() ?? ''));
+            if ((!$isLegacySanaei && ('' === $uuid || '' === $subId)) || ($isLegacySanaei && '' === $uuid && '' === $email)) {
                 $io->writeln(sprintf('  [skip] service #%d: missing uuid or subId', $service->getId() ?? 0));
                 ++$skipped;
                 continue;
@@ -84,6 +88,24 @@ final class InboundRegenerateServiceConfigsCommand extends Command
 
             try {
                 $oldLinks = is_array($service->getConfigLinks()) ? count($service->getConfigLinks()) : 0;
+                if ($isLegacySanaei) {
+                    $refresh = $this->configRefreshService->refreshSanaeiLegacy($service, 'console_inbound_regenerate_configs');
+                    if (!$refresh->succeeded) {
+                        $io->writeln(sprintf('  [fail] service #%d: %s', $service->getId() ?? 0, (string) ($refresh->failureReason ?? 'unknown')));
+                        ++$failed;
+                        continue;
+                    }
+
+                    $io->writeln(sprintf(
+                        '  [ok] service #%d: %d -> %d links, source=panel',
+                        $service->getId() ?? 0,
+                        $oldLinks,
+                        count($refresh->configLinks)
+                    ));
+
+                    ++$updated;
+                    continue;
+                }
 
                 $links = $this->vpnAccessLinkGenerator->generate($service);
                 $configLinks = array_values(array_filter(

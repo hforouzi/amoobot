@@ -6,6 +6,7 @@ namespace App\Command;
 
 use App\Entity\VpnService;
 use App\Provisioning\Application\VpnAccessLinkGenerator;
+use App\Provisioning\Application\VpnServiceConfigRefreshService;
 use App\Provisioning\Infrastructure\Sanaei3xui\Sanaei3xuiRemoteIdParser;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\Console\Attribute\AsCommand;
@@ -22,6 +23,7 @@ final class ServiceRegenerateConfigCommand extends Command
         private readonly EntityManagerInterface $entityManager,
         private readonly VpnAccessLinkGenerator $vpnAccessLinkGenerator,
         private readonly Sanaei3xuiRemoteIdParser $remoteIdParser,
+        private readonly VpnServiceConfigRefreshService $configRefreshService,
     ) {
         parent::__construct();
     }
@@ -75,6 +77,20 @@ final class ServiceRegenerateConfigCommand extends Command
         $io->listing([
             sprintf('externalProxyList count: %d', is_array($externalProxyList) ? count($externalProxyList) : 0),
         ]);
+
+        if ($this->configRefreshService->isSanaeiLegacyService($service)) {
+            $refresh = $this->configRefreshService->refreshSanaeiLegacy($service, 'console_service_regenerate_config');
+            if (!$refresh->succeeded) {
+                $io->error(sprintf('Online panel refresh failed: %s', (string) ($refresh->failureReason ?? 'unknown')));
+
+                return Command::FAILURE;
+            }
+
+            $this->entityManager->flush();
+            $io->success(sprintf('Service #%d config refreshed from panel. %d link(s) stored.', $serviceId, count($refresh->configLinks)));
+
+            return Command::SUCCESS;
+        }
 
         try {
             $links = $this->vpnAccessLinkGenerator->generate($service);
