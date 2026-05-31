@@ -423,6 +423,20 @@ class PaymentGateway
         return $this;
     }
 
+    private function maskedConfiguredLabel(?string $value): string
+    {
+        $value = trim((string) ($value ?? ''));
+        if ('' === $value) {
+            return 'no';
+        }
+
+        if (strlen($value) <= 8) {
+            return 'yes';
+        }
+
+        return substr($value, 0, 4).'...'.substr($value, -4);
+    }
+
     private function isCustomApiConfigured(): bool
     {
         $config = $this->getCustomApiConfig();
@@ -441,7 +455,16 @@ class PaymentGateway
 
     public function setNowPaymentsApiKey(?string $value): self
     {
+        if ('' === trim((string) ($value ?? '')) && null !== $this->getNowPaymentsApiKey()) {
+            return $this;
+        }
+
         return $this->setConfigString('api_key', $value);
+    }
+
+    public function getNowPaymentsApiKeyConfiguredLabel(): string
+    {
+        return $this->maskedConfiguredLabel($this->getNowPaymentsApiKey());
     }
 
     public function getNowPaymentsIpnSecret(): ?string
@@ -451,7 +474,16 @@ class PaymentGateway
 
     public function setNowPaymentsIpnSecret(?string $value): self
     {
+        if ('' === trim((string) ($value ?? '')) && null !== $this->getNowPaymentsIpnSecret()) {
+            return $this;
+        }
+
         return $this->setConfigString('ipn_secret', $value);
+    }
+
+    public function getNowPaymentsIpnSecretConfiguredLabel(): string
+    {
+        return $this->maskedConfiguredLabel($this->getNowPaymentsIpnSecret());
     }
 
     public function isNowPaymentsSandbox(): bool

@@ -116,9 +116,18 @@ class VpnPanel
 
     public function setPassword(?string $password): self
     {
+        if ('' === trim((string) ($password ?? '')) && null !== $this->password) {
+            return $this;
+        }
+
         $this->password = $password;
 
         return $this;
+    }
+
+    public function getPasswordConfiguredLabel(): string
+    {
+        return $this->maskedConfiguredLabel($this->password);
     }
 
     public function getApiToken(): ?string
@@ -137,6 +146,10 @@ class VpnPanel
     public function setApiToken(?string $apiToken): self
     {
         $token = trim((string) ($apiToken ?? ''));
+        if ('' === $token && null !== $this->getApiToken()) {
+            return $this;
+        }
+
         $this->apiToken = '' === $token ? null : $token;
         $this->setConfigValue('api_token', $this->apiToken);
 
@@ -410,5 +423,19 @@ class VpnPanel
     private function normalizeSlashPrefixedPath(string $value): string
     {
         return '/'.ltrim(trim($value), '/');
+    }
+
+    private function maskedConfiguredLabel(?string $value): string
+    {
+        $value = trim((string) ($value ?? ''));
+        if ('' === $value) {
+            return 'no';
+        }
+
+        if (strlen($value) <= 8) {
+            return 'yes';
+        }
+
+        return substr($value, 0, 4).'...'.substr($value, -4);
     }
 }
