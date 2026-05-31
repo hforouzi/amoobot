@@ -3,5 +3,10 @@
 {% block content_title %}{{ 'admin.dashboard'|trans }}{% endblock %}
 
 {% block main %}
+    {% if admin_user is defined and admin_user %}
+        <p>
+            {{ admin_user.displayName ?: admin_user.userIdentifier }}
+        </p>
+    {% endif %}
     <p>{{ 'Use the left menu to manage plans, orders, payments, services and bot logs.'|trans({}, 'messages') }}</p>
 {% endblock %}

@@ -1,14 +1,12 @@
 security:
     password_hashers:
-        Symfony\Component\Security\Core\User\InMemoryUser: plaintext
+        App\Entity\AdminUser: auto
 
     providers:
-        users_in_memory:
-            memory:
-                users:
-                    admin:
-                        password: '%env(ADMIN_PASSWORD)%'
-                        roles: ['ROLE_ADMIN']
+        admin_users:
+            entity:
+                class: App\Entity\AdminUser
+                property: email
 
     firewalls:
         dev:
@@ -16,12 +14,13 @@ security:
             security: false
         main:
             lazy: true
-            provider: users_in_memory
+            provider: admin_users
+            user_checker: App\Security\AdminUserChecker
             form_login:
                 login_path: admin_login
                 check_path: admin_login
-                username_parameter: _username
-                password_parameter: _password
+                username_parameter: email
+                password_parameter: password
                 enable_csrf: true
                 csrf_parameter: _csrf_token
                 csrf_token_id: authenticate
@@ -30,10 +29,16 @@ security:
                 lifetime: 1209600
                 path: /
             logout:
-                path: /logout
+                path: admin_logout
                 target: /admin/login
 
     access_control:
         - { path: ^/admin/login$, roles: PUBLIC_ACCESS }
         - { path: ^/admin/locale/(fa|en)$, roles: PUBLIC_ACCESS }
+        - { path: ^/telegram/webhook, roles: PUBLIC_ACCESS }
+        - { path: ^/payment/callback, roles: PUBLIC_ACCESS }
+        - { path: ^/payment/webhook, roles: PUBLIC_ACCESS }
+        - { path: ^/payment/success$, roles: PUBLIC_ACCESS }
+        - { path: ^/payment/cancel$, roles: PUBLIC_ACCESS }
+        - { path: ^/admin/logout$, roles: ROLE_ADMIN }
         - { path: ^/admin, roles: ROLE_ADMIN }

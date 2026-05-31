@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Admin\UI;
 
+use App\Admin\UI\Crud\AdminUserCrudController;
 use App\Admin\UI\Crud\BotMessageLogCrudController;
 use App\Admin\UI\Crud\BotButtonLabelCrudController;
 use App\Admin\UI\Crud\BotMessageTemplateCrudController;
@@ -45,7 +46,14 @@ class DashboardController extends AbstractDashboardController
 
     public function index(): Response
     {
-        return $this->render('admin/dashboard.html.twig');
+        $user = $this->getUser();
+        if ($user instanceof \App\Entity\AdminUser && !$user->isActive()) {
+            throw $this->createAccessDeniedException('Inactive admin account.');
+        }
+
+        return $this->render('admin/dashboard.html.twig', [
+            'admin_user' => $user,
+        ]);
     }
 
     public function configureDashboard(): Dashboard
@@ -77,15 +85,16 @@ class DashboardController extends AbstractDashboardController
         yield MenuItem::linkTo(PaymentCrudController::class, 'admin.payments', 'fa fa-credit-card');
         yield MenuItem::linkTo(DiscountCodeCrudController::class, 'admin.discount_codes', 'fa fa-ticket');
         yield MenuItem::linkTo(DiscountUsageCrudController::class, 'admin.discount_usages', 'fa fa-bar-chart');
-        yield MenuItem::linkTo(PaymentGatewayCrudController::class, 'admin.payment_gateways', 'fa fa-exchange');
-        yield MenuItem::linkTo(StorePaymentMethodCrudController::class, 'admin.store_payment_methods', 'fa fa-list-ol');
+        yield MenuItem::linkTo(PaymentGatewayCrudController::class, 'admin.payment_gateways', 'fa fa-exchange')->setPermission('ROLE_SUPER_ADMIN');
+        yield MenuItem::linkTo(StorePaymentMethodCrudController::class, 'admin.store_payment_methods', 'fa fa-list-ol')->setPermission('ROLE_SUPER_ADMIN');
 
         yield MenuItem::section('admin.menu.vpn', 'fa fa-server');
-        yield MenuItem::linkTo(VpnPanelCrudController::class, 'admin.vpn_panels', 'fa fa-server');
+        yield MenuItem::linkTo(VpnPanelCrudController::class, 'admin.vpn_panels', 'fa fa-server')->setPermission('ROLE_SUPER_ADMIN');
         yield MenuItem::linkTo(VpnInboundCrudController::class, 'admin.vpn_inbounds', 'fa fa-globe');
         yield MenuItem::linkTo(VpnServiceCrudController::class, 'admin.vpn_services', 'fa fa-link');
 
         yield MenuItem::section('admin.menu.users', 'fa fa-users');
+        yield MenuItem::linkTo(AdminUserCrudController::class, 'کاربران ادمین', 'fa fa-user-secret')->setPermission('ROLE_SUPER_ADMIN');
         yield MenuItem::linkTo(UserCrudController::class, 'admin.users', 'fa fa-users');
         yield MenuItem::linkTo(TelegramAccountCrudController::class, 'admin.telegram_accounts', 'fa fa-paper-plane');
         yield MenuItem::linkTo(RequiredChannelCrudController::class, 'Required Channels', 'fa fa-bullhorn');
@@ -104,12 +113,15 @@ class DashboardController extends AbstractDashboardController
 
         yield MenuItem::section('admin.menu.system', 'fa fa-cogs');
         yield MenuItem::linkTo(PluginCrudController::class, 'admin.plugins', 'fa fa-plug');
-        yield MenuItem::linkTo(SettingCrudController::class, 'admin.settings', 'fa fa-cog');
+        yield MenuItem::linkTo(SettingCrudController::class, 'admin.settings', 'fa fa-cog')->setPermission('ROLE_SUPER_ADMIN');
         yield MenuItem::linkTo(BotMessageLogCrudController::class, 'admin.bot_logs', 'fa fa-file-text');
 
         yield MenuItem::section('admin.menu.bot_content', 'fa fa-commenting');
         yield MenuItem::linkTo(BotMessageTemplateCrudController::class, 'admin.bot_message_templates', 'fa fa-comment');
         yield MenuItem::linkTo(BotButtonLabelCrudController::class, 'admin.bot_button_labels', 'fa fa-keyboard-o');
+
+        yield MenuItem::section();
+        yield MenuItem::linkToLogout('خروج', 'fa fa-sign-out');
     }
 
     private function routeExists(string $routeName): bool

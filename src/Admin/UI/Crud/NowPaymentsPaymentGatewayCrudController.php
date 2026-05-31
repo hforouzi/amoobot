@@ -79,14 +79,16 @@ final class NowPaymentsPaymentGatewayCrudController extends AbstractCrudControll
         $apiKeyField = TextField::new('nowPaymentsApiKey')
             ->setLabel('api_key')
             ->setFormType(PasswordType::class)
-            ->setFormTypeOption('always_empty', false)
+            ->setFormTypeOption('always_empty', true)
+            ->setFormTypeOption('required', false)
             ->setHelp('کلید API از داشبورد NOWPayments')
             ->onlyOnForms();
 
         $ipnSecretField = TextField::new('nowPaymentsIpnSecret')
             ->setLabel('ipn_secret')
             ->setFormType(PasswordType::class)
-            ->setFormTypeOption('always_empty', false)
+            ->setFormTypeOption('always_empty', true)
+            ->setFormTypeOption('required', false)
             ->setHelp('IPN Secret برای اعتبارسنجی وبهوک')
             ->onlyOnForms();
 
@@ -99,6 +101,10 @@ final class NowPaymentsPaymentGatewayCrudController extends AbstractCrudControll
             FormField::addFieldset('fieldset.credentials'),
             $apiKeyField,
             $ipnSecretField,
+            TextField::new('nowPaymentsApiKeyConfiguredLabel', 'api_key')
+                ->hideOnForm(),
+            TextField::new('nowPaymentsIpnSecretConfiguredLabel', 'ipn_secret')
+                ->hideOnForm(),
             FormField::addFieldset('fieldset.payment_settings'),
             TextField::new('nowPaymentsApiBaseUrl')->setLabel('api_base_url')->setHelp('آدرس API NOWPayments. پیشفرض: https://api.nowpayments.io/v1'),
             BooleanField::new('nowPaymentsSandbox')->setLabel('sandbox')->setHelp('حالت sandbox برای تست'),

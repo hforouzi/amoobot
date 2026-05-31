@@ -178,7 +178,7 @@ final class PaymentGatewayCrudController extends AbstractCrudController
             TextareaField::new('configJson', 'payment_gateway.json_config')
                 ->hideOnForm()
                 ->hideOnIndex()
-                ->formatValue(static fn (mixed $value): string => AdminJsonFormatter::toPrettyHtml($value))
+                ->formatValue(static fn (mixed $value): string => AdminJsonFormatter::toPrettyHtml(self::maskSensitiveConfigJson($value)))
                 ->renderAsHtml(),
             DateTimeField::new('createdAt', 'common.created_at')->hideOnForm()->hideOnIndex(),
         ];
@@ -546,5 +546,39 @@ final class PaymentGatewayCrudController extends AbstractCrudController
             ->getSingleScalarResult();
 
         return ((int) ($max ?? 0)) + 10;
+    }
+
+    private static function maskSensitiveConfigJson(mixed $value): string
+    {
+        $config = is_array($value) ? $value : json_decode((string) $value, true);
+        if (!is_array($config)) {
+            return (string) $value;
+        }
+
+        $masked = self::maskSensitiveConfigArray($config);
+
+        return json_encode($masked, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '';
+    }
+
+    /**
+     * @param array<string, mixed> $config
+     *
+     * @return array<string, mixed>
+     */
+    private static function maskSensitiveConfigArray(array $config): array
+    {
+        $sensitiveKeys = ['api_key', 'ipn_secret', 'api_token', 'password', 'proxy_password'];
+        foreach ($config as $key => $value) {
+            if (is_array($value)) {
+                $config[$key] = self::maskSensitiveConfigArray($value);
+                continue;
+            }
+
+            if (in_array(strtolower((string) $key), $sensitiveKeys, true)) {
+                $config[$key] = '' === trim((string) ($value ?? '')) ? 'no' : 'configured';
+            }
+        }
+
+        return $config;
     }
 }
