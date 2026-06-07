@@ -344,6 +344,18 @@ class VpnPanel
         return $this;
     }
 
+    public function isUseProxy(): bool
+    {
+        return true === ($this->getConfigValue('use_proxy') ?? false);
+    }
+
+    public function setUseProxy(bool $useProxy): self
+    {
+        $this->setConfigValue('use_proxy', $useProxy);
+
+        return $this;
+    }
+
     public function isApiTokenConfigured(): bool
     {
         return '' !== trim((string) ($this->getApiToken() ?? ''));

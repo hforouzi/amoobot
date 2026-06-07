@@ -60,6 +60,8 @@ class VpnPanelCrudController extends AbstractCrudController
                 ]),
             TextField::new('title'),
             TextField::new('baseUrl'),
+            BooleanField::new('useProxy', 'Use proxy')
+                ->setHelp('Use the PANEL_PROXY_* proxy from .env.local for this panel. If disabled, this panel connects directly.'),
             ChoiceField::new('apiVersion', 'API Version')
                 ->setChoices([
                     'legacy' => 'legacy',
