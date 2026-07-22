@@ -1610,7 +1610,12 @@ class TelegramUpdateHandler
 
         if (in_array($gateway->getType(), [PaymentGatewayType::ZIBAL, PaymentGatewayType::CUSTOM_API], true) || null !== $gateway->getPluginCode()) {
             if (!$requestResult->success || null === $payment->getPaymentUrl()) {
-                $this->showPopupOrMessage($chatId, $callbackId, $requestResult->message ?: 'ایجاد لینک پرداخت آنلاین انجام نشد.', 'zibal_request_failed_new_service');
+                $logKey = match ($gateway->getPluginCode()) {
+                    'greenpay' => 'greenpay_request_failed_new_service',
+                    null => 'zibal_request_failed_new_service',
+                    default => 'plugin_request_failed_new_service',
+                };
+                $this->showPopupOrMessage($chatId, $callbackId, $requestResult->message ?: 'ایجاد لینک پرداخت آنلاین انجام نشد.', $logKey);
 
                 return;
             }

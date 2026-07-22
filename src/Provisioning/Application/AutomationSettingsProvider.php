@@ -28,6 +28,11 @@ final class AutomationSettingsProvider
         return $this->settingValueProvider->getBool('automation.send_notifications_enabled', true);
     }
 
+    public function broadcastsEnabled(): bool
+    {
+        return $this->settingValueProvider->getBool('automation.broadcasts_enabled', true);
+    }
+
     public function autoSuspendExpiredEnabled(): bool
     {
         return $this->settingValueProvider->getBool('automation.auto_suspend_expired_enabled', false);

@@ -6,6 +6,8 @@ namespace App\Admin\UI;
 
 use App\Admin\UI\Crud\AdminUserCrudController;
 use App\Admin\UI\Crud\BotMessageLogCrudController;
+use App\Admin\UI\Crud\BroadcastDeliveryCrudController;
+use App\Admin\UI\Crud\BroadcastMessageCrudController;
 use App\Admin\UI\Crud\BotButtonLabelCrudController;
 use App\Admin\UI\Crud\BotMessageTemplateCrudController;
 use App\Admin\UI\Crud\DiscountCodeCrudController;
@@ -101,6 +103,8 @@ class DashboardController extends AbstractDashboardController
 
         yield MenuItem::section('admin.menu.automation', 'fa fa-magic');
         yield MenuItem::linkTo(ServiceNotificationLogCrudController::class, 'admin.notifications', 'fa fa-bell');
+        yield MenuItem::linkTo(BroadcastMessageCrudController::class, 'ارسال پیام همگانی', 'fa fa-bullhorn');
+        yield MenuItem::linkTo(BroadcastDeliveryCrudController::class, 'Broadcast Deliveries', 'fa fa-paper-plane-o');
         if ($this->routeExists('admin_renewal_pricing_settings')) {
             yield MenuItem::linkToRoute('admin.renewal_pricing_settings', 'fa fa-sliders', 'admin_renewal_pricing_settings');
         }

@@ -49,56 +49,43 @@ final class PanelHttpClientFactory
     private function resolveTransport(VpnPanel $panel): array
     {
         $panelConfig = is_array($panel->getConfig()) ? $panel->getConfig() : [];
-        $panelProxy = is_array($panelConfig['proxy'] ?? null) ? $panelConfig['proxy'] : [];
 
-        $panelProxyEnabled = $this->toBool($panelProxy['enabled'] ?? false);
-        if ($panelProxyEnabled) {
-            $proxyType = $this->normalizeProxyType((string) ($panelProxy['type'] ?? ''));
-            $proxyHost = trim((string) ($panelProxy['host'] ?? ''));
-            $proxyPort = trim((string) ($panelProxy['port'] ?? ''));
-            $proxyUsername = trim((string) ($panelProxy['username'] ?? ''));
-            $proxyPassword = trim((string) ($panelProxy['password'] ?? ''));
-            $proxyUrl = $this->buildProxyUrl($proxyType, $proxyHost, $proxyPort, $proxyUsername, $proxyPassword);
-
+        if (!$panel->isUseProxy()) {
             return [
-                'proxySource' => 'panel_config',
-                'proxyEnabled' => null !== $proxyUrl,
-                'proxyType' => $proxyType,
-                'proxyHost' => $proxyHost,
-                'proxyPort' => $proxyPort,
+                'proxySource' => 'none',
+                'proxyEnabled' => false,
+                'proxyType' => 'none',
+                'proxyHost' => '',
+                'proxyPort' => '',
                 'timeout' => $this->resolveTimeout($panelConfig),
-                'proxyUrl' => $proxyUrl,
+                'proxyUrl' => null,
             ];
         }
 
         $envEnabled = $this->toBool($this->panelProxyEnabled);
-        if ($envEnabled) {
-            $proxyType = $this->normalizeProxyType($this->panelProxyType);
-            $proxyHost = trim($this->panelProxyHost);
-            $proxyPort = trim($this->panelProxyPort);
-            $proxyUsername = trim($this->panelProxyUsername);
-            $proxyPassword = trim($this->panelProxyPassword);
-            $proxyUrl = $this->buildProxyUrl($proxyType, $proxyHost, $proxyPort, $proxyUsername, $proxyPassword);
+        if (!$envEnabled) {
+            throw new \RuntimeException('Panel proxy is enabled for this panel but PANEL_PROXY_ENABLED is false.');
+        }
 
-            return [
-                'proxySource' => 'env',
-                'proxyEnabled' => null !== $proxyUrl,
-                'proxyType' => $proxyType,
-                'proxyHost' => $proxyHost,
-                'proxyPort' => $proxyPort,
-                'timeout' => $this->resolveTimeout($panelConfig),
-                'proxyUrl' => $proxyUrl,
-            ];
+        $proxyType = $this->normalizeProxyType($this->panelProxyType);
+        $proxyHost = trim($this->panelProxyHost);
+        $proxyPort = trim($this->panelProxyPort);
+        $proxyUsername = trim($this->panelProxyUsername);
+        $proxyPassword = trim($this->panelProxyPassword);
+        $proxyUrl = $this->buildProxyUrl($proxyType, $proxyHost, $proxyPort, $proxyUsername, $proxyPassword);
+
+        if (null === $proxyUrl) {
+            throw new \RuntimeException('Panel proxy is enabled for this panel but PANEL_PROXY_* env proxy is incomplete.');
         }
 
         return [
-            'proxySource' => 'none',
-            'proxyEnabled' => false,
-            'proxyType' => 'none',
-            'proxyHost' => '',
-            'proxyPort' => '',
+            'proxySource' => 'env',
+            'proxyEnabled' => true,
+            'proxyType' => $proxyType,
+            'proxyHost' => $proxyHost,
+            'proxyPort' => $proxyPort,
             'timeout' => $this->resolveTimeout($panelConfig),
-            'proxyUrl' => null,
+            'proxyUrl' => $proxyUrl,
         ];
     }
 

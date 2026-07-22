@@ -159,7 +159,7 @@ final class PluginPaymentWebhookController extends AbstractController
      */
     private function findExternalPaymentId(array $payload): ?string
     {
-        foreach (['payment_id', 'paymentId', 'transaction_id', 'transactionId'] as $key) {
+        foreach (['payment_id', 'paymentId', 'transaction_id', 'transactionId', 'authority', 'Authority'] as $key) {
             $value = $this->stringOrNull($payload[$key] ?? null);
             if (null !== $value) {
                 return $value;

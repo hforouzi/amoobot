@@ -74,6 +74,26 @@ class TelegramApiClient
         $this->botMessageLogger->log(BotMessageDirection::OUTGOING, ['method' => 'sendMessage', 'payload' => $payload], $chatId, 'message');
     }
 
+    public function sendBroadcastMessageStrict(string $chatId, string $text, ?string $parseMode = null, bool $disableWebPagePreview = true): ?int
+    {
+        $payload = [
+            'chat_id' => $chatId,
+            'text' => $text,
+            'disable_web_page_preview' => $disableWebPagePreview,
+        ];
+
+        if (null !== $parseMode && '' !== trim($parseMode)) {
+            $payload['parse_mode'] = $parseMode;
+        }
+
+        $data = $this->callApi('sendMessage', $payload);
+        $this->botMessageLogger->log(BotMessageDirection::OUTGOING, ['method' => 'sendMessage', 'payload' => $payload], $chatId, 'message');
+
+        $messageId = $data['result']['message_id'] ?? null;
+
+        return null === $messageId ? null : (int) $messageId;
+    }
+
     public function answerCallbackQuery(string $callbackQueryId, ?string $text = null, bool $showAlert = false): void
     {
         $payload = ['callback_query_id' => $callbackQueryId];

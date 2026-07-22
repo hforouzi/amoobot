@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Command;
 
+use App\Broadcast\BroadcastSender;
 use App\Provisioning\Application\AutomationSettingsProvider;
 use App\Provisioning\Application\ServiceAutoSuspendService;
 use App\Provisioning\Application\ServiceExpiryChecker;
@@ -28,6 +29,7 @@ final class AutomationRunCommand extends Command
         private readonly ServiceAutoSuspendService $serviceAutoSuspendService,
         private readonly ServiceNotificationService $serviceNotificationService,
         private readonly IncompleteOrderExpiryService $incompleteOrderExpiryService,
+        private readonly BroadcastSender $broadcastSender,
         private readonly LoggerInterface $logger,
     ) {
         parent::__construct();
@@ -38,7 +40,7 @@ final class AutomationRunCommand extends Command
         $this
             ->addOption('dry-run', null, InputOption::VALUE_NONE, 'Show automation results without saving/sending')
             ->addOption('limit', null, InputOption::VALUE_REQUIRED, 'Max services to process per task; falls back to automation.batch_limit', null)
-            ->addOption('only', null, InputOption::VALUE_REQUIRED, 'Run only orders|sync|expiry|notifications|suspend|all', 'all');
+            ->addOption('only', null, InputOption::VALUE_REQUIRED, 'Run only orders|sync|expiry|notifications|suspend|broadcasts|all', 'all');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
@@ -46,10 +48,10 @@ final class AutomationRunCommand extends Command
         $io = new SymfonyStyle($input, $output);
         $dryRun = (bool) $input->getOption('dry-run');
         $only = strtolower(trim((string) $input->getOption('only')));
-        $onlyOptions = ['orders', 'sync', 'expiry', 'notifications', 'suspend', 'all'];
+        $onlyOptions = ['orders', 'sync', 'expiry', 'notifications', 'suspend', 'broadcasts', 'all'];
 
         if (!in_array($only, $onlyOptions, true)) {
-            $io->error('--only option must be one of: orders, sync, expiry, notifications, suspend, all.');
+            $io->error('--only option must be one of: orders, sync, expiry, notifications, suspend, broadcasts, all.');
 
             return Command::FAILURE;
         }
@@ -63,6 +65,7 @@ final class AutomationRunCommand extends Command
         $notified = 0;
         $failed = 0;
         $skipped = 0;
+        $broadcasts = 0;
 
         if ($this->shouldRun($only, 'orders')) {
             if ($this->automationSettingsProvider->expireIncompleteOrdersEnabled()) {
@@ -139,12 +142,26 @@ final class AutomationRunCommand extends Command
             }
         }
 
+        if ($this->shouldRun($only, 'broadcasts')) {
+            if ($this->automationSettingsProvider->broadcastsEnabled()) {
+                $summary = $this->broadcastSender->runDue($limit, $dryRun);
+                $broadcasts += $summary->broadcasts;
+                $notified += $summary->sent;
+                $failed += $summary->failed;
+                $skipped += $summary->skipped;
+                $this->logger->info('automation_task_completed', ['task' => 'broadcasts', 'summary' => $summary->toArray()]);
+            } else {
+                $this->logger->info('automation_task_skipped_by_setting', ['task' => 'broadcasts']);
+            }
+        }
+
         $io->section('Summary');
         $io->listing([
             sprintf('checked: %d', $checked),
             sprintf('updated: %d', $updated),
             sprintf('suspended: %d', $suspended),
             sprintf('notified: %d', $notified),
+            sprintf('broadcasts: %d', $broadcasts),
             sprintf('failed: %d', $failed),
             sprintf('skipped: %d', $skipped),
         ]);
