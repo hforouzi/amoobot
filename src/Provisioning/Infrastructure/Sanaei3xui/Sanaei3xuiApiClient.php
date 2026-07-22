@@ -126,10 +126,38 @@ final class Sanaei3xuiApiClient
             return $this->errorResult('login_failed');
         }
 
+        $clientApiMode = $this->getClientApiMode($panel);
+        if ('clients' === $clientApiMode) {
+            $this->log(sprintf(
+                'add_client_request panel_id=%s inbound_id="%s" client_api_mode="%s" add_client_endpoint="/panel/api/clients/add" %s',
+                $panel->getId() ?? 'null',
+                $inboundId,
+                $clientApiMode,
+                $this->formatDiagnosticContext($context)
+            ));
+
+            $result = $this->request(
+                $panel,
+                'POST',
+                '/panel/api/clients/add',
+                [
+                    'json' => [
+                        'client' => $this->buildClientsApiClientPayload($client),
+                        'inboundIds' => [$inboundId],
+                    ],
+                ]
+            );
+
+            $this->logAddClientResponse($panel, $inboundId, $clientApiMode, $result);
+
+            return $result;
+        }
+
         $this->log(sprintf(
-            'add_client_request panel_id=%s inbound_id="%s" add_client_endpoint="/panel/api/inbounds/addClient" %s',
+            'add_client_request panel_id=%s inbound_id="%s" client_api_mode="%s" add_client_endpoint="/panel/api/inbounds/addClient" %s',
             $panel->getId() ?? 'null',
             $inboundId,
+            $clientApiMode,
             $this->formatDiagnosticContext($context)
         ));
 
@@ -145,17 +173,7 @@ final class Sanaei3xuiApiClient
             ]
         );
 
-        $this->log(sprintf(
-            'add_client_response panel_id=%s inbound_id="%s" status=%s ok=%s success=%s empty=%s error="%s" body_preview="%s"',
-            $panel->getId() ?? 'null',
-            $inboundId,
-            (string) ($result['status'] ?? 'null'),
-            (($result['ok'] ?? false) === true) ? 'true' : 'false',
-            (($result['success'] ?? false) === true) ? 'true' : 'false',
-            (($result['empty'] ?? false) === true) ? 'true' : 'false',
-            (string) ($result['error'] ?? ''),
-            (string) ($result['bodyPreview'] ?? '')
-        ));
+        $this->logAddClientResponse($panel, $inboundId, $clientApiMode, $result);
 
         return $result;
     }
@@ -306,6 +324,8 @@ final class Sanaei3xuiApiClient
         }
 
         $options = array_replace($this->panelHttpClientFactory->createRequestOptions($panel), $options);
+        $transportDiagnostics = $this->panelHttpClientFactory->diagnostics($panel);
+        $this->logPanelHttpRequest($panel, $method, $path, $requestUrl, $expectJson, $transportDiagnostics);
 
         $headers = $options['headers'] ?? [];
         foreach ($this->buildHeaders($panel) as $header) {
@@ -324,7 +344,7 @@ final class Sanaei3xuiApiClient
             if ('' === $content) {
                 $this->log(sprintf('empty_api_response endpoint="%s" status=%d', $path, $statusCode));
 
-                return [
+                $result = [
                     'ok' => $this->isSuccessfulStatus($statusCode),
                     'status' => $statusCode,
                     'data' => null,
@@ -333,6 +353,9 @@ final class Sanaei3xuiApiClient
                     'bodyPreview' => '',
                     'error' => null,
                 ];
+                $this->logPanelHttpResponse($panel, $method, $path, $requestUrl, $result);
+
+                return $result;
             }
 
             $decoded = json_decode($content, true);
@@ -340,7 +363,7 @@ final class Sanaei3xuiApiClient
                 $businessSuccess = $decoded['success'] ?? null;
                 $previewRaw = json_encode($decoded, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 
-                return [
+                $result = [
                     'ok' => $this->isSuccessfulStatus($statusCode),
                     'status' => $statusCode,
                     'data' => $decoded,
@@ -349,6 +372,9 @@ final class Sanaei3xuiApiClient
                     'bodyPreview' => $this->sanitizeSnippet((string) ($previewRaw ?: '')),
                     'error' => null,
                 ];
+                $this->logPanelHttpResponse($panel, $method, $path, $requestUrl, $result);
+
+                return $result;
             }
 
             if ($expectJson) {
@@ -360,7 +386,7 @@ final class Sanaei3xuiApiClient
                     $preview
                 ));
 
-                return [
+                $result = [
                     'ok' => false,
                     'status' => $statusCode,
                     'data' => null,
@@ -369,9 +395,12 @@ final class Sanaei3xuiApiClient
                     'bodyPreview' => $preview,
                     'error' => 'non_json_response',
                 ];
+                $this->logPanelHttpResponse($panel, $method, $path, $requestUrl, $result);
+
+                return $result;
             }
 
-            return [
+            $result = [
                 'ok' => $this->isSuccessfulStatus($statusCode),
                 'status' => $statusCode,
                 'data' => null,
@@ -380,11 +409,122 @@ final class Sanaei3xuiApiClient
                 'bodyPreview' => $this->sanitizeSnippet($content),
                 'error' => null,
             ];
+            $this->logPanelHttpResponse($panel, $method, $path, $requestUrl, $result);
+
+            return $result;
         } catch (TransportExceptionInterface $e) {
+            $this->logPanelHttpTransportFailure($panel, $method, $path, $requestUrl, $e);
             $this->log(sprintf('api_transport_failure endpoint="%s" message="%s"', $path, $this->sanitizeSnippet($e->getMessage())));
 
             return $this->errorResult('transport_failure');
         }
+    }
+
+    private function logPanelHttpRequest(VpnPanel $panel, string $method, string $path, string $requestUrl, bool $expectJson, array $transportDiagnostics): void
+    {
+        $basePath = trim((string) ($this->panelConfig($panel)['base_path'] ?? $panel->getBasePath() ?? ''));
+
+        $this->log(sprintf(
+            'panel_http_request panel_id=%s method="%s" input_path="%s" final_url="%s" base_url="%s" base_path="%s" api_version="%s" auth_mode="%s" auth_type="%s" expect_json=%s proxy_enabled=%s proxy_source="%s" timeout=%s',
+            $panel->getId() ?? 'null',
+            $method,
+            $this->sanitizeSnippet($path),
+            $this->sanitizeUrlForLog($requestUrl),
+            $this->sanitizeUrlForLog($this->normalizeBaseUrl($panel)),
+            $this->sanitizeSnippet($basePath),
+            $this->getConfiguredApiVersion($panel),
+            $this->getConfiguredAuthMode($panel),
+            $this->useBearerAuth($panel) ? 'bearer' : 'cookie',
+            $expectJson ? 'yes' : 'no',
+            (($transportDiagnostics['proxyEnabled'] ?? false) === true) ? 'yes' : 'no',
+            (string) ($transportDiagnostics['proxySource'] ?? 'none'),
+            (string) ($transportDiagnostics['timeout'] ?? '')
+        ));
+    }
+
+    private function logPanelHttpResponse(VpnPanel $panel, string $method, string $path, string $requestUrl, array $result): void
+    {
+        $this->log(sprintf(
+            'panel_http_response panel_id=%s method="%s" input_path="%s" final_url="%s" status=%s ok=%s empty=%s body_preview="%s"',
+            $panel->getId() ?? 'null',
+            $method,
+            $this->sanitizeSnippet($path),
+            $this->sanitizeUrlForLog($requestUrl),
+            (string) ($result['status'] ?? 'null'),
+            (($result['ok'] ?? false) === true) ? 'yes' : 'no',
+            (($result['empty'] ?? false) === true) ? 'yes' : 'no',
+            $this->sanitizeSnippet((string) ($result['bodyPreview'] ?? ''))
+        ));
+    }
+
+    private function logPanelHttpTransportFailure(VpnPanel $panel, string $method, string $path, string $requestUrl, TransportExceptionInterface $exception): void
+    {
+        $this->log(sprintf(
+            'panel_http_transport_failure panel_id=%s method="%s" input_path="%s" final_url="%s" message="%s"',
+            $panel->getId() ?? 'null',
+            $method,
+            $this->sanitizeSnippet($path),
+            $this->sanitizeUrlForLog($requestUrl),
+            $this->sanitizeSnippet($exception->getMessage())
+        ));
+    }
+
+    private function getClientApiMode(VpnPanel $panel): string
+    {
+        $mode = strtolower(trim((string) ($this->panelConfig($panel)['client_api_mode'] ?? $panel->getClientApiMode() ?? '')));
+
+        return in_array($mode, ['inbound_legacy', 'clients'], true) ? $mode : 'inbound_legacy';
+    }
+
+//    private function buildClientsApiClientPayload(array $client): array
+//    {
+//        $allowedKeys = [
+//            'email',
+//            'totalGB',
+//            'expiryTime',
+//            'tgId',
+//            'limitIp',
+//            'enable',
+//            'id',
+//            'subId',
+//            'flow',
+//            'password',
+//        ];
+//
+//        $payload = [];
+//        foreach ($allowedKeys as $key) {
+//            if (array_key_exists($key, $client) && null !== $client[$key]) {
+//                $payload[$key] = $client[$key];
+//            }
+//        }
+//
+//        return $payload;
+//    }
+    private function buildClientsApiClientPayload(array $client): array
+    {
+        return [
+            'email' => (string) ($client['email'] ?? ''),
+            'totalGB' => (int) ($client['totalGB'] ?? 0),
+            'expiryTime' => (int) ($client['expiryTime'] ?? 0),
+            'tgId' => (int) ($client['tgId'] ?? 0),
+            'limitIp' => (int) ($client['limitIp'] ?? 0),
+            'enable' => (bool) ($client['enable'] ?? true),
+        ];
+    }
+    private function logAddClientResponse(VpnPanel $panel, int $inboundId, string $clientApiMode, array $result): void
+    {
+        $this->log(sprintf(
+            'add_client_response panel_id=%s inbound_id="%s" client_api_mode="%s" status=%s ok=%s success=%s empty=%s error="%s" body_preview="%s"',
+            $panel->getId() ?? 'null',
+            $inboundId,
+            $clientApiMode,
+            (string) ($result['status'] ?? 'null'),
+            (($result['ok'] ?? false) === true) ? 'true' : 'false',
+            (($result['success'] ?? false) === true) ? 'true' : 'false',
+            (($result['empty'] ?? false) === true) ? 'true' : 'false',
+            (string) ($result['error'] ?? ''),
+            (string) ($result['bodyPreview'] ?? '')
+        ));
     }
 
     private function captureCookies(VpnPanel $panel, array $headers): void
@@ -536,6 +676,14 @@ final class Sanaei3xuiApiClient
         $snippet = preg_replace('/\s+/', ' ', $snippet) ?? $snippet;
 
         return mb_substr(trim($snippet), 0, 300);
+    }
+
+    private function sanitizeUrlForLog(string $url): string
+    {
+        $sanitized = preg_replace('#^([a-z][a-z0-9+\-.]*://)([^/@\s:]+):([^/@\s]*)@#i', '$1[redacted]@', $url) ?? $url;
+        $sanitized = preg_replace('/([?&](?:api[_-]?token|access[_-]?token|token|password|passwd|cookie|session|authorization)=)[^&#]*/i', '$1[redacted]', $sanitized) ?? $sanitized;
+
+        return mb_substr(trim($sanitized), 0, 500);
     }
 
     private function errorResult(string $error): array

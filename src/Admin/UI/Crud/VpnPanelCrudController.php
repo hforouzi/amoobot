@@ -60,6 +60,8 @@ class VpnPanelCrudController extends AbstractCrudController
                 ]),
             TextField::new('title'),
             TextField::new('baseUrl'),
+            BooleanField::new('useProxy', 'Use proxy')
+                ->setHelp('Use the PANEL_PROXY_* proxy from .env.local for this panel. If disabled, this panel connects directly.'),
             ChoiceField::new('apiVersion', 'API Version')
                 ->setChoices([
                     'legacy' => 'legacy',
@@ -71,6 +73,12 @@ class VpnPanelCrudController extends AbstractCrudController
                     'cookie' => 'cookie',
                     'bearer' => 'bearer',
                 ]),
+            ChoiceField::new('clientApiMode', 'Client API Mode')
+                ->setChoices([
+                    'inbound_legacy' => 'inbound_legacy',
+                    'clients' => 'clients',
+                ])
+                ->setHelp('inbound_legacy uses /panel/api/inbounds/addClient. clients uses /panel/api/clients/add for newer 3x-ui v3 panels.'),
             TextField::new('basePath', 'Base Path')
                 ->setHelp('Optional panel path prefix, e.g. /xui'),
             TextField::new('subscriptionPathPrefix', 'Subscription Path Prefix')

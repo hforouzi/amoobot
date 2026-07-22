@@ -302,6 +302,24 @@ class VpnPanel
         return $this;
     }
 
+    public function getClientApiMode(): string
+    {
+        $mode = strtolower(trim((string) ($this->getConfigValue('client_api_mode') ?? '')));
+
+        return in_array($mode, ['inbound_legacy', 'clients'], true) ? $mode : 'inbound_legacy';
+    }
+
+    public function setClientApiMode(?string $mode): self
+    {
+        $normalized = strtolower(trim((string) ($mode ?? '')));
+        if (!in_array($normalized, ['inbound_legacy', 'clients'], true)) {
+            $normalized = 'inbound_legacy';
+        }
+        $this->setConfigValue('client_api_mode', $normalized);
+
+        return $this;
+    }
+
     public function getBasePath(): ?string
     {
         $value = trim((string) ($this->getConfigValue('base_path') ?? ''));
@@ -340,6 +358,18 @@ class VpnPanel
         }
 
         $this->setConfigValue('subscription_path_prefix', $this->normalizeSlashPrefixedPath($value));
+
+        return $this;
+    }
+
+    public function isUseProxy(): bool
+    {
+        return true === ($this->getConfigValue('use_proxy') ?? false);
+    }
+
+    public function setUseProxy(bool $useProxy): self
+    {
+        $this->setConfigValue('use_proxy', $useProxy);
 
         return $this;
     }
