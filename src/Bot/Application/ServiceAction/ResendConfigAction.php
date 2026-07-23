@@ -16,11 +16,19 @@ final class ResendConfigAction implements ServiceActionInterface
     public function supports(string $callbackData): bool
     {
         return str_starts_with($callbackData, 'service_resend_config:')
-            || str_starts_with($callbackData, 'service_config_links:');
+            || str_starts_with($callbackData, 'service_config_links:')
+            || str_starts_with($callbackData, 'service_configs:');
     }
 
     public function handle(ServiceActionContext $context): void
     {
+        if (str_starts_with($context->data, 'service_configs:')) {
+            $serviceId = (int) str_replace('service_configs:', '', $context->data);
+            $this->serviceManagementService->showServiceAccessPlaceholder($context->account, $serviceId, $context->chatId, $context->callbackId, 'configs');
+
+            return;
+        }
+
         if (str_starts_with($context->data, 'service_config_links:')) {
             $serviceId = (int) str_replace('service_config_links:', '', $context->data);
             $this->serviceManagementService->sendConfigLinks($context->account, $serviceId, $context->chatId, $context->callbackId);

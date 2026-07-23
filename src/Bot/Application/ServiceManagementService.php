@@ -379,7 +379,37 @@ class ServiceManagementService
         $this->syncServiceUsage($account, $serviceId, $chatId, $callbackId, false);
     }
 
-    public function syncServiceUsage(TelegramAccount $account, int $serviceId, string $chatId, string $callbackId, bool $adminMode): void
+    public function showServiceAccessPlaceholder(TelegramAccount $account, int $serviceId, string $chatId, string $callbackId, string $action): void
+    {
+        $service = $this->entityManager->getRepository(VpnService::class)->find($serviceId);
+        if (!$service instanceof VpnService) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'سرویس معتبر نیست.', 'invalid_service_access_placeholder');
+
+            return;
+        }
+
+        if ($service->getUser()->getId() !== $account->getUser()->getId()) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'دسترسی غیرمجاز.', 'unauthorized_service_access_placeholder');
+
+            return;
+        }
+
+        if (VpnServiceStatus::DELETED === $service->getStatus()) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'سرویس معتبر نیست.', 'deleted_service_access_placeholder');
+
+            return;
+        }
+
+        $this->debugLog(sprintf(
+            'telegram_service_access_action action="%s" service_id=%d actor_id="%s"',
+            $action,
+            $serviceId,
+            $account->getTelegramId()
+        ));
+        $this->telegramApiClient->answerCallbackQuery($callbackId, 'این قابلیت در مرحله بعد فعال میشود.', false);
+    }
+
+    public function syncServiceUsage(TelegramAccount $account, int $serviceId, string $chatId, string $callbackId, bool $adminMode, ?string $accessAction = null): void
     {
         $service = $this->entityManager->getRepository(VpnService::class)->find($serviceId);
         if (!$service instanceof VpnService) {
@@ -392,6 +422,21 @@ class ServiceManagementService
             $this->showPopupOrMessage($chatId, $callbackId, 'دسترسی غیرمجاز.', 'unauthorized_service_refresh_user');
 
             return;
+        }
+
+        if (!$adminMode && VpnServiceStatus::DELETED === $service->getStatus()) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'سرویس معتبر نیست.', 'deleted_service_refresh_user');
+
+            return;
+        }
+
+        if (null !== $accessAction) {
+            $this->debugLog(sprintf(
+                'telegram_service_access_action action="%s" service_id=%d actor_id="%s"',
+                $accessAction,
+                $serviceId,
+                $account->getTelegramId()
+            ));
         }
 
         try {
@@ -1863,35 +1908,16 @@ class ServiceManagementService
 
     private function sendUserServiceDetail(string $chatId, VpnService $service, string $sourceFlow): void
     {
-        if (!$this->ensureFreshConfigBeforeDelivery($chatId, $service, $sourceFlow)) {
-            return;
-        }
-
         $this->telegramApiClient->sendMessage(
             $chatId,
             $this->formatServiceDetailForUser($service),
             $this->keyboardFactory->userServiceDetail(
                 (int) $service->getId(),
                 VpnServiceStatus::DELETED !== $service->getStatus() && $this->salesSettingsProvider->renewalsEnabled(),
-                VpnServiceStatus::DELETED !== $service->getStatus() && $this->salesSettingsProvider->addTrafficEnabled()
+                VpnServiceStatus::DELETED !== $service->getStatus() && $this->salesSettingsProvider->addTrafficEnabled(),
+                VpnServiceStatus::DELETED !== $service->getStatus()
             )
         );
-
-        $configLinkSet = $this->collectConfigLinks($service, $sourceFlow);
-        if ([] === $configLinkSet->finalLinks) {
-            return;
-        }
-
-        $this->sendAccessMessages($chatId, $service, '✅ سرویس شما آماده شد', $sourceFlow);
-        $this->debugLog(sprintf(
-            'service_detail_configs service_id=%d source_flow=%s raw_link_count=%d formatted_link_count=%d final_sent_count=%d dropped_duplicate_count=%d',
-            $service->getId() ?? 0,
-            $sourceFlow,
-            $configLinkSet->rawCount,
-            $configLinkSet->formattedCount,
-            count($configLinkSet->finalLinks),
-            $configLinkSet->droppedDuplicateCount
-        ));
     }
 
     private function sendAccessMessages(string $chatId, VpnService $service, string $headline, string $sourceFlow): void

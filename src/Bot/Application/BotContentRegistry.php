@@ -212,12 +212,12 @@ final class BotContentRegistry
             'button.order.cancel' => ['label' => '❌ انصراف', 'buttonType' => 'inline', 'category' => 'order'],
             'button.order.confirm' => ['label' => '✅ تایید سفارش', 'buttonType' => 'inline', 'category' => 'order'],
             'button.service.subscription' => ['label' => '🔗 لینک اشتراک', 'buttonType' => 'inline', 'category' => 'service'],
-            'button.service.qr' => ['label' => '📷 QR لینک اشتراک', 'buttonType' => 'inline', 'category' => 'service'],
-            'button.service.configs' => ['label' => '📨 ارسال مجدد کانفیگ', 'buttonType' => 'inline', 'category' => 'service'],
+            'button.service.qr' => ['label' => 'QR Code', 'buttonType' => 'inline', 'category' => 'service'],
+            'button.service.configs' => ['label' => '⚙️ کانفیگها', 'buttonType' => 'inline', 'category' => 'service'],
             'button.service.view' => ['label' => 'مشاهده سرویس', 'buttonType' => 'inline', 'category' => 'service'],
             'button.service.renew' => ['label' => '🔄 تمدید سرویس', 'buttonType' => 'inline', 'category' => 'service'],
             'button.service.add_traffic' => ['label' => '➕ خرید حجم اضافه', 'buttonType' => 'inline', 'category' => 'service'],
-            'button.service.refresh_usage' => ['label' => '🔄 بروزرسانی مصرف', 'buttonType' => 'inline', 'category' => 'service'],
+            'button.service.refresh_usage' => ['label' => 'بروزرسانی', 'buttonType' => 'inline', 'category' => 'service'],
         ];
     }
 
@@ -262,12 +262,12 @@ final class BotContentRegistry
             'button.order.cancel' => '❌ Cancel',
             'button.order.confirm' => '✅ Confirm order',
             'button.service.subscription' => '🔗 Subscription link',
-            'button.service.qr' => '📷 Subscription QR',
-            'button.service.configs' => '📨 Resend config',
+            'button.service.qr' => 'QR Code',
+            'button.service.configs' => '⚙️ Configs',
             'button.service.view' => 'View service',
             'button.service.renew' => '🔄 Renew service',
             'button.service.add_traffic' => '➕ Buy extra traffic',
-            'button.service.refresh_usage' => '🔄 Refresh usage',
+            'button.service.refresh_usage' => 'Refresh',
         ];
         foreach ($labels as $key => $label) {
             $buttons[$key]['label'] = $label;

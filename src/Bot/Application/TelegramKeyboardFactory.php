@@ -558,18 +558,19 @@ class TelegramKeyboardFactory
     /**
      * @return array<string, array<array<array<string, string>>>>
      */
-    public function userServiceDetail(int $serviceId, bool $canRenew = true, bool $canAddTraffic = true): array
+    public function userServiceDetail(int $serviceId, bool $canRenew = true, bool $canAddTraffic = true, bool $canAccess = true): array
     {
-        $rows = [
-            [
+        $rows = [];
+        if ($canAccess) {
+            $rows[] = [
                 ['text' => $this->button('button.service.subscription'), 'callback_data' => 'service_subscription:'.$serviceId],
-                ['text' => $this->button('button.service.qr'), 'callback_data' => 'service_subscription_qr:'.$serviceId],
-            ],
-            [
-                ['text' => $this->button('button.service.configs'), 'callback_data' => 'service_resend_config:'.$serviceId],
-                ['text' => $this->button('button.service.refresh_usage'), 'callback_data' => 'service_sync_usage:'.$serviceId],
-            ],
-        ];
+                ['text' => $this->button('button.service.configs'), 'callback_data' => 'service_configs:'.$serviceId],
+            ];
+            $rows[] = [
+                ['text' => $this->button('button.service.qr'), 'callback_data' => 'service_qr_menu:'.$serviceId],
+                ['text' => $this->button('button.service.refresh_usage'), 'callback_data' => 'service_refresh:'.$serviceId],
+            ];
+        }
 
         $actionButtons = [];
         if ($canRenew) {

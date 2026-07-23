@@ -32,7 +32,8 @@ final class RefreshServiceAction implements ServiceActionInterface
             $serviceId,
             $context->chatId,
             $context->callbackId,
-            $context->isAdmin
+            $context->isAdmin,
+            str_starts_with($context->data, 'service_refresh:') ? 'refresh' : null
         );
     }
 }
