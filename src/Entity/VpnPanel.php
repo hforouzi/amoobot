@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Entity;
 
+use App\Provisioning\Domain\SanaeiIntegrationMode;
 use Doctrine\DBAL\Types\Types;
 use Doctrine\ORM\Mapping as ORM;
 
@@ -35,6 +36,9 @@ class VpnPanel
 
     #[ORM\Column(type: Types::JSON, nullable: true)]
     private ?array $config = null;
+
+    #[ORM\Column(length: 32, nullable: true, enumType: SanaeiIntegrationMode::class)]
+    private ?SanaeiIntegrationMode $sanaeiIntegrationMode = null;
 
     #[ORM\Column(length: 255, nullable: true)]
     private ?string $subscriptionBaseUrl = null;
@@ -271,6 +275,18 @@ class VpnPanel
         $apiVersion = strtolower(trim((string) ($this->getConfigValue('api_version') ?? '')));
 
         return in_array($apiVersion, ['legacy', 'v3'], true) ? $apiVersion : 'legacy';
+    }
+
+    public function getSanaeiIntegrationMode(): SanaeiIntegrationMode
+    {
+        return $this->sanaeiIntegrationMode ?? SanaeiIntegrationMode::LEGACY;
+    }
+
+    public function setSanaeiIntegrationMode(?SanaeiIntegrationMode $mode): self
+    {
+        $this->sanaeiIntegrationMode = $mode;
+
+        return $this;
     }
 
     public function setApiVersion(?string $apiVersion): self

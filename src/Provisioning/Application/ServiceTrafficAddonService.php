@@ -8,7 +8,7 @@ use App\Entity\Order;
 use App\Entity\VpnService;
 use App\Provisioning\Domain\Dto\RenewVpnServiceRequest;
 use App\Provisioning\Domain\VpnServiceStatus;
-use App\Provisioning\Infrastructure\Sanaei3xui\Sanaei3xuiDriver;
+use App\Provisioning\Infrastructure\Sanaei3xui\Legacy\Sanaei3xuiLegacyDriver;
 use App\Provisioning\Infrastructure\VpnPanelDriverRegistry;
 
 final class ServiceTrafficAddonService
@@ -42,7 +42,7 @@ final class ServiceTrafficAddonService
         }
 
         $driver = $this->driverRegistry->resolve($service->getPanel());
-        if ($driver instanceof Sanaei3xuiDriver) {
+        if ($driver instanceof Sanaei3xuiLegacyDriver) {
             $driver->addTrafficLimit((string) ($service->getRemoteId() ?? ''), $newTrafficLimitGb, $service->getPanel());
         } else {
             $driver->renewService(

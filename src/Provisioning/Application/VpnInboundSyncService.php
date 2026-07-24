@@ -6,14 +6,14 @@ namespace App\Provisioning\Application;
 
 use App\Entity\VpnInbound;
 use App\Entity\VpnPanel;
-use App\Provisioning\Infrastructure\Sanaei3xui\Sanaei3xuiApiClient;
+use App\Provisioning\Infrastructure\Sanaei3xui\Legacy\Sanaei3xuiLegacyApiClient;
 use Doctrine\ORM\EntityManagerInterface;
 
 final class VpnInboundSyncService
 {
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
-        private readonly Sanaei3xuiApiClient $apiClient,
+        private readonly Sanaei3xuiLegacyApiClient $apiClient,
     ) {
     }
 

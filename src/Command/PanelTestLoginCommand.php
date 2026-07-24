@@ -6,7 +6,7 @@ namespace App\Command;
 
 use App\Entity\VpnPanel;
 use App\Provisioning\Infrastructure\PanelHttpClientFactory;
-use App\Provisioning\Infrastructure\Sanaei3xui\Sanaei3xuiApiClient;
+use App\Provisioning\Infrastructure\Sanaei3xui\Legacy\Sanaei3xuiLegacyApiClient;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
@@ -20,7 +20,7 @@ final class PanelTestLoginCommand extends Command
 {
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
-        private readonly Sanaei3xuiApiClient $apiClient,
+        private readonly Sanaei3xuiLegacyApiClient $apiClient,
         private readonly PanelHttpClientFactory $panelHttpClientFactory,
     ) {
         parent::__construct();

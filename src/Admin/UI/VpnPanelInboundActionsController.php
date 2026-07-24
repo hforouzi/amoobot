@@ -17,7 +17,7 @@ use App\Provisioning\Application\VpnInboundSyncService;
 use App\Provisioning\Application\VpnServiceConfigRefreshService;
 use App\Provisioning\Domain\Dto\CreateVpnServiceRequest;
 use App\Provisioning\Domain\VpnServiceStatus;
-use App\Provisioning\Infrastructure\Sanaei3xui\Sanaei3xuiApiClient;
+use App\Provisioning\Infrastructure\Sanaei3xui\Legacy\Sanaei3xuiLegacyApiClient;
 use App\Provisioning\Infrastructure\VpnPanelDriverRegistry;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
@@ -37,7 +37,7 @@ final class VpnPanelInboundActionsController extends AbstractController
     }
 
     #[Route('/vpn-panel/{id}/test-connection', name: 'admin_vpn_panel_test_connection', methods: ['GET'])]
-    public function testPanelConnection(VpnPanel $panel, Sanaei3xuiApiClient $apiClient): RedirectResponse
+    public function testPanelConnection(VpnPanel $panel, Sanaei3xuiLegacyApiClient $apiClient): RedirectResponse
     {
         if ('sanaei_3xui' !== $panel->getType()) {
             $this->addFlash('danger', 'این عملیات فقط برای پنل sanaei_3xui قابل انجام است.');

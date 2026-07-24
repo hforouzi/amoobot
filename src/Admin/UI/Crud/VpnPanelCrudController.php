@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Admin\UI\Crud;
 
 use App\Entity\VpnPanel;
+use App\Provisioning\Domain\SanaeiIntegrationMode;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Action;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Actions;
 use EasyCorp\Bundle\EasyAdminBundle\Controller\AbstractCrudController;
@@ -62,6 +63,12 @@ class VpnPanelCrudController extends AbstractCrudController
             TextField::new('baseUrl'),
             BooleanField::new('useProxy', 'Use proxy')
                 ->setHelp('Use the PANEL_PROXY_* proxy from .env.local for this panel. If disabled, this panel connects directly.'),
+            ChoiceField::new('sanaeiIntegrationMode', 'Sanaei integration')
+                ->setChoices([
+                    'Legacy API' => SanaeiIntegrationMode::LEGACY,
+                    'Modern API' => SanaeiIntegrationMode::MODERN,
+                ])
+                ->setHelp('Legacy remains the production-compatible default. Modern is a foundation-only selection until modern operations are implemented.'),
             ChoiceField::new('apiVersion', 'API Version')
                 ->setChoices([
                     'legacy' => 'legacy',

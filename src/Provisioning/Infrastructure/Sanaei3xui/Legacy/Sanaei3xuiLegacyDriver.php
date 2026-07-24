@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace App\Provisioning\Infrastructure\Sanaei3xui;
+namespace App\Provisioning\Infrastructure\Sanaei3xui\Legacy;
 
 use App\Entity\VpnInbound;
 use App\Entity\VpnPanel;
@@ -12,15 +12,22 @@ use App\Provisioning\Domain\Dto\CreatedVpnService;
 use App\Provisioning\Domain\Dto\CreateVpnServiceRequest;
 use App\Provisioning\Domain\Dto\RenewVpnServiceRequest;
 use App\Provisioning\Domain\Dto\VpnUsage;
+use App\Provisioning\Domain\SanaeiIntegrationMode;
 use App\Provisioning\Domain\VpnPanelDriverInterface;
+use App\Provisioning\Infrastructure\Sanaei3xui\Sanaei3xuiConfigGenerator;
+use App\Provisioning\Infrastructure\Sanaei3xui\Sanaei3xuiRemoteClientRef;
+use App\Provisioning\Infrastructure\Sanaei3xui\Sanaei3xuiRemoteIdParser;
 use Symfony\Component\Uid\Uuid;
 
-final class Sanaei3xuiDriver implements VpnPanelDriverInterface
+/**
+ * Legacy Sanaei / 3x-ui integration.
+ */
+class Sanaei3xuiLegacyDriver implements VpnPanelDriverInterface
 {
     private const BYTES_PER_GB = 1073741824;
 
     public function __construct(
-        private readonly Sanaei3xuiApiClient $apiClient,
+        private readonly Sanaei3xuiLegacyApiClient $apiClient,
         private readonly Sanaei3xuiRemoteIdParser $remoteIdParser,
         private readonly Sanaei3xuiConfigGenerator $configGenerator,
     ) {
@@ -28,7 +35,19 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
 
     public function supports(?VpnPanel $panel): bool
     {
-        return $panel instanceof VpnPanel && 'sanaei_3xui' === $panel->getType();
+        return $panel instanceof VpnPanel
+            && 'sanaei_3xui' === $panel->getType()
+            && SanaeiIntegrationMode::LEGACY === $panel->getSanaeiIntegrationMode();
+    }
+
+    public function integrationMode(): SanaeiIntegrationMode
+    {
+        return SanaeiIntegrationMode::LEGACY;
+    }
+
+    public function integrationKey(): string
+    {
+        return 'sanaei_3xui_legacy';
     }
 
     public function createService(CreateVpnServiceRequest $request, ?VpnPanel $panel = null): CreatedVpnService
@@ -716,7 +735,7 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
 
     private function log(string $message): void
     {
-        error_log('[Sanaei3xuiDriver] '.$message);
+        error_log('[Sanaei3xuiLegacyDriver] '.$message);
     }
 
     private function toNonNegativeInt(mixed $value): ?int

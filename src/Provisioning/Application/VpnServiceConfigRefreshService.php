@@ -5,12 +5,13 @@ declare(strict_types=1);
 namespace App\Provisioning\Application;
 
 use App\Entity\VpnService;
-use App\Provisioning\Infrastructure\Sanaei3xui\Sanaei3xuiDriver;
+use App\Provisioning\Domain\SanaeiIntegrationMode;
+use App\Provisioning\Infrastructure\Sanaei3xui\Legacy\Sanaei3xuiLegacyDriver;
 
 final class VpnServiceConfigRefreshService
 {
     public function __construct(
-        private readonly Sanaei3xuiDriver $sanaei3xuiDriver,
+        private readonly Sanaei3xuiLegacyDriver $sanaei3xuiDriver,
     ) {
     }
 
@@ -72,10 +73,7 @@ final class VpnServiceConfigRefreshService
             return false;
         }
 
-        $config = is_array($panel->getConfig()) ? $panel->getConfig() : [];
-        $apiVersion = strtolower(trim((string) ($config['api_version'] ?? $panel->getApiVersion() ?? 'legacy')));
-
-        return 'v3' !== $apiVersion;
+        return SanaeiIntegrationMode::LEGACY === $panel->getSanaeiIntegrationMode();
     }
 
     /**

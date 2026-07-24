@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace App\Command;
 
 use App\Entity\VpnService;
-use App\Provisioning\Infrastructure\Sanaei3xui\Sanaei3xuiApiClient;
+use App\Provisioning\Infrastructure\Sanaei3xui\Legacy\Sanaei3xuiLegacyApiClient;
 use App\Provisioning\Infrastructure\Sanaei3xui\Sanaei3xuiRemoteIdParser;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\Console\Attribute\AsCommand;
@@ -21,7 +21,7 @@ final class PanelTestClientLinksCommand extends Command
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
         private readonly Sanaei3xuiRemoteIdParser $remoteIdParser,
-        private readonly Sanaei3xuiApiClient $apiClient,
+        private readonly Sanaei3xuiLegacyApiClient $apiClient,
     ) {
         parent::__construct();
     }

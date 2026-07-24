@@ -11,7 +11,7 @@ use App\Provisioning\Application\VpnAccessLinkGenerator;
 use App\Provisioning\Application\VpnInboundSyncService;
 use App\Provisioning\Application\VpnServiceConfigRefreshService;
 use App\Provisioning\Domain\VpnServiceStatus;
-use App\Provisioning\Infrastructure\Sanaei3xui\Sanaei3xuiApiClient;
+use App\Provisioning\Infrastructure\Sanaei3xui\Legacy\Sanaei3xuiLegacyApiClient;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
@@ -27,7 +27,7 @@ final class PanelSyncInboundsCommand extends Command
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
         private readonly VpnInboundSyncService $inboundSyncService,
-        private readonly Sanaei3xuiApiClient $apiClient,
+        private readonly Sanaei3xuiLegacyApiClient $apiClient,
         private readonly VpnAccessLinkGenerator $vpnAccessLinkGenerator,
         private readonly VpnServiceConfigRefreshService $configRefreshService,
     ) {

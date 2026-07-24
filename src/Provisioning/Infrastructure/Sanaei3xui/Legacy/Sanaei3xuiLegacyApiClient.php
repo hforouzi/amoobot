@@ -2,14 +2,14 @@
 
 declare(strict_types=1);
 
-namespace App\Provisioning\Infrastructure\Sanaei3xui;
+namespace App\Provisioning\Infrastructure\Sanaei3xui\Legacy;
 
 use App\Entity\VpnPanel;
 use App\Provisioning\Infrastructure\PanelHttpClientFactory;
 use Symfony\Contracts\HttpClient\Exception\TransportExceptionInterface;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 
-final class Sanaei3xuiApiClient
+final class Sanaei3xuiLegacyApiClient
 {
     private array $cookiesByPanel = [];
     private array $loggedInPanels = [];
@@ -732,6 +732,6 @@ final class Sanaei3xuiApiClient
 
     private function log(string $message): void
     {
-        error_log('[Sanaei3xuiApiClient] '.$message);
+        error_log('[Sanaei3xuiLegacyApiClient] '.$message);
     }
 }
