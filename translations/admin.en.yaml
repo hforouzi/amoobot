@@ -103,7 +103,7 @@ help:
   payment_gateway_store_method: PaymentGateway stores gateway credentials. StorePaymentMethod controls what users see in the bot.
   plan_custom_pricing: If enabled, custom pricing is calculated based on traffic and duration values.
   nowpayments_rate: Set conversion rates based on the selected amount unit (toman or rial).
-  panel_bearer_token: For Sanaei v3 bearer mode, use Settings → Security → API Token and set auth mode to bearer.
+  panel_bearer_token: For Sanaei Modern API and Sanaei v3 bearer mode, use Settings -> Security -> API Token. Leaving this field blank preserves the stored token.
   incomplete_order_expiration: Defines expiration time for incomplete orders in automation settings.
 
 fieldset:
@@ -205,3 +205,74 @@ sales_settings:
     renewals_enabled: Renewals enabled?
     add_traffic_enabled: Extra traffic purchases enabled?
     disabled_message: Sales disabled message
+
+vpn_panel:
+  sections:
+    type_mode: Panel type and integration mode
+    connection: Connection information
+    modern_api: Modern API connection
+    legacy: Legacy connection
+    advanced: Advanced settings
+    status: Status
+  fields:
+    type: Type
+    sanaei_integration: Sanaei Integration
+    title: Display name
+    base_url: Base URL
+    use_proxy: Use proxy
+    api_token: API Token
+    legacy_api_token: API Token
+    auth_mode: Legacy authentication method
+    username: Username
+    password: Password
+    api_version: API Version
+    client_api_mode: Client API Mode
+    base_path: Base Path
+    subscription_path_prefix: Subscription Path Prefix
+    subscription_base_url: Subscription Base URL
+    public_host: Public Host
+    password_configured: Password configured
+    token_configured: Token configured
+    last_test_result: Last test result
+    is_active: Panel is active
+  integration:
+    legacy:
+      label: Legacy
+      description: Traditional connection using username and password
+    modern:
+      label: Modern API
+      description: Modern connection using an API token
+  auth:
+    cookie:
+      label: Cookie login
+      description: Use username and password for older Sanaei panels.
+    bearer:
+      label: Bearer token
+      description: Use an API token for Sanaei v3 bearer mode.
+  help:
+    type: Select dummy for local testing, or sanaei_3xui for a real Sanaei/3x-ui panel.
+    sanaei_integration: Legacy uses username/password or optional bearer authentication. Modern uses the official API token boundary.
+    title: A recognizable display name, for example “Germany Panel 1”.
+    base_url: "Enter only the panel base URL; API paths are added automatically. Example: https://panel.example.com:2053"
+    use_proxy: When enabled, panel requests use the configured PANEL_PROXY_* environment settings.
+    modern_callout: Username and password are not required in Modern mode.
+    modern_api_token: Get the API token from 3x-ui under Settings → Security → API Token. When editing, leaving this field blank preserves the current token.
+    legacy_callout: For older Sanaei panels that use username and password authentication.
+    auth_mode: Choose cookie login for username/password panels. Choose bearer token only for legacy Sanaei v3 bearer setups.
+    legacy_username: Required for cookie login.
+    legacy_password: Required for cookie login. When editing, leaving this field blank preserves the current password.
+    legacy_api_token: Required only when Legacy authentication method is Bearer token. When editing, leaving this field blank preserves the current token.
+    api_version: Legacy panels usually use legacy. Select v3 only for Sanaei panels where legacy bearer/client API settings are intentionally used.
+    client_api_mode: Advanced legacy client endpoint selection. Leave the default unless a Sanaei v3 panel requires the clients endpoint.
+    base_path: Optional reverse-proxy path prefix such as /xui. Leave empty for normal panel URLs.
+    subscription_path_prefix: Optional legacy subscription path prefix. Leave empty unless subscriptions are served behind a custom path.
+    subscription_base_url: Optional public subscription base URL for legacy subscription links. Leave empty to use the panel URL.
+    public_host: Optional fallback host for generated legacy single links. Leave empty for normal inbound host handling.
+    config: Technical JSON configuration is shown read-only here; sensitive values are redacted.
+    is_active: Disable this switch to keep the panel configured but unavailable for provisioning.
+  actions:
+    save_changes: Save changes
+    save_and_continue: Save and continue editing
+    back_to_list: Back to list
+    test_modern_connection: Test Modern API Connection
+    test_legacy_connection: Test Legacy Connection

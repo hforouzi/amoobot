@@ -103,7 +103,7 @@ help:
   payment_gateway_store_method: PaymentGateway اطلاعات اتصال و اعتبارنامه درگاه را نگهداری می‌کند. StorePaymentMethod تعیین می‌کند کاربر در بات چه روش‌هایی ببیند.
   plan_custom_pricing: در صورت فعال بودن، قیمت سفارشی بر اساس حجم و مدت محاسبه می‌شود.
   nowpayments_rate: نرخ تبدیل را بر اساس amount unit انتخاب‌شده (toman یا rial) تنظیم کنید.
-  panel_bearer_token: برای حالت bearer در Sanaei v3 از Settings → Security → API Token استفاده کنید و auth mode را bearer بگذارید.
+  panel_bearer_token: برای Sanaei Modern API و حالت bearer در Sanaei v3 از Settings -> Security -> API Token استفاده کنید. خالی گذاشتن این فیلد توکن ذخیره‌شده را حفظ می‌کند.
   incomplete_order_expiration: زمان انقضای سفارش ناقص در تنظیمات اتوماسیون را مشخص می‌کند.
 
 fieldset:
@@ -205,3 +205,74 @@ sales_settings:
     renewals_enabled: تمدید سرویس فعال است؟
     add_traffic_enabled: خرید حجم اضافه فعال است؟
     disabled_message: پیام غیرفعال بودن فروش
+
+vpn_panel:
+  sections:
+    type_mode: نوع پنل و حالت یکپارچه‌سازی
+    connection: اطلاعات اتصال
+    modern_api: اتصال Modern API
+    legacy: اتصال Legacy
+    advanced: تنظیمات پیشرفته
+    status: وضعیت
+  fields:
+    type: نوع
+    sanaei_integration: Sanaei Integration
+    title: نام نمایشی
+    base_url: Base URL
+    use_proxy: استفاده از پروکسی
+    api_token: API Token
+    legacy_api_token: API Token
+    auth_mode: روش احراز هویت Legacy
+    username: نام کاربری
+    password: رمز عبور
+    api_version: API Version
+    client_api_mode: Client API Mode
+    base_path: Base Path
+    subscription_path_prefix: Subscription Path Prefix
+    subscription_base_url: Subscription Base URL
+    public_host: Public Host
+    password_configured: رمز عبور تنظیم شده
+    token_configured: توکن تنظیم شده
+    last_test_result: نتیجه آخرین تست
+    is_active: پنل فعال است
+  integration:
+    legacy:
+      label: Legacy
+      description: اتصال سنتی با نام کاربری و رمز عبور
+    modern:
+      label: Modern API
+      description: اتصال جدید از طریق API Token
+  auth:
+    cookie:
+      label: ورود Cookie
+      description: استفاده از نام کاربری و رمز عبور برای پنل‌های قدیمی Sanaei.
+    bearer:
+      label: Bearer token
+      description: استفاده از API Token برای حالت bearer در Sanaei v3.
+  help:
+    type: برای تست محلی dummy و برای پنل واقعی Sanaei/3x-ui مقدار sanaei_3xui را انتخاب کنید.
+    sanaei_integration: Legacy از نام کاربری و رمز عبور یا bearer اختیاری استفاده می‌کند. Modern از API Token رسمی استفاده می‌کند.
+    title: یک نام قابل تشخیص برای این پنل، مانند «پنل آلمان ۱»
+    base_url: "فقط آدرس پایه پنل را وارد کنید؛ مسیر API به‌صورت خودکار اضافه می‌شود. مثال: https://panel.example.com:2053"
+    use_proxy: در صورت فعال بودن، درخواست‌های پنل از تنظیمات محیطی PANEL_PROXY_* استفاده می‌کنند.
+    modern_callout: در حالت Modern به نام کاربری و رمز عبور نیازی نیست.
+    modern_api_token: توکن API را از پنل 3x-ui در مسیر Settings → Security → API Token دریافت کنید. هنگام ویرایش، خالی گذاشتن این فیلد توکن فعلی را حفظ می‌کند.
+    legacy_callout: برای پنل‌های قدیمی Sanaei که از ورود با نام کاربری و رمز عبور استفاده می‌کنند.
+    auth_mode: برای پنل‌های نام کاربری و رمز عبور، Cookie login را انتخاب کنید. Bearer token فقط برای تنظیمات Legacy v3 استفاده می‌شود.
+    legacy_username: برای ورود Cookie الزامی است.
+    legacy_password: برای ورود Cookie الزامی است. هنگام ویرایش، خالی گذاشتن این فیلد رمز عبور فعلی را حفظ می‌کند.
+    legacy_api_token: فقط وقتی روش احراز هویت Legacy روی Bearer token است الزامی است. هنگام ویرایش، خالی گذاشتن این فیلد توکن فعلی را حفظ می‌کند.
+    api_version: پنل‌های Legacy معمولا مقدار legacy را استفاده می‌کنند. فقط وقتی تنظیمات bearer یا client API در Sanaei v3 لازم است v3 را انتخاب کنید.
+    client_api_mode: انتخاب پیشرفته endpoint کلاینت در Legacy. مگر اینکه پنل Sanaei v3 به endpoint clients نیاز داشته باشد، مقدار پیش‌فرض را تغییر ندهید.
+    base_path: پیشوند مسیر reverse proxy مانند /xui. برای URL معمولی پنل خالی بگذارید.
+    subscription_path_prefix: پیشوند مسیر اشتراک Legacy. فقط برای مسیر سفارشی اشتراک پر شود.
+    subscription_base_url: آدرس پایه عمومی اشتراک برای لینک‌های Legacy. برای استفاده از URL پنل خالی بگذارید.
+    public_host: میزبان جایگزین برای لینک‌های تکی Legacy. برای حالت معمولی خالی بگذارید.
+    config: تنظیمات JSON فنی فقط برای نمایش است؛ مقدارهای حساس پنهان می‌شوند.
+    is_active: برای نگه داشتن تنظیمات بدون استفاده در provisioning این گزینه را غیرفعال کنید.
+  actions:
+    save_changes: ذخیره تغییرات
+    save_and_continue: ذخیره و ادامه ویرایش
+    back_to_list: بازگشت به لیست
+    test_modern_connection: Test Modern API Connection
+    test_legacy_connection: Test Legacy Connection

@@ -16,12 +16,15 @@ use App\Provisioning\Application\VpnAccessLinkGenerator;
 use App\Provisioning\Application\VpnInboundSyncService;
 use App\Provisioning\Application\VpnServiceConfigRefreshService;
 use App\Provisioning\Domain\Dto\CreateVpnServiceRequest;
+use App\Provisioning\Domain\SanaeiIntegrationMode;
 use App\Provisioning\Domain\VpnServiceStatus;
-use App\Provisioning\Infrastructure\Sanaei3xui\Legacy\Sanaei3xuiLegacyApiClient;
 use App\Provisioning\Infrastructure\VpnPanelDriverRegistry;
+use App\Provisioning\Infrastructure\Sanaei3xui\Legacy\Sanaei3xuiLegacyApiClient;
+use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Connection\ModernConnectionTesterInterface;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\RedirectResponse;
+use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\Routing\Attribute\Route;
 
 #[Route('/admin')]
@@ -41,6 +44,12 @@ final class VpnPanelInboundActionsController extends AbstractController
     {
         if ('sanaei_3xui' !== $panel->getType()) {
             $this->addFlash('danger', 'این عملیات فقط برای پنل sanaei_3xui قابل انجام است.');
+
+            return $this->redirectToPanels();
+        }
+
+        if (SanaeiIntegrationMode::MODERN === $panel->getSanaeiIntegrationMode()) {
+            $this->addFlash('danger', 'Use the Modern API connection test for Modern Sanaei panels.');
 
             return $this->redirectToPanels();
         }
@@ -69,6 +78,46 @@ final class VpnPanelInboundActionsController extends AbstractController
         }
 
         return $this->redirectToPanels();
+    }
+
+    #[Route('/vpn-panel/{id}/test-modern-connection', name: 'admin_vpn_panel_test_modern_connection', methods: ['GET'])]
+    public function testModernPanelConnection(VpnPanel $panel, ModernConnectionTesterInterface $connectionTester, Request $request): RedirectResponse
+    {
+        if ('sanaei_3xui' !== $panel->getType() || SanaeiIntegrationMode::MODERN !== $panel->getSanaeiIntegrationMode()) {
+            $this->addFlash('danger', 'Modern API connection test is only available for Sanaei panels using Modern integration mode.');
+
+            return $this->redirectBackToPanelContext($request);
+        }
+
+        $result = $connectionTester->test($panel);
+        if ($result->success) {
+            $details = [];
+            if (null !== $result->responseTimeMs) {
+                $details[] = sprintf('response_time=%dms', $result->responseTimeMs);
+            }
+            if (null !== $result->xrayState) {
+                $details[] = sprintf('xray_state=%s', $result->xrayState);
+            }
+            if (null !== $result->xrayVersion) {
+                $details[] = sprintf('xray_version=%s', $result->xrayVersion);
+            }
+
+            $this->addFlash('success', sprintf(
+                'Modern Sanaei API connection succeeded%s.',
+                [] === $details ? '' : ' ('.implode(', ', $details).')'
+            ));
+
+            return $this->redirectBackToPanelContext($request);
+        }
+
+        $requestId = null === $result->requestId ? '' : sprintf(' request_id=%s', $result->requestId);
+        $this->addFlash('danger', sprintf(
+            'Modern Sanaei API connection failed: %s.%s',
+            $this->modernStatusMessage($result->status->value),
+            $requestId
+        ));
+
+        return $this->redirectBackToPanelContext($request);
     }
 
     #[Route('/vpn-panel/{id}/sync-inbounds', name: 'admin_vpn_panel_sync_inbounds', methods: ['GET'])]
@@ -332,12 +381,40 @@ final class VpnPanelInboundActionsController extends AbstractController
         return sprintf('اتصال ناموفق بود. status=%s, error=%s', (string) $status, $error);
     }
 
+    private function modernStatusMessage(string $status): string
+    {
+        return match ($status) {
+            'missing_configuration' => 'missing Modern configuration or API token',
+            'authentication_failed' => 'invalid or missing API token',
+            'authorization_failed' => 'API token is not authorized',
+            'timeout' => 'request timed out',
+            'unavailable' => 'panel is unavailable',
+            'rate_limited' => 'panel rate limit was reached',
+            'invalid_response' => 'panel returned an invalid response',
+            'incompatible_api' => 'panel did not return a compatible Modern API response',
+            default => 'unknown error',
+        };
+    }
+
     private function redirectToPanels(): RedirectResponse
     {
         return $this->redirectToRoute('admin', [
             'crudAction' => 'index',
             'crudControllerFqcn' => VpnPanelCrudController::class,
         ]);
+    }
+
+    private function redirectBackToPanelContext(Request $request): RedirectResponse
+    {
+        $referer = trim((string) $request->headers->get('referer', ''));
+        if ('' !== $referer) {
+            $host = parse_url($referer, PHP_URL_HOST);
+            if (null === $host || $host === $request->getHost()) {
+                return $this->redirect($referer);
+            }
+        }
+
+        return $this->redirectToPanels();
     }
 
     private function redirectToInbounds(): RedirectResponse

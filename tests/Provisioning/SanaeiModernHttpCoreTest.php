@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Entity\VpnPanel;
 use App\Provisioning\Infrastructure\PanelHttpClientFactory;
+use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Connection\SanaeiModernConnectionTester;
 use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http\Exception\ApiException;
 use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http\Exception\AuthenticationFailedException;
 use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http\Exception\AuthorizationFailedException;
@@ -26,6 +27,7 @@ use Symfony\Contracts\HttpClient\Exception\TransportExceptionInterface;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 use Symfony\Contracts\HttpClient\ResponseInterface;
 use Symfony\Contracts\HttpClient\ResponseStreamInterface;
+use Symfony\Component\Serializer\Attribute\Ignore;
 
 require_once dirname(__DIR__, 2).'/vendor/autoload.php';
 
@@ -50,6 +52,18 @@ function runSanaeiModernHttpCoreTest(): void
 
     assertThrows(InvalidJsonException::class, static fn () => $requestBuilder->build($panel, 'POST', '/probe', ['nan' => NAN]), 'Invalid JSON payloads must be rejected.');
     assertThrows(AuthenticationFailedException::class, static fn () => $requestBuilder->build(panel('https://panel.example.com', ''), 'GET', '/probe'), 'Missing token must fail with auth exception.');
+    $tokenPanel = panel('https://panel.example.com', 'stored-token');
+    $tokenPanel->setApiToken('');
+    assertSame('stored-token', $tokenPanel->getApiToken(), 'Blank token form submissions must preserve the stored token.');
+    $tokenPanel->setApiToken(' replacement-token ');
+    assertSame('replacement-token', $tokenPanel->getApiToken(), 'Non-blank token form submissions must replace the stored token.');
+    assertStringNotContains('replacement-token', $tokenPanel->getConfigJson(), 'API token must not be mirrored into generic JSON config.');
+    $legacyConfigTokenPanel = panel('https://panel.example.com', '')->setConfig(['api_token' => 'legacy-config-token']);
+    $legacyConfigTokenPanel->setApiToken('');
+    assertSame('legacy-config-token', $legacyConfigTokenPanel->getConfig()['api_token'] ?? null, 'Blank token form submissions must not erase legacy-only config tokens.');
+    assertSame(null, $legacyConfigTokenPanel->getApiToken(), 'Modern token resolution must not read legacy config api_token fallback.');
+    assertTrue([] !== (new ReflectionMethod(VpnPanel::class, 'getApiToken'))->getAttributes(Ignore::class), 'API token getter must be ignored by normal entity serialization.');
+    assertTrue([] !== (new ReflectionMethod(VpnPanel::class, 'getPassword'))->getAttributes(Ignore::class), 'Password getter must be ignored by normal entity serialization.');
 
     $jsonParser = new JsonResponseParser();
     $envelopeValidator = new SanaeiEnvelopeValidator();
@@ -135,7 +149,7 @@ function runSanaeiModernHttpCoreTest(): void
 
     assertFalse(class_exists(App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http\RequestFactory::class), 'Old RequestFactory must not be autoloadable.');
     assertFalse(class_exists(App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http\HttpTransportInterface::class), 'Old duplicate transport interface must not be autoloadable.');
-    assertFalse(class_exists(App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http\ModernConnectionTester::class), 'No concrete ModernConnectionTester should remain.');
+    assertTrue(class_exists(SanaeiModernConnectionTester::class), 'This phase must provide the concrete Sanaei Modern connection tester.');
 
     echo "Sanaei Modern HTTP core tests passed.\n";
 }

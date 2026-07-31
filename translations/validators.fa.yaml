@@ -1,0 +1,10 @@
+vpn_panel:
+  validation:
+    type_required: نوع پنل الزامی است.
+    title_required: وارد کردن نام نمایشی الزامی است.
+    base_url_required: وارد کردن Base URL الزامی است.
+    base_url_invalid: یک Base URL معتبر شامل scheme و host وارد کنید.
+    modern_api_token_required: برای اتصال Modern وارد کردن API Token الزامی است.
+    legacy_api_token_required: برای احراز هویت bearer در Legacy وارد کردن API Token الزامی است.
+    legacy_username_required: برای اتصال Legacy نام کاربری الزامی است.
+    legacy_password_required: برای اتصال Legacy رمز عبور الزامی است.

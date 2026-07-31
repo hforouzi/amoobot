@@ -7,6 +7,9 @@ namespace App\Entity;
 use App\Provisioning\Domain\SanaeiIntegrationMode;
 use Doctrine\DBAL\Types\Types;
 use Doctrine\ORM\Mapping as ORM;
+use Symfony\Component\Serializer\Attribute\Ignore;
+use Symfony\Component\Validator\Context\ExecutionContextInterface;
+use Symfony\Component\Validator\Constraints as Assert;
 
 #[ORM\Entity]
 class VpnPanel
@@ -113,6 +116,7 @@ class VpnPanel
         return $this;
     }
 
+    #[Ignore]
     public function getPassword(): ?string
     {
         return $this->password;
@@ -134,28 +138,27 @@ class VpnPanel
         return $this->maskedConfiguredLabel($this->password);
     }
 
+    #[Ignore]
     public function getApiToken(): ?string
     {
         $token = trim((string) ($this->apiToken ?? ''));
-        if ('' !== $token) {
-            return $token;
-        }
 
-        $config = is_array($this->config) ? $this->config : [];
-        $fallback = trim((string) ($config['api_token'] ?? ''));
-
-        return '' === $fallback ? null : $fallback;
+        return '' === $token ? null : $token;
     }
 
     public function setApiToken(?string $apiToken): self
     {
         $token = trim((string) ($apiToken ?? ''));
-        if ('' === $token && null !== $this->getApiToken()) {
+        if ('' === $token) {
+            if (null !== $this->apiToken) {
+                $this->setConfigValue('api_token', null);
+            }
+
             return $this;
         }
 
-        $this->apiToken = '' === $token ? null : $token;
-        $this->setConfigValue('api_token', $this->apiToken);
+        $this->apiToken = $token;
+        $this->setConfigValue('api_token', null);
 
         return $this;
     }
@@ -268,6 +271,69 @@ class VpnPanel
     public function __toString(): string
     {
         return sprintf('%s (%s)', $this->title ?? 'Panel', $this->type);
+    }
+
+    #[Assert\Callback]
+    public function validatePanelConfiguration(ExecutionContextInterface $context): void
+    {
+        if (!isset($this->type) || '' === trim($this->type)) {
+            $context->buildViolation('vpn_panel.validation.type_required')
+                ->atPath('type')
+                ->addViolation();
+        }
+
+        if (!isset($this->title) || '' === trim($this->title)) {
+            $context->buildViolation('vpn_panel.validation.title_required')
+                ->atPath('title')
+                ->addViolation();
+        }
+
+        $baseUrl = trim((string) ($this->baseUrl ?? ''));
+        if ('' === $baseUrl) {
+            $context->buildViolation('vpn_panel.validation.base_url_required')
+                ->atPath('baseUrl')
+                ->addViolation();
+        } elseif (false === filter_var($baseUrl, FILTER_VALIDATE_URL)) {
+            $context->buildViolation('vpn_panel.validation.base_url_invalid')
+                ->atPath('baseUrl')
+                ->addViolation();
+        }
+
+        if ('sanaei_3xui' !== ($this->type ?? null)) {
+            return;
+        }
+
+        if (SanaeiIntegrationMode::MODERN === $this->getSanaeiIntegrationMode()) {
+            if ('' === trim((string) ($this->apiToken ?? ''))) {
+                $context->buildViolation('vpn_panel.validation.modern_api_token_required')
+                    ->atPath('apiToken')
+                    ->addViolation();
+            }
+
+            return;
+        }
+
+        if ('bearer' === $this->getAuthMode()) {
+            if ('' === trim((string) ($this->apiToken ?? ''))) {
+                $context->buildViolation('vpn_panel.validation.legacy_api_token_required')
+                    ->atPath('apiToken')
+                    ->addViolation();
+            }
+
+            return;
+        }
+
+        if ('' === trim((string) ($this->username ?? ''))) {
+            $context->buildViolation('vpn_panel.validation.legacy_username_required')
+                ->atPath('username')
+                ->addViolation();
+        }
+
+        if ('' === trim((string) ($this->password ?? ''))) {
+            $context->buildViolation('vpn_panel.validation.legacy_password_required')
+                ->atPath('password')
+                ->addViolation();
+        }
     }
 
     public function getApiVersion(): string

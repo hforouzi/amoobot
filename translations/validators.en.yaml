@@ -1,0 +1,10 @@
+vpn_panel:
+  validation:
+    type_required: Type is required.
+    title_required: A display name is required.
+    base_url_required: A Base URL is required.
+    base_url_invalid: Enter a valid Base URL including scheme and host.
+    modern_api_token_required: An API token is required for a Modern connection.
+    legacy_api_token_required: An API token is required for Legacy bearer authentication.
+    legacy_username_required: A username is required for a Legacy connection.
+    legacy_password_required: A password is required for a Legacy connection.

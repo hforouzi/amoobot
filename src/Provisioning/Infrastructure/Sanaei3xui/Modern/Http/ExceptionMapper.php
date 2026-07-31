@@ -61,6 +61,7 @@ final class ExceptionMapper
         $safe = preg_replace('/Bearer\s+[A-Za-z0-9\-\._~\+\/]+=*/i', 'Bearer [redacted]', $safe) ?? $safe;
         $safe = preg_replace('/([?&](?:api[_-]?token|access[_-]?token|token|password|passwd|cookie|session|authorization)=)[^&#\s]*/i', '$1[redacted]', $safe) ?? $safe;
         $safe = preg_replace('/("?(?:password|passwd|token|cookie|session|authorization|secret|api[_-]?key)"?\s*[:=]\s*)"[^"]*"/i', '$1"[redacted]"', $safe) ?? $safe;
+        $safe = preg_replace('/\b(token|secret|password|passwd)\s+((?=[A-Za-z0-9._~+\/=-]*[._~+\/=-])[A-Za-z0-9._~+\/=-]{6,})/i', '$1 [redacted]', $safe) ?? $safe;
         $safe = preg_replace('/\s+/', ' ', $safe) ?? $safe;
 
         return mb_substr($safe, 0, 300);

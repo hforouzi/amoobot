@@ -813,3 +813,88 @@ html[dir="ltr"] .admin-actions {
         padding: 1.25rem;
     }
 }
+
+/* VPN panel conditional form */
+.vpn-panel-admin-form .vpn-panel-hidden {
+    display: none !important;
+}
+
+.vpn-panel-admin-form .field-form_fieldset.vpn-panel-form-card {
+    margin: 1rem 0;
+    border: 1px solid var(--admin-border);
+    border-radius: 8px;
+    background: var(--admin-surface);
+    box-shadow: var(--admin-shadow);
+    overflow: hidden;
+}
+
+.vpn-panel-admin-form .field-form_fieldset.vpn-panel-form-card > legend,
+.vpn-panel-admin-form .field-form_fieldset.vpn-panel-form-card .fieldset-header {
+    padding: .95rem 1rem;
+    border-bottom: 1px solid #eef2f7;
+    background: #f8fafc;
+    font-weight: 800;
+}
+
+.vpn-panel-admin-form .field-form_fieldset.vpn-panel-form-card .fieldset-body {
+    padding: 1rem;
+}
+
+.vpn-panel-admin-form .vpn-panel-field {
+    margin-bottom: .85rem;
+}
+
+.vpn-panel-admin-form .vpn-panel-mode-choice .form-widget,
+.vpn-panel-admin-form .vpn-panel-auth-mode-choice .form-widget {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: .75rem;
+}
+
+.vpn-panel-admin-form .vpn-panel-mode-choice .form-check,
+.vpn-panel-admin-form .vpn-panel-auth-mode-choice .form-check {
+    align-items: flex-start;
+    min-height: 4.1rem;
+    padding: .85rem;
+    border: 1px solid var(--admin-border-strong);
+    border-radius: 8px;
+    background: #fff;
+    transition: border-color .16s ease, box-shadow .16s ease, background .16s ease;
+}
+
+.vpn-panel-admin-form .vpn-panel-choice-selected {
+    border-color: var(--admin-primary) !important;
+    background: #eff6ff !important;
+    box-shadow: 0 0 0 .16rem rgba(37, 99, 235, .1);
+}
+
+.vpn-panel-admin-form .vpn-panel-mode-choice .form-check-label,
+.vpn-panel-admin-form .vpn-panel-auth-mode-choice .form-check-label {
+    font-weight: 800;
+}
+
+.vpn-panel-admin-form .vpn-panel-switch-field .form-check {
+    width: fit-content;
+    padding: .45rem .6rem;
+    border: 1px solid var(--admin-border);
+    border-radius: 999px;
+    background: #fff;
+}
+
+.vpn-panel-admin-form .vpn-panel-secret-field input {
+    direction: ltr;
+    text-align: left;
+}
+
+html[dir="rtl"] .vpn-panel-admin-form .vpn-panel-secret-field input,
+html[dir="rtl"] .vpn-panel-admin-form input[name$="[baseUrl]"] {
+    direction: ltr;
+    text-align: left;
+}
+
+@media (max-width: 760px) {
+    .vpn-panel-admin-form .vpn-panel-mode-choice .form-widget,
+    .vpn-panel-admin-form .vpn-panel-auth-mode-choice .form-widget {
+        grid-template-columns: 1fr;
+    }
+}

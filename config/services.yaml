@@ -82,6 +82,9 @@ services:
     App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http\ModernHttpClientInterface:
         alias: App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http\SanaeiModernHttpTransport
 
+    App\Provisioning\Infrastructure\Sanaei3xui\Modern\Connection\ModernConnectionTesterInterface:
+        alias: App\Provisioning\Infrastructure\Sanaei3xui\Modern\Connection\SanaeiModernConnectionTester
+
     App\Payment\Infrastructure\PaymentGatewayRegistry:
         arguments:
             $drivers: !tagged_iterator 'app.payment_gateway'
