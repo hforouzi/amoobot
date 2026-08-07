@@ -276,3 +276,65 @@ vpn_panel:
     back_to_list: Back to list
     test_modern_connection: Test Modern API Connection
     test_legacy_connection: Test Legacy Connection
+    view_inbounds: View Inbounds
+    sync_legacy_inbounds: Sync Legacy Inbounds
+    sync_modern_inbounds: Sync Modern Inbounds
+  flash:
+    modern_sync_use_modern_action: Use the Modern inbound sync action for Modern Sanaei panels.
+    modern_inbounds_sync_invalid_csrf: The sync request is no longer valid. Please try again.
+    modern_inbounds_sync_wrong_mode: Modern inbound sync is only available for Sanaei panels using Modern integration mode.
+    modern_inbounds_sync_success: "Modern inbound synchronization completed: %fetched% fetched, %created% created, %updated% updated, %unchanged% unchanged. Duration: %duration%ms."
+    modern_inbounds_sync_missing: "%missing% local inbound record(s) were missing remotely; %deactivated% were deactivated locally."
+    modern_inbounds_sync_failed: "Modern inbound synchronization failed (%status%). Request ID: %request_id%."
+  confirm:
+    sync_modern_inbounds_title: Sync Modern Inbounds
+    sync_modern_inbounds_body: "Synchronize inbound metadata for %panel%. This reads from the Modern Sanaei API and updates local inbound records only."
+
+vpn_inbound:
+  singular: Inbound
+  plural: Inbounds
+  pages:
+    index: Inbounds
+    detail: Inbound details
+  sections:
+    identity: Identity
+    status: Status
+    traffic: Traffic
+    technical: Technical configuration
+  fields:
+    id: ID
+    panel: Panel
+    remote_inbound_id: Remote inbound ID
+    title: Name
+    remark: Remark
+    protocol: Protocol
+    port: Port
+    is_active: Active
+    upload: Upload
+    download: Download
+    total: Total limit
+    expiry: Expiry
+    tag: Tag
+    listen: Listen address
+    last_synced_at: Last synchronized
+    last_access_metadata_synced_at: Access metadata synchronized
+    country: Country
+    location: Location
+    network: Network
+    security: Security
+    host: Host
+    sni: SNI
+    path: Path
+    host_header: Host header
+    flow: Flow
+    service_name: Service name
+    fingerprint: Fingerprint
+    alpn: ALPN
+    config: Redacted technical JSON
+  actions:
+    back_to_panel: Back to panel
+  empty:
+    panel: No inbounds have been synchronized for this panel yet.
+  expiry:
+    never: Never
+    expired: Expired

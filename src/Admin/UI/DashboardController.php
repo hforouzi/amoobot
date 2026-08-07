@@ -92,7 +92,7 @@ class DashboardController extends AbstractDashboardController
 
         yield MenuItem::section('admin.menu.vpn', 'fa fa-server');
         yield MenuItem::linkTo(VpnPanelCrudController::class, 'admin.vpn_panels', 'fa fa-server')->setPermission('ROLE_SUPER_ADMIN');
-        yield MenuItem::linkTo(VpnInboundCrudController::class, 'admin.vpn_inbounds', 'fa fa-globe');
+        yield MenuItem::linkTo(VpnInboundCrudController::class, 'admin.vpn_inbounds', 'fa fa-globe')->setPermission('ROLE_SUPER_ADMIN');
         yield MenuItem::linkTo(VpnServiceCrudController::class, 'admin.vpn_services', 'fa fa-link');
 
         yield MenuItem::section('admin.menu.users', 'fa fa-users');

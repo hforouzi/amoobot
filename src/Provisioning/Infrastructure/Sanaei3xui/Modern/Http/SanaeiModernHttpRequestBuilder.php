@@ -67,12 +67,25 @@ final class SanaeiModernHttpRequestBuilder
             throw new InvalidResponseException('Sanaei Modern panel base URL is not configured.');
         }
 
-        $normalizedPath = $this->normalizePath($path);
-        if (str_ends_with($baseUrl, '/panel') && str_starts_with($normalizedPath, '/panel/api')) {
+        $basePath = $this->normalizeBasePath((string) ($panel->getBasePath() ?? ''));
+        $normalizedPath = $basePath.$this->normalizePath($path);
+        if ('' === $basePath && str_ends_with($baseUrl, '/panel') && str_starts_with($normalizedPath, '/panel/api')) {
             $normalizedPath = substr($normalizedPath, strlen('/panel'));
         }
 
         return $baseUrl.$normalizedPath;
+    }
+
+    private function normalizeBasePath(string $basePath): string
+    {
+        $basePath = trim($basePath);
+        if ('' === $basePath || '/' === $basePath) {
+            return '';
+        }
+
+        $basePath = '/'.trim($basePath, '/');
+
+        return preg_replace('#/+#', '/', $basePath) ?? $basePath;
     }
 
     private function normalizePath(string $path): string

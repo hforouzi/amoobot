@@ -41,6 +41,7 @@ function runSanaeiModernHttpCoreTest(): void
     assertSame('https://panel.example.com/panel/api/probe', $requestBuilder->buildUrl(panel('https://panel.example.com/panel', 'secret-token'), '/panel/api/probe'), 'Base URL ending /panel must not duplicate /panel.');
     assertSame('https://panel.example.com/base/panel/api/probe', $requestBuilder->buildUrl(panel('https://panel.example.com/base', 'secret-token'), '/probe'), 'Reverse-proxy base path must be preserved.');
     assertSame('https://panel.example.com/base/panel/api/probe', $requestBuilder->buildUrl(panel('https://panel.example.com/base/', 'secret-token'), 'api/probe'), '/api paths must be normalized under /panel.');
+    assertSame('https://panel.example.com/custom-panel-path/panel/api/inbounds/list', $requestBuilder->buildUrl(panel('https://panel.example.com', 'secret-token')->setBasePath('/custom-panel-path'), '/panel/api/inbounds/list'), 'Modern base path must be inserted between base URL and endpoint path.');
 
     $request = $requestBuilder->build($panel, 'POST', '/probe', ['enabled' => true]);
     assertSame('POST', $request->method, 'Request builder must normalize method.');

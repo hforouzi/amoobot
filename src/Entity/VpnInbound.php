@@ -395,6 +395,36 @@ class VpnInbound
         ) ?: '';
     }
 
+    public function getRemoteTag(): ?string
+    {
+        return $this->remoteString('tag');
+    }
+
+    public function getRemoteListen(): ?string
+    {
+        return $this->remoteString('listen');
+    }
+
+    public function getUploadTrafficBytes(): ?int
+    {
+        return $this->remoteInt('up');
+    }
+
+    public function getDownloadTrafficBytes(): ?int
+    {
+        return $this->remoteInt('down');
+    }
+
+    public function getTotalTrafficBytes(): ?int
+    {
+        return $this->remoteInt('total');
+    }
+
+    public function getRemoteExpiryTime(): ?int
+    {
+        return $this->remoteInt('expiryTime');
+    }
+
     public function setConfigJson(?string $json): self
     {
         if ($json === null || trim($json) === '') {
@@ -492,6 +522,30 @@ class VpnInbound
         $intValue = (int) $scalar;
 
         return $intValue >= 1 && $intValue <= 65535 ? $intValue : null;
+    }
+
+    private function remoteString(string $key): ?string
+    {
+        $remote = is_array($this->config['remote'] ?? null) ? $this->config['remote'] : [];
+        $value = $remote[$key] ?? null;
+        if (!is_scalar($value)) {
+            return null;
+        }
+
+        $text = trim((string) $value);
+
+        return '' === $text ? null : $text;
+    }
+
+    private function remoteInt(string $key): ?int
+    {
+        $remote = is_array($this->config['remote'] ?? null) ? $this->config['remote'] : [];
+        $value = $remote[$key] ?? null;
+        if (null === $value || is_bool($value) || !is_numeric($value)) {
+            return null;
+        }
+
+        return (int) $value;
     }
 
     private function extractFirstScalar(mixed $value): string|int|float|bool|null

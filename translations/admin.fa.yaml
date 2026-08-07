@@ -276,3 +276,65 @@ vpn_panel:
     back_to_list: بازگشت به لیست
     test_modern_connection: Test Modern API Connection
     test_legacy_connection: Test Legacy Connection
+    view_inbounds: مشاهده Inboundها
+    sync_legacy_inbounds: همگامسازی Inboundهای Legacy
+    sync_modern_inbounds: همگامسازی Inboundهای Modern
+  flash:
+    modern_sync_use_modern_action: برای پنلهای Modern Sanaei از عملیات همگامسازی Modern استفاده کنید.
+    modern_inbounds_sync_invalid_csrf: درخواست همگامسازی دیگر معتبر نیست. دوباره تلاش کنید.
+    modern_inbounds_sync_wrong_mode: همگامسازی Inboundهای Modern فقط برای پنلهای Sanaei با حالت Modern فعال است.
+    modern_inbounds_sync_success: "همگامسازی Inboundهای Modern انجام شد: %fetched% دریافت، %created% ایجاد، %updated% بروزرسانی، %unchanged% بدون تغییر. مدت: %duration%ms."
+    modern_inbounds_sync_missing: "%missing% رکورد محلی در پنل راه دور پیدا نشد؛ %deactivated% رکورد محلی غیرفعال شد."
+    modern_inbounds_sync_failed: "همگامسازی Inboundهای Modern ناموفق بود (%status%). Request ID: %request_id%."
+  confirm:
+    sync_modern_inbounds_title: همگامسازی Inboundهای Modern
+    sync_modern_inbounds_body: "متادیتای Inboundهای %panel% همگامسازی میشود. این عملیات فقط از Modern Sanaei API میخواند و رکوردهای محلی Inbound را بروزرسانی میکند."
+
+vpn_inbound:
+  singular: Inbound
+  plural: Inboundها
+  pages:
+    index: Inboundها
+    detail: جزئیات Inbound
+  sections:
+    identity: هویت
+    status: وضعیت
+    traffic: ترافیک
+    technical: تنظیمات فنی
+  fields:
+    id: ID
+    panel: پنل
+    remote_inbound_id: شناسه Inbound راه دور
+    title: نام
+    remark: Remark
+    protocol: پروتکل
+    port: پورت
+    is_active: فعال
+    upload: آپلود
+    download: دانلود
+    total: محدودیت کل
+    expiry: انقضا
+    tag: Tag
+    listen: آدرس Listen
+    last_synced_at: آخرین همگامسازی
+    last_access_metadata_synced_at: همگامسازی متادیتای دسترسی
+    country: کشور
+    location: موقعیت
+    network: Network
+    security: Security
+    host: Host
+    sni: SNI
+    path: Path
+    host_header: Host header
+    flow: Flow
+    service_name: Service name
+    fingerprint: Fingerprint
+    alpn: ALPN
+    config: JSON فنی پنهانسازی شده
+  actions:
+    back_to_panel: بازگشت به پنل
+  empty:
+    panel: هنوز هیچ Inboundی برای این پنل همگامسازی نشده است.
+  expiry:
+    never: هرگز
+    expired: منقضی شده

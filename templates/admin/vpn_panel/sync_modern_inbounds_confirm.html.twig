@@ -1,0 +1,35 @@
+{% extends 'admin/custom_page.html.twig' %}
+{% trans_default_domain 'admin' %}
+
+{% block page_section %}{{ 'admin.vpn_panels'|trans }}{% endblock %}
+{% block page_title %}{{ 'vpn_panel.confirm.sync_modern_inbounds_title'|trans }}{% endblock %}
+
+{% block actions %}
+    <a href="{{ cancel_url }}" class="btn btn-secondary">
+        {{ 'common.back'|trans }}
+    </a>
+{% endblock %}
+
+{% block main %}
+    <div class="content-panel">
+        <div class="content-panel-body">
+            <p>{{ 'vpn_panel.confirm.sync_modern_inbounds_body'|trans({ '%panel%': panel.title }) }}</p>
+
+            <form method="post"
+                  action="{{ path('admin_vpn_panel_sync_modern_inbounds', { id: panel.id }) }}">
+                <input type="hidden"
+                       name="_token"
+                       value="{{ csrf_token('sync_modern_inbounds_' ~ panel.id) }}">
+
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-primary">
+                        {{ 'vpn_panel.actions.sync_modern_inbounds'|trans }}
+                    </button>
+                    <a href="{{ cancel_url }}" class="btn btn-secondary">
+                        {{ 'common.cancel'|trans }}
+                    </a>
+                </div>
+            </form>
+        </div>
+    </div>
+{% endblock %}

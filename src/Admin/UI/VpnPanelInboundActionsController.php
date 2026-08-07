@@ -21,11 +21,16 @@ use App\Provisioning\Domain\VpnServiceStatus;
 use App\Provisioning\Infrastructure\VpnPanelDriverRegistry;
 use App\Provisioning\Infrastructure\Sanaei3xui\Legacy\Sanaei3xuiLegacyApiClient;
 use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Connection\ModernConnectionTesterInterface;
+use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Inbounds\Sync\ModernInboundSynchronizer;
 use Doctrine\ORM\EntityManagerInterface;
+use EasyCorp\Bundle\EasyAdminBundle\Config\Action;
+use EasyCorp\Bundle\EasyAdminBundle\Router\AdminUrlGeneratorInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\RedirectResponse;
 use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Attribute\Route;
+use Symfony\Contracts\Translation\TranslatorInterface;
 
 #[Route('/admin')]
 final class VpnPanelInboundActionsController extends AbstractController
@@ -36,6 +41,8 @@ final class VpnPanelInboundActionsController extends AbstractController
         private readonly FinalConfigLinkProvider $finalConfigLinkProvider,
         private readonly VpnServiceConfigRefreshService $configRefreshService,
         private readonly ServiceConfigDeliveryRefresher $deliveryRefresher,
+        private readonly TranslatorInterface $translator,
+        private readonly AdminUrlGeneratorInterface $adminUrlGenerator,
     ) {
     }
 
@@ -123,6 +130,12 @@ final class VpnPanelInboundActionsController extends AbstractController
     #[Route('/vpn-panel/{id}/sync-inbounds', name: 'admin_vpn_panel_sync_inbounds', methods: ['GET'])]
     public function syncPanelInbounds(VpnPanel $panel, VpnInboundSyncService $inboundSyncService): RedirectResponse
     {
+        if (SanaeiIntegrationMode::MODERN === $panel->getSanaeiIntegrationMode()) {
+            $this->addFlash('danger', $this->translator->trans('vpn_panel.flash.modern_sync_use_modern_action', domain: 'admin'));
+
+            return $this->redirectToPanels();
+        }
+
         try {
             $sync = $inboundSyncService->syncPanelInbounds($panel);
             $this->addFlash('success', sprintf('همگام‌سازی انجام شد: %d اینباند.', $sync->syncedCount));
@@ -137,18 +150,103 @@ final class VpnPanelInboundActionsController extends AbstractController
         return $this->redirectToPanels();
     }
 
+    #[Route('/vpn-panel/{id}/sync-modern-inbounds/confirm', name: 'admin_vpn_panel_sync_modern_inbounds_confirm', methods: ['GET'])]
+    public function confirmModernPanelInboundsSync(VpnPanel $panel): Response
+    {
+        if (!$this->isModernSanaeiPanel($panel)) {
+            $this->addFlash('danger', $this->translator->trans('vpn_panel.flash.modern_inbounds_sync_wrong_mode', domain: 'admin'));
+
+            return $this->redirectToPanelDetail($panel);
+        }
+
+        return $this->render('admin/vpn_panel/sync_modern_inbounds_confirm.html.twig', [
+            'panel' => $panel,
+            'cancel_url' => $this->panelDetailUrl($panel),
+        ]);
+    }
+
+    #[Route('/vpn-panel/{id}/sync-modern-inbounds', name: 'admin_vpn_panel_sync_modern_inbounds', methods: ['POST'])]
+    public function syncModernPanelInbounds(VpnPanel $panel, ModernInboundSynchronizer $synchronizer, Request $request): RedirectResponse
+    {
+        if (!$this->isModernSanaeiPanel($panel)) {
+            $this->addFlash('danger', $this->translator->trans('vpn_panel.flash.modern_inbounds_sync_wrong_mode', domain: 'admin'));
+
+            return $this->redirectToPanelDetail($panel);
+        }
+
+        if (!$this->isCsrfTokenValid($this->modernInboundSyncTokenId($panel), (string) $request->request->get('_token', ''))) {
+            $this->addFlash('danger', $this->translator->trans('vpn_panel.flash.modern_inbounds_sync_invalid_csrf', domain: 'admin'));
+
+            return $this->redirectToPanelDetail($panel);
+        }
+
+        try {
+            $result = $synchronizer->sync($panel);
+        } catch (\Throwable $exception) {
+            $this->log(sprintf(
+                'modern_inbound_sync_failed panel_id=%d error_class=%s',
+                $panel->getId() ?? 0,
+                $exception::class
+            ));
+            $this->addFlash('danger', $this->translator->trans('vpn_panel.flash.modern_inbounds_sync_failed', [
+                '%fetched%' => 0,
+                '%created%' => 0,
+                '%updated%' => 0,
+                '%unchanged%' => 0,
+                '%missing%' => 0,
+                '%deactivated%' => 0,
+                '%duration%' => '0',
+                '%request_id%' => '',
+                '%status%' => 'unknown_error',
+            ], 'admin'));
+
+            return $this->redirectToPanelDetail($panel);
+        }
+
+        $parameters = [
+            '%fetched%' => $result->fetchedCount,
+            '%created%' => $result->createdCount,
+            '%updated%' => $result->updatedCount,
+            '%unchanged%' => $result->unchangedCount,
+            '%missing%' => $result->missingCount,
+            '%deactivated%' => $result->deactivatedCount,
+            '%duration%' => (string) ($result->durationMs ?? 0),
+            '%request_id%' => (string) ($result->requestId ?? ''),
+            '%status%' => $result->status->value,
+        ];
+
+        if ($result->success) {
+            $this->addFlash('success', $this->translator->trans('vpn_panel.flash.modern_inbounds_sync_success', $parameters, 'admin'));
+            if ($result->missingCount > 0) {
+                $this->addFlash('warning', $this->translator->trans('vpn_panel.flash.modern_inbounds_sync_missing', $parameters, 'admin'));
+            }
+
+            return $this->redirectToPanelDetail($panel);
+        }
+
+        $this->addFlash('danger', $this->translator->trans('vpn_panel.flash.modern_inbounds_sync_failed', $parameters, 'admin'));
+
+        return $this->redirectToPanelDetail($panel);
+    }
+
     #[Route('/vpn-panel/{id}/inbounds', name: 'admin_vpn_panel_view_inbounds', methods: ['GET'])]
     public function viewPanelInbounds(VpnPanel $panel): RedirectResponse
     {
+        $count = $this->entityManager->getRepository(VpnInbound::class)->count(['panel' => $panel]);
+        if (0 === $count) {
+            $this->addFlash('info', $this->translator->trans('vpn_inbound.empty.panel', domain: 'admin'));
+
+            return $this->redirectToRoute('admin', [
+                'crudAction' => 'detail',
+                'crudControllerFqcn' => VpnPanelCrudController::class,
+                'entityId' => $panel->getId(),
+            ]);
+        }
+
         return $this->redirectToRoute('admin', [
             'crudAction' => 'index',
             'crudControllerFqcn' => VpnInboundCrudController::class,
-            'filters' => [
-                'panel' => [
-                    'comparison' => '=',
-                    'value' => (string) ($panel->getId() ?? 0),
-                ],
-            ],
+            'panelId' => $panel->getId(),
         ]);
     }
 
@@ -394,6 +492,33 @@ final class VpnPanelInboundActionsController extends AbstractController
             'incompatible_api' => 'panel did not return a compatible Modern API response',
             default => 'unknown error',
         };
+    }
+
+    private function modernInboundSyncTokenId(VpnPanel $panel): string
+    {
+        return sprintf('sync_modern_inbounds_%d', $panel->getId() ?? 0);
+    }
+
+    private function isModernSanaeiPanel(VpnPanel $panel): bool
+    {
+        return null !== $panel->getId()
+            && 'sanaei_3xui' === $panel->getType()
+            && SanaeiIntegrationMode::MODERN === $panel->getSanaeiIntegrationMode();
+    }
+
+    private function redirectToPanelDetail(VpnPanel $panel): RedirectResponse
+    {
+        return $this->redirect($this->panelDetailUrl($panel));
+    }
+
+    private function panelDetailUrl(VpnPanel $panel): string
+    {
+        return $this->adminUrlGenerator
+            ->unsetAll()
+            ->setController(VpnPanelCrudController::class)
+            ->setAction(Action::DETAIL)
+            ->setEntityId($panel->getId())
+            ->generateUrl();
     }
 
     private function redirectToPanels(): RedirectResponse
