@@ -1,0 +1,889 @@
+parameters:
+	ignoreErrors:
+		-
+			message: '#^Instanceof between App\\Entity\\AdminUser and App\\Entity\\AdminUser will always evaluate to true\.$#'
+			identifier: instanceof.alwaysTrue
+			count: 1
+			path: src/Admin/UI/Crud/AdminUserCrudController.php
+
+		-
+			message: '#^Property App\\Admin\\UI\\Crud\\PluginCrudController\:\:\$entityManager is never read, only written\.$#'
+			identifier: property.onlyWritten
+			count: 1
+			path: src/Admin/UI/Crud/PluginCrudController.php
+
+		-
+			message: '#^Offset ''configLinks'' on array\{subscriptionUrl\: string\|null, configLinks\: array\<int, string\>, missing\: array\<int, string\>\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 2
+			path: src/Admin/UI/VpnPanelInboundActionsController.php
+
+		-
+			message: '#^Property App\\Provisioning\\Domain\\Dto\\CreatedVpnService\:\:\$username \(string\) on left side of \?\? is not nullable\.$#'
+			identifier: nullCoalesce.property
+			count: 1
+			path: src/Admin/UI/VpnPanelInboundActionsController.php
+
+		-
+			message: '#^Offset 1 on array\{string, string, string\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: src/Bot/Application/ServiceAction/AddTrafficAction.php
+
+		-
+			message: '#^Offset 2 on array\{string, string, string\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: src/Bot/Application/ServiceAction/AddTrafficAction.php
+
+		-
+			message: '#^Offset 0 on non\-empty\-list\<string\> on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: src/Bot/Application/ServiceAction/AdminUserViewAction.php
+
+		-
+			message: '#^Offset 1 on array\{string, string, string\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: src/Bot/Application/ServiceAction/ExtendServiceAction.php
+
+		-
+			message: '#^Offset 2 on array\{string, string, string\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: src/Bot/Application/ServiceAction/ExtendServiceAction.php
+
+		-
+			message: '#^Instanceof between App\\Entity\\Plan and App\\Entity\\Plan will always evaluate to true\.$#'
+			identifier: instanceof.alwaysTrue
+			count: 1
+			path: src/Bot/Application/ServiceManagementService.php
+
+		-
+			message: '#^Method App\\Bot\\Application\\ServiceManagementService\:\:formatConfigLinksMessage\(\) is unused\.$#'
+			identifier: method.unused
+			count: 1
+			path: src/Bot/Application/ServiceManagementService.php
+
+		-
+			message: '#^Method App\\Bot\\Application\\ServiceManagementService\:\:resolveCancelCallbackForDraft\(\) is unused\.$#'
+			identifier: method.unused
+			count: 1
+			path: src/Bot/Application/ServiceManagementService.php
+
+		-
+			message: '#^Offset ''activeStorePaymentM…'' on array\{orderId\: int, amount\: int, payableAmount\: int, currency\: string, activeStorePaymentMethodCount\: int, skippedReasons\: list\<string\>, methods\: list\<array\<string, mixed\>\>\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: src/Bot/Application/ServiceManagementService.php
+
+		-
+			message: '#^Offset ''amount'' on array\{orderId\: int, amount\: int, payableAmount\: int, currency\: string, activeStorePaymentMethodCount\: int, skippedReasons\: list\<string\>, methods\: list\<array\<string, mixed\>\>\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: src/Bot/Application/ServiceManagementService.php
+
+		-
+			message: '#^Offset ''currency'' on array\{orderId\: int, amount\: int, payableAmount\: int, currency\: string, activeStorePaymentMethodCount\: int, skippedReasons\: list\<string\>, methods\: list\<array\<string, mixed\>\>\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: src/Bot/Application/ServiceManagementService.php
+
+		-
+			message: '#^Offset ''message'' on array\{type\: int, message\: string, file\: string, line\: int\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: src/Bot/Application/ServiceManagementService.php
+
+		-
+			message: '#^Offset ''methods'' on array\{orderId\: int, amount\: int, payableAmount\: int, currency\: string, activeStorePaymentMethodCount\: int, skippedReasons\: list\<string\>, methods\: list\<array\<string, mixed\>\>\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: src/Bot/Application/ServiceManagementService.php
+
+		-
+			message: '#^Offset ''orderId'' on array\{orderId\: int, amount\: int, payableAmount\: int, currency\: string, activeStorePaymentMethodCount\: int, skippedReasons\: list\<string\>, methods\: list\<array\<string, mixed\>\>\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: src/Bot/Application/ServiceManagementService.php
+
+		-
+			message: '#^Offset ''payableAmount'' on array\{orderId\: int, amount\: int, payableAmount\: int, currency\: string, activeStorePaymentMethodCount\: int, skippedReasons\: list\<string\>, methods\: list\<array\<string, mixed\>\>\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: src/Bot/Application/ServiceManagementService.php
+
+		-
+			message: '#^PHPDoc tag @return with type list\<string\> is incompatible with native type App\\Provisioning\\Application\\VpnConfigLinkSetResult\.$#'
+			identifier: return.phpDocType
+			count: 1
+			path: src/Bot/Application/ServiceManagementService.php
+
+		-
+			message: '#^Call to function is_array\(\) with list\<App\\Entity\\StorePaymentMethod\> will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: src/Bot/Application/StorePaymentMethodResolver.php
+
+		-
+			message: '#^Call to function is_array\(\) with list\<string\> will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: src/Bot/Application/StorePaymentMethodResolver.php
+
+		-
+			message: '#^Instanceof between App\\Entity\\StorePaymentMethod and App\\Entity\\StorePaymentMethod will always evaluate to true\.$#'
+			identifier: instanceof.alwaysTrue
+			count: 3
+			path: src/Bot/Application/StorePaymentMethodResolver.php
+
+		-
+			message: '#^Offset ''accepted'' on array\{method\: App\\Entity\\StorePaymentMethod, accepted\: bool, methodId\: int, methodTitle\: string, methodIsActive\: bool, methodCurrency\: string, methodMinAmount\: int\|null, methodMaxAmount\: int\|null, \.\.\.\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: src/Bot/Application/StorePaymentMethodResolver.php
+
+		-
+			message: '#^Offset ''method'' on array\{method\: App\\Entity\\StorePaymentMethod, accepted\: bool, methodId\: int, methodTitle\: string, methodIsActive\: bool, methodCurrency\: string, methodMinAmount\: int\|null, methodMaxAmount\: int\|null, \.\.\.\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: src/Bot/Application/StorePaymentMethodResolver.php
+
+		-
+			message: '#^Offset ''method'' on array\{method\: App\\Entity\\StorePaymentMethod, accepted\: true, methodId\: int, methodTitle\: string, methodIsActive\: bool, methodCurrency\: string, methodMinAmount\: int\|null, methodMaxAmount\: int\|null, \.\.\.\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: src/Bot/Application/StorePaymentMethodResolver.php
+
+		-
+			message: '#^Offset ''methodIsActive'' on array\{method\: App\\Entity\\StorePaymentMethod, accepted\: bool, methodId\: int, methodTitle\: string, methodIsActive\: bool, methodCurrency\: string, methodMinAmount\: int\|null, methodMaxAmount\: int\|null, \.\.\.\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: src/Bot/Application/StorePaymentMethodResolver.php
+
+		-
+			message: '#^Offset ''skipReasons'' on array\{method\: App\\Entity\\StorePaymentMethod, accepted\: bool, methodId\: int, methodTitle\: string, methodIsActive\: bool, methodCurrency\: string, methodMinAmount\: int\|null, methodMaxAmount\: int\|null, \.\.\.\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: src/Bot/Application/StorePaymentMethodResolver.php
+
+		-
+			message: '#^Variable \$driverError on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.variable
+			count: 1
+			path: src/Bot/Application/StorePaymentMethodResolver.php
+
+		-
+			message: '#^Instanceof between App\\Entity\\StorePaymentMethod and App\\Entity\\StorePaymentMethod will always evaluate to true\.$#'
+			identifier: instanceof.alwaysTrue
+			count: 1
+			path: src/Bot/Application/TelegramKeyboardFactory.php
+
+		-
+			message: '#^Strict comparison using \!\=\= between array\{\} and array\{0\: array\{text\: string, callback_data\: non\-falsy\-string\}, 1\?\: array\{text\: string, callback_data\: non\-falsy\-string\}\} will always evaluate to true\.$#'
+			identifier: notIdentical.alwaysTrue
+			count: 1
+			path: src/Bot/Application/TelegramKeyboardFactory.php
+
+		-
+			message: '#^Instanceof between App\\Entity\\Order and App\\Entity\\Order will always evaluate to true\.$#'
+			identifier: instanceof.alwaysTrue
+			count: 4
+			path: src/Bot/Application/TelegramUpdateHandler.php
+
+		-
+			message: '#^Instanceof between App\\Entity\\OrderDraft and App\\Entity\\OrderDraft will always evaluate to true\.$#'
+			identifier: instanceof.alwaysTrue
+			count: 1
+			path: src/Bot/Application/TelegramUpdateHandler.php
+
+		-
+			message: '#^Instanceof between App\\Entity\\Payment and App\\Entity\\Payment will always evaluate to true\.$#'
+			identifier: instanceof.alwaysTrue
+			count: 1
+			path: src/Bot/Application/TelegramUpdateHandler.php
+
+		-
+			message: '#^Instanceof between null and App\\Entity\\Payment will always evaluate to false\.$#'
+			identifier: instanceof.alwaysFalse
+			count: 1
+			path: src/Bot/Application/TelegramUpdateHandler.php
+
+		-
+			message: '#^Method App\\Bot\\Application\\TelegramUpdateHandler\:\:findPendingNewServiceOrder\(\) is unused\.$#'
+			identifier: method.unused
+			count: 1
+			path: src/Bot/Application/TelegramUpdateHandler.php
+
+		-
+			message: '#^Method App\\Bot\\Application\\TelegramUpdateHandler\:\:handleAdminServices\(\) is unused\.$#'
+			identifier: method.unused
+			count: 1
+			path: src/Bot/Application/TelegramUpdateHandler.php
+
+		-
+			message: '#^Method App\\Bot\\Application\\TelegramUpdateHandler\:\:handleMyServices\(\) is unused\.$#'
+			identifier: method.unused
+			count: 1
+			path: src/Bot/Application/TelegramUpdateHandler.php
+
+		-
+			message: '#^Offset ''activeStorePaymentM…'' on array\{orderId\: int, amount\: int, payableAmount\: int, currency\: string, activeStorePaymentMethodCount\: int, skippedReasons\: list\<string\>, methods\: list\<array\<string, mixed\>\>\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: src/Bot/Application/TelegramUpdateHandler.php
+
+		-
+			message: '#^Offset ''amount'' on array\{orderId\: int, amount\: int, payableAmount\: int, currency\: string, activeStorePaymentMethodCount\: int, skippedReasons\: list\<string\>, methods\: list\<array\<string, mixed\>\>\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: src/Bot/Application/TelegramUpdateHandler.php
+
+		-
+			message: '#^Offset ''currency'' on array\{orderId\: int, amount\: int, payableAmount\: int, currency\: string, activeStorePaymentMethodCount\: int, skippedReasons\: list\<string\>, methods\: list\<array\<string, mixed\>\>\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: src/Bot/Application/TelegramUpdateHandler.php
+
+		-
+			message: '#^Offset ''methods'' on array\{orderId\: int, amount\: int, payableAmount\: int, currency\: string, activeStorePaymentMethodCount\: int, skippedReasons\: list\<string\>, methods\: list\<array\<string, mixed\>\>\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: src/Bot/Application/TelegramUpdateHandler.php
+
+		-
+			message: '#^Offset ''orderId'' on array\{orderId\: int, amount\: int, payableAmount\: int, currency\: string, activeStorePaymentMethodCount\: int, skippedReasons\: list\<string\>, methods\: list\<array\<string, mixed\>\>\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: src/Bot/Application/TelegramUpdateHandler.php
+
+		-
+			message: '#^Offset ''payableAmount'' on array\{orderId\: int, amount\: int, payableAmount\: int, currency\: string, activeStorePaymentMethodCount\: int, skippedReasons\: list\<string\>, methods\: list\<array\<string, mixed\>\>\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: src/Bot/Application/TelegramUpdateHandler.php
+
+		-
+			message: '#^Call to function is_array\(\) with array will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 2
+			path: src/Bot/Infrastructure/TelegramApiClient.php
+
+		-
+			message: '#^Call to an undefined method Symfony\\Component\\Console\\Helper\\HelperInterface\:\:ask\(\)\.$#'
+			identifier: method.notFound
+			count: 4
+			path: src/Command/AdminCreateUserCommand.php
+
+		-
+			message: '#^Instanceof between App\\Entity\\AdminUser and App\\Entity\\AdminUser will always evaluate to true\.$#'
+			identifier: instanceof.alwaysTrue
+			count: 1
+			path: src/Command/AdminListUsersCommand.php
+
+		-
+			message: '#^Offset ''configLinks'' on array\{subscriptionUrl\: string\|null, configLinks\: array\<int, string\>, missing\: array\<int, string\>\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: src/Command/InboundRegenerateServiceConfigsCommand.php
+
+		-
+			message: '#^Instanceof between App\\Entity\\Order and App\\Entity\\Order will always evaluate to true\.$#'
+			identifier: instanceof.alwaysTrue
+			count: 1
+			path: src/Command/OrdersBackfillTrackingCodesCommand.php
+
+		-
+			message: '#^Offset ''configLinks'' on array\{subscriptionUrl\: string\|null, configLinks\: array\<int, string\>, missing\: array\<int, string\>\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: src/Command/PanelSyncInboundsCommand.php
+
+		-
+			message: '#^Property App\\Payment\\Application\\PaymentApprovalResult\:\:\$message \(string\) on left side of \?\? is not nullable\.$#'
+			identifier: nullCoalesce.property
+			count: 1
+			path: src/Command/PaymentCheckNowPaymentsCommand.php
+
+		-
+			message: '#^Call to function is_array\(\) with array\<string, mixed\> will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: src/Command/PaymentDebugMethodsForOrderCommand.php
+
+		-
+			message: '#^Call to function is_array\(\) with list\<array\<string, mixed\>\> will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: src/Command/PaymentDebugMethodsForOrderCommand.php
+
+		-
+			message: '#^Offset ''activeStorePaymentM…'' on array\{orderId\: int, amount\: int, payableAmount\: int, currency\: string, activeStorePaymentMethodCount\: int, skippedReasons\: list\<string\>, methods\: list\<array\<string, mixed\>\>\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: src/Command/PaymentDebugMethodsForOrderCommand.php
+
+		-
+			message: '#^Offset ''amount'' on array\{orderId\: int, amount\: int, payableAmount\: int, currency\: string, activeStorePaymentMethodCount\: int, skippedReasons\: list\<string\>, methods\: list\<array\<string, mixed\>\>\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: src/Command/PaymentDebugMethodsForOrderCommand.php
+
+		-
+			message: '#^Offset ''currency'' on array\{orderId\: int, amount\: int, payableAmount\: int, currency\: string, activeStorePaymentMethodCount\: int, skippedReasons\: list\<string\>, methods\: list\<array\<string, mixed\>\>\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: src/Command/PaymentDebugMethodsForOrderCommand.php
+
+		-
+			message: '#^Offset ''methods'' on array\{orderId\: int, amount\: int, payableAmount\: int, currency\: string, activeStorePaymentMethodCount\: int, skippedReasons\: list\<string\>, methods\: list\<array\<string, mixed\>\>\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: src/Command/PaymentDebugMethodsForOrderCommand.php
+
+		-
+			message: '#^Offset ''orderId'' on array\{orderId\: int, amount\: int, payableAmount\: int, currency\: string, activeStorePaymentMethodCount\: int, skippedReasons\: list\<string\>, methods\: list\<array\<string, mixed\>\>\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: src/Command/PaymentDebugMethodsForOrderCommand.php
+
+		-
+			message: '#^Offset ''payableAmount'' on array\{orderId\: int, amount\: int, payableAmount\: int, currency\: string, activeStorePaymentMethodCount\: int, skippedReasons\: list\<string\>, methods\: list\<array\<string, mixed\>\>\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: src/Command/PaymentDebugMethodsForOrderCommand.php
+
+		-
+			message: '#^Instanceof between App\\Entity\\PaymentGateway and App\\Entity\\PaymentGateway will always evaluate to true\.$#'
+			identifier: instanceof.alwaysTrue
+			count: 1
+			path: src/Command/PaymentListGatewaysCommand.php
+
+		-
+			message: '#^Instanceof between App\\Entity\\StorePaymentMethod and App\\Entity\\StorePaymentMethod will always evaluate to true\.$#'
+			identifier: instanceof.alwaysTrue
+			count: 1
+			path: src/Command/PaymentListMethodsCommand.php
+
+		-
+			message: '#^Expression on left side of \?\? is not nullable\.$#'
+			identifier: nullCoalesce.expr
+			count: 1
+			path: src/Command/PaymentPreviewProvisionConfigCommand.php
+
+		-
+			message: '#^Offset ''api_key_configured'' on array\{success\: bool, statusCode\: int, endpoint\: string, api_key_configured\: string, api_key_length\: int, api_key_prefix\: string, sandbox\: string, response\: array\<int\<0, max\>\|string, mixed\>\|null, \.\.\.\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: src/Command/PaymentTestNowPaymentsAuthCommand.php
+
+		-
+			message: '#^Offset ''api_key_length'' on array\{success\: bool, statusCode\: int, endpoint\: string, api_key_configured\: string, api_key_length\: int, api_key_prefix\: string, sandbox\: string, response\: array\<int\<0, max\>\|string, mixed\>\|null, \.\.\.\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: src/Command/PaymentTestNowPaymentsAuthCommand.php
+
+		-
+			message: '#^Offset ''api_key_prefix'' on array\{success\: bool, statusCode\: int, endpoint\: string, api_key_configured\: string, api_key_length\: int, api_key_prefix\: string, sandbox\: string, response\: array\<int\<0, max\>\|string, mixed\>\|null, \.\.\.\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: src/Command/PaymentTestNowPaymentsAuthCommand.php
+
+		-
+			message: '#^Offset ''endpoint'' on array\{success\: bool, statusCode\: int, endpoint\: string, api_key_configured\: string, api_key_length\: int, api_key_prefix\: string, sandbox\: string, response\: array\<int\<0, max\>\|string, mixed\>\|null, \.\.\.\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: src/Command/PaymentTestNowPaymentsAuthCommand.php
+
+		-
+			message: '#^Offset ''message'' on array\{success\: bool, statusCode\: int, endpoint\: string, api_key_configured\: string, api_key_length\: int, api_key_prefix\: string, sandbox\: string, response\: array\<int\<0, max\>\|string, mixed\>\|null, \.\.\.\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: src/Command/PaymentTestNowPaymentsAuthCommand.php
+
+		-
+			message: '#^Offset ''sandbox'' on array\{success\: bool, statusCode\: int, endpoint\: string, api_key_configured\: string, api_key_length\: int, api_key_prefix\: string, sandbox\: string, response\: array\<int\<0, max\>\|string, mixed\>\|null, \.\.\.\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: src/Command/PaymentTestNowPaymentsAuthCommand.php
+
+		-
+			message: '#^Offset ''statusCode'' on array\{success\: bool, statusCode\: int, endpoint\: string, api_key_configured\: string, api_key_length\: int, api_key_prefix\: string, sandbox\: string, response\: array\<int\<0, max\>\|string, mixed\>\|null, \.\.\.\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: src/Command/PaymentTestNowPaymentsAuthCommand.php
+
+		-
+			message: '#^Offset ''success'' on array\{success\: bool, statusCode\: int, endpoint\: string, api_key_configured\: string, api_key_length\: int, api_key_prefix\: string, sandbox\: string, response\: array\<int\<0, max\>\|string, mixed\>\|null, \.\.\.\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 2
+			path: src/Command/PaymentTestNowPaymentsAuthCommand.php
+
+		-
+			message: '#^Expression on left side of \?\? is not nullable\.$#'
+			identifier: nullCoalesce.expr
+			count: 1
+			path: src/Command/PaymentTestPluginGatewayCommand.php
+
+		-
+			message: '#^Using nullsafe property access "\?\-\>clientId" on left side of \?\? is unnecessary\. Use \-\> instead\.$#'
+			identifier: nullsafe.neverNull
+			count: 1
+			path: src/Command/ServiceDebugLinksCommand.php
+
+		-
+			message: '#^Using nullsafe property access "\?\-\>email" on left side of \?\? is unnecessary\. Use \-\> instead\.$#'
+			identifier: nullsafe.neverNull
+			count: 1
+			path: src/Command/ServiceDebugLinksCommand.php
+
+		-
+			message: '#^Using nullsafe property access "\?\-\>inboundId" on left side of \?\? is unnecessary\. Use \-\> instead\.$#'
+			identifier: nullsafe.neverNull
+			count: 1
+			path: src/Command/ServiceDebugLinksCommand.php
+
+		-
+			message: '#^Using nullsafe property access "\?\-\>subId" on left side of \?\? is unnecessary\. Use \-\> instead\.$#'
+			identifier: nullsafe.neverNull
+			count: 1
+			path: src/Command/ServiceDebugLinksCommand.php
+
+		-
+			message: '#^Offset ''configLinks'' on array\{subscriptionUrl\: string\|null, configLinks\: array\<int, string\>, missing\: array\<int, string\>\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: src/Command/ServiceRegenerateConfigCommand.php
+
+		-
+			message: '#^Offset ''missing'' on array\{subscriptionUrl\: string\|null, configLinks\: array\<int, string\>, missing\: array\<int, string\>\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: src/Command/ServiceRegenerateConfigCommand.php
+
+		-
+			message: '#^Property App\\Command\\SetTelegramWebhookCommand\:\:\$botToken is never read, only written\.$#'
+			identifier: property.onlyWritten
+			count: 1
+			path: src/Command/SetTelegramWebhookCommand.php
+
+		-
+			message: '#^Property App\\Command\\TelegramModeInfoCommand\:\:\$webhookSecret is never read, only written\.$#'
+			identifier: property.onlyWritten
+			count: 1
+			path: src/Command/TelegramModeInfoCommand.php
+
+		-
+			message: '#^Call to function is_array\(\) with array\{name\: string, type\: string, required\: bool, default\?\: mixed, choices\?\: array\<string, int\|string\>\} will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: src/Payment/Application/PaymentGatewayModuleRegistry.php
+
+		-
+			message: '#^Call to function is_array\(\) with list\<array\{name\: string, type\: string, required\: bool, default\?\: mixed, choices\?\: array\<string, int\|string\>\}\> will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 2
+			path: src/Payment/Application/PaymentGatewayModuleRegistry.php
+
+		-
+			message: '#^Offset ''name'' on array\{name\: string, type\: string, required\: bool, default\?\: mixed, choices\?\: array\<string, int\|string\>\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: src/Payment/Application/PaymentGatewayModuleRegistry.php
+
+		-
+			message: '#^Offset ''schema'' on array\{type\: string, displayName\: string, defaultTitle\: string, description\: string, category\: string, supportsWebhook\: bool, supportsOnlinePayment\: bool, defaults\: array\<string, mixed\>, \.\.\.\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 2
+			path: src/Payment/Application/PaymentGatewayModuleRegistry.php
+
+		-
+			message: '#^Offset ''type'' on array\{name\: string, type\: string, required\: bool, default\?\: mixed, choices\?\: array\<string, int\|string\>\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: src/Payment/Application/PaymentGatewayModuleRegistry.php
+
+		-
+			message: '#^Property App\\Payment\\Application\\PaymentGatewayModuleRegistry\:\:\$modules \(array\<string, array\{type\: string, displayName\: string, defaultTitle\: string, description\: string, category\: string, supportsWebhook\: bool, supportsOnlinePayment\: bool, defaults\: array\<string, mixed\>, \.\.\.\}\>\) does not accept array\{manual_card\: array\{type\: ''manual_card'', displayName\: ''Manual Card / کارت…'', defaultTitle\: ''کارت به کارت'', description\: ''ثبت اطلاعات کارت و…'', category\: ''offline'', supportsWebhook\: false, supportsOnlinePayment\: false, source\: ''core'', \.\.\.\}, zibal\: array\{type\: ''zibal'', displayName\: ''Zibal / زیبال'', defaultTitle\: ''زیبال'', description\: ''درگاه آنلاین ریالی…'', category\: ''online'', supportsWebhook\: true, supportsOnlinePayment\: true, source\: ''core'', \.\.\.\}, nowpayments\: array\{type\: ''nowpayments'', displayName\: ''NOWPayments'', defaultTitle\: ''NOWPayments'', description\: ''پرداخت رمزارزی…'', category\: ''crypto'', supportsWebhook\: true, supportsOnlinePayment\: true, source\: ''core'', \.\.\.\}\}\.$#'
+			identifier: assign.propertyType
+			count: 1
+			path: src/Payment/Application/PaymentGatewayModuleRegistry.php
+
+		-
+			message: '#^Dead catch \- Symfony\\Contracts\\HttpClient\\Exception\\TransportExceptionInterface is never thrown in the try block\.$#'
+			identifier: catch.neverThrown
+			count: 2
+			path: src/Payment/Infrastructure/CustomApiGateway.php
+
+		-
+			message: '#^Offset 1 on array\{non\-falsy\-string, non\-empty\-string\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: src/Payment/Infrastructure/CustomApiGateway.php
+
+		-
+			message: '#^Call to function is_array\(\) with array will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 7
+			path: src/Payment/Infrastructure/NowPaymentsGateway.php
+
+		-
+			message: '#^Call to function is_array\(\) with array\<mixed, mixed\> will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 3
+			path: src/Payment/Infrastructure/NowPaymentsGateway.php
+
+		-
+			message: '#^Call to function is_float\(\) with float will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: src/Payment/Infrastructure/NowPaymentsGateway.php
+
+		-
+			message: '#^Dead catch \- Symfony\\Contracts\\HttpClient\\Exception\\TransportExceptionInterface is never thrown in the try block\.$#'
+			identifier: catch.neverThrown
+			count: 6
+			path: src/Payment/Infrastructure/NowPaymentsGateway.php
+
+		-
+			message: '#^Offset ''statusCode'' on non\-empty\-array on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: src/Payment/Infrastructure/NowPaymentsGateway.php
+
+		-
+			message: '#^PHPDoc tag @param references unknown parameter\: \$config$#'
+			identifier: parameter.notFound
+			count: 1
+			path: src/Payment/Infrastructure/NowPaymentsGateway.php
+
+		-
+			message: '#^Strict comparison using \!\=\= between '''' and non\-falsy\-string will always evaluate to true\.$#'
+			identifier: notIdentical.alwaysTrue
+			count: 2
+			path: src/Payment/Infrastructure/NowPaymentsGateway.php
+
+		-
+			message: '#^Call to function is_array\(\) with array will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 3
+			path: src/Payment/Infrastructure/ZibalGateway.php
+
+		-
+			message: '#^Dead catch \- Symfony\\Contracts\\HttpClient\\Exception\\TransportExceptionInterface is never thrown in the try block\.$#'
+			identifier: catch.neverThrown
+			count: 2
+			path: src/Payment/Infrastructure/ZibalGateway.php
+
+		-
+			message: '#^Property App\\Payment\\Application\\PaymentApprovalResult\:\:\$message \(string\) on left side of \?\? is not nullable\.$#'
+			identifier: nullCoalesce.property
+			count: 1
+			path: src/Payment/UI/NowPaymentsWebhookController.php
+
+		-
+			message: '#^Call to function is_string\(\) with string will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: src/Payment/UI/PluginPaymentWebhookController.php
+
+		-
+			message: '#^Using nullsafe property access "\?\-\>message" on left side of \?\? is unnecessary\. Use \-\> instead\.$#'
+			identifier: nullsafe.neverNull
+			count: 1
+			path: src/Payment/UI/PluginPaymentWebhookController.php
+
+		-
+			message: '#^Strict comparison using \!\=\= between null and string will always evaluate to true\.$#'
+			identifier: notIdentical.alwaysTrue
+			count: 1
+			path: src/Plugin/PluginManager.php
+
+		-
+			message: '#^Constant App\\Plugin\\PluginPackageValidator\:\:ALLOWED_ROOTS is unused\.$#'
+			identifier: classConstant.unused
+			count: 1
+			path: src/Plugin/PluginPackageValidator.php
+
+		-
+			message: '#^Offset ''type'' on non\-empty\-array on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: src/Plugin/PluginPackageValidator.php
+
+		-
+			message: '#^Offset 0 on non\-empty\-list\<string\> on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: src/Plugin/PluginPackageValidator.php
+
+		-
+			message: '#^Offset ''configLinks'' on array\{subscriptionUrl\: string\|null, configLinks\: array\<int, string\>, missing\: array\<int, string\>\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: src/Provisioning/Application/FinalConfigLinkProvider.php
+
+		-
+			message: '#^Parameter \#1 \$array \(list\<string\>\) of array_values is already a list, call has no effect\.$#'
+			identifier: arrayValues.list
+			count: 1
+			path: src/Provisioning/Application/FinalConfigLinkProvider.php
+
+		-
+			message: '#^PHPDoc tag @return with type list\<string\> is incompatible with native type bool\.$#'
+			identifier: return.phpDocType
+			count: 1
+			path: src/Provisioning/Application/ServiceConfigDeliveryRefresher.php
+
+		-
+			message: '#^Method App\\Provisioning\\Application\\ServiceNotificationService\:\:buildTrafficMessage\(\) is unused\.$#'
+			identifier: method.unused
+			count: 1
+			path: src/Provisioning/Application/ServiceNotificationService.php
+
+		-
+			message: '#^Comparison operation "\<\=" between int\<1, max\> and 0 is always false\.$#'
+			identifier: smallerOrEqual.alwaysFalse
+			count: 1
+			path: src/Provisioning/Application/ServiceRenewalService.php
+
+		-
+			message: '#^Instanceof between DateTimeImmutable and DateTimeImmutable will always evaluate to true\.$#'
+			identifier: instanceof.alwaysTrue
+			count: 1
+			path: src/Provisioning/Application/ServiceRenewalService.php
+
+		-
+			message: '#^Comparison operation "\<\=" between int\<1, max\> and 0 is always false\.$#'
+			identifier: smallerOrEqual.alwaysFalse
+			count: 1
+			path: src/Provisioning/Application/ServiceTrafficAddonService.php
+
+		-
+			message: '#^Call to function is_string\(\) with string will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 3
+			path: src/Provisioning/Application/VpnAccessLinkGenerator.php
+
+		-
+			message: '#^Comparison operation "\<\=" between int\<1, 65535\> and 65535 is always true\.$#'
+			identifier: smallerOrEqual.alwaysTrue
+			count: 1
+			path: src/Provisioning/Application/VpnAccessLinkGenerator.php
+
+		-
+			message: '#^Expression on left side of \?\? is not nullable\.$#'
+			identifier: nullCoalesce.expr
+			count: 3
+			path: src/Provisioning/Application/VpnAccessLinkGenerator.php
+
+		-
+			message: '#^Using nullsafe property access "\?\-\>subId" on left side of \?\? is unnecessary\. Use \-\> instead\.$#'
+			identifier: nullsafe.neverNull
+			count: 1
+			path: src/Provisioning/Application/VpnAccessLinkGenerator.php
+
+		-
+			message: '#^Call to function is_string\(\) with string will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 3
+			path: src/Provisioning/Application/VpnInboundSyncService.php
+
+		-
+			message: '#^Instanceof between App\\Entity\\VpnInbound and App\\Entity\\VpnInbound will always evaluate to true\.$#'
+			identifier: instanceof.alwaysTrue
+			count: 1
+			path: src/Provisioning/Application/VpnInboundSyncService.php
+
+		-
+			message: '#^Offset ''configLinks'' on array\{subscriptionUrl\: string\|null, configLinks\: array\<int, string\>, missing\: array\<int, string\>\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: src/Provisioning/Application/VpnProvisioningService.php
+
+		-
+			message: '#^Offset ''missing'' on array\{subscriptionUrl\: string\|null, configLinks\: array\<int, string\>, missing\: array\<int, string\>\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: src/Provisioning/Application/VpnProvisioningService.php
+
+		-
+			message: '#^Expression on left side of \?\? is not nullable\.$#'
+			identifier: nullCoalesce.expr
+			count: 1
+			path: src/Provisioning/Application/VpnServiceConfigRefreshService.php
+
+		-
+			message: '#^Call to function is_int\(\) with int will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: src/Provisioning/Infrastructure/Sanaei3xui/Sanaei3xuiApiClient.php
+
+		-
+			message: '#^Expression on left side of \?\? is not nullable\.$#'
+			identifier: nullCoalesce.expr
+			count: 3
+			path: src/Provisioning/Infrastructure/Sanaei3xui/Sanaei3xuiApiClient.php
+
+		-
+			message: '#^Offset 0 on non\-empty\-list\<string\> on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: src/Provisioning/Infrastructure/Sanaei3xui/Sanaei3xuiApiClient.php
+
+		-
+			message: '#^Expression on left side of \?\? is not nullable\.$#'
+			identifier: nullCoalesce.expr
+			count: 1
+			path: src/Provisioning/Infrastructure/Sanaei3xui/Sanaei3xuiConfigGenerator.php
+
+		-
+			message: '#^Call to function is_array\(\) with array\<mixed, mixed\> will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: src/Provisioning/Infrastructure/Sanaei3xui/Sanaei3xuiDriver.php
+
+		-
+			message: '#^Comparison operation "\<\=" between int\<min, 0\> and 0 is always true\.$#'
+			identifier: smallerOrEqual.alwaysTrue
+			count: 1
+			path: src/Provisioning/Infrastructure/Sanaei3xui/Sanaei3xuiDriver.php
+
+		-
+			message: '#^Expression on left side of \?\? is not nullable\.$#'
+			identifier: nullCoalesce.expr
+			count: 2
+			path: src/Provisioning/Infrastructure/Sanaei3xui/Sanaei3xuiDriver.php
+
+		-
+			message: '#^Method App\\Provisioning\\Infrastructure\\Sanaei3xui\\Sanaei3xuiDriver\:\:buildClientConfigText\(\) is unused\.$#'
+			identifier: method.unused
+			count: 1
+			path: src/Provisioning/Infrastructure/Sanaei3xui/Sanaei3xuiDriver.php
+
+		-
+			message: '#^Offset ''matchedBy'' on array\{client\: array\<string, mixed\>\|null, matchedBy\: string\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: src/Provisioning/Infrastructure/Sanaei3xui/Sanaei3xuiDriver.php
+
+		-
+			message: '#^Offset ''matchedBy'' on array\{matchedBy\: string\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: src/Provisioning/Infrastructure/Sanaei3xui/Sanaei3xuiDriver.php
+
+		-
+			message: '#^Result of \|\| is always true\.$#'
+			identifier: booleanOr.alwaysTrue
+			count: 1
+			path: src/Provisioning/Infrastructure/Sanaei3xui/Sanaei3xuiDriver.php
+
+		-
+			message: '#^Strict comparison using \=\=\= between array\{\} and array\{\} will always evaluate to true\.$#'
+			identifier: identical.alwaysTrue
+			count: 1
+			path: src/Provisioning/Infrastructure/Sanaei3xui/Sanaei3xuiDriver.php
+
+		-
+			message: '#^Using nullsafe property access "\?\-\>clientId" on left side of \?\? is unnecessary\. Use \-\> instead\.$#'
+			identifier: nullsafe.neverNull
+			count: 1
+			path: src/Provisioning/Infrastructure/Sanaei3xui/Sanaei3xuiDriver.php
+
+		-
+			message: '#^Using nullsafe property access "\?\-\>email" on left side of \?\? is unnecessary\. Use \-\> instead\.$#'
+			identifier: nullsafe.neverNull
+			count: 1
+			path: src/Provisioning/Infrastructure/Sanaei3xui/Sanaei3xuiDriver.php
+
+		-
+			message: '#^Using nullsafe property access "\?\-\>inboundId" on left side of \?\? is unnecessary\. Use \-\> instead\.$#'
+			identifier: nullsafe.neverNull
+			count: 1
+			path: src/Provisioning/Infrastructure/Sanaei3xui/Sanaei3xuiDriver.php
+
+		-
+			message: '#^Using nullsafe method call on non\-nullable type App\\Entity\\Plan\. Use \-\> instead\.$#'
+			identifier: nullsafe.neverNull
+			count: 1
+			path: src/Shop/Application/DiscountCodeService.php
+
+		-
+			message: '#^Instanceof between App\\Entity\\Order and App\\Entity\\Order will always evaluate to true\.$#'
+			identifier: instanceof.alwaysTrue
+			count: 1
+			path: src/Shop/Application/IncompleteOrderExpiryService.php
+
+		-
+			message: '#^Instanceof between App\\Entity\\OrderDraft and App\\Entity\\OrderDraft will always evaluate to true\.$#'
+			identifier: instanceof.alwaysTrue
+			count: 1
+			path: src/Shop/Application/IncompleteOrderExpiryService.php
+
+		-
+			message: '#^Instanceof between App\\Entity\\Payment and App\\Entity\\Payment will always evaluate to true\.$#'
+			identifier: instanceof.alwaysTrue
+			count: 2
+			path: src/Shop/Application/IncompleteOrderExpiryService.php
+
+		-
+			message: '#^Instanceof between App\\Entity\\Order and App\\Entity\\Order will always evaluate to true\.$#'
+			identifier: instanceof.alwaysTrue
+			count: 2
+			path: src/Shop/Application/IncompleteOrderService.php
+
+		-
+			message: '#^Instanceof between App\\Entity\\OrderDraft and App\\Entity\\OrderDraft will always evaluate to true\.$#'
+			identifier: instanceof.alwaysTrue
+			count: 1
+			path: src/Shop/Application/IncompleteOrderService.php
+
+		-
+			message: '#^Instanceof between App\\Entity\\Payment and App\\Entity\\Payment will always evaluate to true\.$#'
+			identifier: instanceof.alwaysTrue
+			count: 1
+			path: src/Shop/Application/IncompleteOrderService.php
+
+		-
+			message: '#^Instanceof between DateTimeImmutable and DateTimeImmutable will always evaluate to true\.$#'
+			identifier: instanceof.alwaysTrue
+			count: 2
+			path: src/Shop/Application/IncompleteOrderService.php
+
+		-
+			message: '#^Result of && is always true\.$#'
+			identifier: booleanAnd.alwaysTrue
+			count: 1
+			path: src/Shop/Application/IncompleteOrderService.php
+
+		-
+			message: '#^Using nullsafe method call on non\-nullable type App\\Entity\\Order\. Use \-\> instead\.$#'
+			identifier: nullsafe.neverNull
+			count: 2
+			path: src/Shop/Application/IncompleteOrderService.php
+
+		-
+			message: '#^Using nullsafe method call on non\-nullable type App\\Entity\\OrderDraft\. Use \-\> instead\.$#'
+			identifier: nullsafe.neverNull
+			count: 3
+			path: src/Shop/Application/IncompleteOrderService.php
+
+		-
+			message: '#^Service "App\\Tests\\Support\\MockHttpResponder" is not registered in the container\.$#'
+			identifier: symfonyContainer.serviceNotFound
+			count: 1
+			path: tests/Support/IntegrationTestCase.php
+
+		-
+			message: '#^PHPDoc tag @param for parameter \$handler with type array\<mixed\>\|\(callable\) is not subtype of native type callable\.$#'
+			identifier: parameter.phpDocType
+			count: 1
+			path: tests/Support/MockHttpResponder.php
+
+		-
+			message: '#^Call to function method_exists\(\) with ''Symfony\\\\Component\\\\Dotenv\\\\Dotenv'' and ''bootEnv'' will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: tests/bootstrap.php

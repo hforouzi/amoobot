@@ -15,3 +15,6 @@ when@test:
         test: true
         session:
             storage_factory_id: session.storage.factory.mock_file
+        # Tests never reach the network: every HttpClient call is answered by MockHttpResponder.
+        http_client:
+            mock_response_factory: App\Tests\Support\MockHttpResponder
