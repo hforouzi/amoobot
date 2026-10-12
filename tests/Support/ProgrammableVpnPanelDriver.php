@@ -5,41 +5,61 @@ declare(strict_types=1);
 namespace App\Tests\Support;
 
 use App\Entity\VpnPanel;
+use App\Provisioning\Domain\Dto\AdoptedVpnService;
 use App\Provisioning\Domain\Dto\CreatedVpnService;
 use App\Provisioning\Domain\Dto\CreateVpnServiceRequest;
 use App\Provisioning\Domain\Dto\RenewVpnServiceRequest;
 use App\Provisioning\Domain\Dto\VpnUsage;
+use App\Provisioning\Domain\ExistingClientAwareDriverInterface;
 use App\Provisioning\Domain\VpnPanelDriverInterface;
 
 /**
  * Test VPN panel driver for panels of type "test" (registered in config/services_test.yaml).
  *
  * - failNext(n): the next n create/renew calls throw, simulating a panel outage
+ * - failNextAfterCreate(): the next create adds the client on the "panel" and then throws (lost
+ *   response / timeout after the panel already did the work)
+ * - $clients: what the panel holds, keyed by email; findExistingService() searches it
+ * - $lookupFails: findExistingService() throws (panel unreadable)
  * - TEST_PANEL_DELAY_MS env var: sleeps inside createService, used to overlap concurrent settlements
  * - $usage / $usageFails: what getUsage() reports (the panel's current state of a client)
  */
-final class ProgrammableVpnPanelDriver implements VpnPanelDriverInterface
+final class ProgrammableVpnPanelDriver implements VpnPanelDriverInterface, ExistingClientAwareDriverInterface
 {
     public const TYPE = 'test';
 
     private int $failuresLeft = 0;
+    private bool $failAfterCreate = false;
     public int $createCalls = 0;
     public int $renewCalls = 0;
+    public int $lookupCalls = 0;
     public ?VpnUsage $usage = null;
     public bool $usageFails = false;
+    public bool $lookupFails = false;
+    /** @var array<string, array{uuid: string, email: string, subId: string}> */
+    public array $clients = [];
 
     public function failNext(int $times = 1): void
     {
         $this->failuresLeft = $times;
     }
 
+    public function failNextAfterCreate(): void
+    {
+        $this->failAfterCreate = true;
+    }
+
     public function reset(): void
     {
         $this->failuresLeft = 0;
+        $this->failAfterCreate = false;
         $this->createCalls = 0;
         $this->renewCalls = 0;
+        $this->lookupCalls = 0;
         $this->usage = null;
         $this->usageFails = false;
+        $this->lookupFails = false;
+        $this->clients = [];
     }
 
     public function supports(?VpnPanel $panel): bool
@@ -55,20 +75,37 @@ final class ProgrammableVpnPanelDriver implements VpnPanelDriverInterface
             usleep($delay * 1000);
         }
         $this->maybeFail('createService');
+        if (isset($this->clients[$request->username])) {
+            throw new \RuntimeException('Duplicate email: '.$request->username); // like 3x-ui
+        }
 
-        $token = bin2hex(random_bytes(6));
+        $uuid = $request->clientUuid ?? bin2hex(random_bytes(6));
+        $this->clients[$request->username] = ['uuid' => $uuid, 'email' => $request->username, 'subId' => bin2hex(random_bytes(6))];
+        if ($this->failAfterCreate) {
+            $this->failAfterCreate = false;
+            throw new \RuntimeException('Simulated timeout after the panel created the client');
+        }
 
-        return new CreatedVpnService(
-            remoteId: 'test_'.$token,
-            username: $request->username,
-            subscriptionUrl: 'https://panel.test/sub',
-            configText: 'vless://test',
-            clientUuid: $token,
-            clientEmail: $request->username,
-            subId: $token,
-            ipLimit: $request->ipLimit,
-            configLinks: ['vless://test'],
-        );
+        return $this->service($this->clients[$request->username]);
+    }
+
+    public function findExistingService(CreateVpnServiceRequest $request, ?VpnPanel $panel = null): ?AdoptedVpnService
+    {
+        ++$this->lookupCalls;
+        if ($this->lookupFails) {
+            throw new \RuntimeException('Simulated panel outage during client lookup');
+        }
+
+        foreach ($this->clients as $client) {
+            if (null !== $request->clientUuid && $client['uuid'] === $request->clientUuid) {
+                return new AdoptedVpnService($this->service($client), AdoptedVpnService::MATCHED_BY_UUID, new \DateTimeImmutable('+25 days'), 40);
+            }
+        }
+        if (isset($this->clients[$request->username])) {
+            return new AdoptedVpnService($this->service($this->clients[$request->username]), AdoptedVpnService::MATCHED_BY_EMAIL, new \DateTimeImmutable('+25 days'), 40);
+        }
+
+        return null;
     }
 
     public function renewService(string $remoteId, RenewVpnServiceRequest $request, ?VpnPanel $panel = null): void
@@ -96,6 +133,23 @@ final class ProgrammableVpnPanelDriver implements VpnPanelDriverInterface
         }
 
         return $this->usage ?? new VpnUsage(trafficUsedGb: 0, trafficLimitGb: null, usedBytes: 0, totalBytes: null);
+    }
+
+    /**
+     * @param array{uuid: string, email: string, subId: string} $client
+     */
+    private function service(array $client): CreatedVpnService
+    {
+        return new CreatedVpnService(
+            remoteId: 'test_'.$client['uuid'],
+            username: $client['email'],
+            subscriptionUrl: 'https://panel.test/sub',
+            configText: 'vless://test',
+            clientUuid: $client['uuid'],
+            clientEmail: $client['email'],
+            subId: $client['subId'],
+            configLinks: ['vless://test'],
+        );
     }
 
     private function maybeFail(string $operation): void

@@ -7,12 +7,18 @@ namespace App\Provisioning\Application;
 use App\Entity\Order;
 use App\Entity\TelegramAccount;
 use App\Entity\VpnInbound;
+use App\Entity\VpnPanel;
 use App\Entity\VpnService;
+use App\Provisioning\Domain\Dto\AdoptedVpnService;
 use App\Provisioning\Domain\Dto\CreateVpnServiceRequest;
+use App\Provisioning\Domain\ExistingClientAwareDriverInterface;
+use App\Provisioning\Domain\VpnPanelDriverInterface;
 use App\Provisioning\Domain\VpnServiceStatus;
 use App\Provisioning\Infrastructure\VpnPanelDriverRegistry;
 use App\Shop\Domain\OrderStatus;
 use Doctrine\ORM\EntityManagerInterface;
+use Psr\Log\LoggerInterface;
+use Symfony\Component\DependencyInjection\Attribute\Autowire;
 
 class VpnProvisioningService
 {
@@ -23,13 +29,31 @@ class VpnProvisioningService
         private readonly VpnPanelDriverRegistry $driverRegistry,
         private readonly VpnAccessLinkGenerator $vpnAccessLinkGenerator,
         private readonly FinalConfigLinkProvider $finalConfigLinkProvider,
+        #[Autowire('%kernel.secret%')]
+        private readonly string $appSecret,
+        private readonly LoggerInterface $logger,
     ) {
     }
 
     /**
-     * @param array<string, scalar|null> $meta
+     * Client UUID for an order's panel client. Deterministic, so a retried provisioning can find
+     * the client an earlier attempt created; keyed with the app secret because for VLESS/VMess the
+     * UUID is the connection credential and must not be computable from the order id.
      */
-    public function provisionOrder(Order $order, array $meta = []): VpnService
+    public function orderClientUuid(Order $order): string
+    {
+        $hash = hash_hmac('sha256', 'amoobot-order-client:'.($order->getId() ?? 0), $this->appSecret);
+        // Format as an RFC 4122 version-4 style UUID (version and variant bits set).
+        $hex = substr($hash, 0, 12).'4'.substr($hash, 13, 3).dechex(8 | (hexdec($hash[16]) & 3)).substr($hash, 17, 15);
+
+        return sprintf('%s-%s-%s-%s-%s', substr($hex, 0, 8), substr($hex, 8, 4), substr($hex, 12, 4), substr($hex, 16, 4), substr($hex, 20, 12));
+    }
+
+    /**
+     * @param array<string, scalar|null> $meta
+     * @param bool $adoptExisting look for this order's client on the panel first (retry after a failed attempt)
+     */
+    public function provisionOrder(Order $order, array $meta = [], bool $adoptExisting = false): VpnService
     {
         $planInbound = $order->getPlan()->getInbound();
         if ($planInbound instanceof VpnInbound && !$planInbound->isActive()) {
@@ -62,7 +86,7 @@ class VpnProvisioningService
 
         $driver = $this->driverRegistry->resolve($panel);
         $driverType = $panel?->getType() ?? 'dummy';
-        $created = $driver->createService(new CreateVpnServiceRequest(
+        $request = new CreateVpnServiceRequest(
             username: $username,
             durationDays: $durationDays,
             trafficLimitGb: $trafficLimitValue,
@@ -78,7 +102,13 @@ class VpnProvisioningService
                 'driverType' => $driverType,
                 'customOrder' => $isCustomOrder ? 1 : 0,
             ], $meta),
-        ), $panel);
+            clientUuid: $this->orderClientUuid($order),
+        );
+        $adopted = $adoptExisting ? $this->findAdoptableClient($driver, $request, $panel, $order, '' === $customFinalUsername) : null;
+        $created = $adopted->service ?? $driver->createService($request, $panel);
+        if (null !== $adopted?->trafficLimitGb) {
+            $trafficLimitValue = $adopted->trafficLimitGb;
+        }
 
         $vpnService = (new VpnService())
             ->setUser($order->getUser())
@@ -96,7 +126,7 @@ class VpnProvisioningService
             ->setConfigText($created->configText)
             ->setStatus(VpnServiceStatus::ACTIVE)
             ->setStartsAt(new \DateTimeImmutable())
-            ->setExpiresAt($unlimitedDuration ? null : (new \DateTimeImmutable())->modify('+'.$durationDays.' days'))
+            ->setExpiresAt($adopted->expiresAt ?? ($unlimitedDuration ? null : (new \DateTimeImmutable())->modify('+'.$durationDays.' days')))
             ->setTrafficLimitGb($trafficLimitValue)
             ->setTrafficUsedGb(0)
             ->setTrafficLimitBytes(null === $trafficLimitValue ? null : ($trafficLimitValue * self::BYTES_PER_GB))
@@ -161,6 +191,34 @@ class VpnProvisioningService
         $this->entityManager->persist($vpnService);
 
         return $vpnService;
+    }
+
+    /**
+     * An earlier attempt may have created the client on the panel and then failed (database error,
+     * timeout, verification). Adopting it avoids a second client for one order.
+     *
+     * A UUID match always belongs to this order (the UUID is derived from it). An email match is
+     * accepted only for generated names (tg_<telegram>_order_<id>): a customer-chosen username may
+     * belong to someone else's client, so then provisioning stops for a manual decision.
+     */
+    private function findAdoptableClient(VpnPanelDriverInterface $driver, CreateVpnServiceRequest $request, ?VpnPanel $panel, Order $order, bool $generatedName): ?AdoptedVpnService
+    {
+        if (!$driver instanceof ExistingClientAwareDriverInterface) {
+            return null;
+        }
+
+        $adopted = $driver->findExistingService($request, $panel);
+        if (!$adopted instanceof AdoptedVpnService) {
+            return null;
+        }
+
+        if (AdoptedVpnService::MATCHED_BY_UUID !== $adopted->matchedBy && !$generatedName) {
+            throw new \RuntimeException(sprintf('A panel client named "%s" already exists but its UUID does not belong to order #%d; resolve it on the panel, then retry.', $request->username, $order->getId() ?? 0));
+        }
+
+        $this->logger->warning('Adopted existing panel client instead of creating a second one.', ['order_id' => $order->getId(), 'matched_by' => $adopted->matchedBy]);
+
+        return $adopted;
     }
 
     private function logProvisioningConfig(

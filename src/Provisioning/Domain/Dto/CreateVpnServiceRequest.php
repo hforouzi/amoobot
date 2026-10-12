@@ -16,6 +16,8 @@ class CreateVpnServiceRequest
         public readonly ?VpnInbound $inbound = null,
         public readonly ?string $remoteInboundId = null,
         public readonly array $meta = [],
+        /** Client UUID to use (derived from the order, so a retry can find the client again); null = driver picks. */
+        public readonly ?string $clientUuid = null,
     ) {
     }
 }

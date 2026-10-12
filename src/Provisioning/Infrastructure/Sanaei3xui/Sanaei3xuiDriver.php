@@ -8,14 +8,16 @@ use App\Entity\VpnInbound;
 use App\Entity\VpnPanel;
 use App\Entity\VpnService;
 use App\Provisioning\Application\VpnServiceConfigRefreshResult;
+use App\Provisioning\Domain\Dto\AdoptedVpnService;
 use App\Provisioning\Domain\Dto\CreatedVpnService;
 use App\Provisioning\Domain\Dto\CreateVpnServiceRequest;
 use App\Provisioning\Domain\Dto\RenewVpnServiceRequest;
 use App\Provisioning\Domain\Dto\VpnUsage;
+use App\Provisioning\Domain\ExistingClientAwareDriverInterface;
 use App\Provisioning\Domain\VpnPanelDriverInterface;
 use Symfony\Component\Uid\Uuid;
 
-final class Sanaei3xuiDriver implements VpnPanelDriverInterface
+final class Sanaei3xuiDriver implements VpnPanelDriverInterface, ExistingClientAwareDriverInterface
 {
     private const BYTES_PER_GB = 1073741824;
 
@@ -53,7 +55,8 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
         if ('' === $email) {
             throw new \RuntimeException('Sanaei provisioning requires a valid email/username.');
         }
-        $clientUuid = Uuid::v4()->toRfc4122();
+        // The core derives the UUID from the order so a retry can find this client again.
+        $clientUuid = $request->clientUuid ?? Uuid::v4()->toRfc4122();
         $subId = bin2hex(random_bytes(8));
         $totalBytes = $this->gbToBytes($request->trafficLimitGb);
         $expiryTime = $this->durationToMs($request->durationDays);
@@ -142,6 +145,17 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
             throw new \RuntimeException('Sanaei addClient could not be verified on panel.');
         }
 
+        return $this->buildCreatedService($panel, $config, $inbound, $inboundIdRaw, $inboundIdInt, $clientUuid, $email, $subId, $ipLimit, $inboundConfig, $source);
+    }
+
+    /**
+     * Subscription URL and config links for a client that exists on the panel (just created or adopted).
+     *
+     * @param array<string, mixed> $config
+     * @param array<string, mixed> $inboundConfig
+     */
+    private function buildCreatedService(VpnPanel $panel, array $config, VpnInbound $inbound, string $inboundIdRaw, int $inboundIdInt, string $clientUuid, string $email, string $subId, ?int $ipLimit, array $inboundConfig, string $source): CreatedVpnService
+    {
         $subscriptionUrl = $this->buildSubscriptionUrl($panel, $config, $subId);
         $configLinks = [];
         $configText = '';
@@ -246,6 +260,64 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface
             subId: $subId,
             ipLimit: $ipLimit,
             configLinks: $configLinks,
+        );
+    }
+
+    /**
+     * Looks for the client a create request would produce: by its (order-derived) UUID first, then by
+     * email. Clients on 3x-ui are unique per email, so this is what a retry must check before addClient.
+     */
+    public function findExistingService(CreateVpnServiceRequest $request, ?VpnPanel $panel = null): ?AdoptedVpnService
+    {
+        $panel = $this->requireSupportedPanel($panel);
+        $inbound = $request->inbound;
+        if (null === $inbound) {
+            throw new \RuntimeException('Sanaei client lookup requires a selected inbound.');
+        }
+        $inboundIdRaw = trim((string) ($request->remoteInboundId ?? $inbound->getRemoteInboundId()));
+        $inboundIdInt = $this->toInboundIdIntOrFail($inboundIdRaw);
+        $email = trim($request->username);
+
+        $remoteInbound = $this->fetchLegacyInboundById($panel, $inboundIdInt);
+        if (null === $remoteInbound) {
+            // Unknown is not "absent": creating now could duplicate the client.
+            throw new \RuntimeException(sprintf('Sanaei inbound %s could not be read to check for an existing client.', $inboundIdRaw));
+        }
+
+        $match = $this->findLegacyClient($remoteInbound, (string) ($request->clientUuid ?? ''), $email);
+        $client = $match['client'];
+        if (!is_array($client)) {
+            return null;
+        }
+
+        $clientUuid = trim((string) ($client['id'] ?? $client['password'] ?? ''));
+        $clientEmail = trim((string) ($client['email'] ?? $email));
+        $subId = trim((string) ($client['subId'] ?? ''));
+        $limitIp = isset($client['limitIp']) ? (int) $client['limitIp'] : null;
+        $expiryMs = (int) ($client['expiryTime'] ?? 0);
+        $totalBytes = (int) ($client['totalGB'] ?? 0);
+        $this->log(sprintf('existing_client_found panel_id=%d remote_inbound_id="%s" email="%s" matched_by="%s"', $panel->getId() ?? 0, $inboundIdRaw, $clientEmail, (string) $match['matchedBy']));
+
+        $created = $this->buildCreatedService(
+            $panel,
+            $this->panelConfig($panel),
+            $inbound,
+            $inboundIdRaw,
+            $inboundIdInt,
+            $clientUuid,
+            $clientEmail,
+            $subId,
+            $limitIp,
+            $this->inboundConfig($inbound),
+            'adopt_existing_client'
+        );
+
+        return new AdoptedVpnService(
+            service: $created,
+            matchedBy: 'uuid' === $match['matchedBy'] ? AdoptedVpnService::MATCHED_BY_UUID : AdoptedVpnService::MATCHED_BY_EMAIL,
+            // 3x-ui: expiryTime in ms (0 = unlimited, negative = starts on first use), totalGB in bytes (0 = unlimited).
+            expiresAt: $expiryMs > 0 ? (new \DateTimeImmutable())->setTimestamp(intdiv($expiryMs, 1000)) : null,
+            trafficLimitGb: $totalBytes > 0 ? (int) round($totalBytes / 1073741824) : null,
         );
     }
 

@@ -27,6 +27,17 @@ Options:
 The command never provisions or renews anything. Marked payments appear in
 **Admin > Payments: provisioning failed**, where **Retry provisioning** runs the fulfilment once.
 
+### Retry never creates a second client
+
+Every retry (admin **Retry provisioning**, also after this command) first looks for the order's
+client on the panel and, if it exists, adopts it (rebuilds the service row from the panel) instead of
+creating another one. A client matches by its UUID, which is derived from the order id with the app
+secret, or by email when the name is the generated `tg_<telegram id>_order_<order id>`. A
+customer-chosen username that exists with a different UUID stops the retry with an error, because it
+may be another customer's client. If the panel cannot be read, the retry fails and nothing is created.
+Supported by the Sanaei 3x-ui driver; other drivers create as before. Changing `APP_SECRET` changes
+the derived UUIDs, so after a change only the email match applies.
+
 ## Categories
 
 | Category | Meaning | `--apply` |

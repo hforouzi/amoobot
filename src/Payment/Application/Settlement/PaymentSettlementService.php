@@ -360,7 +360,11 @@ class PaymentSettlementService
             'planInboundId' => $inbound?->getId() ?? 0,
             'panelId' => $inbound?->getPanel()?->getId() ?? 0,
             'driverType' => (string) ($inbound?->getPanel()?->getType() ?? 'dummy'),
-        ]);
+        ],
+            // A retry after a failed attempt (admin Retry, repair-stuck) first looks for the client
+            // that attempt may already have created on the panel, and adopts it instead of a second one.
+            adoptExisting: PaymentStatus::PROVISIONING_FAILED === $payment->getStatus(),
+        );
     }
 
     private function parkLatePayment(Payment $payment, Order $order, VerifiedPayment $verified, string $source): SettlementResult
