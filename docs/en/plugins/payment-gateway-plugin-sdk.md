@@ -73,6 +73,11 @@ notifications).
 4. **No amount or currency ⇒ NEEDS_REVIEW.** A paid result without both, a different currency, or a
    lower amount is never confirmed automatically; an admin must review it. More than expected is
    confirmed and flagged.
+   **Underpayment tolerance:** a shortfall of at most `underpayment_tolerance_percent` of the expected
+   amount (gateway config; default 0, or 1 when your `plugin.json` declares `"category": "crypto"`)
+   is confirmed and flagged `underpaid_tolerated`; a larger shortfall goes to NEEDS_REVIEW with the
+   shortfall in the review reason. Add the key to your `configSchema` (type `number`) so admins can
+   set it. The core applies the tolerance; plugins must still report the exact amount paid.
 5. **Non-Toman quotes:** if you charge in another currency (USD, USDT, …) call
    `$payment->setExpectation($quotedAmount, $quotedCurrency)` in `createPayment()`; the reported
    amount is then compared with that quote.

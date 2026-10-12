@@ -33,7 +33,8 @@ use Psr\Log\LoggerInterface;
  * and the payment (always in that order, so concurrent settlements cannot deadlock):
  *
  *   1. idempotency: a payment that is not in an allowed state is returned as ALREADY_PROCESSED
- *   2. strict amount check for gateway verifications (AmountMatcher) -> NEEDS_REVIEW on mismatch
+ *   2. strict amount check for gateway verifications (AmountMatcher, with the gateway's underpayment
+ *      tolerance) -> NEEDS_REVIEW on mismatch; the review reason records the shortfall
  *   3. an order that is already fulfilled (second payment for it) -> NEEDS_REVIEW
  *   4. fulfilment: new service / renewal / add-traffic
  *   5. success: Payment CONFIRMED, Order PROVISIONED, discount usage recorded, commit
@@ -43,6 +44,7 @@ use Psr\Log\LoggerInterface;
 class PaymentSettlementService
 {
     public const FLAG_OVERPAID = 'overpaid';
+    public const FLAG_UNDERPAID_TOLERATED = 'underpaid_tolerated';
 
     /** Payments an admin may approve (manual receipt or a parked review). */
     private const ADMIN_APPROVABLE = [PaymentStatus::PENDING, PaymentStatus::SUBMITTED, PaymentStatus::NEEDS_REVIEW];
@@ -52,6 +54,7 @@ class PaymentSettlementService
         private readonly EntityManagerInterface $entityManager,
         private readonly ManagerRegistry $managerRegistry,
         private readonly AmountMatcher $amountMatcher,
+        private readonly UnderpaymentTolerancePolicy $tolerancePolicy,
         private readonly VpnProvisioningService $vpnProvisioningService,
         private readonly ServiceRenewalService $serviceRenewalService,
         private readonly ServiceTrafficAddonService $serviceTrafficAddonService,
@@ -179,7 +182,7 @@ class PaymentSettlementService
             $match = null;
             if ($checkAmount) {
                 [$expectedAmount, $expectedCurrency] = AmountMatcher::expectationFor($payment);
-                $match = $this->amountMatcher->match($expectedAmount, $expectedCurrency, $verified->amount, $verified->currency);
+                $match = $this->amountMatcher->match($expectedAmount, $expectedCurrency, $verified->amount, $verified->currency, $this->tolerancePolicy->percentFor($payment));
                 $payment
                     ->setVerifiedMoney($verified->amount, $verified->currency)
                     ->setVerifiedAt($payment->getVerifiedAt() ?? new \DateTimeImmutable());
@@ -187,7 +190,11 @@ class PaymentSettlementService
                 if (!$match->status->isAcceptable()) {
                     return $this->parkForReview($payment, $match->describe(), $source, $match);
                 }
-                $payment->setAmountFlag(AmountMatchStatus::OVERPAID === $match->status ? self::FLAG_OVERPAID : null);
+                $payment->setAmountFlag(match ($match->status) {
+                    AmountMatchStatus::OVERPAID => self::FLAG_OVERPAID,
+                    AmountMatchStatus::UNDERPAID_WITHIN_TOLERANCE => self::FLAG_UNDERPAID_TOLERATED,
+                    default => null,
+                });
             }
 
             $fulfilledBy = $this->fulfilledByPayment($order);

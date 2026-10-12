@@ -30,12 +30,34 @@ with the expectation using `AmountMatcher`:
 |---|---|---|
 | `match` | normalized amount and currency equal the expectation | confirm |
 | `overpaid` | more than expected | confirm and flag for the admin |
-| `underpaid` | less than expected | **needs review** |
+| `underpaid_within_tolerance` | less than expected, shortfall ≤ the gateway's tolerance (see below) | confirm and flag `underpaid_tolerated` |
+| `underpaid` | less than expected, beyond the tolerance | **needs review** (shortfall in the review reason) |
 | `currency_mismatch` | different currency after normalization | **needs review** |
 | `missing` | amount or currency not reported / not a number | **needs review** |
 
 The expectation is `payableAmount` in Toman, unless the gateway stored its own quote when creating the
 payment (`Payment::setExpectation()`), as NOWPayments does with `price_amount` / `price_currency`.
+
+## Underpayment tolerance
+
+Each gateway may accept a small shortfall. Config key (per payment gateway, in the admin config form
+or the config JSON):
+
+```json
+{ "underpayment_tolerance_percent": 1 }
+```
+
+- Default when the key is empty or absent: **0** for fiat gateways (Zibal, NovinoPay, Custom API,
+  manual card) and **1** for crypto gateways (module category `crypto`: NOWPayments, SwapWallet and
+  other plugins whose `plugin.json` has `"category": "crypto"`).
+- The value is a percentage of the expected amount (decimals allowed, e.g. `0.5`). Invalid values
+  (negative, not a number) mean 0; values above 10 are capped at 10.
+- A shortfall within the tolerance is confirmed and flagged `underpaid_tolerated` on the payment
+  (`amount_flag`; expected and verified amounts stay visible in the admin).
+- A shortfall beyond the tolerance goes to **needs review**. The review reason records the shortfall,
+  e.g. `underpaid: expected 10 USD, gateway reported 9.5 USD; shortfall 0.5 USD (5%), tolerance 1%`.
+- The comparison is exact decimal arithmetic (`shortfall × 100 ≤ expected × tolerance`), never floats.
+- The tolerance never excuses a currency mismatch or a missing amount.
 
 ## Per gateway
 

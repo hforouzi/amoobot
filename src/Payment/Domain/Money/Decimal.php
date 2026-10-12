@@ -63,6 +63,67 @@ final class Decimal
     }
 
     /**
+     * $a - $b for canonical decimal strings with $a >= $b.
+     */
+    public static function subtract(string $a, string $b): string
+    {
+        if (self::compare($a, $b) < 0) {
+            throw new \InvalidArgumentException('Decimal::subtract() needs $a >= $b.');
+        }
+        [$ai, $af] = self::split($a);
+        [$bi, $bf] = self::split($b);
+        $scale = max(strlen($af), strlen($bf));
+        $x = $ai.str_pad($af, $scale, '0');
+        $y = str_pad($bi.str_pad($bf, $scale, '0'), strlen($x), '0', STR_PAD_LEFT);
+
+        $digits = '';
+        $borrow = 0;
+        for ($i = strlen($x) - 1; $i >= 0; --$i) {
+            $d = (int) $x[$i] - (int) $y[$i] - $borrow;
+            $borrow = $d < 0 ? 1 : 0;
+            $digits = (string) ($d + 10 * $borrow).$digits;
+        }
+
+        return self::fromScaled($digits, $scale);
+    }
+
+    public static function multiply(string $a, string $b): string
+    {
+        [$ai, $af] = self::split($a);
+        [$bi, $bf] = self::split($b);
+        $x = ltrim($ai.$af, '0');
+        $y = ltrim($bi.$bf, '0');
+        if ('' === $x || '' === $y) {
+            return '0';
+        }
+
+        $result = array_fill(0, strlen($x) + strlen($y), 0);
+        for ($i = strlen($x) - 1; $i >= 0; --$i) {
+            for ($j = strlen($y) - 1; $j >= 0; --$j) {
+                $position = $i + $j + 1;
+                $sum = (int) $x[$i] * (int) $y[$j] + $result[$position];
+                $result[$position] = $sum % 10;
+                $result[$position - 1] += intdiv($sum, 10);
+            }
+        }
+
+        return self::fromScaled(implode('', $result), strlen($af) + strlen($bf));
+    }
+
+    /**
+     * Digits of an integer that represents a value scaled by 10^$scale.
+     */
+    private static function fromScaled(string $digits, int $scale): string
+    {
+        if (0 === $scale) {
+            return (string) self::normalize($digits);
+        }
+        $digits = str_pad($digits, $scale + 1, '0', STR_PAD_LEFT);
+
+        return (string) self::normalize(substr($digits, 0, -$scale).'.'.substr($digits, -$scale));
+    }
+
+    /**
      * @return array{string, string}
      */
     private static function split(string $decimal): array

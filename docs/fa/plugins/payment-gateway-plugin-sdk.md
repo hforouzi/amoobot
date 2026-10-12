@@ -69,6 +69,11 @@ php bin/console app:payment:test-plugin-gateway GATEWAY_ID
    (رشتهٔ عددی، مثل `amount: "1500000", currency: "IRR"`) و برای بررسی از مرجع ذخیره‌شده استفاده کند.
 4. **بدون مبلغ یا ارز ⇒ NEEDS_REVIEW.** نتیجهٔ پرداخت‌شده بدون این دو، ارز متفاوت یا مبلغ کمتر هرگز
    خودکار تأیید نمی‌شود و ادمین باید بررسی کند. مبلغ بیشتر تأیید و علامت‌گذاری می‌شود.
+   **تلورانس کم‌پرداخت:** کسری حداکثر به اندازهٔ `underpayment_tolerance_percent` درصد از مبلغ مورد انتظار
+   (تنظیم درگاه؛ پیش‌فرض ۰، یا ۱ اگر `plugin.json` مقدار `"category": "crypto"` داشته باشد) تأیید و با
+   `underpaid_tolerated` علامت‌گذاری می‌شود؛ کسری بیشتر با ثبت مقدار کسری به NEEDS_REVIEW می‌رود. این کلید
+   را با نوع `number` به `configSchema` اضافه کنید. تلورانس را هسته اعمال می‌کند؛ پلاگین باید همچنان مبلغ
+   دقیق پرداخت‌شده را گزارش کند.
 5. **قیمت به ارز دیگر:** اگر به USD/USDT و … دریافت می‌کنید، در `createPayment()`
    `$payment->setExpectation($quotedAmount, $quotedCurrency)` را صدا بزنید.
 6. **Webhook باید fail-closed باشد.** در `handleWebhook()` امضا را بررسی کنید و اگر نادرست بود یا

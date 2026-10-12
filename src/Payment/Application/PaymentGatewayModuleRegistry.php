@@ -83,6 +83,8 @@ final class PaymentGatewayModuleRegistry
                     ['name' => 'merchant', 'type' => 'text', 'required' => true],
                     ['name' => 'sandbox', 'type' => 'boolean', 'required' => false, 'default' => false],
                     ['name' => 'callback_base_url', 'type' => 'text', 'required' => true],
+                    // Empty = default (0 for this fiat gateway). See UnderpaymentTolerancePolicy.
+                    ['name' => 'underpayment_tolerance_percent', 'type' => 'number', 'required' => false],
                 ],
             ],
             PaymentGatewayType::NOWPAYMENTS => [
@@ -138,6 +140,8 @@ final class PaymentGatewayModuleRegistry
                     ['name' => 'callback_base_url', 'type' => 'text', 'required' => true],
                     ['name' => 'success_url', 'type' => 'text', 'required' => false],
                     ['name' => 'cancel_url', 'type' => 'text', 'required' => false],
+                    // Empty = default (1 for crypto gateways). See UnderpaymentTolerancePolicy.
+                    ['name' => 'underpayment_tolerance_percent', 'type' => 'number', 'required' => false],
                 ],
             ],
         ];

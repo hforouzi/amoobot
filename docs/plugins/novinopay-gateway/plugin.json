@@ -71,6 +71,15 @@
       }
     },
     {
+      "key": "underpayment_tolerance_percent",
+      "type": "number",
+      "required": false,
+      "label": {
+        "fa": "تلورانس کم‌پرداخت (درصد)",
+        "en": "Underpayment tolerance (%)"
+      }
+    },
+    {
       "key": "description",
       "type": "text",
       "required": false,

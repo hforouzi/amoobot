@@ -11,33 +11,45 @@ use App\Payment\Domain\Dto\PaymentVerificationResult;
  * Strict comparison of what a gateway says was paid against what this payment expects.
  *
  * Rules: a verification without amount AND currency is MISSING; a different currency (after
- * Rial/Toman normalization) is CURRENCY_MISMATCH; less than expected is UNDERPAID; more is OVERPAID.
- * Only MATCH and OVERPAID may be confirmed automatically.
+ * Rial/Toman normalization) is CURRENCY_MISMATCH; more is OVERPAID; less is UNDERPAID, unless the
+ * shortfall is at most the tolerance (percent of the expected amount) (UNDERPAID_WITHIN_TOLERANCE).
+ * Only MATCH, OVERPAID and UNDERPAID_WITHIN_TOLERANCE may be confirmed automatically.
+ *
+ * The tolerance comes from UnderpaymentTolerancePolicy (default 0 for fiat, 1 for crypto gateways).
  */
 final class AmountMatcher
 {
-    public function matchVerification(Payment $payment, PaymentVerificationResult $verification): AmountMatch
+    public function matchVerification(Payment $payment, PaymentVerificationResult $verification, string $tolerancePercent = '0'): AmountMatch
     {
         [$expectedAmount, $expectedCurrency] = self::expectationFor($payment);
 
-        return $this->match($expectedAmount, $expectedCurrency, $verification->amount, $verification->currency);
+        return $this->match($expectedAmount, $expectedCurrency, $verification->amount, $verification->currency, $tolerancePercent);
     }
 
-    public function match(string $expectedAmount, string $expectedCurrency, ?string $actualAmount, ?string $actualCurrency): AmountMatch
+    /**
+     * @param string $tolerancePercent accepted shortfall in percent of the expected amount, e.g. "1" or "0.5"
+     */
+    public function match(string $expectedAmount, string $expectedCurrency, ?string $actualAmount, ?string $actualCurrency, string $tolerancePercent = '0'): AmountMatch
     {
         $expected = AmountNormalizer::normalize($expectedAmount, $expectedCurrency);
         if (null === $expected) {
             throw new \InvalidArgumentException(sprintf('Invalid expected amount "%s %s".', $expectedAmount, $expectedCurrency));
         }
+        $tolerance = Decimal::normalize($tolerancePercent);
+        if (null === $tolerance) {
+            throw new \InvalidArgumentException(sprintf('Invalid underpayment tolerance "%s".', $tolerancePercent));
+        }
 
         $actualAmount = null === $actualAmount || '' === trim($actualAmount) ? null : trim($actualAmount);
         $actualCurrency = null === $actualCurrency || '' === trim($actualCurrency) ? null : trim($actualCurrency);
-        $build = static fn (AmountMatchStatus $status): AmountMatch => new AmountMatch(
+        $build = static fn (AmountMatchStatus $status, ?string $shortfall = null): AmountMatch => new AmountMatch(
             $status,
             $expected['amount'],
             $expected['currency'],
             $actualAmount,
             $actualCurrency,
+            $shortfall,
+            $tolerance,
         );
 
         if (null === $actualAmount || null === $actualCurrency) {
@@ -53,11 +65,17 @@ final class AmountMatcher
             return $build(AmountMatchStatus::CURRENCY_MISMATCH);
         }
 
-        return $build(match (Decimal::compare($actual['amount'], $expected['amount'])) {
-            0 => AmountMatchStatus::MATCH,
-            1 => AmountMatchStatus::OVERPAID,
-            default => AmountMatchStatus::UNDERPAID,
-        });
+        $comparison = Decimal::compare($actual['amount'], $expected['amount']);
+        if ($comparison >= 0) {
+            return $build(0 === $comparison ? AmountMatchStatus::MATCH : AmountMatchStatus::OVERPAID);
+        }
+
+        // Exact decimal arithmetic: within tolerance <=> shortfall * 100 <= expected * tolerance.
+        $shortfall = Decimal::subtract($expected['amount'], $actual['amount']);
+        $withinTolerance = Decimal::compare($tolerance, '0') > 0
+            && Decimal::compare(Decimal::multiply($shortfall, '100'), Decimal::multiply($expected['amount'], $tolerance)) <= 0;
+
+        return $build($withinTolerance ? AmountMatchStatus::UNDERPAID_WITHIN_TOLERANCE : AmountMatchStatus::UNDERPAID, $shortfall);
     }
 
     /**
