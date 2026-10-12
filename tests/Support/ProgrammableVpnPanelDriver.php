@@ -16,6 +16,7 @@ use App\Provisioning\Domain\VpnPanelDriverInterface;
  *
  * - failNext(n): the next n create/renew calls throw, simulating a panel outage
  * - TEST_PANEL_DELAY_MS env var: sleeps inside createService, used to overlap concurrent settlements
+ * - $usage / $usageFails: what getUsage() reports (the panel's current state of a client)
  */
 final class ProgrammableVpnPanelDriver implements VpnPanelDriverInterface
 {
@@ -24,6 +25,8 @@ final class ProgrammableVpnPanelDriver implements VpnPanelDriverInterface
     private int $failuresLeft = 0;
     public int $createCalls = 0;
     public int $renewCalls = 0;
+    public ?VpnUsage $usage = null;
+    public bool $usageFails = false;
 
     public function failNext(int $times = 1): void
     {
@@ -35,6 +38,8 @@ final class ProgrammableVpnPanelDriver implements VpnPanelDriverInterface
         $this->failuresLeft = 0;
         $this->createCalls = 0;
         $this->renewCalls = 0;
+        $this->usage = null;
+        $this->usageFails = false;
     }
 
     public function supports(?VpnPanel $panel): bool
@@ -86,7 +91,11 @@ final class ProgrammableVpnPanelDriver implements VpnPanelDriverInterface
 
     public function getUsage(string $remoteId, ?VpnPanel $panel = null): VpnUsage
     {
-        return new VpnUsage(trafficUsedGb: 0, trafficLimitGb: null, usedBytes: 0, totalBytes: null);
+        if ($this->usageFails) {
+            throw new \RuntimeException('Simulated panel outage during getUsage');
+        }
+
+        return $this->usage ?? new VpnUsage(trafficUsedGb: 0, trafficLimitGb: null, usedBytes: 0, totalBytes: null);
     }
 
     private function maybeFail(string $operation): void

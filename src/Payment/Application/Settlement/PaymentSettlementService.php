@@ -127,6 +127,49 @@ class PaymentSettlementService
     }
 
     /**
+     * Repair of a CONFIRMED payment whose order was never fulfilled (left by the pre-settlement code):
+     * moves payment and order to PROVISIONING_FAILED so an admin can retry fulfilment.
+     *
+     * $stillUnfulfilled is evaluated under the order/payment locks; if it returns false (someone fixed
+     * the order in the meantime) nothing is changed. No customer message is sent.
+     *
+     * @param \Closure(Order): bool $stillUnfulfilled
+     */
+    public function markStuckForRetry(Payment $payment, \Closure $stillUnfulfilled, string $reason, string $source): SettlementResult
+    {
+        $paymentId = (int) $payment->getId();
+        $connection = $this->entityManager->getConnection();
+
+        try {
+            $connection->beginTransaction();
+            [$payment, $order] = $this->lock($paymentId);
+            if (PaymentStatus::CONFIRMED !== $payment->getStatus() || !$stillUnfulfilled($order)) {
+                $connection->commit();
+
+                return new SettlementResult(SettlementOutcome::ALREADY_PROCESSED, sprintf('Payment is %s and no longer stuck.', $payment->getStatus()), $payment);
+            }
+
+            $now = new \DateTimeImmutable();
+            $payment
+                ->setStatus(PaymentStatus::PROVISIONING_FAILED)
+                ->setProvisioningError(mb_substr(sprintf('[%s] %s', $source, $reason), 0, 2000))
+                ->setProvisioningFailedAt($now);
+            $order->setStatus(OrderStatus::PROVISIONING_FAILED);
+            $this->entityManager->flush();
+            $connection->commit();
+        } catch (\Throwable $e) {
+            $this->rollbackAndReset();
+            $this->logger->error('Marking stuck payment failed.', ['payment_id' => $paymentId, 'error' => $e->getMessage()]);
+
+            return new SettlementResult(SettlementOutcome::ERROR, 'Payment could not be marked; nothing was changed.');
+        }
+
+        $this->logger->warning('Stuck confirmed payment moved to provisioning_failed.', ['payment_id' => $paymentId, 'source' => $source]);
+
+        return new SettlementResult(SettlementOutcome::PROVISIONING_FAILED, 'Payment moved to provisioning_failed for an admin retry.', $payment);
+    }
+
+    /**
      * The provider itself (verifyPayment(), not the request) says the payment failed or expired.
      * Only an unsettled payment is closed; the order is left as is, so the customer can pay again.
      */
