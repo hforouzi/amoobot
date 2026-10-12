@@ -8,6 +8,7 @@ use App\Entity\Order;
 use App\Entity\Payment;
 use App\Payment\Domain\Dto\PaymentRequestResult;
 use App\Payment\Domain\Dto\PaymentVerificationResult;
+use App\Payment\Domain\Money\AmountNormalizer;
 use App\Payment\Domain\PaymentGatewayInterface;
 use App\Payment\Domain\PaymentGatewayType;
 use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
@@ -137,6 +138,11 @@ final class CustomApiGateway implements PaymentGatewayInterface
         $refId = $this->stringOrNull($this->pathValue($response['data'], $responseMapping['ref_id'] ?? null));
         $transactionId = $this->stringOrNull($this->pathValue($response['data'], $responseMapping['transaction_id'] ?? null));
         $message = $this->stringOrNull($this->pathValue($response['data'], $responseMapping['message'] ?? null));
+        // Amount/currency the provider reports as paid. Without both the core sends the payment to
+        // manual review. "amount_currency" is a fixed fallback when the API reports no currency field.
+        $verifiedAmount = $this->stringOrNull($this->pathValue($response['data'], $responseMapping['amount'] ?? null));
+        $verifiedCurrency = $this->stringOrNull($this->pathValue($response['data'], $responseMapping['currency'] ?? null))
+            ?? $this->stringOrNull($verify['amount_currency'] ?? null);
 
         $sanitizedPayload = [
             'request' => [
@@ -180,6 +186,8 @@ final class CustomApiGateway implements PaymentGatewayInterface
             refId: $refId,
             message: $message ?? ($paid ? 'paid' : 'not_paid'),
             rawResponse: $sanitizedPayload,
+            amount: $verifiedAmount,
+            currency: null !== $verifiedAmount ? $verifiedCurrency : null,
         );
     }
 
@@ -412,7 +420,11 @@ final class CustomApiGateway implements PaymentGatewayInterface
 
         $context = [
             'amount' => (string) $payment->getAmount(),
+            // amount/payable_amount are shop amounts in Toman; *_rial are the same values in Rial.
             'payable_amount' => (string) ((int) ($payment->getPayableAmount() ?? $payment->getAmount())),
+            'amount_rial' => (string) AmountNormalizer::toRial($payment->getAmount()),
+            'payable_amount_rial' => (string) AmountNormalizer::toRial((int) ($payment->getPayableAmount() ?? $payment->getAmount())),
+            'shop_currency' => AmountNormalizer::SHOP_CURRENCY,
             'order_id' => (string) ($order->getId() ?? 0),
             'payment_id' => (string) ($payment->getId() ?? 0),
             'callback_url' => $gatewayId > 0 ? $this->urlGenerator->generate('payment_callback_custom_api', ['gatewayId' => $gatewayId], UrlGeneratorInterface::ABSOLUTE_URL) : '',

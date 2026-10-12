@@ -48,6 +48,16 @@ class Payment
     #[ORM\Column(nullable: true)]
     private ?int $payableAmount = null;
 
+    /**
+     * Exact amount a non-Toman gateway (e.g. crypto) quoted at createPayment time, as a decimal string.
+     * Null means the expectation is payableAmount in Toman. See App\Payment\Domain\Money\AmountMatcher.
+     */
+    #[ORM\Column(length: 64, nullable: true)]
+    private ?string $expectedAmount = null;
+
+    #[ORM\Column(length: 16, nullable: true)]
+    private ?string $expectedCurrency = null;
+
     #[ORM\Column(type: 'json', nullable: true)]
     private ?array $callbackPayload = null;
 
@@ -273,6 +283,24 @@ class Payment
     public function setPayableAmount(?int $payableAmount): self
     {
         $this->payableAmount = $payableAmount;
+
+        return $this;
+    }
+
+    public function getExpectedAmount(): ?string
+    {
+        return $this->expectedAmount;
+    }
+
+    public function getExpectedCurrency(): ?string
+    {
+        return $this->expectedCurrency;
+    }
+
+    public function setExpectation(?string $amount, ?string $currency): self
+    {
+        $this->expectedAmount = $amount;
+        $this->expectedCurrency = null === $currency ? null : strtoupper(trim($currency));
 
         return $this;
     }

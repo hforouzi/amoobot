@@ -10,6 +10,7 @@ use App\Entity\PaymentGateway;
 use App\Payment\Domain\Dto\PaymentRequestResult;
 use App\Payment\Domain\Dto\PaymentVerificationResult;
 use App\Payment\Domain\PaymentGatewayInterface;
+use App\Payment\Domain\Money\AmountNormalizer;
 use App\Payment\Domain\PaymentGatewayType;
 use Symfony\Contracts\HttpClient\Exception\TransportExceptionInterface;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
@@ -36,7 +37,8 @@ final class ZibalGateway implements PaymentGatewayInterface
         $config = $this->resolveConfig($gateway);
         $merchant = $this->resolveMerchant($config);
         $callbackUrl = $this->buildCallbackUrl($config);
-        $amount = max(1, (int) ($payment->getPayableAmount() ?? $payment->getAmount()));
+        // Shop amounts are Toman; Zibal charges in Rial.
+        $amount = max(1, AmountNormalizer::toRial((int) ($payment->getPayableAmount() ?? $payment->getAmount())));
 
         if ('' === $merchant || '' === $callbackUrl) {
             return new PaymentRequestResult(
@@ -165,13 +167,18 @@ final class ZibalGateway implements PaymentGatewayInterface
             $this->safeLog('zibal_verify_failed', ['paymentId' => $payment->getId(), 'raw' => $raw]);
         }
 
+        // Zibal reports the verified amount in Rial; the core normalizes it to Toman.
+        $verifiedAmount = isset($raw['amount']) && is_scalar($raw['amount']) ? trim((string) $raw['amount']) : '';
+
         return new PaymentVerificationResult(
             success: true,
             paid: $paid,
             transactionId: $trackId,
             refId: $refId,
             message: '' !== $message ? $message : ($paid ? 'paid' : 'not_paid'),
-            rawResponse: is_array($raw) ? $raw : null
+            rawResponse: is_array($raw) ? $raw : null,
+            amount: '' !== $verifiedAmount ? $verifiedAmount : null,
+            currency: '' !== $verifiedAmount ? AmountNormalizer::RIAL : null,
         );
     }
 

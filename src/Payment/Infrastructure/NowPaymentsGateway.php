@@ -89,6 +89,9 @@ final class NowPaymentsGateway implements PaymentGatewayInterface
             );
         }
 
+        // The core later checks the API-reported price against exactly this quote.
+        $payment->setExpectation($this->formatDecimal($priceAmount), $priceCurrency);
+
         $orderId = (string) ($order->getTrackingCode() ?? $order->getId() ?? $payment->getId() ?? '');
         $description = trim((string) ($config['order_description'] ?? 'Amoobot VPN order'));
         $ipnCallbackUrl = $callbackBaseUrl.'/payment/webhook/nowpayments';
@@ -349,12 +352,16 @@ final class NowPaymentsGateway implements PaymentGatewayInterface
             $payment->setFailedAt($payment->getFailedAt() ?? new \DateTimeImmutable());
         }
 
+        [$reportedAmount, $reportedCurrency] = $this->reportedPriceAmount($raw);
+
         return new PaymentVerificationResult(
             success: true,
             paid: $paid,
             transactionId: $paymentId,
             message: '' !== $status ? $status : 'unknown',
-            rawResponse: is_array($raw) ? $raw : null
+            rawResponse: is_array($raw) ? $raw : null,
+            amount: $reportedAmount,
+            currency: $reportedCurrency,
         );
     }
 
@@ -433,12 +440,16 @@ final class NowPaymentsGateway implements PaymentGatewayInterface
             return new PaymentVerificationResult(success: false, paid: false, message: self::PAYMENT_NOT_REPORTED_MESSAGE, rawResponse: is_array($raw) ? $raw : null);
         }
 
+        [$reportedAmount, $reportedCurrency] = $this->reportedPriceAmount($raw);
+
         return new PaymentVerificationResult(
             success: true,
             paid: $paid,
             transactionId: '' !== $paymentId ? $paymentId : $invoiceId,
             message: $status,
-            rawResponse: is_array($raw) ? $raw : null
+            rawResponse: is_array($raw) ? $raw : null,
+            amount: $reportedAmount,
+            currency: $reportedCurrency,
         );
     }
 
@@ -545,6 +556,35 @@ final class NowPaymentsGateway implements PaymentGatewayInterface
         $expected = hash_hmac('sha512', $sortedJson, $ipnSecret);
 
         return hash_equals(strtolower($expected), strtolower(trim($receivedSignature)));
+    }
+
+    /**
+     * The value actually received, expressed in the price currency (the fiat quote we created).
+     *
+     * NOWPayments reports price_amount/price_currency (our quote) plus pay_amount/actually_paid in the
+     * crypto pay currency. When less than pay_amount arrived (e.g. "partially_paid") the price amount
+     * is pro-rated, so the core sees an underpayment instead of the full quote.
+     *
+     * @param array<mixed> $raw
+     *
+     * @return array{?string, ?string}
+     */
+    private function reportedPriceAmount(array $raw): array
+    {
+        $priceAmount = is_numeric($raw['price_amount'] ?? null) ? (float) $raw['price_amount'] : null;
+        $priceCurrency = strtoupper(trim((string) ($raw['price_currency'] ?? '')));
+        if (null === $priceAmount || '' === $priceCurrency) {
+            return [null, null];
+        }
+
+        $payAmount = is_numeric($raw['pay_amount'] ?? null) ? (float) $raw['pay_amount'] : null;
+        $actuallyPaid = is_numeric($raw['actually_paid'] ?? null) ? (float) $raw['actually_paid'] : null;
+        if (null !== $payAmount && $payAmount > 0 && null !== $actuallyPaid && $actuallyPaid < $payAmount) {
+            // Round down so a shortfall can never be rounded up into a match.
+            $priceAmount = floor($priceAmount * ($actuallyPaid / $payAmount) * 100) / 100;
+        }
+
+        return [$this->formatDecimal($priceAmount), $priceCurrency];
     }
 
     /**
