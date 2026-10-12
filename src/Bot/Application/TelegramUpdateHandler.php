@@ -289,6 +289,12 @@ class TelegramUpdateHandler
                 return;
             }
 
+            if ('admin_attention_payments' === $data) {
+                $this->handleAdminAttentionPayments($chatId, $callbackId);
+
+                return;
+            }
+
             if ('admin_users' === $data) {
                 $this->handleAdminUsers($chatId, $callbackId);
 
@@ -2372,6 +2378,40 @@ class TelegramUpdateHandler
         }
 
         return sprintf('<code>%s</code>', $escaped);
+    }
+
+    /**
+     * Payments that need a human: NEEDS_REVIEW (amount/currency mismatch, duplicate) and
+     * PROVISIONING_FAILED (paid, service not created yet). One message per payment with its actions.
+     */
+    private function handleAdminAttentionPayments(string $chatId, ?string $callbackId = null): void
+    {
+        $payments = $this->entityManager->getRepository(Payment::class)->findBy([
+            'status' => [PaymentStatus::NEEDS_REVIEW, PaymentStatus::PROVISIONING_FAILED],
+        ], ['id' => 'ASC'], 15);
+
+        if ([] === $payments) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'پرداختی برای رسیدگی وجود ندارد.', 'popup_no_attention_payments');
+
+            return;
+        }
+
+        $this->acknowledgeCallback($callbackId);
+        foreach ($payments as $payment) {
+            $order = $payment->getOrder();
+            $needsReview = PaymentStatus::NEEDS_REVIEW === $payment->getStatus();
+            $text = implode("
+", [
+                sprintf('%s پرداخت #%d | سفارش #%d (%s)', $needsReview ? '⚠️' : '🚨', $payment->getId() ?? 0, $order->getId() ?? 0, $this->translateOrderType($order->getType())),
+                sprintf('کاربر: %s', $this->formatTelegramIdentity($order->getUser()->getTelegramAccount())),
+                sprintf('مبلغ سفارش: %d تومان | درگاه: %s', $payment->getPayableAmount() ?? $payment->getAmount(), $payment->getGatewayType() ?? $payment->getMethod()),
+                sprintf('گزارش درگاه: %s %s', $payment->getVerifiedAmount() ?? '-', $payment->getVerifiedCurrency() ?? ''),
+                $needsReview
+                    ? 'علت بررسی: '.mb_substr((string) ($payment->getReviewReason() ?? '-'), 0, 500)
+                    : sprintf('خطای ساخت سرویس (%d تلاش): %s', $payment->getProvisioningAttempts(), mb_substr((string) ($payment->getProvisioningError() ?? '-'), 0, 500)),
+            ]);
+            $this->telegramApiClient->sendMessage($chatId, $text, $this->keyboardFactory->adminPaymentAttentionActions((int) $payment->getId(), $payment->getStatus()));
+        }
     }
 
     private function handleAdminPendingPayments(string $chatId, ?string $callbackId = null): void

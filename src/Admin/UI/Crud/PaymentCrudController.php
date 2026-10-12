@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Admin\UI\Crud;
 
+use App\Admin\UI\PaymentModerationController;
 use App\Admin\UI\Support\AdminStatusBadge;
 use App\Entity\Payment;
 use App\Payment\Domain\PaymentStatus;
@@ -21,9 +22,14 @@ use EasyCorp\Bundle\EasyAdminBundle\Field\TextareaField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\TextField;
 use EasyCorp\Bundle\EasyAdminBundle\Filter\ChoiceFilter;
 use EasyCorp\Bundle\EasyAdminBundle\Filter\EntityFilter;
+use Symfony\Component\Security\Csrf\CsrfTokenManagerInterface;
 
 class PaymentCrudController extends AbstractCrudController
 {
+    public function __construct(private readonly CsrfTokenManagerInterface $csrfTokenManager)
+    {
+    }
+
     public static function getEntityFqcn(): string
     {
         return Payment::class;
@@ -43,21 +49,42 @@ class PaymentCrudController extends AbstractCrudController
 
     public function configureActions(Actions $actions): Actions
     {
-        $confirm = Action::new('confirmPayment', 'Confirm Payment')
-            ->linkToRoute('admin_payment_confirm', fn (Payment $payment): array => ['id' => $payment->getId()])
+        // POST forms straight to PaymentModerationController (not via the dashboard router, which would
+        // drop the query string) carrying a per-payment CSRF token.
+        $confirm = Action::new('confirmPayment', 'Approve')
+            ->linkToUrl(fn (Payment $payment): string => $this->generateUrl('admin_payment_confirm', $this->routeParameters($payment)))
+            ->renderAsForm()
             ->setCssClass('btn btn-success')
-            ->displayIf(fn (Payment $payment): bool => in_array($payment->getStatus(), [PaymentStatus::PENDING, PaymentStatus::SUBMITTED], true));
+            ->displayIf(fn (Payment $payment): bool => in_array($payment->getStatus(), [PaymentStatus::PENDING, PaymentStatus::SUBMITTED, PaymentStatus::NEEDS_REVIEW], true));
 
-        $reject = Action::new('rejectPayment', 'Reject Payment')
-            ->linkToRoute('admin_payment_reject', fn (Payment $payment): array => ['id' => $payment->getId()])
+        $retry = Action::new('retryProvisioning', 'Retry provisioning')
+            ->linkToUrl(fn (Payment $payment): string => $this->generateUrl('admin_payment_retry', $this->routeParameters($payment)))
+            ->renderAsForm()
+            ->setCssClass('btn btn-primary')
+            ->displayIf(fn (Payment $payment): bool => PaymentStatus::PROVISIONING_FAILED === $payment->getStatus());
+
+        $reject = Action::new('rejectPayment', 'Reject')
+            ->linkToUrl(fn (Payment $payment): string => $this->generateUrl('admin_payment_reject', $this->routeParameters($payment)))
+            ->renderAsForm()
             ->setCssClass('btn btn-warning')
-            ->displayIf(fn (Payment $payment): bool => in_array($payment->getStatus(), [PaymentStatus::PENDING, PaymentStatus::SUBMITTED], true));
+            ->displayIf(fn (Payment $payment): bool => in_array($payment->getStatus(), [PaymentStatus::PENDING, PaymentStatus::SUBMITTED, PaymentStatus::NEEDS_REVIEW, PaymentStatus::PROVISIONING_FAILED], true));
 
-        return $actions
-            ->add(Action::INDEX, $confirm)
-            ->add(Action::DETAIL, $confirm)
-            ->add(Action::INDEX, $reject)
-            ->add(Action::DETAIL, $reject);
+        foreach ([$confirm, $retry, $reject] as $action) {
+            $actions->add(Action::INDEX, $action)->add(Action::DETAIL, $action);
+        }
+
+        return $actions;
+    }
+
+    /**
+     * @return array{id: int|null, _token: string}
+     */
+    private function routeParameters(Payment $payment): array
+    {
+        return [
+            'id' => $payment->getId(),
+            '_token' => $this->csrfTokenManager->getToken(PaymentModerationController::CSRF_PREFIX.$payment->getId())->getValue(),
+        ];
     }
 
     public function configureFields(string $pageName): iterable

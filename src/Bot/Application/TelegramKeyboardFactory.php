@@ -6,6 +6,7 @@ namespace App\Bot\Application;
 
 use App\Entity\StorePaymentMethod;
 use App\Payment\Domain\PaymentGatewayType;
+use App\Payment\Domain\PaymentStatus;
 use App\Entity\Plan;
 use App\Entity\TrialPlan;
 use App\Shop\Application\SalesSettingsProvider;
@@ -417,6 +418,33 @@ class TelegramKeyboardFactory
     }
 
     /**
+     * Buttons for a payment in NEEDS_REVIEW (approve / reject) or PROVISIONING_FAILED (retry / reject).
+     * admin_confirm_payment retries fulfilment when the payment is PROVISIONING_FAILED.
+     *
+     * @return array<string, array<array<array<string, string>>>>
+     */
+    public function adminPaymentAttentionActions(int $paymentId, string $status): array
+    {
+        $primary = PaymentStatus::PROVISIONING_FAILED === $status ? '🔁 تلاش مجدد ساخت سرویس' : '✅ تایید پرداخت';
+
+        return [
+            'inline_keyboard' => [
+                [[
+                    'text' => $primary,
+                    'callback_data' => 'admin_confirm_payment:'.$paymentId,
+                ], [
+                    'text' => '❌ رد پرداخت',
+                    'callback_data' => 'admin_reject_payment:'.$paymentId,
+                ]],
+                [[
+                    'text' => '🔙 پرداخت‌های نیازمند رسیدگی',
+                    'callback_data' => 'admin_attention_payments',
+                ]],
+            ],
+        ];
+    }
+
+    /**
      * @return array<string, array<array<array<string, string>>>>
      */
     public function adminMenu(): array
@@ -429,6 +457,10 @@ class TelegramKeyboardFactory
                 ], [
                     'text' => $this->button('button.admin.payments'),
                     'callback_data' => 'admin_pending_payments',
+                ]],
+                [[
+                    'text' => '⚠️ پرداخت‌های نیازمند رسیدگی',
+                    'callback_data' => 'admin_attention_payments',
                 ]],
                 [[
                     'text' => $this->button('button.admin.services'),

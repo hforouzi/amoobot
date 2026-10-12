@@ -15,6 +15,8 @@ use App\Admin\UI\Crud\DiscountUsageCrudController;
 use App\Admin\UI\Crud\OrderCrudController;
 use App\Admin\UI\Crud\OrderDraftCrudController;
 use App\Admin\UI\Crud\PaymentCrudController;
+use App\Admin\UI\Crud\PaymentNeedsReviewCrudController;
+use App\Admin\UI\Crud\PaymentProvisioningFailedCrudController;
 use App\Admin\UI\Crud\PaymentGatewayCrudController;
 use App\Admin\UI\Crud\PluginCrudController;
 use App\Admin\UI\Crud\PlanCrudController;
@@ -85,6 +87,8 @@ class DashboardController extends AbstractDashboardController
         yield MenuItem::linkTo(OrderCrudController::class, 'admin.orders', 'fa fa-shopping-cart');
         yield MenuItem::linkTo(OrderDraftCrudController::class, 'Order Drafts', 'fa fa-list-alt');
         yield MenuItem::linkTo(PaymentCrudController::class, 'admin.payments', 'fa fa-credit-card');
+        yield MenuItem::linkTo(PaymentNeedsReviewCrudController::class, 'admin.payments_needs_review', 'fa fa-exclamation-triangle');
+        yield MenuItem::linkTo(PaymentProvisioningFailedCrudController::class, 'admin.payments_provisioning_failed', 'fa fa-exclamation-circle');
         yield MenuItem::linkTo(DiscountCodeCrudController::class, 'admin.discount_codes', 'fa fa-ticket');
         yield MenuItem::linkTo(DiscountUsageCrudController::class, 'admin.discount_usages', 'fa fa-bar-chart');
         yield MenuItem::linkTo(PaymentGatewayCrudController::class, 'admin.payment_gateways', 'fa fa-exchange')->setPermission('ROLE_SUPER_ADMIN');

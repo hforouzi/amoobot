@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Payment\Application;
 
+use App\Bot\Application\TelegramKeyboardFactory;
 use App\Bot\Infrastructure\TelegramApiClient;
 use App\Entity\Payment;
 use Psr\Log\LoggerInterface;
@@ -17,6 +18,7 @@ class AdminPaymentAlerter
 {
     public function __construct(
         private readonly TelegramApiClient $telegramApiClient,
+        private readonly TelegramKeyboardFactory $keyboardFactory,
         private readonly LoggerInterface $logger,
         private readonly ?string $adminChatId = null,
     ) {
@@ -24,12 +26,12 @@ class AdminPaymentAlerter
 
     public function needsReview(Payment $payment): void
     {
-        $this->send($payment, '⚠️ پرداخت نیازمند بررسی', (string) ($payment->getReviewReason() ?? '-'));
+        $this->send($payment, '⚠️ پرداخت نیازمند بررسی', (string) ($payment->getReviewReason() ?? '-'), true);
     }
 
     public function provisioningFailed(Payment $payment): void
     {
-        $this->send($payment, '🚨 پرداخت تایید شد اما ساخت سرویس ناموفق بود', (string) ($payment->getProvisioningError() ?? '-'));
+        $this->send($payment, '🚨 پرداخت تایید شد اما ساخت سرویس ناموفق بود', (string) ($payment->getProvisioningError() ?? '-'), true);
     }
 
     public function overpaid(Payment $payment): void
@@ -37,7 +39,7 @@ class AdminPaymentAlerter
         $this->send($payment, 'ℹ️ پرداخت بیش از مبلغ سفارش (تایید شد)', sprintf('Verified: %s %s', $payment->getVerifiedAmount() ?? '-', $payment->getVerifiedCurrency() ?? '-'));
     }
 
-    private function send(Payment $payment, string $title, string $detail): void
+    private function send(Payment $payment, string $title, string $detail, bool $withActions = false): void
     {
         $chatId = trim((string) $this->adminChatId);
         if ('' === $chatId) {
@@ -59,7 +61,8 @@ class AdminPaymentAlerter
         ]);
 
         try {
-            $this->telegramApiClient->sendMessage($chatId, $text);
+            // Approve / Retry / Reject buttons; the bot checks the admin id again when they are pressed.
+            $this->telegramApiClient->sendMessage($chatId, $text, $withActions ? $this->keyboardFactory->adminPaymentAttentionActions((int) $payment->getId(), $payment->getStatus()) : null);
         } catch (\Throwable $e) {
             $this->logger->error('Admin payment alert failed.', ['payment_id' => $payment->getId(), 'error' => $e->getMessage()]);
         }

@@ -20,7 +20,8 @@ require dirname(__DIR__, 3).'/vendor/autoload.php';
 $_SERVER['APP_ENV'] = $_ENV['APP_ENV'] = 'test';
 (new Dotenv())->bootEnv(dirname(__DIR__, 3).'/.env');
 
-$kernel = new Kernel('test', false);
+// debug=true: rebuild the cached container when sources change (same as the PHPUnit kernel).
+$kernel = new Kernel('test', true);
 $kernel->boot();
 $container = $kernel->getContainer()->get('test.service_container');
 
