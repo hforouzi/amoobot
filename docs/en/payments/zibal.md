@@ -15,8 +15,11 @@ The driver creates a payment URL, receives callback data, and verifies payment s
 Callback route:
 
 ```text
-/payment/callback/zibal
+/payment/callback/zibal?rt={return token}
 ```
+
+The callback is matched to the payment by the stored `trackId` and verified with Zibal; `rt` only
+sends the customer on to the return page `/payment/return/{token}` afterwards.
 
 ## Test
 

@@ -74,6 +74,16 @@ php bin/console app:payment:test-plugin-gateway GATEWAY_ID
 6. **Webhook باید fail-closed باشد.** در `handleWebhook()` امضا را بررسی کنید و اگر نادرست بود یا
    secret تنظیم نشده بود `handled: false, message: "unauthorized"` برگردانید. بدنهٔ webhook هرگز
    پرداخت‌شدن را تعیین نمی‌کند؛ فقط `verifyPayment()`.
+7. **آدرس بازگشت باید توکن بازگشت داشته باشد.** هر پرداخت یک `returnToken` غیرقابل‌حدس دارد. مشتری را با
+   `App\Payment\Domain\PaymentReturnUrl` برگردانید:
+   - آدرس بازگشت/موفقیت درگاه: `PaymentReturnUrl::returnUrl($callbackBaseUrl, $payment)`
+     (`/payment/return/{token}`) و آدرس لغو: `PaymentReturnUrl::cancelUrl(...)`؛
+   - callback مرورگری که ابتدا آموبات پردازش می‌کند: `PaymentReturnUrl::withToken($callbackUrl, $payment)`
+     که `?rt={token}` اضافه می‌کند؛ پس از پردازش، مشتری به صفحهٔ بازگشت هدایت می‌شود.
+
+   صفحهٔ بازگشت پرداخت را **فقط** با این توکن پیدا می‌کند و تا وقتی پرداخت در انتظار است، حالت «در انتظار
+   تایید» با به‌روزرسانی خودکار نشان می‌دهد. توکن هرگز برای پیدا کردن پرداخت در callback/webhook استفاده
+   نمی‌شود (قانون ۲ پابرجاست).
 
 مسیرها: webhook در `/payment/webhook/plugin/{code}` و بازگشت مرورگر در `/payment/callback/plugin/{code}`.
 

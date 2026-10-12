@@ -553,12 +553,6 @@ parameters:
 			path: src/Payment/Infrastructure/NowPaymentsGateway.php
 
 		-
-			message: '#^Strict comparison using \!\=\= between '''' and non\-falsy\-string will always evaluate to true\.$#'
-			identifier: notIdentical.alwaysTrue
-			count: 2
-			path: src/Payment/Infrastructure/NowPaymentsGateway.php
-
-		-
 			message: '#^Call to function is_array\(\) with array will always evaluate to true\.$#'
 			identifier: function.alreadyNarrowedType
 			count: 3

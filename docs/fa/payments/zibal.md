@@ -15,8 +15,11 @@ Zibal یک درگاه Core برای پرداخت ریالی آنلاین است.
 مسیر Callback:
 
 ```text
-/payment/callback/zibal
+/payment/callback/zibal?rt={توکن بازگشت}
 ```
+
+callback با `trackId` ذخیره‌شده به پرداخت وصل و با زیبال verify می‌شود؛ `rt` فقط مشتری را پس از آن به
+صفحهٔ بازگشت `/payment/return/{token}` می‌فرستد.
 
 ## تست
 

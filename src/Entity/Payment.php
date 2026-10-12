@@ -9,6 +9,7 @@ use Doctrine\ORM\Mapping as ORM;
 
 #[ORM\Entity]
 #[ORM\Index(name: 'idx_payment_status', columns: ['status'])]
+#[ORM\UniqueConstraint(name: 'uniq_payment_return_token', columns: ['return_token'])]
 class Payment
 {
     #[ORM\Id]
@@ -182,9 +183,34 @@ class Payment
     #[ORM\Column(type: 'json', nullable: true)]
     private ?array $ipnPayload = null;
 
+    /**
+     * Unguessable per-payment token carried in gateway return/callback URLs. The customer return
+     * page identifies the payment only by this value. NULL only for payments created before the
+     * column existed.
+     */
+    #[ORM\Column(length: 64, nullable: true)]
+    private ?string $returnToken = null;
+
     public function __construct()
     {
         $this->createdAt = new \DateTimeImmutable();
+        $this->returnToken = self::generateReturnToken();
+    }
+
+    public static function generateReturnToken(): string
+    {
+        // 32 random bytes, base64url without padding: 43 characters.
+        return rtrim(strtr(base64_encode(random_bytes(32)), '+/', '-_'), '=');
+    }
+
+    public function getReturnToken(): ?string
+    {
+        return $this->returnToken;
+    }
+
+    public function ensureReturnToken(): string
+    {
+        return $this->returnToken ??= self::generateReturnToken();
     }
 
     public function getId(): ?int

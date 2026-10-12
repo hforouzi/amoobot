@@ -8,6 +8,7 @@ use App\Entity\Order;
 use App\Entity\Payment;
 use App\Payment\Domain\Dto\PaymentRequestResult;
 use App\Payment\Domain\Dto\PaymentVerificationResult;
+use App\Payment\Domain\PaymentReturnUrl;
 use App\Payment\Plugin\PaymentGatewayPluginInterface;
 use App\Payment\Plugin\PaymentWebhookResult;
 use Symfony\Component\HttpClient\HttpClient;
@@ -340,7 +341,7 @@ final class SwapWalletGatewayPlugin implements PaymentGatewayPluginInterface
             'userLanguage' => 'FA',
             'ttl' => (int) ($config['ttl'] ?? 3600),
             'underPaidCoveragePercent' => '0',
-            'returnUrl' => $this->successUrl($config),
+            'returnUrl' => $this->successUrl($payment, $config),
             'webhookUrl' => $this->buildWebhookUrl($payment, $order, $config),
             'orderId' => $this->orderId($payment, $order),
             'description' => $this->description($config),
@@ -383,14 +384,15 @@ final class SwapWalletGatewayPlugin implements PaymentGatewayPluginInterface
     /**
      * @param array<string, mixed> $config
      */
-    private function successUrl(array $config): ?string
+    private function successUrl(Payment $payment, array $config): ?string
     {
-        $successUrl = $this->stringOrNull($config['success_url'] ?? null);
-        if (null !== $successUrl) {
-            return $successUrl;
+        // The core return page identifies the payment only by its unguessable return token.
+        $baseUrl = $this->stringOrNull($config['callback_base_url'] ?? null);
+        if (null !== $baseUrl) {
+            return PaymentReturnUrl::returnUrl($baseUrl, $payment);
         }
 
-        return null;
+        return $this->stringOrNull($config['success_url'] ?? null);
     }
 
     /**

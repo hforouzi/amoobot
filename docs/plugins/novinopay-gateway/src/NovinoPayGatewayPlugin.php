@@ -9,6 +9,7 @@ use App\Entity\Payment;
 use App\Payment\Domain\Dto\PaymentRequestResult;
 use App\Payment\Domain\Dto\PaymentVerificationResult;
 use App\Payment\Domain\Money\AmountNormalizer;
+use App\Payment\Domain\PaymentReturnUrl;
 use App\Payment\Plugin\PaymentGatewayPluginInterface;
 use App\Payment\Plugin\PaymentWebhookResult;
 use Symfony\Component\HttpClient\HttpClient;
@@ -249,7 +250,8 @@ final class NovinoPayGatewayPlugin implements PaymentGatewayPluginInterface
             'tracking_code' => $payment->getTrackingCode() ?? $order->getTrackingCode(),
         ], static fn (mixed $value): bool => null !== $value && '' !== (string) $value));
 
-        return $baseUrl.'/payment/callback/plugin/novinopay'.('' !== $query ? '?'.$query : '');
+        // ?rt= sends the customer on to the core return page once the callback was processed.
+        return PaymentReturnUrl::withToken($baseUrl.'/payment/callback/plugin/novinopay'.('' !== $query ? '?'.$query : ''), $payment);
     }
 
     /**

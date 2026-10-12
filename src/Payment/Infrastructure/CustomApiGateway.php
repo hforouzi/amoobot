@@ -11,6 +11,7 @@ use App\Payment\Domain\Dto\PaymentVerificationResult;
 use App\Payment\Domain\Money\AmountNormalizer;
 use App\Payment\Domain\PaymentGatewayInterface;
 use App\Payment\Domain\PaymentGatewayType;
+use App\Payment\Domain\PaymentReturnUrl;
 use App\Payment\Domain\Webhook\GatewayNotification;
 use App\Payment\Domain\Webhook\NotificationAwareGatewayInterface;
 use App\Payment\Domain\Webhook\RequestPayload;
@@ -487,7 +488,9 @@ final class CustomApiGateway implements PaymentGatewayInterface, NotificationAwa
             'shop_currency' => AmountNormalizer::SHOP_CURRENCY,
             'order_id' => (string) ($order->getId() ?? 0),
             'payment_id' => (string) ($payment->getId() ?? 0),
-            'callback_url' => $gatewayId > 0 ? $this->urlGenerator->generate('payment_callback_custom_api', ['gatewayId' => $gatewayId], UrlGeneratorInterface::ABSOLUTE_URL) : '',
+            'callback_url' => $gatewayId > 0 ? PaymentReturnUrl::withToken($this->urlGenerator->generate('payment_callback_custom_api', ['gatewayId' => $gatewayId], UrlGeneratorInterface::ABSOLUTE_URL), $payment) : '',
+            'return_url' => $this->urlGenerator->generate('payment_return', ['token' => $payment->ensureReturnToken()], UrlGeneratorInterface::ABSOLUTE_URL),
+            'return_token' => $payment->ensureReturnToken(),
             'webhook_url' => $gatewayId > 0 ? $this->urlGenerator->generate('payment_webhook_custom_api', ['gatewayId' => $gatewayId], UrlGeneratorInterface::ABSOLUTE_URL) : '',
             'description' => $description,
             'transaction_id' => (string) ($transactionId ?? ''),

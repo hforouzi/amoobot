@@ -11,7 +11,9 @@ NOWPayments یک درگاه Core برای پرداخت رمزارزی است.
 - `pay_currency`: ارز پرداخت، مخصوصاً برای direct payment.
 - `amount_unit`: واحد مبلغ فروشگاه، مثل `toman` یا `rial`.
 - `toman_per_usd`: نرخ تبدیل تومان به دلار، برای مبالغ ریالی required.
-- `callback_base_url`: آدرس عمومی برنامه، required.
+- `callback_base_url`: آدرس عمومی برنامه، required. مشتری به `{callback_base_url}/payment/return/{توکن بازگشت}`
+  (لغو: `.../cancel`) برمی‌گردد؛ این صفحه پرداخت را فقط با همین توکن پیدا می‌کند و تا تایید پرداخت خودکار
+  به‌روز می‌شود. لینک‌های قدیمی `/payment/success?NP_id=...` دیگر پرداختی را نشان نمی‌دهند.
 
 ## نکته‌ها
 

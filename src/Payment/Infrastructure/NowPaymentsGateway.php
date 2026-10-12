@@ -11,6 +11,7 @@ use App\Payment\Domain\Dto\PaymentRequestResult;
 use App\Payment\Domain\Dto\PaymentVerificationResult;
 use App\Payment\Domain\PaymentGatewayInterface;
 use App\Payment\Domain\PaymentGatewayType;
+use App\Payment\Domain\PaymentReturnUrl;
 use App\Payment\Domain\Webhook\GatewayNotification;
 use App\Payment\Domain\Webhook\NotificationAwareGatewayInterface;
 use Symfony\Component\HttpFoundation\Request;
@@ -102,8 +103,9 @@ final class NowPaymentsGateway implements PaymentGatewayInterface, NotificationA
         $orderId = (string) ($order->getTrackingCode() ?? $order->getId() ?? $payment->getId() ?? '');
         $description = trim((string) ($config['order_description'] ?? 'Amoobot VPN order'));
         $ipnCallbackUrl = $callbackBaseUrl.'/payment/webhook/nowpayments';
-        $successUrl = $callbackBaseUrl.'/payment/success';
-        $cancelUrl = $callbackBaseUrl.'/payment/cancel';
+        // The return page identifies the payment only by its unguessable return token.
+        $successUrl = PaymentReturnUrl::returnUrl($callbackBaseUrl, $payment);
+        $cancelUrl = PaymentReturnUrl::cancelUrl($callbackBaseUrl, $payment);
 
         $requestBody = [
             'price_amount' => $priceAmount,

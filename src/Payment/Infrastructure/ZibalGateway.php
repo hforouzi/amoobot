@@ -12,6 +12,7 @@ use App\Payment\Domain\Dto\PaymentVerificationResult;
 use App\Payment\Domain\PaymentGatewayInterface;
 use App\Payment\Domain\Money\AmountNormalizer;
 use App\Payment\Domain\PaymentGatewayType;
+use App\Payment\Domain\PaymentReturnUrl;
 use App\Payment\Domain\Webhook\GatewayNotification;
 use App\Payment\Domain\Webhook\NotificationAwareGatewayInterface;
 use App\Payment\Domain\Webhook\RequestPayload;
@@ -53,7 +54,7 @@ final class ZibalGateway implements PaymentGatewayInterface, NotificationAwareGa
         $gateway = $payment->getGateway();
         $config = $this->resolveConfig($gateway);
         $merchant = $this->resolveMerchant($config);
-        $callbackUrl = $this->buildCallbackUrl($config);
+        $callbackUrl = $this->buildCallbackUrl($config, $payment);
         // Shop amounts are Toman; Zibal charges in Rial.
         $amount = max(1, AmountNormalizer::toRial((int) ($payment->getPayableAmount() ?? $payment->getAmount())));
 
@@ -227,14 +228,15 @@ final class ZibalGateway implements PaymentGatewayInterface, NotificationAwareGa
     /**
      * @param array<string, mixed> $config
      */
-    private function buildCallbackUrl(array $config): string
+    private function buildCallbackUrl(array $config, Payment $payment): string
     {
         $base = rtrim(trim((string) ($config['callback_base_url'] ?? '')), '/');
         if ('' === $base) {
             return '';
         }
 
-        return $base.'/payment/callback/zibal';
+        // ?rt= only sends the customer on to the return page; the callback is matched by trackId.
+        return PaymentReturnUrl::withToken($base.'/payment/callback/zibal', $payment);
     }
 
     /**

@@ -4,16 +4,20 @@ declare(strict_types=1);
 
 namespace App\Payment\UI;
 
+use App\Entity\Payment;
 use App\Entity\PaymentGateway;
 use App\Payment\Application\Webhook\GatewayNotificationProcessor;
 use App\Payment\Application\Webhook\NotificationOutcome;
 use App\Payment\Domain\PaymentGatewayType;
+use App\Payment\Domain\PaymentReturnUrl;
 use App\Payment\Domain\Webhook\NotificationAwareGatewayInterface;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
+use Symfony\Component\HttpFoundation\RedirectResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Attribute\Route;
+use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
 
 /**
  * Single entry point for gateway notifications: /payment/webhook/{type}/{code}
@@ -24,6 +28,9 @@ use Symfony\Component\Routing\Attribute\Route;
  * The historical URLs below are thin aliases so gateway dashboards and stored callback URLs keep
  * working. All of them run GatewayNotificationProcessor (auth -> stored-reference lookup ->
  * verifyPayment -> PaymentSettlementService).
+ *
+ * Browser callbacks that carry ?rt=<return token> then send the customer on to the return page
+ * (/payment/return/{token}). The token is never used to find the payment being settled.
  */
 final class PaymentWebhookController
 {
@@ -38,6 +45,7 @@ final class PaymentWebhookController
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
         private readonly GatewayNotificationProcessor $processor,
+        private readonly UrlGeneratorInterface $urlGenerator,
     ) {
     }
 
@@ -68,19 +76,19 @@ final class PaymentWebhookController
     #[Route('/payment/callback/zibal', name: 'payment_callback_zibal', methods: ['GET', 'POST'])]
     public function zibalCallback(Request $request): Response
     {
-        return $this->html($this->run($request, 'zibal', 'default', NotificationAwareGatewayInterface::CHANNEL_CALLBACK));
+        return $this->browser($request, $this->run($request, 'zibal', 'default', NotificationAwareGatewayInterface::CHANNEL_CALLBACK));
     }
 
     #[Route('/payment/callback/custom-api/{gatewayId}', name: 'payment_callback_custom_api', requirements: ['gatewayId' => '\d+'], methods: ['GET', 'POST'])]
     public function customApiCallback(Request $request, string $gatewayId): Response
     {
-        return $this->html($this->run($request, 'custom_api', $gatewayId, NotificationAwareGatewayInterface::CHANNEL_CALLBACK));
+        return $this->browser($request, $this->run($request, 'custom_api', $gatewayId, NotificationAwareGatewayInterface::CHANNEL_CALLBACK));
     }
 
     #[Route('/payment/callback/plugin/{code}', name: 'payment_callback_plugin', methods: ['GET', 'POST'])]
     public function pluginCallback(Request $request, string $code): Response
     {
-        return $this->html($this->run($request, 'plugin', $code, NotificationAwareGatewayInterface::CHANNEL_CALLBACK));
+        return $this->browser($request, $this->run($request, 'plugin', $code, NotificationAwareGatewayInterface::CHANNEL_CALLBACK));
     }
 
     private function run(Request $request, string $type, string $code, string $channel): NotificationOutcome
@@ -120,6 +128,23 @@ final class PaymentWebhookController
     private function json(NotificationOutcome $outcome): JsonResponse
     {
         return new JsonResponse(['ok' => $outcome->httpStatus < 400, 'message' => $outcome->code], $outcome->httpStatus);
+    }
+
+    /**
+     * After the callback was processed, a valid return token sends the customer to the return page,
+     * which shows the (now updated) payment state; without one the plain result message is shown.
+     */
+    private function browser(Request $request, NotificationOutcome $outcome): Response
+    {
+        $token = trim((string) $request->query->get(PaymentReturnUrl::QUERY_PARAMETER, ''));
+        if (1 === preg_match('/^'.PaymentReturnUrl::TOKEN_PATTERN.'$/', $token)) {
+            $payment = $this->entityManager->getRepository(Payment::class)->findOneBy(['returnToken' => $token]);
+            if ($payment instanceof Payment) {
+                return new RedirectResponse($this->urlGenerator->generate('payment_return', ['token' => $token]), Response::HTTP_SEE_OTHER);
+            }
+        }
+
+        return $this->html($outcome);
     }
 
     private function html(NotificationOutcome $outcome): Response

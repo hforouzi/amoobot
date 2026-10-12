@@ -79,6 +79,17 @@ notifications).
 6. **Webhooks fail closed.** `handleWebhook()` must authenticate the request and return
    `handled: false, message: "unauthorized"` if the signature is wrong or no secret is configured.
    The webhook body never decides that a payment is paid; `verifyPayment()` does.
+7. **Return URLs carry the return token.** Each payment has an unguessable `returnToken`. Send the
+   customer back with `App\Payment\Domain\PaymentReturnUrl`:
+   - provider return / success URL: `PaymentReturnUrl::returnUrl($callbackBaseUrl, $payment)`
+     (`/payment/return/{token}`), cancel URL: `PaymentReturnUrl::cancelUrl(...)`;
+   - a browser callback that Amoobot processes first: `PaymentReturnUrl::withToken($callbackUrl, $payment)`
+     adds `?rt={token}`; after processing, the customer is redirected to the return page.
+
+   The return page identifies the payment **only** by this token and shows a self-refreshing
+   "waiting for confirmation" state while the payment is pending. The token is never a lookup key
+   for callbacks/webhooks (rule 2 still applies). Never put payment or order ids in a return URL as
+   the way to find the payment.
 
 Endpoints: webhooks `/payment/webhook/plugin/{code}` (the unified `/payment/webhook/{type}/{code}`
 with type `plugin`), browser returns `/payment/callback/plugin/{code}`.
