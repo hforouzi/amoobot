@@ -12,10 +12,14 @@ use App\Payment\Domain\Dto\PaymentVerificationResult;
 use App\Payment\Domain\PaymentGatewayInterface;
 use App\Payment\Domain\Money\AmountNormalizer;
 use App\Payment\Domain\PaymentGatewayType;
+use App\Payment\Domain\Webhook\GatewayNotification;
+use App\Payment\Domain\Webhook\NotificationAwareGatewayInterface;
+use App\Payment\Domain\Webhook\RequestPayload;
+use Symfony\Component\HttpFoundation\Request;
 use Symfony\Contracts\HttpClient\Exception\TransportExceptionInterface;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 
-final class ZibalGateway implements PaymentGatewayInterface
+final class ZibalGateway implements PaymentGatewayInterface, NotificationAwareGatewayInterface
 {
     private const REQUEST_URL = 'https://gateway.zibal.ir/v1/request';
     private const VERIFY_URL = 'https://gateway.zibal.ir/v1/verify';
@@ -29,6 +33,19 @@ final class ZibalGateway implements PaymentGatewayInterface
     public function getType(): string
     {
         return PaymentGatewayType::ZIBAL;
+    }
+
+    /**
+     * Zibal callbacks are unsigned browser redirects (trackId, success, status). They are only used
+     * to find the payment; authenticity comes from /v1/verify with the stored trackId.
+     */
+    public function handleNotification(PaymentGateway $gateway, Request $request, string $channel): GatewayNotification
+    {
+        $payload = RequestPayload::from($request);
+        $trackId = RequestPayload::firstScalar($payload, ['trackId', 'track_id']);
+        $reportedNotPaid = array_key_exists('success', $payload) && '1' !== trim((string) $payload['success']);
+
+        return GatewayNotification::accepted([$trackId], $payload, $reportedNotPaid);
     }
 
     public function createPayment(Payment $payment, Order $order): PaymentRequestResult
@@ -109,7 +126,8 @@ final class ZibalGateway implements PaymentGatewayInterface
         $gateway = $payment->getGateway();
         $config = $this->resolveConfig($gateway);
         $merchant = $this->resolveMerchant($config);
-        $trackId = (string) ($payload['trackId'] ?? $payload['track_id'] ?? $payload['authority'] ?? $payment->getGatewayTransactionId() ?? $payment->getAuthority() ?? '');
+        // Verify the trackId stored at createPayment time; a request-supplied one is never preferred.
+        $trackId = (string) ($payment->getGatewayTransactionId() ?? $payment->getAuthority() ?? '');
 
         if ('' === $merchant || '' === $trackId) {
             return new PaymentVerificationResult(

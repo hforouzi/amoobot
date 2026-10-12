@@ -11,11 +11,16 @@ use App\Payment\Domain\Dto\PaymentVerificationResult;
 use App\Payment\Domain\Money\AmountNormalizer;
 use App\Payment\Domain\PaymentGatewayInterface;
 use App\Payment\Domain\PaymentGatewayType;
+use App\Payment\Domain\Webhook\GatewayNotification;
+use App\Payment\Domain\Webhook\NotificationAwareGatewayInterface;
+use App\Payment\Domain\Webhook\RequestPayload;
+use App\Entity\PaymentGateway;
+use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
 use Symfony\Contracts\HttpClient\Exception\TransportExceptionInterface;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 
-final class CustomApiGateway implements PaymentGatewayInterface
+final class CustomApiGateway implements PaymentGatewayInterface, NotificationAwareGatewayInterface
 {
     private const REQUEST_TIMEOUT = 20;
     private const FLOAT_EPSILON = 0.00001;
@@ -102,6 +107,60 @@ final class CustomApiGateway implements PaymentGatewayInterface
             message: $message ?? 'success',
             rawResponse: $sanitizedPayload,
         );
+    }
+
+    /**
+     * Webhook: must be enabled and authenticated with webhook.secret_header + webhook.secret
+     * (fail-closed when not configured). Callback: unauthenticated browser return, lookup only.
+     */
+    public function handleNotification(PaymentGateway $gateway, Request $request, string $channel): GatewayNotification
+    {
+        $config = is_array($gateway->getConfig()) ? $gateway->getConfig() : [];
+        $payload = RequestPayload::from($request);
+        $referenceKeys = ['transaction_id', 'transactionId', 'authority', 'Authority', 'trackId', 'track_id'];
+
+        if (self::CHANNEL_CALLBACK === $channel) {
+            return GatewayNotification::accepted([RequestPayload::firstScalar($payload, $referenceKeys)], $payload);
+        }
+
+        $webhook = is_array($config['webhook'] ?? null) ? $config['webhook'] : [];
+        // (string) true === '1', so boolean and textual flags are both covered.
+        if (!in_array(strtolower(trim((string) ($webhook['enabled'] ?? ''))), ['1', 'true', 'yes', 'on'], true)) {
+            return GatewayNotification::rejected(404, 'webhook_disabled');
+        }
+
+        $headerName = trim((string) ($webhook['secret_header'] ?? ''));
+        $secret = trim((string) ($webhook['secret'] ?? ''));
+        if ('' === $headerName || '' === $secret) {
+            return GatewayNotification::rejected(403, 'webhook_secret_not_configured');
+        }
+        $received = trim((string) $request->headers->get($headerName, ''));
+        if ('' === $received || !hash_equals($secret, $received)) {
+            return GatewayNotification::rejected(401, 'unauthorized');
+        }
+
+        $lookupPath = trim((string) ($webhook['payment_lookup'] ?? ''));
+        $references = [
+            '' !== $lookupPath ? $this->stringOrNull($this->arrayPathReader->get($payload, $lookupPath)) : null,
+            RequestPayload::firstScalar($payload, $referenceKeys),
+        ];
+
+        return GatewayNotification::accepted($references, $payload, $this->webhookReportsNotPaid($payload, $webhook));
+    }
+
+    /**
+     * @param array<string, mixed> $payload
+     * @param array<string, mixed> $webhook
+     */
+    private function webhookReportsNotPaid(array $payload, array $webhook): bool
+    {
+        $statusPath = trim((string) ($webhook['status_path'] ?? ''));
+        $status = '' === $statusPath ? '' : strtolower(trim((string) ($this->arrayPathReader->get($payload, $statusPath) ?? '')));
+        $paidValues = $webhook['paid_values'] ?? [];
+        $paidValues = is_string($paidValues) ? explode(',', $paidValues) : (is_array($paidValues) ? $paidValues : []);
+        $paidValues = array_values(array_filter(array_map(static fn (mixed $v): string => is_scalar($v) ? strtolower(trim((string) $v)) : '', $paidValues)));
+
+        return '' !== $status && [] !== $paidValues && !in_array($status, $paidValues, true);
     }
 
     public function verifyPayment(Payment $payment, array $payload = []): PaymentVerificationResult
@@ -413,10 +472,11 @@ final class CustomApiGateway implements PaymentGatewayInterface
         $config = $this->gatewayConfig($payment);
         $variables = is_array($config['variables'] ?? null) ? $config['variables'] : [];
         $description = sprintf('order_%d_payment_%d', $order->getId() ?? 0, $payment->getId() ?? 0);
-        $transactionId = $this->stringOrNull($callbackPayload['transaction_id'] ?? null)
-            ?? $this->stringOrNull($callbackPayload['transactionId'] ?? null)
-            ?? $payment->getGatewayTransactionId();
-        $authority = $this->stringOrNull($callbackPayload['authority'] ?? null) ?? $payment->getAuthority();
+        // References stored at createPayment time win; callback values only fill gaps.
+        $transactionId = $payment->getGatewayTransactionId()
+            ?? $this->stringOrNull($callbackPayload['transaction_id'] ?? null)
+            ?? $this->stringOrNull($callbackPayload['transactionId'] ?? null);
+        $authority = $payment->getAuthority() ?? $this->stringOrNull($callbackPayload['authority'] ?? null);
 
         $context = [
             'amount' => (string) $payment->getAmount(),

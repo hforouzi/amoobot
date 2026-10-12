@@ -12,6 +12,8 @@ class PaymentVerificationResult
      *
      * A paid result without both $amount and $currency is never confirmed automatically: the core
      * puts the payment into manual review (see App\Payment\Domain\Money\AmountMatcher).
+     *
+     * @param bool $failed the provider says this payment definitively failed/expired (core rejects it)
      */
     public function __construct(
         public readonly bool $success,
@@ -22,6 +24,7 @@ class PaymentVerificationResult
         public readonly ?array $rawResponse = null,
         public readonly ?string $amount = null,
         public readonly ?string $currency = null,
+        public readonly bool $failed = false,
     ) {
     }
 }

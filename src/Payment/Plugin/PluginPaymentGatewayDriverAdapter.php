@@ -10,9 +10,13 @@ use App\Entity\Plugin;
 use App\Payment\Domain\Dto\PaymentRequestResult;
 use App\Payment\Domain\Dto\PaymentVerificationResult;
 use App\Payment\Domain\PaymentGatewayInterface;
+use App\Payment\Domain\Webhook\GatewayNotification;
+use App\Payment\Domain\Webhook\NotificationAwareGatewayInterface;
+use App\Payment\Domain\Webhook\RequestPayload;
+use App\Entity\PaymentGateway;
 use Symfony\Component\HttpFoundation\Request;
 
-final class PluginPaymentGatewayDriverAdapter implements PaymentGatewayInterface
+final class PluginPaymentGatewayDriverAdapter implements PaymentGatewayInterface, NotificationAwareGatewayInterface
 {
     public function __construct(
         private readonly Plugin $plugin,
@@ -46,11 +50,37 @@ final class PluginPaymentGatewayDriverAdapter implements PaymentGatewayInterface
     }
 
     /**
-     * @param array<string, mixed> $payload
+     * The plugin's handleWebhook() authenticates the request (and may add data to the payload);
+     * the payment is then found by stored references and verified via verifyPayment().
      */
-    public function handleWebhook(Payment $payment, array $payload, Request $request): ?PaymentWebhookResult
+    public function handleNotification(PaymentGateway $gateway, Request $request, string $channel): GatewayNotification
     {
-        return $this->inner->handleWebhook($payload, $request, $this->gatewayConfig($payment));
+        $payload = RequestPayload::from($request);
+        foreach (['token', 'secret'] as $secretKey) {
+            unset($payload[$secretKey]);
+        }
+        $referenceKeys = ['payment_id', 'paymentId', 'transaction_id', 'transactionId', 'authority', 'Authority', 'trackId'];
+
+        // Browser return: no authentication possible; only used to find the payment, verifyPayment() decides.
+        if (self::CHANNEL_CALLBACK === $channel) {
+            return GatewayNotification::accepted([RequestPayload::firstScalar($payload, $referenceKeys)], $payload);
+        }
+
+        if (!$this->inner->supportsWebhook()) {
+            return GatewayNotification::rejected(404, 'webhook_not_supported');
+        }
+
+        $result = $this->inner->handleWebhook($payload, $request, is_array($gateway->getConfig()) ? $gateway->getConfig() : []);
+        if (null === $result || !$result->handled) {
+            $message = null === $result ? 'webhook_not_handled' : ($result->message ?? 'webhook_not_handled');
+
+            return GatewayNotification::rejected('unauthorized' === $message ? 401 : 400, $message);
+        }
+
+        $payload = array_replace($payload, is_array($result->payload) ? $result->payload : []);
+        $reference = RequestPayload::firstScalar($payload, $referenceKeys);
+
+        return GatewayNotification::accepted([$reference], $payload, false === ($payload['paid'] ?? null));
     }
 
     /**

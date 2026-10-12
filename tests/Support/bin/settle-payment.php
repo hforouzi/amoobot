@@ -26,8 +26,21 @@ $container = $kernel->getContainer()->get('test.service_container');
 
 $paymentId = (int) ($argv[1] ?? 0);
 $amount = (string) ($argv[2] ?? '0');
+$entityManager = $container->get('doctrine')->getManager();
 
-$payment = $container->get('doctrine')->getManager()->find(Payment::class, $paymentId);
+// auto_generate_proxy_classes rewrites proxy files whenever a process first needs them. Two processes
+// doing that at once collide on Windows ("rename(): Access is denied"), so load every proxy class
+// under a file lock before the actual (parallel) work starts.
+$lock = fopen(sys_get_temp_dir().'/amoobot-test-proxies.lock', 'c');
+flock($lock, LOCK_EX);
+foreach ($entityManager->getMetadataFactory()->getAllMetadata() as $metadata) {
+    if (!$metadata->isMappedSuperclass && !$metadata->isEmbeddedClass && 1 === count($metadata->getIdentifierFieldNames())) {
+        $entityManager->getProxyFactory()->getProxy($metadata->getName(), [$metadata->getIdentifierFieldNames()[0] => 0]);
+    }
+}
+flock($lock, LOCK_UN);
+
+$payment = $entityManager->find(Payment::class, $paymentId);
 $verification = new PaymentVerificationResult(success: true, paid: true, transactionId: 'tx-'.$paymentId, amount: $amount, currency: 'IRT');
 
 $result = $container->get(PaymentSettlementService::class)->settle($payment, VerifiedPayment::fromGateway($verification), 'concurrency_test');

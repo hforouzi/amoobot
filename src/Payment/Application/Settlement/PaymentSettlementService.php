@@ -124,6 +124,40 @@ class PaymentSettlementService
     }
 
     /**
+     * The provider itself (verifyPayment(), not the request) says the payment failed or expired.
+     * Only an unsettled payment is closed; the order is left as is, so the customer can pay again.
+     */
+    public function recordGatewayFailure(Payment $payment, string $source): SettlementResult
+    {
+        $paymentId = (int) $payment->getId();
+        $connection = $this->entityManager->getConnection();
+
+        try {
+            $connection->beginTransaction();
+            [$payment] = $this->lock($paymentId);
+            if (!in_array($payment->getStatus(), PaymentStatus::SETTLEABLE, true)) {
+                $connection->commit();
+
+                return new SettlementResult(SettlementOutcome::ALREADY_PROCESSED, sprintf('Payment is already %s.', $payment->getStatus()), $payment);
+            }
+
+            $payment
+                ->setStatus(PaymentStatus::REJECTED)
+                ->setFailedAt($payment->getFailedAt() ?? new \DateTimeImmutable())
+                ->setConfirmationSource($source);
+            $this->entityManager->flush();
+            $connection->commit();
+        } catch (\Throwable $e) {
+            $this->rollbackAndReset();
+            $this->logger->error('Recording gateway failure failed.', ['payment_id' => $paymentId, 'error' => $e->getMessage()]);
+
+            return new SettlementResult(SettlementOutcome::ERROR, 'Payment state could not be updated; try again.');
+        }
+
+        return new SettlementResult(SettlementOutcome::REJECTED, 'Gateway reported the payment as failed or expired.', $payment);
+    }
+
+    /**
      * @param list<string> $allowedStatuses
      */
     private function run(Payment $payment, VerifiedPayment $verified, string $source, array $allowedStatuses, bool $checkAmount): SettlementResult
@@ -221,6 +255,10 @@ class PaymentSettlementService
         if (!$payment instanceof Payment) {
             throw new \RuntimeException(sprintf('Payment #%d not found.', $paymentId));
         }
+
+        // Persist what verifyPayment() recorded on the entity (crypto status, ids, payloads) before the
+        // refresh below re-reads the row. Only changed fields are written, never a stale status.
+        $this->entityManager->flush();
 
         $order = $payment->getOrder();
         // refresh() with a lock mode issues SELECT ... FOR UPDATE and re-reads the row; a plain find()

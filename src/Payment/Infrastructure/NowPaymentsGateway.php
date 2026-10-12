@@ -11,6 +11,9 @@ use App\Payment\Domain\Dto\PaymentRequestResult;
 use App\Payment\Domain\Dto\PaymentVerificationResult;
 use App\Payment\Domain\PaymentGatewayInterface;
 use App\Payment\Domain\PaymentGatewayType;
+use App\Payment\Domain\Webhook\GatewayNotification;
+use App\Payment\Domain\Webhook\NotificationAwareGatewayInterface;
+use Symfony\Component\HttpFoundation\Request;
 use Symfony\Contracts\HttpClient\Exception\TransportExceptionInterface;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 
@@ -26,7 +29,7 @@ use Symfony\Contracts\HttpClient\HttpClientInterface;
  *   PENDING (do not provision): waiting, confirming
  *   FAILED (do not provision): failed, expired, refunded
  */
-final class NowPaymentsGateway implements PaymentGatewayInterface
+final class NowPaymentsGateway implements PaymentGatewayInterface, NotificationAwareGatewayInterface
 {
     public const DEFAULT_API_BASE = 'https://api.nowpayments.io/v1';
     public const BELOW_MINIMUM_USER_MESSAGE = 'مبلغ این سفارش برای پرداخت با این ارز کمتر از حداقل مجاز درگاه است. لطفاً روش پرداخت دیگری انتخاب کنید یا مبلغ سفارش را افزایش دهید.';
@@ -260,6 +263,37 @@ final class NowPaymentsGateway implements PaymentGatewayInterface
         );
     }
 
+    /**
+     * IPN authentication (fail-closed): the gateway must have an ipn_secret and the
+     * x-nowpayments-sig HMAC must match. The body is only used to find the payment.
+     */
+    public function handleNotification(PaymentGateway $gateway, Request $request, string $channel): GatewayNotification
+    {
+        if (self::CHANNEL_WEBHOOK !== $channel) {
+            return GatewayNotification::rejected(404, 'not_supported');
+        }
+
+        $rawBody = (string) $request->getContent();
+        $payload = '' === $rawBody ? null : json_decode($rawBody, true);
+        if (!is_array($payload)) {
+            return GatewayNotification::rejected(400, 'invalid_json');
+        }
+
+        $ipnSecret = trim((string) ($gateway->getNowPaymentsIpnSecret() ?? ''));
+        if ('' === $ipnSecret) {
+            return GatewayNotification::rejected(403, 'ipn_secret_not_configured');
+        }
+        if (!$this->validateIpnSignature($rawBody, (string) $request->headers->get('x-nowpayments-sig', ''), $ipnSecret)) {
+            return GatewayNotification::rejected(401, 'invalid_signature');
+        }
+
+        $paymentId = trim((string) ($payload['payment_id'] ?? ''));
+        $invoiceId = trim((string) ($payload['invoice_id'] ?? ''));
+
+        // Only the payment_id travels on as a hint (invoice-mode payments get it after creation).
+        return GatewayNotification::accepted([$paymentId, $invoiceId], '' !== $paymentId ? ['payment_id' => $paymentId] : []);
+    }
+
     public function verifyPayment(Payment $payment, array $payload = []): PaymentVerificationResult
     {
         $gateway = $payment->getGateway();
@@ -366,6 +400,7 @@ final class NowPaymentsGateway implements PaymentGatewayInterface
             rawResponse: is_array($raw) ? $raw : null,
             amount: $reportedAmount,
             currency: $reportedCurrency,
+            failed: $failed,
         );
     }
 
@@ -454,6 +489,7 @@ final class NowPaymentsGateway implements PaymentGatewayInterface
             rawResponse: is_array($raw) ? $raw : null,
             amount: $reportedAmount,
             currency: $reportedCurrency,
+            failed: $failed,
         );
     }
 
