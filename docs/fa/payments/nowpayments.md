@@ -5,7 +5,7 @@ NOWPayments یک درگاه Core برای پرداخت رمزارزی است.
 ## تنظیمات
 
 - `api_key`: required.
-- `ipn_secret`: برای امضای IPN/Webhook، اختیاری.
+- `ipn_secret`: برای امضای IPN/Webhook، **الزامی**. بدون آن همه IPNها با HTTP 403 رد می‌شوند.
 - `payment_mode`: مقدار `invoice` یا `payment`.
 - `price_currency`: ارز قیمت‌گذاری، معمولاً `usd`.
 - `pay_currency`: ارز پرداخت، مخصوصاً برای direct payment.

@@ -23,11 +23,13 @@ use Symfony\Component\Routing\Attribute\Route;
  *
  * Endpoint: POST /payment/webhook/nowpayments
  *
- * Signature validation:
- *   - Header: x-nowpayments-sig
- *   - Algorithm: HMAC-SHA512 over sorted JSON payload using ipn_secret
- *   - If ipn_secret is configured and signature is invalid, the request is rejected (fail-closed).
- *   - If ipn_secret is not configured, signature check is skipped.
+ * Security model (fail-closed):
+ *   - The payment is looked up only by references stored when it was created
+ *     (payment_id / invoice_id), never by the order_id in the body.
+ *   - The gateway must have an ipn_secret; without it every IPN is rejected (403).
+ *   - The x-nowpayments-sig HMAC-SHA512 signature must be valid (401 otherwise).
+ *   - The IPN body is treated as a notification only: the payment status is re-read from the
+ *     NOWPayments API via verifyPayment() before anything is confirmed.
  *
  * This handler is idempotent: duplicate IPN calls do not double-provision.
  */
@@ -56,81 +58,49 @@ final class NowPaymentsWebhookController extends AbstractController
 
         $paymentId = trim((string) ($payload['payment_id'] ?? ''));
         $invoiceId = trim((string) ($payload['invoice_id'] ?? ''));
-        $orderId = trim((string) ($payload['order_id'] ?? ''));
-        $status = strtolower(trim((string) ($payload['payment_status'] ?? $payload['invoice_status'] ?? $payload['status'] ?? '')));
 
-        $payment = $this->findPayment($paymentId, $invoiceId, $orderId);
+        $payment = $this->findPayment($paymentId, $invoiceId);
         if (!$payment instanceof Payment) {
-            error_log(sprintf('[NowPaymentsWebhookController] payment_not_found payment_id=%s invoice_id=%s order_id=%s', $paymentId, $invoiceId, $orderId));
+            error_log(sprintf('[NowPaymentsWebhookController] payment_not_found payment_id=%s invoice_id=%s', $paymentId, $invoiceId));
 
             return new JsonResponse(['status' => 'ok', 'message' => 'payment_not_found'], Response::HTTP_OK);
         }
 
-        // Validate IPN signature
         $gateway = $payment->getGateway();
-        if ($gateway instanceof PaymentGateway) {
-            $ipnSecret = trim((string) ($gateway->getNowPaymentsIpnSecret() ?? ''));
-            if ('' !== $ipnSecret) {
-                $receivedSig = trim((string) $request->headers->get('x-nowpayments-sig', ''));
-                /** @var NowPaymentsGateway $nowGateway */
-                $nowGateway = $this->paymentGatewayRegistry->resolveByType(PaymentGatewayType::NOWPAYMENTS);
-                if (!$nowGateway->validateIpnSignature($rawBody, $receivedSig, $ipnSecret)) {
-                    error_log(sprintf('[NowPaymentsWebhookController] invalid_ipn_signature payment_id=%s', $paymentId));
+        $ipnSecret = $gateway instanceof PaymentGateway ? trim((string) ($gateway->getNowPaymentsIpnSecret() ?? '')) : '';
+        if ('' === $ipnSecret) {
+            error_log(sprintf('[NowPaymentsWebhookController] ipn_secret_not_configured payment=%d', $payment->getId() ?? 0));
 
-                    return new JsonResponse(['status' => 'error', 'message' => 'invalid_signature'], Response::HTTP_UNAUTHORIZED);
-                }
-            }
+            return new JsonResponse(['status' => 'error', 'message' => 'ipn_secret_not_configured'], Response::HTTP_FORBIDDEN);
         }
 
-        // Store IPN payload
+        /** @var NowPaymentsGateway $nowGateway */
+        $nowGateway = $this->paymentGatewayRegistry->resolveByType(PaymentGatewayType::NOWPAYMENTS);
+        $receivedSig = trim((string) $request->headers->get('x-nowpayments-sig', ''));
+        if (!$nowGateway->validateIpnSignature($rawBody, $receivedSig, $ipnSecret)) {
+            error_log(sprintf('[NowPaymentsWebhookController] invalid_ipn_signature payment=%d', $payment->getId() ?? 0));
+
+            return new JsonResponse(['status' => 'error', 'message' => 'invalid_signature'], Response::HTTP_UNAUTHORIZED);
+        }
+
         $payment->setIpnPayload($payload);
 
-        // Update crypto status fields from payload
-        if ('' !== $status) {
-            $payment->setCryptoPaymentStatus($status);
-        }
-        if ('' !== $paymentId) {
-            $payment
-                ->setCryptoPaymentId($paymentId)
-                ->setGatewayTransactionId($paymentId);
-        }
-        if ('' !== $invoiceId) {
-            $payment->setCryptoInvoiceId($invoiceId);
-            if ('' === $paymentId) {
-                $payment->setGatewayTransactionId($invoiceId);
-            }
-        }
-        $invoiceUrl = trim((string) ($payload['invoice_url'] ?? ''));
-        if ('' !== $invoiceUrl) {
-            $payment
-                ->setCryptoInvoiceUrl($invoiceUrl)
-                ->setPaymentUrl($invoiceUrl);
-        }
-        $actuallyPaid = trim((string) ($payload['actually_paid'] ?? ''));
-        if ('' !== $actuallyPaid) {
-            $payment->setCryptoActuallyPaid($actuallyPaid);
-        }
-        $outcomeAmount = trim((string) ($payload['outcome_amount'] ?? ''));
-        if ('' !== $outcomeAmount) {
-            $payment->setCryptoOutcomeAmount($outcomeAmount);
+        if (PaymentStatus::CONFIRMED === $payment->getStatus()) {
+            $this->entityManager->flush();
+
+            return new JsonResponse(['status' => 'ok', 'message' => 'already_confirmed']);
         }
 
-        // Handle final paid status
-        if (in_array($status, NowPaymentsGateway::PAID_STATUSES, true)) {
-            if (PaymentStatus::CONFIRMED === $payment->getStatus()) {
-                // Already processed — idempotent, just return OK
-                $this->entityManager->flush();
+        // Never trust payment_status from the body: ask the NOWPayments API.
+        $verification = $nowGateway->verifyPayment($payment, '' !== $paymentId ? ['payment_id' => $paymentId] : []);
+        $apiStatus = strtolower(trim((string) ($payment->getCryptoPaymentStatus() ?? '')));
 
-                return new JsonResponse(['status' => 'ok', 'message' => 'already_confirmed']);
-            }
-
-            $payment->setVerifiedAt($payment->getVerifiedAt() ?? new \DateTimeImmutable());
-            $payment->setFailedAt(null);
+        if ($verification->success && $verification->paid) {
             $this->entityManager->flush();
 
             $result = $this->paymentConfirmationService->confirm($payment, 'nowpayments_webhook');
             if (!$result->processed && !$result->alreadyProcessed) {
-                error_log(sprintf('[NowPaymentsWebhookController] confirm_failed payment_id=%s message="%s"', $paymentId, (string) ($result->message ?? '')));
+                error_log(sprintf('[NowPaymentsWebhookController] confirm_failed payment=%d message="%s"', $payment->getId() ?? 0, $result->message));
 
                 return new JsonResponse([
                     'status' => 'error',
@@ -141,8 +111,7 @@ final class NowPaymentsWebhookController extends AbstractController
             return new JsonResponse(['status' => 'ok', 'message' => 'confirmed']);
         }
 
-        // Handle failed/expired status
-        if (in_array($status, NowPaymentsGateway::FAILED_STATUSES, true)) {
+        if ($verification->success && in_array($apiStatus, NowPaymentsGateway::FAILED_STATUSES, true)) {
             if (!in_array($payment->getStatus(), [PaymentStatus::CONFIRMED, PaymentStatus::REJECTED], true)) {
                 $payment
                     ->setStatus(PaymentStatus::REJECTED)
@@ -153,75 +122,31 @@ final class NowPaymentsWebhookController extends AbstractController
             return new JsonResponse(['status' => 'ok', 'message' => 'failed_or_expired']);
         }
 
-        // Pending/confirming/partially_paid — update status but do not provision
+        // Pending/confirming/partially_paid or API unavailable — keep waiting, do not provision.
         $this->entityManager->flush();
 
-        return new JsonResponse(['status' => 'ok', 'message' => 'status_updated']);
+        return new JsonResponse(['status' => 'ok', 'message' => $verification->success ? 'status_updated' : 'verification_unavailable']);
     }
 
-    private function findPayment(string $paymentId, string $invoiceId, string $orderId): ?Payment
+    private function findPayment(string $paymentId, string $invoiceId): ?Payment
     {
+        $candidates = [];
         if ('' !== $paymentId) {
-            $payment = $this->entityManager->getRepository(Payment::class)
-                ->createQueryBuilder('p')
-                ->where('p.cryptoPaymentId = :pid')
-                ->andWhere('p.gatewayType = :type')
-                ->setParameter('pid', $paymentId)
-                ->setParameter('type', PaymentGatewayType::NOWPAYMENTS)
-                ->setMaxResults(1)
-                ->getQuery()
-                ->getOneOrNullResult();
-
-            if ($payment instanceof Payment) {
-                return $payment;
-            }
-
-            // Fallback: try gatewayTransactionId
-            $payment = $this->entityManager->getRepository(Payment::class)
-                ->createQueryBuilder('p')
-                ->where('p.gatewayTransactionId = :pid')
-                ->andWhere('p.gatewayType = :type')
-                ->setParameter('pid', $paymentId)
-                ->setParameter('type', PaymentGatewayType::NOWPAYMENTS)
-                ->setMaxResults(1)
-                ->getQuery()
-                ->getOneOrNullResult();
-
-            if ($payment instanceof Payment) {
-                return $payment;
-            }
+            $candidates[] = ['cryptoPaymentId', $paymentId];
+            $candidates[] = ['gatewayTransactionId', $paymentId];
         }
-
         if ('' !== $invoiceId) {
-            $payment = $this->entityManager->getRepository(Payment::class)
-                ->createQueryBuilder('p')
-                ->where('p.cryptoInvoiceId = :invoiceId')
-                ->andWhere('p.gatewayType = :type')
-                ->setParameter('invoiceId', $invoiceId)
-                ->setParameter('type', PaymentGatewayType::NOWPAYMENTS)
-                ->setMaxResults(1)
-                ->getQuery()
-                ->getOneOrNullResult();
+            $candidates[] = ['cryptoInvoiceId', $invoiceId];
+        }
 
+        foreach ($candidates as [$field, $value]) {
+            $payment = $this->entityManager->getRepository(Payment::class)->findOneBy([
+                $field => $value,
+                'gatewayType' => PaymentGatewayType::NOWPAYMENTS,
+            ]);
             if ($payment instanceof Payment) {
                 return $payment;
             }
-        }
-
-        if ('' !== $orderId) {
-            // Try to find by order tracking code
-            return $this->entityManager->getRepository(Payment::class)
-                ->createQueryBuilder('p')
-                ->join('p.order', 'o')
-                ->where('(o.trackingCode = :oid OR o.id = :oidInt)')
-                ->andWhere('p.gatewayType = :type')
-                ->setParameter('oid', $orderId)
-                ->setParameter('oidInt', is_numeric($orderId) ? (int) $orderId : -1)
-                ->setParameter('type', PaymentGatewayType::NOWPAYMENTS)
-                ->orderBy('p.id', 'DESC')
-                ->setMaxResults(1)
-                ->getQuery()
-                ->getOneOrNullResult();
         }
 
         return null;

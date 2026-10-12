@@ -266,8 +266,13 @@ final class NowPaymentsGateway implements PaymentGatewayInterface
             return new PaymentVerificationResult(success: false, paid: false, message: 'NOWPayments api_key is not configured.');
         }
 
-        $paymentId = trim((string) ($payload['payment_id'] ?? $payment->getCryptoPaymentId() ?? ''));
-        $invoiceId = trim((string) ($payload['invoice_id'] ?? $payment->getCryptoInvoiceId() ?? ''));
+        // References stored at createPayment time always win. A request-supplied payment_id is only a
+        // hint for invoice-mode payments (NOWPayments assigns it after creation) and is accepted only
+        // when the API response ties it back to this payment's invoice/order (see paymentBelongsTo()).
+        $storedPaymentId = trim((string) ($payment->getCryptoPaymentId() ?? ''));
+        $invoiceId = trim((string) ($payment->getCryptoInvoiceId() ?? ''));
+        $hintedPaymentId = '' === $storedPaymentId ? trim((string) ($payload['payment_id'] ?? '')) : '';
+        $paymentId = '' !== $storedPaymentId ? $storedPaymentId : $hintedPaymentId;
         if ('' === $paymentId && '' !== $invoiceId) {
             return $this->verifyInvoicePayment($payment, $invoiceId, $apiKey, $baseUrl, $sandbox);
         }
@@ -307,6 +312,15 @@ final class NowPaymentsGateway implements PaymentGatewayInterface
                 message: $this->buildUserFacingErrorMessage($rawMessage, 'خطا در اتصال به درگاه پرداخت ارز دیجیتال. لطفاً بعداً تلاش کنید.'),
                 rawResponse: is_array($raw) ? $raw : null
             );
+        }
+
+        if ('' !== $hintedPaymentId && !$this->paymentBelongsTo($payment, $raw)) {
+            $this->safeLog('nowpayments_verify_foreign_payment_id', ['paymentId' => $payment->getId()]);
+
+            return new PaymentVerificationResult(success: false, paid: false, message: self::PAYMENT_NOT_REPORTED_MESSAGE);
+        }
+        if ('' !== $hintedPaymentId) {
+            $payment->setCryptoPaymentId($hintedPaymentId)->setGatewayTransactionId($hintedPaymentId);
         }
 
         $status = strtolower(trim((string) ($raw['payment_status'] ?? '')));
@@ -507,12 +521,14 @@ final class NowPaymentsGateway implements PaymentGatewayInterface
      * Validate NOWPayments IPN signature.
      *
      * NOWPayments sends the signature in HTTP header: x-nowpayments-sig
-     * Algorithm: HMAC-SHA512 over the JSON-encoded sorted payload using ipn_secret as key.
+     * Algorithm: HMAC-SHA512 over the JSON-encoded, recursively key-sorted payload using ipn_secret as key.
+     *
+     * Fail-closed: without an ipn_secret or a signature nothing is considered authentic.
      */
     public function validateIpnSignature(string $rawBody, string $receivedSignature, string $ipnSecret): bool
     {
-        if ('' === $ipnSecret) {
-            return true;
+        if ('' === trim($ipnSecret) || '' === trim($receivedSignature)) {
+            return false;
         }
 
         $payload = json_decode($rawBody, true);
@@ -520,7 +536,7 @@ final class NowPaymentsGateway implements PaymentGatewayInterface
             return false;
         }
 
-        ksort($payload);
+        $this->ksortRecursive($payload);
         $sortedJson = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         if (false === $sortedJson) {
             return false;
@@ -529,6 +545,39 @@ final class NowPaymentsGateway implements PaymentGatewayInterface
         $expected = hash_hmac('sha512', $sortedJson, $ipnSecret);
 
         return hash_equals(strtolower($expected), strtolower(trim($receivedSignature)));
+    }
+
+    /**
+     * True when a NOWPayments API payment object references this payment's stored invoice or order.
+     *
+     * @param array<mixed> $raw
+     */
+    private function paymentBelongsTo(Payment $payment, array $raw): bool
+    {
+        $storedInvoiceId = trim((string) ($payment->getCryptoInvoiceId() ?? ''));
+        $remoteInvoiceId = trim((string) ($raw['invoice_id'] ?? ''));
+        if ('' !== $storedInvoiceId && $storedInvoiceId === $remoteInvoiceId) {
+            return true;
+        }
+
+        $order = $payment->getOrder();
+        $expectedOrderId = (string) ($order->getTrackingCode() ?? $order->getId() ?? $payment->getId() ?? '');
+        $remoteOrderId = trim((string) ($raw['order_id'] ?? ''));
+
+        return '' !== $expectedOrderId && $expectedOrderId === $remoteOrderId;
+    }
+
+    /**
+     * @param array<mixed> $payload
+     */
+    private function ksortRecursive(array &$payload): void
+    {
+        ksort($payload);
+        foreach ($payload as &$value) {
+            if (is_array($value)) {
+                $this->ksortRecursive($value);
+            }
+        }
     }
 
     /**

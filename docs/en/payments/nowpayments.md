@@ -5,7 +5,7 @@ NOWPayments is a core crypto gateway.
 ## Config
 
 - `api_key`: required.
-- `ipn_secret`: optional webhook/IPN signature secret.
+- `ipn_secret`: **required** IPN signature secret. Without it every IPN is rejected (HTTP 403); payments are then only confirmed via the success page or `payment:check-nowpayments`.
 - `payment_mode`: `invoice` or `payment`.
 - `price_currency`: currency used for invoice pricing, commonly `usd`.
 - `pay_currency`: direct payment currency when needed.

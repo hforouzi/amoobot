@@ -89,7 +89,7 @@ final class NowPaymentsPaymentGatewayCrudController extends AbstractCrudControll
             ->setFormType(PasswordType::class)
             ->setFormTypeOption('always_empty', true)
             ->setFormTypeOption('required', false)
-            ->setHelp('IPN Secret برای اعتبارسنجی وبهوک')
+            ->setHelp('IPN Secret برای اعتبارسنجی وبهوک (الزامی؛ بدون آن همه IPNها رد می‌شوند)')
             ->onlyOnForms();
 
         return [
