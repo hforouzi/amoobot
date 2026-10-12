@@ -50,6 +50,31 @@ php bin/console app:payment:create-default-gateways
 
 Admin user setup is handled by the project security setup. If a dedicated admin creation command is added later, use it here.
 
+### Database SQL mode
+
+The database **must run in strict mode** (`STRICT_TRANS_TABLES`), in production too. Without it
+MariaDB/MySQL silently truncates values that do not fit a column (payment references, amounts,
+statuses) and stores invalid values as zero or empty, which can make a paid payment impossible to
+match or settle.
+
+- **dev and test** set it per connection in `config/packages/doctrine.yaml` (`when@dev`, `when@test`):
+  `SET SESSION sql_mode = 'STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION'`.
+- **production** must set it on the server. In `my.cnf` / `my.ini` under `[mysqld]`:
+
+  ```ini
+  sql_mode = STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION
+  ```
+
+  then restart the database. (MySQL 8 and MariaDB ≥ 10.2.4 are strict by default; panels and some
+  installers such as Laragon or older control panels turn it off.)
+- Check it with a read-only query:
+
+  ```bash
+  php bin/console dbal:run-sql "SELECT @@GLOBAL.sql_mode, @@SESSION.sql_mode"
+  ```
+
+  Both values must contain `STRICT_TRANS_TABLES`.
+
 ## Cache And Server
 
 ```bash

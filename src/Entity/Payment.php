@@ -197,6 +197,23 @@ class Payment
         $this->returnToken = self::generateReturnToken();
     }
 
+    /**
+     * Fits a provider-reported, descriptive value (status, amount, currency, source) into its column.
+     *
+     * The database runs in strict mode, so an over-long value would make the whole settlement fail
+     * after the customer has paid. These columns are informational only (decisions use the values
+     * from the verification itself), so they are cut explicitly, marked with "…". References used
+     * for lookups (transaction ids, authority, …) are deliberately NOT clipped: they must fail loudly.
+     */
+    private static function clip(?string $value, int $length): ?string
+    {
+        if (null === $value || mb_strlen($value) <= $length) {
+            return $value;
+        }
+
+        return mb_substr($value, 0, $length - 1).'…';
+    }
+
     public static function generateReturnToken(): string
     {
         // 32 random bytes, base64url without padding: 43 characters.
@@ -379,8 +396,8 @@ class Payment
 
     public function setVerifiedMoney(?string $amount, ?string $currency): self
     {
-        $this->verifiedAmount = $amount;
-        $this->verifiedCurrency = $currency;
+        $this->verifiedAmount = self::clip($amount, 64);
+        $this->verifiedCurrency = self::clip($currency, 16);
 
         return $this;
     }
@@ -452,7 +469,7 @@ class Payment
 
     public function setConfirmationSource(?string $confirmationSource): self
     {
-        $this->confirmationSource = $confirmationSource;
+        $this->confirmationSource = self::clip($confirmationSource, 64);
 
         return $this;
     }
@@ -663,7 +680,7 @@ class Payment
 
     public function setCryptoPriceCurrency(?string $cryptoPriceCurrency): self
     {
-        $this->cryptoPriceCurrency = $cryptoPriceCurrency;
+        $this->cryptoPriceCurrency = self::clip($cryptoPriceCurrency, 32);
 
         return $this;
     }
@@ -675,7 +692,7 @@ class Payment
 
     public function setCryptoPayCurrency(?string $cryptoPayCurrency): self
     {
-        $this->cryptoPayCurrency = $cryptoPayCurrency;
+        $this->cryptoPayCurrency = self::clip($cryptoPayCurrency, 32);
 
         return $this;
     }
@@ -687,7 +704,7 @@ class Payment
 
     public function setCryptoPayAmount(?string $cryptoPayAmount): self
     {
-        $this->cryptoPayAmount = $cryptoPayAmount;
+        $this->cryptoPayAmount = self::clip($cryptoPayAmount, 64);
 
         return $this;
     }
@@ -699,7 +716,7 @@ class Payment
 
     public function setCryptoActuallyPaid(?string $cryptoActuallyPaid): self
     {
-        $this->cryptoActuallyPaid = $cryptoActuallyPaid;
+        $this->cryptoActuallyPaid = self::clip($cryptoActuallyPaid, 64);
 
         return $this;
     }
@@ -711,7 +728,7 @@ class Payment
 
     public function setCryptoOutcomeAmount(?string $cryptoOutcomeAmount): self
     {
-        $this->cryptoOutcomeAmount = $cryptoOutcomeAmount;
+        $this->cryptoOutcomeAmount = self::clip($cryptoOutcomeAmount, 64);
 
         return $this;
     }
@@ -723,7 +740,7 @@ class Payment
 
     public function setCryptoPaymentStatus(?string $cryptoPaymentStatus): self
     {
-        $this->cryptoPaymentStatus = $cryptoPaymentStatus;
+        $this->cryptoPaymentStatus = self::clip($cryptoPaymentStatus, 64);
 
         return $this;
     }
@@ -795,7 +812,7 @@ class Payment
 
     public function setCryptoNetwork(?string $cryptoNetwork): self
     {
-        $this->cryptoNetwork = $cryptoNetwork;
+        $this->cryptoNetwork = self::clip($cryptoNetwork, 64);
 
         return $this;
     }

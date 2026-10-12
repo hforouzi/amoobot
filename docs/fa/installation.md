@@ -50,6 +50,30 @@ php bin/console app:payment:create-default-gateways
 
 اگر در آینده دستور جداگانه‌ای برای ساخت کاربر ادمین اضافه شود، از همان دستور استفاده کنید. در وضعیت فعلی، ورود ادمین طبق تنظیمات امنیتی پروژه انجام می‌شود.
 
+### حالت SQL پایگاه داده
+
+پایگاه داده **باید در حالت strict** (`STRICT_TRANS_TABLES`) اجرا شود؛ در production هم. بدون آن MariaDB/MySQL
+مقادیری را که در ستون جا نمی‌شوند (مرجع پرداخت، مبلغ، وضعیت) بی‌صدا کوتاه می‌کند و مقدار نامعتبر را صفر یا
+خالی ذخیره می‌کند؛ در نتیجه ممکن است پرداختِ انجام‌شده قابل تطبیق یا تایید نباشد.
+
+- **dev و test** این حالت را برای هر اتصال در `config/packages/doctrine.yaml` (`when@dev` و `when@test`) تنظیم
+  می‌کنند.
+- **production** باید آن را روی خود سرور تنظیم کند. در `my.cnf` / `my.ini` زیر `[mysqld]`:
+
+  ```ini
+  sql_mode = STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION
+  ```
+
+  و سپس سرویس پایگاه داده را ری‌استارت کنید. (MySQL 8 و MariaDB 10.2.4 به بعد به‌طور پیش‌فرض strict هستند؛
+  بعضی پنل‌ها و نصب‌کننده‌ها مثل Laragon آن را خاموش می‌کنند.)
+- بررسی با یک کوئری فقط‌خواندنی:
+
+  ```bash
+  php bin/console dbal:run-sql "SELECT @@GLOBAL.sql_mode, @@SESSION.sql_mode"
+  ```
+
+  هر دو مقدار باید شامل `STRICT_TRANS_TABLES` باشند.
+
 ## کش و اجرای محلی
 
 ```bash

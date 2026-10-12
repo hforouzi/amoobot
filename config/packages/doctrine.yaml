@@ -27,11 +27,23 @@ doctrine:
         controller_resolver:
             auto_mapping: false
 
+# Strict SQL mode in dev and test: MariaDB/MySQL must reject values that do not fit a column
+# (too long, out of range, wrong type) instead of silently truncating them. Production must run
+# the server itself in strict mode (docs/en/installation.md#database-sql-mode).
+# 1002 = PDO::MYSQL_ATTR_INIT_COMMAND (Pdo\Mysql::ATTR_INIT_COMMAND), run on every new connection.
+when@dev:
+    doctrine:
+        dbal:
+            options:
+                1002: "SET SESSION sql_mode = 'STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION'"
+
 when@test:
     doctrine:
         dbal:
             # "TEST_TOKEN" is typically set by ParaTest
             dbname_suffix: '_test%env(default::TEST_TOKEN)%'
+            options:
+                1002: "SET SESSION sql_mode = 'STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION'"
 
 when@prod:
     doctrine:
