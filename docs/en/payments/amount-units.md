@@ -17,6 +17,13 @@ Inside the code Toman is written as the pseudo-ISO code `IRT`. The only place th
 
 `Payment::currency` / `PaymentGateway::currency` are legacy labels and are **not** used for amount checks.
 
+**Admin warning.** The plan list has a *Unit check* column, and saving a plan shows a warning, when a
+price looks implausible for Toman (`App\Shop\Application\PlanPriceSanityChecker`): price outside
+5,000–20,000,000, price per GB outside 500–200,000, price per day outside 100–1,000,000 Toman. Too high
+usually means the value was typed in Rial, too low means thousands of Toman or USD. Saving is never
+blocked. `tests/Payment/UnitConversionPinningTest.php` pins what every gateway charges for a
+150,000 Toman plan.
+
 > Changed in hardening/payment-settlement: Zibal used to be sent the Toman number as if it were Rial,
 > so customers paid one tenth of the price. Zibal now receives Toman × 10.
 
