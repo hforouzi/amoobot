@@ -8,13 +8,10 @@ use App\Entity\Order;
 use App\Entity\Payment;
 use App\Entity\VpnService;
 use App\Payment\Application\Settlement\PaymentSettlementService;
-use App\Payment\Application\Settlement\SettlementOutcome;
 use App\Payment\Application\Settlement\VerifiedPayment;
 use App\Payment\Domain\PaymentGatewayType;
 use App\Payment\Domain\PaymentStatus;
-use App\Payment\Infrastructure\NowPaymentsGateway;
 use App\Payment\Infrastructure\PaymentGatewayRegistry;
-use App\Shop\Domain\OrderStatus;
 use App\Shop\Domain\OrderType;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
@@ -22,8 +19,19 @@ use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Attribute\Route;
 
+/**
+ * Customer's browser returning from NOWPayments (success_url / cancel_url, with ?NP_id=...).
+ *
+ * The page never confirms anything by itself: it asks the provider (verifyPayment), hands a paid
+ * result to PaymentSettlementService and then only displays the resulting payment state.
+ * The payment is found ONLY by the NOWPayments id stored when it was created; internal payment or
+ * order ids in the URL are ignored, because the paid page shows the service's access details.
+ */
 final class PaymentReturnController extends AbstractController
 {
+    /** Payment columns holding NOWPayments ids stored at createPayment time (or set by a verified IPN). */
+    private const REFERENCE_FIELDS = ['cryptoPaymentId', 'gatewayTransactionId', 'cryptoInvoiceId'];
+
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
         private readonly PaymentGatewayRegistry $paymentGatewayRegistry,
@@ -35,13 +43,10 @@ final class PaymentReturnController extends AbstractController
     public function success(Request $request): Response
     {
         $npId = $this->queryText($request, 'NP_id');
-        $paymentId = $this->queryText($request, 'payment_id');
-        $orderId = $this->queryText($request, 'order_id');
-        $lookupId = $this->firstNonEmpty($npId, $paymentId);
-        $payment = $this->findPayment($lookupId, $orderId);
+        $payment = $this->findPayment($npId);
 
         if (!$payment instanceof Payment) {
-            $this->logSuccessPage($npId, false, null, null, null, null, false, false, false);
+            $this->logSuccessPage($npId, null, 'not_found');
 
             return $this->render('payment/success.html.twig', [
                 'state' => 'not_found',
@@ -55,46 +60,18 @@ final class PaymentReturnController extends AbstractController
             ]);
         }
 
-        $order = $payment->getOrder();
-        $statusText = trim((string) ($payment->getCryptoPaymentStatus() ?? $payment->getStatus()));
-        $state = 'pending';
-
-        if (PaymentGatewayType::NOWPAYMENTS === (string) $payment->getGatewayType()) {
-            /** @var NowPaymentsGateway $gateway */
-            $gateway = $this->paymentGatewayRegistry->resolveByType(PaymentGatewayType::NOWPAYMENTS);
-            $verification = $gateway->verifyPayment($payment, $this->nowPaymentsVerifyPayload($payment, $lookupId));
-            $statusText = trim((string) ($verification->message ?? $payment->getCryptoPaymentStatus() ?? ''));
-
-            if ($verification->success && $verification->paid) {
-                $settlement = $this->paymentSettlementService->settle($payment, VerifiedPayment::fromGateway($verification), 'nowpayments_success_return');
-                $payment = $settlement->payment ?? $payment;
-                $order = $payment->getOrder();
-                $state = match (true) {
-                    SettlementOutcome::CONFIRMED === $settlement->outcome, PaymentStatus::CONFIRMED === $payment->getStatus() => 'paid',
-                    default => 'provision_failed',
-                };
-            } elseif (in_array(strtolower($statusText), NowPaymentsGateway::FAILED_STATUSES, true)) {
-                if (PaymentStatus::CONFIRMED !== $payment->getStatus()) {
-                    $payment
-                        ->setStatus(PaymentStatus::REJECTED)
-                        ->setFailedAt($payment->getFailedAt() ?? new \DateTimeImmutable());
-                    $this->entityManager->flush();
-                }
-                $state = 'failed';
-            } else {
-                $this->entityManager->flush();
-                $state = 'pending';
-            }
-        } elseif (PaymentStatus::CONFIRMED === $payment->getStatus() || $this->isOrderProcessed($order)) {
-            $state = 'paid';
+        $statusText = null;
+        if (in_array($payment->getStatus(), PaymentStatus::SETTLEABLE, true)) {
+            [$payment, $statusText] = $this->verifyAndSettle($payment, $npId);
         }
 
+        $order = $payment->getOrder();
+        $state = $this->displayState($payment);
         $service = 'paid' === $state ? $this->findServiceForOrder($order) : null;
         $subscriptionUrl = trim((string) ($service?->getSubscriptionUrl() ?? ''));
         $configText = trim((string) ($service?->getConfigText() ?? ''));
-        $redirectEnabled = 'paid' === $state && '' !== $subscriptionUrl;
 
-        $this->logSuccessPage($npId, true, $payment, $order, $service, $statusText, '' !== $subscriptionUrl, $redirectEnabled, $this->isOrderProcessed($order));
+        $this->logSuccessPage($npId, $payment, $state);
 
         return $this->render('payment/success.html.twig', [
             'state' => $state,
@@ -103,8 +80,8 @@ final class PaymentReturnController extends AbstractController
             'service' => $service,
             'subscriptionUrl' => '' !== $subscriptionUrl ? $subscriptionUrl : null,
             'configText' => '' !== $configText ? $configText : null,
-            'redirectEnabled' => $redirectEnabled,
-            'statusText' => '' !== $statusText ? $statusText : null,
+            'redirectEnabled' => 'paid' === $state && '' !== $subscriptionUrl,
+            'statusText' => $statusText ?? $payment->getCryptoPaymentStatus(),
         ]);
     }
 
@@ -112,15 +89,12 @@ final class PaymentReturnController extends AbstractController
     public function cancel(Request $request): Response
     {
         $npId = $this->queryText($request, 'NP_id');
-        $paymentId = $this->queryText($request, 'payment_id');
-        $orderId = $this->queryText($request, 'order_id');
-        $payment = $this->findPayment($this->firstNonEmpty($npId, $paymentId), $orderId);
+        $payment = $this->findPayment($npId);
 
         error_log(sprintf(
-            '[PaymentReturnController] payment_cancel_page_hit NP_id="%s" payment_found=%s order_id=%s',
+            '[PaymentReturnController] payment_cancel_page_hit NP_id="%s" payment_found=%s',
             $npId,
-            $payment instanceof Payment ? 'yes' : 'no',
-            $payment?->getOrder()->getId() ?? ('' !== $orderId ? $orderId : 'null')
+            $payment instanceof Payment ? 'yes' : 'no'
         ));
 
         return $this->render('payment/cancel.html.twig', [
@@ -129,64 +103,68 @@ final class PaymentReturnController extends AbstractController
         ]);
     }
 
-    private function findPayment(string $gatewayId, string $orderId): ?Payment
+    /**
+     * @return array{Payment, ?string}
+     */
+    private function verifyAndSettle(Payment $payment, string $npId): array
     {
-        if ('' !== $gatewayId) {
-            foreach (['cryptoPaymentId', 'gatewayTransactionId', 'authority', 'cryptoInvoiceId'] as $field) {
-                $payment = $this->entityManager->getRepository(Payment::class)->findOneBy([$field => $gatewayId]);
-                if ($payment instanceof Payment) {
-                    return $payment;
-                }
-            }
+        try {
+            $gateway = $payment->getGateway();
+            $driver = null !== $gateway
+                ? $this->paymentGatewayRegistry->resolve($gateway)
+                : $this->paymentGatewayRegistry->resolveByType(PaymentGatewayType::NOWPAYMENTS);
+            // NP_id is only a hint; the gateway accepts it only if the API ties it to this payment.
+            $verification = $driver->verifyPayment($payment, ['payment_id' => $npId]);
+            $this->entityManager->flush();
+        } catch (\Throwable $e) {
+            error_log(sprintf('[PaymentReturnController] verify_failed payment=%d message="%s"', $payment->getId() ?? 0, $e->getMessage()));
 
-            if (is_numeric($gatewayId)) {
-                $payment = $this->entityManager->getRepository(Payment::class)->find((int) $gatewayId);
-                if ($payment instanceof Payment) {
-                    return $payment;
-                }
-            }
+            return [$payment, null];
         }
 
-        if ('' !== $orderId) {
-            $qb = $this->entityManager->getRepository(Payment::class)->createQueryBuilder('p');
-            $qb
-                ->join('p.order', 'o')
-                ->andWhere('o.trackingCode = :orderId OR o.id = :orderIdInt')
-                ->setParameter('orderId', $orderId)
-                ->setParameter('orderIdInt', is_numeric($orderId) ? (int) $orderId : -1)
-                ->orderBy('p.id', 'DESC')
-                ->setMaxResults(1);
+        if ($verification->success && $verification->paid) {
+            $result = $this->paymentSettlementService->settle($payment, VerifiedPayment::fromGateway($verification), 'nowpayments_success_return');
 
-            $payment = $qb->getQuery()->getOneOrNullResult();
+            return [$result->payment ?? $payment, $verification->message];
+        }
 
-            return $payment instanceof Payment ? $payment : null;
+        if ($verification->success && $verification->failed) {
+            $result = $this->paymentSettlementService->recordGatewayFailure($payment, 'nowpayments_success_return');
+
+            return [$result->payment ?? $payment, $verification->message];
+        }
+
+        return [$payment, $verification->message];
+    }
+
+    private function displayState(Payment $payment): string
+    {
+        return match ($payment->getStatus()) {
+            PaymentStatus::CONFIRMED => 'paid',
+            PaymentStatus::NEEDS_REVIEW => 'review',
+            PaymentStatus::PROVISIONING_FAILED => 'provision_failed',
+            PaymentStatus::REJECTED => 'failed',
+            default => 'pending',
+        };
+    }
+
+    private function findPayment(string $npId): ?Payment
+    {
+        if ('' === $npId) {
+            return null;
+        }
+
+        foreach (self::REFERENCE_FIELDS as $field) {
+            $payment = $this->entityManager->getRepository(Payment::class)->findOneBy([
+                $field => $npId,
+                'gatewayType' => PaymentGatewayType::NOWPAYMENTS,
+            ]);
+            if ($payment instanceof Payment) {
+                return $payment;
+            }
         }
 
         return null;
-    }
-
-    /**
-     * @return array{payment_id?: string, invoice_id?: string}
-     */
-    private function nowPaymentsVerifyPayload(Payment $payment, string $lookupId): array
-    {
-        $payload = [];
-        $cryptoPaymentId = trim((string) ($payment->getCryptoPaymentId() ?? ''));
-        $cryptoInvoiceId = trim((string) ($payment->getCryptoInvoiceId() ?? ''));
-
-        if ('' !== $cryptoPaymentId) {
-            $payload['payment_id'] = $cryptoPaymentId;
-        } elseif ('' !== $lookupId && $lookupId !== $cryptoInvoiceId) {
-            $payload['payment_id'] = $lookupId;
-        }
-
-        if ('' !== $cryptoInvoiceId) {
-            $payload['invoice_id'] = $cryptoInvoiceId;
-        } elseif ('' !== $lookupId && '' === ($payload['payment_id'] ?? '')) {
-            $payload['invoice_id'] = $lookupId;
-        }
-
-        return $payload;
     }
 
     private function findServiceForOrder(Order $order): ?VpnService
@@ -200,41 +178,21 @@ final class PaymentReturnController extends AbstractController
         return $service instanceof VpnService ? $service : null;
     }
 
-    private function isOrderProcessed(Order $order): bool
-    {
-        return OrderStatus::PROVISIONED === $order->getStatus() || null !== $order->getProvisionedAt();
-    }
-
     private function queryText(Request $request, string $key): string
     {
         return trim((string) $request->query->get($key, ''));
     }
 
-    private function firstNonEmpty(string ...$values): string
-    {
-        foreach ($values as $value) {
-            if ('' !== trim($value)) {
-                return trim($value);
-            }
-        }
-
-        return '';
-    }
-
-    private function logSuccessPage(string $npId, bool $found, ?Payment $payment, ?Order $order, ?VpnService $service, ?string $status, bool $hasSubscription, bool $redirectEnabled, bool $orderProcessed): void
+    private function logSuccessPage(string $npId, ?Payment $payment, string $state): void
     {
         error_log(sprintf(
-            '[PaymentReturnController] payment_success_page_hit NP_id="%s" payment_found=%s payment_id=%s order_id=%s order_type="%s" payment_status="%s" order_processed=%s service_found=%s subscriptionUrl_exists=%s redirect_enabled=%s',
+            '[PaymentReturnController] payment_success_page_hit NP_id="%s" payment_found=%s payment_id=%s order_id=%s payment_status="%s" state=%s',
             $npId,
-            $found ? 'yes' : 'no',
+            $payment instanceof Payment ? 'yes' : 'no',
             $payment?->getId() ?? 'null',
-            $order?->getId() ?? 'null',
-            (string) ($order?->getType() ?? ''),
-            (string) ($status ?? ''),
-            $orderProcessed ? 'yes' : 'no',
-            $service instanceof VpnService ? 'yes' : 'no',
-            $hasSubscription ? 'yes' : 'no',
-            $redirectEnabled ? 'yes' : 'no'
+            $payment?->getOrder()->getId() ?? 'null',
+            $payment?->getStatus() ?? '',
+            $state
         ));
     }
 }
