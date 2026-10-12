@@ -301,12 +301,6 @@ parameters:
 			path: src/Command/PanelSyncInboundsCommand.php
 
 		-
-			message: '#^Property App\\Payment\\Application\\PaymentApprovalResult\:\:\$message \(string\) on left side of \?\? is not nullable\.$#'
-			identifier: nullCoalesce.property
-			count: 1
-			path: src/Command/PaymentCheckNowPaymentsCommand.php
-
-		-
 			message: '#^Call to function is_array\(\) with array\<string, mixed\> will always evaluate to true\.$#'
 			identifier: function.alreadyNarrowedType
 			count: 1
@@ -575,12 +569,6 @@ parameters:
 			identifier: catch.neverThrown
 			count: 2
 			path: src/Payment/Infrastructure/ZibalGateway.php
-
-		-
-			message: '#^Property App\\Payment\\Application\\PaymentApprovalResult\:\:\$message \(string\) on left side of \?\? is not nullable\.$#'
-			identifier: nullCoalesce.property
-			count: 1
-			path: src/Payment/UI/NowPaymentsWebhookController.php
 
 		-
 			message: '#^Call to function is_string\(\) with string will always evaluate to true\.$#'

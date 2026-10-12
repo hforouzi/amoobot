@@ -107,7 +107,8 @@ final class NowPaymentsWebhookTest extends IntegrationTestCase
         ]));
         $order = $this->createOrder($this->createUser(), $this->createPlan());
         $payment = $this->createPayment($order, $gateway, PaymentStatus::PENDING);
-        $payment->setCryptoPaymentId('np_1')->setGatewayTransactionId('np_1');
+        // As NowPaymentsGateway::createPayment() would: the quote the API must report back.
+        $payment->setCryptoPaymentId('np_1')->setGatewayTransactionId('np_1')->setExpectation('10', 'usd');
         $this->em->flush();
 
         return [$order, $payment];

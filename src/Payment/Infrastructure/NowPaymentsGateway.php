@@ -21,8 +21,9 @@ use Symfony\Contracts\HttpClient\HttpClientInterface;
  * Signature algorithm: HMAC-SHA512 over the sorted JSON payload using ipn_secret.
  *
  * Status mapping:
- *   PAID (trigger PaymentApprovalService): finished, confirmed
- *   PENDING (do not provision): waiting, confirming, partially_paid
+ *   PAID (settled by PaymentSettlementService): finished, confirmed
+ *   PARTIALLY PAID: reported as paid with a pro-rated amount, so settlement parks it as NEEDS_REVIEW
+ *   PENDING (do not provision): waiting, confirming
  *   FAILED (do not provision): failed, expired, refunded
  */
 final class NowPaymentsGateway implements PaymentGatewayInterface
@@ -37,7 +38,10 @@ final class NowPaymentsGateway implements PaymentGatewayInterface
     public const PAID_STATUSES = ['finished', 'confirmed'];
 
     /** Statuses that are considered pending (no provisioning) */
-    public const PENDING_STATUSES = ['waiting', 'confirming', 'partially_paid'];
+    public const PENDING_STATUSES = ['waiting', 'confirming'];
+
+    /** Money arrived but less than requested: handed to settlement, which sends it to manual review */
+    public const PARTIALLY_PAID_STATUSES = ['partially_paid'];
 
     /** Statuses that are considered failed */
     public const FAILED_STATUSES = ['failed', 'expired', 'refunded'];
@@ -341,7 +345,7 @@ final class NowPaymentsGateway implements PaymentGatewayInterface
             $payment->setCryptoOutcomeAmount($outcomeAmount);
         }
 
-        $paid = in_array($status, self::PAID_STATUSES, true);
+        $paid = in_array($status, self::PAID_STATUSES, true) || in_array($status, self::PARTIALLY_PAID_STATUSES, true);
         $failed = in_array($status, self::FAILED_STATUSES, true);
 
         if ($paid) {
@@ -425,7 +429,7 @@ final class NowPaymentsGateway implements PaymentGatewayInterface
             $payment->setGatewayTransactionId($paymentId);
         }
 
-        $paid = in_array($status, self::PAID_STATUSES, true);
+        $paid = in_array($status, self::PAID_STATUSES, true) || in_array($status, self::PARTIALLY_PAID_STATUSES, true);
         $failed = in_array($status, self::FAILED_STATUSES, true);
 
         if ($paid) {

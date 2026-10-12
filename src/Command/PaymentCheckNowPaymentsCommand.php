@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace App\Command;
 
 use App\Entity\Payment;
-use App\Payment\Application\PaymentConfirmationService;
+use App\Payment\Application\Settlement\PaymentSettlementService;
+use App\Payment\Application\Settlement\SettlementOutcome;
+use App\Payment\Application\Settlement\VerifiedPayment;
 use App\Payment\Domain\PaymentGatewayType;
 use App\Payment\Infrastructure\NowPaymentsGateway;
 use App\Payment\Infrastructure\PaymentGatewayRegistry;
@@ -24,7 +26,7 @@ final class PaymentCheckNowPaymentsCommand extends Command
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
         private readonly PaymentGatewayRegistry $paymentGatewayRegistry,
-        private readonly PaymentConfirmationService $paymentConfirmationService,
+        private readonly PaymentSettlementService $paymentSettlementService,
     ) {
         parent::__construct();
     }
@@ -99,16 +101,22 @@ final class PaymentCheckNowPaymentsCommand extends Command
         }
 
         $io->writeln('Auto-approving payment...');
-        $approvalResult = $this->paymentConfirmationService->confirm($payment, 'cli_check_nowpayments');
+        $settlement = $this->paymentSettlementService->settle($payment, VerifiedPayment::fromGateway($result), 'cli_check_nowpayments');
 
-        if ($approvalResult->processed) {
-            $io->success('Payment approved and service provisioned.');
-        } elseif ($approvalResult->alreadyProcessed) {
-            $io->info('Payment was already processed.');
-        } else {
-            $io->error(sprintf('Approval failed: %s', $approvalResult->message ?? 'unknown error'));
+        switch ($settlement->outcome) {
+            case SettlementOutcome::CONFIRMED:
+                $io->success('Payment approved and service provisioned.');
+                break;
+            case SettlementOutcome::ALREADY_PROCESSED:
+                $io->info($settlement->message);
+                break;
+            case SettlementOutcome::NEEDS_REVIEW:
+                $io->warning('Payment parked for review: '.$settlement->message);
+                break;
+            default:
+                $io->error(sprintf('Settlement %s: %s', $settlement->outcome->value, $settlement->message));
 
-            return Command::FAILURE;
+                return Command::FAILURE;
         }
 
         return Command::SUCCESS;

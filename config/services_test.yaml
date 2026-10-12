@@ -1,3 +1,7 @@
 services:
     App\Tests\Support\MockHttpResponder:
         public: true
+
+    App\Tests\Support\ProgrammableVpnPanelDriver:
+        public: true
+        tags: ['app.vpn_driver']

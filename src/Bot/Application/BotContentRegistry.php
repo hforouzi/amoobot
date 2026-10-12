@@ -111,6 +111,8 @@ final class BotContentRegistry
             'payment.confirmed' => ['title' => 'Payment confirmed', 'body' => '✅ پرداخت شما تایید شد.', 'category' => 'payments'],
             'payment.rejected' => ['title' => 'Payment rejected', 'body' => '❌ پرداخت شما رد شد. لطفا مجدد رسید معتبر ارسال کنید یا با پشتیبانی تماس بگیرید.', 'category' => 'payments'],
             'payment.failed' => ['title' => 'Payment failed', 'body' => 'پرداخت ناموفق بود.', 'category' => 'payments'],
+            'payment.under_review' => ['title' => 'Payment under review', 'body' => '⏳ پرداخت شما ثبت شد و برای بررسی به پشتیبانی ارسال شد (مبلغ یا ارز پرداختی با سفارش مطابقت نداشت). نتیجه به شما اطلاع داده می‌شود.', 'category' => 'payments'],
+            'payment.provisioning_delayed' => ['title' => 'Payment received, service delayed', 'body' => '✅ پرداخت شما دریافت شد، اما ساخت سرویس با خطا مواجه شد. پشتیبانی مطلع شده و سرویس شما به‌زودی آماده می‌شود؛ نیازی به پرداخت مجدد نیست.', 'category' => 'payments'],
             'payment.expired' => ['title' => 'Payment expired', 'body' => 'مهلت پرداخت به پایان رسیده است.', 'category' => 'payments'],
             'payment.receipt_request' => ['title' => 'Receipt request', 'body' => 'لطفاً رسید پرداخت را ارسال کنید.', 'category' => 'payments'],
             'payment.receipt_received' => ['title' => 'Receipt received', 'body' => 'اطلاعات پرداخت شما ثبت شد و پس از بررسی تایید می‌شود.', 'category' => 'payments'],

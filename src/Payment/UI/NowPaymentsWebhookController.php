@@ -6,7 +6,8 @@ namespace App\Payment\UI;
 
 use App\Entity\Payment;
 use App\Entity\PaymentGateway;
-use App\Payment\Application\PaymentConfirmationService;
+use App\Payment\Application\Settlement\PaymentSettlementService;
+use App\Payment\Application\Settlement\VerifiedPayment;
 use App\Payment\Domain\PaymentGatewayType;
 use App\Payment\Domain\PaymentStatus;
 use App\Payment\Infrastructure\NowPaymentsGateway;
@@ -38,7 +39,7 @@ final class NowPaymentsWebhookController extends AbstractController
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
         private readonly PaymentGatewayRegistry $paymentGatewayRegistry,
-        private readonly PaymentConfirmationService $paymentConfirmationService,
+        private readonly PaymentSettlementService $paymentSettlementService,
     ) {
     }
 
@@ -98,8 +99,8 @@ final class NowPaymentsWebhookController extends AbstractController
         if ($verification->success && $verification->paid) {
             $this->entityManager->flush();
 
-            $result = $this->paymentConfirmationService->confirm($payment, 'nowpayments_webhook');
-            if (!$result->processed && !$result->alreadyProcessed) {
+            $result = $this->paymentSettlementService->settle($payment, VerifiedPayment::fromGateway($verification), 'nowpayments_webhook');
+            if (!$result->isRecorded()) {
                 error_log(sprintf('[NowPaymentsWebhookController] confirm_failed payment=%d message="%s"', $payment->getId() ?? 0, $result->message));
 
                 return new JsonResponse([
@@ -108,7 +109,7 @@ final class NowPaymentsWebhookController extends AbstractController
                 ], Response::HTTP_INTERNAL_SERVER_ERROR);
             }
 
-            return new JsonResponse(['status' => 'ok', 'message' => 'confirmed']);
+            return new JsonResponse(['status' => 'ok', 'message' => $result->outcome->value]);
         }
 
         if ($verification->success && in_array($apiStatus, NowPaymentsGateway::FAILED_STATUSES, true)) {

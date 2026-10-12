@@ -6,7 +6,8 @@ namespace App\Payment\UI;
 
 use App\Entity\Payment;
 use App\Entity\PaymentGateway;
-use App\Payment\Application\PaymentConfirmationService;
+use App\Payment\Application\Settlement\PaymentSettlementService;
+use App\Payment\Application\Settlement\VerifiedPayment;
 use App\Payment\Domain\PaymentStatus;
 use App\Payment\Infrastructure\PaymentGatewayRegistry;
 use App\Payment\Plugin\PluginPaymentGatewayDriverAdapter;
@@ -22,7 +23,7 @@ final class PluginPaymentWebhookController extends AbstractController
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
         private readonly PaymentGatewayRegistry $paymentGatewayRegistry,
-        private readonly PaymentConfirmationService $paymentConfirmationService,
+        private readonly PaymentSettlementService $paymentSettlementService,
         private readonly LoggerInterface $logger,
     ) {
     }
@@ -102,9 +103,9 @@ final class PluginPaymentWebhookController extends AbstractController
             return $this->json(['ok' => true, 'paid' => false, 'message' => $verification->message ?? 'not_paid'], 200);
         }
 
-        $result = $this->paymentConfirmationService->confirm($payment, sprintf('plugin_%s_webhook', $code));
-        if ($result->processed || $result->alreadyProcessed) {
-            return $this->json(['ok' => true, 'paid' => true, 'message' => 'confirmed'], 200);
+        $result = $this->paymentSettlementService->settle($payment, VerifiedPayment::fromGateway($verification), sprintf('plugin_%s_webhook', $code));
+        if ($result->isRecorded()) {
+            return $this->json(['ok' => true, 'paid' => true, 'message' => $result->outcome->value], 200);
         }
 
         $this->logger->error('Plugin payment webhook confirmation failed after verification.', [

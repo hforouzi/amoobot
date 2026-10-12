@@ -7,7 +7,9 @@ namespace App\Payment\UI;
 use App\Entity\Order;
 use App\Entity\Payment;
 use App\Entity\VpnService;
-use App\Payment\Application\PaymentApprovalService;
+use App\Payment\Application\Settlement\PaymentSettlementService;
+use App\Payment\Application\Settlement\SettlementOutcome;
+use App\Payment\Application\Settlement\VerifiedPayment;
 use App\Payment\Domain\PaymentGatewayType;
 use App\Payment\Domain\PaymentStatus;
 use App\Payment\Infrastructure\NowPaymentsGateway;
@@ -25,7 +27,7 @@ final class PaymentReturnController extends AbstractController
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
         private readonly PaymentGatewayRegistry $paymentGatewayRegistry,
-        private readonly PaymentApprovalService $paymentApprovalService,
+        private readonly PaymentSettlementService $paymentSettlementService,
     ) {
     }
 
@@ -64,16 +66,13 @@ final class PaymentReturnController extends AbstractController
             $statusText = trim((string) ($verification->message ?? $payment->getCryptoPaymentStatus() ?? ''));
 
             if ($verification->success && $verification->paid) {
-                if (!$this->isOrderProcessed($order)) {
-                    $approval = $this->paymentApprovalService->confirm($payment, 'nowpayments_success_return');
-                    if (!$approval->processed && !$approval->alreadyProcessed) {
-                        $state = 'provision_failed';
-                    } else {
-                        $state = 'paid';
-                    }
-                } else {
-                    $state = 'paid';
-                }
+                $settlement = $this->paymentSettlementService->settle($payment, VerifiedPayment::fromGateway($verification), 'nowpayments_success_return');
+                $payment = $settlement->payment ?? $payment;
+                $order = $payment->getOrder();
+                $state = match (true) {
+                    SettlementOutcome::CONFIRMED === $settlement->outcome, PaymentStatus::CONFIRMED === $payment->getStatus() => 'paid',
+                    default => 'provision_failed',
+                };
             } elseif (in_array(strtolower($statusText), NowPaymentsGateway::FAILED_STATUSES, true)) {
                 if (PaymentStatus::CONFIRMED !== $payment->getStatus()) {
                     $payment

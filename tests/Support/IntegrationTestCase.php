@@ -10,6 +10,8 @@ use App\Entity\PaymentGateway;
 use App\Entity\Plan;
 use App\Entity\TelegramAccount;
 use App\Entity\User;
+use App\Entity\VpnInbound;
+use App\Entity\VpnPanel;
 use App\Entity\VpnService;
 use App\Payment\Domain\PaymentGatewayType;
 use App\Payment\Domain\PaymentStatus;
@@ -41,6 +43,8 @@ abstract class IntegrationTestCase extends KernelTestCase
         'telegram_account',
         'bot_message_log',
         '`user`',
+        'vpn_inbound',
+        'vpn_panel',
     ];
 
     protected EntityManagerInterface $em;
@@ -52,6 +56,7 @@ abstract class IntegrationTestCase extends KernelTestCase
         $this->em = self::getContainer()->get(EntityManagerInterface::class);
         $this->http = self::getContainer()->get(MockHttpResponder::class);
         $this->http->reset();
+        $this->driver()->reset();
         $this->purge();
     }
 
@@ -66,8 +71,9 @@ abstract class IntegrationTestCase extends KernelTestCase
         $this->em->clear();
     }
 
-    protected function createUser(string $telegramId = '1001'): User
+    protected function createUser(?string $telegramId = null): User
     {
+        $telegramId ??= (string) random_int(100000, 999999999);
         $user = (new User())->setName('Test User '.$telegramId);
         $account = (new TelegramAccount())->setUser($user)->setTelegramId($telegramId);
         $user->setTelegramAccount($account);
@@ -78,13 +84,14 @@ abstract class IntegrationTestCase extends KernelTestCase
         return $user;
     }
 
-    protected function createPlan(int $price = 100000): Plan
+    protected function createPlan(int $price = 100000, ?VpnInbound $inbound = null): Plan
     {
         $plan = (new Plan())
             ->setTitle('Test plan')
             ->setDurationDays(30)
             ->setTrafficGb(50)
-            ->setPrice($price);
+            ->setPrice($price)
+            ->setInbound($inbound);
         $this->em->persist($plan);
         $this->em->flush();
 
@@ -120,6 +127,9 @@ abstract class IntegrationTestCase extends KernelTestCase
         if (OrderType::ADD_TRAFFIC === $type) {
             $order->setMetadata(['trafficGb' => 10]);
         }
+        if (OrderType::RENEWAL === $type) {
+            $order->setMetadata(['trafficGb' => 50, 'durationDays' => 30]);
+        }
         $this->em->persist($order);
         $this->em->flush();
 
@@ -142,10 +152,31 @@ abstract class IntegrationTestCase extends KernelTestCase
         return $payment;
     }
 
-    protected function createActiveService(User $user): VpnService
+    /**
+     * Panel + inbound served by ProgrammableVpnPanelDriver (type "test").
+     */
+    protected function createTestInbound(): VpnInbound
+    {
+        $panel = (new VpnPanel())->setType(ProgrammableVpnPanelDriver::TYPE)->setTitle('Test panel');
+        $inbound = (new VpnInbound())->setPanel($panel)->setRemoteInboundId('1')->setTitle('Test inbound');
+        $this->em->persist($panel);
+        $this->em->persist($inbound);
+        $this->em->flush();
+
+        return $inbound;
+    }
+
+    protected function driver(): ProgrammableVpnPanelDriver
+    {
+        return self::getContainer()->get(ProgrammableVpnPanelDriver::class);
+    }
+
+    protected function createActiveService(User $user, ?VpnInbound $inbound = null): VpnService
     {
         $service = (new VpnService())
             ->setUser($user)
+            ->setPanel($inbound?->getPanel())
+            ->setInbound($inbound)
             ->setRemoteId('dummy_existing')
             ->setUsername('existing_user')
             ->setStatus(VpnServiceStatus::ACTIVE)

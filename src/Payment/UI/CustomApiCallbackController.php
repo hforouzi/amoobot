@@ -6,7 +6,8 @@ namespace App\Payment\UI;
 
 use App\Entity\Payment;
 use App\Entity\PaymentGateway;
-use App\Payment\Application\PaymentConfirmationService;
+use App\Payment\Application\Settlement\PaymentSettlementService;
+use App\Payment\Application\Settlement\VerifiedPayment;
 use App\Payment\Domain\PaymentGatewayType;
 use App\Payment\Domain\PaymentStatus;
 use App\Payment\Infrastructure\ArrayPathReader;
@@ -23,7 +24,7 @@ final class CustomApiCallbackController extends AbstractController
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
         private readonly PaymentGatewayRegistry $paymentGatewayRegistry,
-        private readonly PaymentConfirmationService $paymentConfirmationService,
+        private readonly PaymentSettlementService $paymentSettlementService,
         private readonly ArrayPathReader $arrayPathReader,
     ) {
     }
@@ -69,12 +70,8 @@ final class CustomApiCallbackController extends AbstractController
             return $this->html($verification->message ?? 'پرداخت تایید نشد.', 400);
         }
 
-        $result = $this->paymentConfirmationService->confirm($payment, 'custom_api_callback');
-        if ($result->processed || $result->alreadyProcessed) {
-            return $this->html('پرداخت با موفقیت تایید شد.', 200);
-        }
-
-        return $this->html($result->message, 400);
+        $result = $this->paymentSettlementService->settle($payment, VerifiedPayment::fromGateway($verification), 'custom_api_callback');
+        return $this->html($result->customerMessage(), $result->isRecorded() ? 200 : 500);
     }
 
     #[Route('/payment/webhook/custom-api/{gatewayId}', name: 'payment_webhook_custom_api', methods: ['POST'])]
@@ -132,12 +129,12 @@ final class CustomApiCallbackController extends AbstractController
             return $this->json(['ok' => true, 'paid' => false, 'message' => $verification->message ?? 'not_paid'], 200);
         }
 
-        $result = $this->paymentConfirmationService->confirm($payment, 'custom_api_webhook');
-        if ($result->processed || $result->alreadyProcessed) {
-            return $this->json(['ok' => true, 'paid' => true, 'message' => 'confirmed'], 200);
+        $result = $this->paymentSettlementService->settle($payment, VerifiedPayment::fromGateway($verification), 'custom_api_webhook');
+        if ($result->isRecorded()) {
+            return $this->json(['ok' => true, 'paid' => true, 'message' => $result->outcome->value], 200);
         }
 
-        return $this->json(['ok' => false, 'message' => $result->message], 400);
+        return $this->json(['ok' => false, 'message' => 'settlement_failed'], 500);
     }
 
     private function findGateway(int $gatewayId): ?PaymentGateway

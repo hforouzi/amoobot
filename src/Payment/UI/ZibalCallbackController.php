@@ -5,7 +5,8 @@ declare(strict_types=1);
 namespace App\Payment\UI;
 
 use App\Entity\Payment;
-use App\Payment\Application\PaymentConfirmationService;
+use App\Payment\Application\Settlement\PaymentSettlementService;
+use App\Payment\Application\Settlement\VerifiedPayment;
 use App\Payment\Domain\PaymentGatewayType;
 use App\Payment\Domain\PaymentStatus;
 use App\Payment\Infrastructure\PaymentGatewayRegistry;
@@ -20,7 +21,7 @@ final class ZibalCallbackController extends AbstractController
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
         private readonly PaymentGatewayRegistry $paymentGatewayRegistry,
-        private readonly PaymentConfirmationService $paymentConfirmationService,
+        private readonly PaymentSettlementService $paymentSettlementService,
     ) {
     }
 
@@ -56,12 +57,8 @@ final class ZibalCallbackController extends AbstractController
             return $this->html('پرداخت تایید نشد.', 400);
         }
 
-        $result = $this->paymentConfirmationService->confirm($payment, 'zibal_callback');
-        if ($result->processed || $result->alreadyProcessed) {
-            return $this->html('پرداخت با موفقیت تایید شد.', 200);
-        }
-
-        return $this->html($result->message, 400);
+        $result = $this->paymentSettlementService->settle($payment, VerifiedPayment::fromGateway($verification), 'zibal_callback');
+        return $this->html($result->customerMessage(), $result->isRecorded() ? 200 : 500);
     }
 
     private function findPaymentByCallbackIds(string $trackId, string $authority, int $orderId): ?Payment

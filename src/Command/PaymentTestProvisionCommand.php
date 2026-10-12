@@ -5,7 +5,8 @@ declare(strict_types=1);
 namespace App\Command;
 
 use App\Entity\Payment;
-use App\Payment\Application\PaymentApprovalService;
+use App\Payment\Application\Settlement\PaymentSettlementService;
+use App\Payment\Application\Settlement\SettlementOutcome;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
@@ -14,12 +15,12 @@ use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Style\SymfonyStyle;
 
-#[AsCommand(name: 'app:payment:test-provision', description: 'Run payment provisioning flow via PaymentApprovalService confirm')]
+#[AsCommand(name: 'app:payment:test-provision', description: 'Approve a payment as admin and run provisioning through PaymentSettlementService')]
 final class PaymentTestProvisionCommand extends Command
 {
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
-        private readonly PaymentApprovalService $paymentApprovalService,
+        private readonly PaymentSettlementService $paymentSettlementService,
     ) {
         parent::__construct();
     }
@@ -53,7 +54,7 @@ final class PaymentTestProvisionCommand extends Command
 
         $io->section('Safe diagnostics');
         $io->listing([
-            sprintf('source: %s', 'telegram_payment_approval'),
+            sprintf('source: %s', 'cli_test_provision'),
             sprintf('paymentId: %d', $payment->getId() ?? 0),
             sprintf('paymentStatus: %s', $payment->getStatus()),
             sprintf('orderId: %d', $order->getId() ?? 0),
@@ -66,14 +67,14 @@ final class PaymentTestProvisionCommand extends Command
         ]);
 
         try {
-            $result = $this->paymentApprovalService->confirm($payment, 'telegram_payment_approval');
+            $result = $this->paymentSettlementService->approveByAdmin($payment, null, null, 'cli_test_provision');
         } catch (\Throwable $e) {
             $io->error(sprintf('Provisioning execution failed: %s', $e->getMessage()));
 
             return Command::FAILURE;
         }
 
-        if ($result->alreadyProcessed) {
+        if ($result->isAlreadyProcessed()) {
             $io->warning($result->message);
             if (null !== $result->vpnService) {
                 $io->writeln(sprintf('serviceId: %d', $result->vpnService->getId() ?? 0));
@@ -83,7 +84,7 @@ final class PaymentTestProvisionCommand extends Command
             return Command::SUCCESS;
         }
 
-        if (!$result->processed) {
+        if (SettlementOutcome::CONFIRMED !== $result->outcome) {
             $io->error($result->message);
 
             return Command::FAILURE;

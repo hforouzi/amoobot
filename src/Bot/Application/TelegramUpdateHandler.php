@@ -23,7 +23,10 @@ use App\Entity\StorePaymentMethod;
 use App\Entity\TelegramAccount;
 use App\Entity\TrialPlan;
 use App\Entity\User;
-use App\Payment\Application\PaymentConfirmationService;
+use App\Payment\Application\PaymentCustomerNotifier;
+use App\Payment\Application\Settlement\PaymentSettlementService;
+use App\Payment\Application\Settlement\SettlementOutcome;
+use App\Payment\Application\Settlement\VerifiedPayment;
 use App\Payment\Domain\PaymentGatewayType;
 use App\Payment\Domain\PaymentStatus;
 use App\Payment\Infrastructure\NowPaymentsGateway;
@@ -70,7 +73,8 @@ class TelegramUpdateHandler
         private readonly ServiceManagementService $serviceManagementService,
         private readonly ServiceActionResolver $serviceActionResolver,
         private readonly EntityManagerInterface $entityManager,
-        private readonly PaymentConfirmationService $paymentConfirmationService,
+        private readonly PaymentCustomerNotifier $paymentCustomerNotifier,
+        private readonly PaymentSettlementService $paymentSettlementService,
         private readonly SettingValueProvider $settingValueProvider,
         private readonly IncompleteOrderSettingsProvider $incompleteOrderSettingsProvider,
         private readonly IncompleteOrderService $incompleteOrderService,
@@ -715,7 +719,7 @@ class TelegramUpdateHandler
             return;
         }
 
-        foreach ($this->paymentConfirmationService->buildNewServiceConfirmedMessages($result->vpnService, '🎁 اکانت تست شما آماده شد') as $message) {
+        foreach ($this->paymentCustomerNotifier->buildNewServiceConfirmedMessages($result->vpnService, '🎁 اکانت تست شما آماده شد') as $message) {
             if (str_contains($message, '<code>')) {
                 $this->telegramApiClient->sendHtmlMessage($chatId, $message);
             } else {
@@ -2096,12 +2100,7 @@ class TelegramUpdateHandler
                 return;
             }
 
-            if (in_array(strtolower($cryptoStatus), ['partially_paid'], true)) {
-                $this->showPopupOrMessage($chatId, $callbackId, 'مبلغ پرداختی کافی نیست. لطفاً وضعیت پرداخت را بررسی کنید.', 'payment_check_partially_paid');
-
-                return;
-            }
-
+            // partially_paid is reported as paid with a pro-rated amount; settlement parks it for review.
             if (in_array(strtolower($cryptoStatus), NowPaymentsGateway::FAILED_STATUSES, true)) {
                 $this->showPopupOrMessage($chatId, $callbackId, 'پرداخت منقضی یا ناموفق شده است.', 'payment_check_failed_expired');
 
@@ -2120,14 +2119,15 @@ class TelegramUpdateHandler
             return;
         }
 
-        $result = $this->paymentConfirmationService->confirm($payment, 'telegram_payment_check');
-        if ($result->processed || $result->alreadyProcessed) {
-            $this->showPopupOrMessage($chatId, $callbackId, 'پرداخت تایید شد.', 'payment_check_confirmed');
-
-            return;
-        }
-
-        $this->showPopupOrMessage($chatId, $callbackId, $result->message, 'payment_check_confirm_failed');
+        $result = $this->paymentSettlementService->settle($payment, VerifiedPayment::fromGateway($verify), 'telegram_payment_check');
+        [$text, $event] = match ($result->outcome) {
+            SettlementOutcome::CONFIRMED => ['پرداخت تایید شد.', 'payment_check_confirmed'],
+            SettlementOutcome::ALREADY_PROCESSED => [PaymentStatus::CONFIRMED === $result->payment?->getStatus() ? 'پرداخت تایید شد.' : 'این پرداخت قبلاً ثبت شده و در حال پیگیری است.', 'payment_check_already_processed'],
+            SettlementOutcome::NEEDS_REVIEW => ['مبلغ یا ارز پرداختی با سفارش مطابقت ندارد؛ پرداخت برای بررسی به پشتیبانی ارسال شد.', 'payment_check_needs_review'],
+            SettlementOutcome::PROVISIONING_FAILED => ['پرداخت دریافت شد اما ساخت سرویس با خطا مواجه شد؛ پشتیبانی مطلع شد.', 'payment_check_provisioning_failed'],
+            default => ['بررسی پرداخت انجام نشد. لطفاً کمی بعد دوباره تلاش کنید.', 'payment_check_confirm_failed'],
+        };
+        $this->showPopupOrMessage($chatId, $callbackId, $text, $event);
     }
 
     private function buildCryptoPaymentMessage(Payment $payment, Order $order): string
@@ -2584,21 +2584,23 @@ class TelegramUpdateHandler
             return;
         }
 
-        $result = $this->paymentConfirmationService->confirm($payment, 'telegram_payment_approval');
+        // On a PROVISIONING_FAILED payment "confirm" means: retry fulfilment (already verified).
+        $result = PaymentStatus::PROVISIONING_FAILED === $payment->getStatus()
+            ? $this->paymentSettlementService->retryProvisioning($payment, null, $chatId, 'telegram_retry_provisioning')
+            : $this->paymentSettlementService->approveByAdmin($payment, null, $chatId, 'telegram_payment_approval');
         $this->debugLog(sprintf(
-            'admin_confirm_result payment_id=%d processed=%s already_processed=%s message="%s"',
+            'admin_confirm_result payment_id=%d outcome=%s message="%s"',
             $paymentId,
-            $result->processed ? 'true' : 'false',
-            $result->alreadyProcessed ? 'true' : 'false',
+            $result->outcome->value,
             $result->message
         ));
-        if ($result->alreadyProcessed) {
+        if ($result->isAlreadyProcessed()) {
             $this->showPopupOrMessage($chatId, $callbackId, 'این پرداخت قبلاً بررسی شده است.', 'popup_payment_already_processed_confirm');
 
             return;
         }
 
-        if (!$result->processed) {
+        if (!$result->isConfirmed()) {
             $this->showPopupOrMessage($chatId, $callbackId, $result->message, 'popup_payment_confirm_panel_failed');
 
             return;
@@ -2618,21 +2620,20 @@ class TelegramUpdateHandler
             return;
         }
 
-        $result = $this->paymentConfirmationService->reject($payment);
+        $result = $this->paymentSettlementService->reject($payment, null, null, $chatId, 'telegram_payment_reject');
         $this->debugLog(sprintf(
-            'admin_reject_result payment_id=%d processed=%s already_processed=%s message="%s"',
+            'admin_reject_result payment_id=%d outcome=%s message="%s"',
             $paymentId,
-            $result->processed ? 'true' : 'false',
-            $result->alreadyProcessed ? 'true' : 'false',
+            $result->outcome->value,
             $result->message
         ));
-        if ($result->alreadyProcessed) {
+        if ($result->isAlreadyProcessed()) {
             $this->showPopupOrMessage($chatId, $callbackId, 'این پرداخت قبلاً بررسی شده است.', 'popup_payment_already_processed_reject');
 
             return;
         }
 
-        if (!$result->processed) {
+        if (SettlementOutcome::REJECTED !== $result->outcome) {
             $this->showPopupOrMessage($chatId, $callbackId, 'عملیات انجام نشد.', 'popup_payment_reject_failed');
 
             return;

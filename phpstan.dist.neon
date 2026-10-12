@@ -11,3 +11,8 @@ parameters:
         containerXmlPath: var/cache/dev/App_KernelDevDebugContainer.xml
     doctrine:
         objectManagerLoader: tests/object-manager.php
+    ignoreErrors:
+        # phpstan reads the dev container; test-only services (config/services_test.yaml) live in the test container.
+        -
+            identifier: symfonyContainer.serviceNotFound
+            path: tests/*

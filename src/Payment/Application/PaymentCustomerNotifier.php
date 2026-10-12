@@ -15,60 +15,80 @@ use App\Shop\Domain\OrderType;
 use App\Provisioning\Application\FinalConfigLinkProvider;
 use App\Provisioning\Application\ServiceConfigDeliveryRefresher;
 use App\Provisioning\Application\ServiceConfigRefreshOutcome;
+use Psr\Log\LoggerInterface;
 
-class PaymentConfirmationService
+/**
+ * Customer-facing Telegram messages about a payment's outcome.
+ *
+ * Called by PaymentSettlementService only after its transaction has committed. Delivery problems
+ * are logged and swallowed: a message that cannot be sent must never undo a settled payment.
+ */
+class PaymentCustomerNotifier
 {
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
-        private readonly PaymentApprovalService $paymentApprovalService,
         private readonly TelegramApiClient $telegramApiClient,
         private readonly BotTextResolver $botTextResolver,
         private readonly VpnAccessMessageFormatter $vpnAccessMessageFormatter,
         private readonly FinalConfigLinkProvider $finalConfigLinkProvider,
         private readonly ServiceConfigDeliveryRefresher $deliveryRefresher,
+        private readonly LoggerInterface $logger,
     ) {
     }
 
-    public function confirm(Payment $payment, string $source = 'payment_confirmation'): PaymentApprovalResult
+    public function confirmed(Payment $payment, ?VpnService $vpnService): void
     {
-        $result = $this->paymentApprovalService->confirm($payment, $source);
-        if ($result->processed) {
-            $telegramAccount = $this->entityManager->getRepository(TelegramAccount::class)->findOneBy(['user' => $payment->getOrder()->getUser()]);
-            if ($telegramAccount instanceof TelegramAccount) {
-                $vpnService = $result->vpnService;
-                $orderType = $payment->getOrder()->getType();
-                if (OrderType::RENEWAL === $orderType) {
-                    $messages = $this->buildRenewalConfirmedMessages($vpnService);
-                } elseif (OrderType::ADD_TRAFFIC === $orderType) {
-                    $metadata = is_array($payment->getOrder()->getMetadata()) ? $payment->getOrder()->getMetadata() : [];
-                    $messages = $this->buildAddTrafficConfirmedMessages($vpnService, (int) ($metadata['trafficGb'] ?? 0));
-                } else {
-                    $messages = $this->buildNewServiceConfirmedMessages($vpnService);
-                }
-                foreach ($messages as $message) {
-                    if (str_contains($message, '<code>')) {
-                        $this->telegramApiClient->sendHtmlMessage($telegramAccount->getTelegramId(), $message);
-                    } else {
-                        $this->telegramApiClient->sendMessage($telegramAccount->getTelegramId(), $message);
-                    }
-                }
+        $this->deliver($payment, 'confirmed', function () use ($payment, $vpnService): array {
+            $orderType = $payment->getOrder()->getType();
+            if (OrderType::RENEWAL === $orderType) {
+                return $this->buildRenewalConfirmedMessages($vpnService);
             }
-        }
+            if (OrderType::ADD_TRAFFIC === $orderType) {
+                $metadata = is_array($payment->getOrder()->getMetadata()) ? $payment->getOrder()->getMetadata() : [];
 
-        return $result;
+                return $this->buildAddTrafficConfirmedMessages($vpnService, (int) ($metadata['trafficGb'] ?? 0));
+            }
+
+            return $this->buildNewServiceConfirmedMessages($vpnService);
+        });
     }
 
-    public function reject(Payment $payment, ?string $note = null): PaymentApprovalResult
+    public function rejected(Payment $payment): void
     {
-        $result = $this->paymentApprovalService->reject($payment, $note);
-        if ($result->processed) {
-            $telegramAccount = $this->entityManager->getRepository(TelegramAccount::class)->findOneBy(['user' => $payment->getOrder()->getUser()]);
-            if ($telegramAccount instanceof TelegramAccount) {
-                $this->telegramApiClient->sendMessage($telegramAccount->getTelegramId(), $this->botTextResolver->message('payment.rejected'));
-            }
-        }
+        $this->deliver($payment, 'rejected', fn (): array => [$this->botTextResolver->message('payment.rejected')]);
+    }
 
-        return $result;
+    public function underReview(Payment $payment): void
+    {
+        $this->deliver($payment, 'under_review', fn (): array => [$this->botTextResolver->message('payment.under_review')]);
+    }
+
+    public function provisioningDelayed(Payment $payment): void
+    {
+        $this->deliver($payment, 'provisioning_delayed', fn (): array => [$this->botTextResolver->message('payment.provisioning_delayed')]);
+    }
+
+    /**
+     * @param callable(): string[] $buildMessages
+     */
+    private function deliver(Payment $payment, string $kind, callable $buildMessages): void
+    {
+        try {
+            $telegramAccount = $this->entityManager->getRepository(TelegramAccount::class)->findOneBy(['user' => $payment->getOrder()->getUser()]);
+            if (!$telegramAccount instanceof TelegramAccount) {
+                return;
+            }
+
+            foreach ($buildMessages() as $message) {
+                if (str_contains($message, '<code>')) {
+                    $this->telegramApiClient->sendHtmlMessage($telegramAccount->getTelegramId(), $message);
+                } else {
+                    $this->telegramApiClient->sendMessage($telegramAccount->getTelegramId(), $message);
+                }
+            }
+        } catch (\Throwable $e) {
+            $this->logger->error('Customer payment notification failed.', ['payment_id' => $payment->getId(), 'kind' => $kind, 'error' => $e->getMessage()]);
+        }
     }
 
     /**
