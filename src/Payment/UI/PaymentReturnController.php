@@ -53,7 +53,7 @@ final class PaymentReturnController extends AbstractController
         }
 
         $statusText = null;
-        if (in_array($payment->getStatus(), PaymentStatus::SETTLEABLE, true) && $this->isVerifiable($payment)) {
+        if ($payment->acceptsGatewayVerification() && $this->isVerifiable($payment)) {
             [$payment, $statusText] = $this->verifyAndSettle($payment, $request);
         }
 

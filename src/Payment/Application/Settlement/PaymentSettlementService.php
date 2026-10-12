@@ -216,6 +216,11 @@ class PaymentSettlementService
             $connection->beginTransaction();
             [$payment, $order] = $this->lock($paymentId);
 
+            // The customer paid after the expiry job had rejected the payment: never ignore money.
+            if ($checkAmount && $payment->isRejectedByOrderExpiry()) {
+                return $this->parkLatePayment($payment, $order, $verified, $source);
+            }
+
             if (!in_array($payment->getStatus(), $allowedStatuses, true)) {
                 $connection->commit();
 
@@ -356,6 +361,25 @@ class PaymentSettlementService
             'panelId' => $inbound?->getPanel()?->getId() ?? 0,
             'driverType' => (string) ($inbound?->getPanel()?->getType() ?? 'dummy'),
         ]);
+    }
+
+    private function parkLatePayment(Payment $payment, Order $order, VerifiedPayment $verified, string $source): SettlementResult
+    {
+        [$expectedAmount, $expectedCurrency] = AmountMatcher::expectationFor($payment);
+        $match = $this->amountMatcher->match($expectedAmount, $expectedCurrency, $verified->amount, $verified->currency, $this->tolerancePolicy->percentFor($payment));
+        $payment
+            ->setVerifiedMoney($verified->amount, $verified->currency)
+            ->setVerifiedAt($payment->getVerifiedAt() ?? new \DateTimeImmutable());
+        if (null !== $verified->transactionId && null === $payment->getGatewayTransactionId()) {
+            $payment->setGatewayTransactionId($verified->transactionId);
+        }
+
+        return $this->parkForReview($payment, sprintf(
+            'paid after expiry: order #%d had expired (%s) and the payment was rejected unpaid; the gateway now reports it paid. %s',
+            $order->getId() ?? 0,
+            $order->getStatus(),
+            $match->describe()
+        ), $source, $match);
     }
 
     private function parkForReview(Payment $payment, string $reason, string $source, ?AmountMatch $match): SettlementResult

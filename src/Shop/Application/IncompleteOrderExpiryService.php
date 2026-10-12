@@ -159,7 +159,9 @@ final class IncompleteOrderExpiryService
                 if (PaymentStatus::PENDING === $payment->getStatus()) {
                     $payment
                         ->setStatus(PaymentStatus::REJECTED)
-                        ->setAdminNote('Auto expired incomplete order');
+                        ->setAdminNote(Payment::NOTE_ORDER_EXPIRY)
+                        // A late "paid" for this payment goes to NEEDS_REVIEW (PaymentSettlementService).
+                        ->setConfirmationSource(Payment::SOURCE_ORDER_EXPIRY);
                     ++$result['paymentsRejected'];
                 }
             }

@@ -9,7 +9,6 @@ use App\Entity\PaymentGateway;
 use App\Payment\Application\Settlement\PaymentSettlementService;
 use App\Payment\Application\Settlement\VerifiedPayment;
 use App\Payment\Domain\PaymentGatewayInterface;
-use App\Payment\Domain\PaymentStatus;
 use App\Payment\Domain\Webhook\GatewayNotification;
 use App\Payment\Domain\Webhook\NotificationAwareGatewayInterface;
 use App\Payment\Infrastructure\PaymentGatewayRegistry;
@@ -82,7 +81,7 @@ final class GatewayNotificationProcessor
 
     private function processPayment(NotificationAwareGatewayInterface&PaymentGatewayInterface $driver, Payment $payment, GatewayNotification $notification, string $source): NotificationOutcome
     {
-        if (!in_array($payment->getStatus(), PaymentStatus::SETTLEABLE, true)) {
+        if (!$payment->acceptsGatewayVerification()) {
             return new NotificationOutcome(200, 'already_'.$payment->getStatus(), $payment);
         }
 

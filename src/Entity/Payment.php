@@ -12,6 +12,10 @@ use Doctrine\ORM\Mapping as ORM;
 #[ORM\UniqueConstraint(name: 'uniq_payment_return_token', columns: ['return_token'])]
 class Payment
 {
+    /** confirmationSource / adminNote of a pending payment rejected because its order expired unpaid. */
+    public const SOURCE_ORDER_EXPIRY = 'order_expiry';
+    public const NOTE_ORDER_EXPIRY = 'Auto expired incomplete order';
+
     #[ORM\Id]
     #[ORM\GeneratedValue]
     #[ORM\Column]
@@ -223,6 +227,24 @@ class Payment
     public function getReturnToken(): ?string
     {
         return $this->returnToken;
+    }
+
+    /**
+     * Rejected by the incomplete-order expiry job (not by an admin or the gateway). The customer may
+     * still pay such a payment at the gateway, so a later "paid" must reach PaymentSettlementService.
+     */
+    public function isRejectedByOrderExpiry(): bool
+    {
+        return PaymentStatus::REJECTED === $this->status
+            && (self::SOURCE_ORDER_EXPIRY === $this->confirmationSource || self::NOTE_ORDER_EXPIRY === $this->adminNote);
+    }
+
+    /**
+     * Whether a gateway verification may still change this payment (pending, or expired unpaid).
+     */
+    public function acceptsGatewayVerification(): bool
+    {
+        return in_array($this->status, PaymentStatus::SETTLEABLE, true) || $this->isRejectedByOrderExpiry();
     }
 
     public function ensureReturnToken(): string
