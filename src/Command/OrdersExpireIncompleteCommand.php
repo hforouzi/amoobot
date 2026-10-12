@@ -48,6 +48,7 @@ final class OrdersExpireIncompleteCommand extends Command
             sprintf('orders expired: %d', $summary['ordersExpired']),
             sprintf('payments rejected: %d', $summary['paymentsRejected']),
             sprintf('orders skipped (submitted receipt): %d', $summary['ordersSkippedSubmittedReceipt']),
+            sprintf('orders skipped (payment under review / provisioning failed / confirmed): %d', $summary['ordersSkippedPaymentInProgress']),
         ]);
 
         if ($dryRun) {
