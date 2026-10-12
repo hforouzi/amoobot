@@ -11,11 +11,19 @@ use App\Payment\Domain\Dto\PaymentVerificationResult;
 use App\Payment\Plugin\PaymentGatewayPluginInterface;
 use App\Payment\Plugin\PaymentWebhookResult;
 use Symfony\Component\HttpClient\HttpClient;
+use Symfony\Contracts\HttpClient\HttpClientInterface;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Contracts\HttpClient\Exception\TransportExceptionInterface;
 
 final class SwapWalletGatewayPlugin implements PaymentGatewayPluginInterface
 {
+    /**
+     * Amoobot instantiates plugins without arguments; the client is injectable for tests.
+     */
+    public function __construct(private readonly ?HttpClientInterface $httpClient = null)
+    {
+    }
+
     // TODO: SwapWallet's current OpenAPI document publishes these invoice
     // request/response schemas but omits their path entries. Keep the inferred
     // paths isolated here so they can be corrected without changing flow code.
@@ -41,6 +49,11 @@ final class SwapWalletGatewayPlugin implements PaymentGatewayPluginInterface
         $conversion = $this->conversionSnapshot($payment, $order, $config);
         if (isset($conversion['error'])) {
             return new PaymentRequestResult(success: false, message: (string) $conversion['error']);
+        }
+
+        // Amoobot later checks the verified amount against exactly this quote.
+        if (method_exists($payment, 'setExpectation')) {
+            $payment->setExpectation((string) $conversion['priceAmount'], (string) $conversion['priceCurrency']);
         }
 
         $paymentMode = $this->paymentMode($config);
@@ -139,6 +152,9 @@ final class SwapWalletGatewayPlugin implements PaymentGatewayPluginInterface
         $refId = $this->stringOrNull($result['supportCode'] ?? $result['support_code'] ?? $result['transactionId'] ?? null);
 
         if ($this->isPaidStatus($status)) {
+            // The invoice amount as SwapWallet reports it ({number, unit}), not what the webhook claimed.
+            $amount = is_array($result['amount'] ?? null) ? $result['amount'] : [];
+
             return new PaymentVerificationResult(
                 success: true,
                 paid: true,
@@ -146,6 +162,8 @@ final class SwapWalletGatewayPlugin implements PaymentGatewayPluginInterface
                 refId: $refId,
                 message: 'SwapWallet payment verified.',
                 rawResponse: $this->sanitize($response),
+                amount: $this->stringOrNull($amount['number'] ?? null),
+                currency: $this->stringOrNull($amount['unit'] ?? null),
             );
         }
 
@@ -170,11 +188,12 @@ final class SwapWalletGatewayPlugin implements PaymentGatewayPluginInterface
      */
     public function handleWebhook(array $payload, Request $request, array $config): ?PaymentWebhookResult
     {
+        // Fail-closed: without a configured webhook_secret no webhook is accepted.
         $webhookSecret = trim((string) ($config['webhook_secret'] ?? ''));
-        if ('' !== $webhookSecret && !$this->isValidWebhookSignature($request, $webhookSecret)) {
+        if ('' === $webhookSecret || !$this->isValidWebhookSignature($request, $webhookSecret)) {
             return new PaymentWebhookResult(
                 handled: false,
-                message: 'SwapWallet webhook signature is invalid.',
+                message: 'unauthorized',
                 payload: $this->sanitize($payload),
             );
         }
@@ -423,7 +442,7 @@ final class SwapWalletGatewayPlugin implements PaymentGatewayPluginInterface
      */
     private function requestJson(string $method, string $url, array $config, array $options = []): array
     {
-        $client = HttpClient::create(['timeout' => 20]);
+        $client = $this->httpClient ?? HttpClient::create(['timeout' => 20]);
         $headers = array_merge([
             'Accept' => 'application/json',
             'Authorization' => 'Bearer '.trim((string) $config['api_key']),
@@ -533,6 +552,12 @@ final class SwapWalletGatewayPlugin implements PaymentGatewayPluginInterface
      */
     private function findPaymentIdentifier(Payment $payment, array $payload): ?string
     {
+        // The invoice id stored at createPayment time wins over anything in the request.
+        $stored = $payment->getGatewayTransactionId() ?? $payment->getAuthority();
+        if (null !== $stored && '' !== trim($stored)) {
+            return $stored;
+        }
+
         foreach (['id', 'invoiceId', 'invoice_id', 'payment_id', 'paymentId', 'authority', 'transaction_id', 'transactionId'] as $key) {
             $value = $this->stringOrNull($payload[$key] ?? null);
             if (null !== $value) {
@@ -540,7 +565,7 @@ final class SwapWalletGatewayPlugin implements PaymentGatewayPluginInterface
             }
         }
 
-        return $payment->getGatewayTransactionId() ?? $payment->getAuthority();
+        return null;
     }
 
     private function normalizedStatus(?string $status): ?string

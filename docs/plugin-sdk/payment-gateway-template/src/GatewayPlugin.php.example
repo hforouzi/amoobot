@@ -8,10 +8,20 @@ use App\Entity\Order;
 use App\Entity\Payment;
 use App\Payment\Domain\Dto\PaymentRequestResult;
 use App\Payment\Domain\Dto\PaymentVerificationResult;
+use App\Payment\Domain\Money\AmountNormalizer;
 use App\Payment\Plugin\PaymentGatewayPluginInterface;
 use App\Payment\Plugin\PaymentWebhookResult;
 use Symfony\Component\HttpFoundation\Request;
 
+/**
+ * Template. Rules (see docs/en/plugins/payment-gateway-plugin-sdk.md, "Verification contract"):
+ *  - Amoobot amounts are Toman; convert with AmountNormalizer::toRial() for a Rial provider.
+ *  - createPayment() returns the PROVIDER's reference as transactionId/authority; Amoobot stores it
+ *    and later finds the payment only by that reference.
+ *  - verifyPayment() asks the provider using the stored reference and reports the amount + currency
+ *    the provider confirms. Without them the payment goes to manual review.
+ *  - Never decide "paid" from the callback/webhook body.
+ */
 final class GatewayPlugin implements PaymentGatewayPluginInterface
 {
     public function getType(): string
@@ -22,22 +32,36 @@ final class GatewayPlugin implements PaymentGatewayPluginInterface
     public function createPayment(Payment $payment, Order $order, array $config): PaymentRequestResult
     {
         $callbackBaseUrl = rtrim((string) ($config['callback_base_url'] ?? ''), '/');
+        $amountRial = AmountNormalizer::toRial((int) ($payment->getPayableAmount() ?? $payment->getAmount()));
+
+        // $response = <POST to provider: amount=$amountRial, callback=$callbackBaseUrl/payment/callback/plugin/your_gateway_code>
+        $providerReference = 'provider-reference-from-response';
 
         return new PaymentRequestResult(
             success: true,
-            paymentUrl: $callbackBaseUrl.'/payment/callback/plugin/your_gateway_code?payment='.$payment->getId(),
-            transactionId: (string) $payment->getId(),
-            rawResponse: ['gateway' => 'your_gateway_code']
+            paymentUrl: 'https://provider.example/pay/'.$providerReference,
+            transactionId: $providerReference,
+            authority: $providerReference,
+            rawResponse: ['gateway' => 'your_gateway_code', 'amount_rial' => $amountRial, 'callback' => $callbackBaseUrl]
         );
     }
 
     public function verifyPayment(Payment $payment, array $payload, array $config): PaymentVerificationResult
     {
+        // Use the stored reference, not one from $payload.
+        $reference = $payment->getGatewayTransactionId() ?? $payment->getAuthority();
+
+        // $result = <ask the provider about $reference>
+        $providerSaysPaid = false;
+        $providerAmountRial = null;
+
         return new PaymentVerificationResult(
             success: true,
-            paid: false,
-            transactionId: (string) ($payload['reference'] ?? ''),
-            rawResponse: ['payload' => $payload]
+            paid: $providerSaysPaid,
+            transactionId: $reference,
+            rawResponse: ['reference' => $reference],
+            amount: $providerSaysPaid ? $providerAmountRial : null,
+            currency: $providerSaysPaid ? AmountNormalizer::RIAL : null,
         );
     }
 
@@ -46,6 +70,10 @@ final class GatewayPlugin implements PaymentGatewayPluginInterface
         return false;
     }
 
+    /**
+     * If you support webhooks: authenticate the request (signature/secret) and return handled=false
+     * with message "unauthorized" when it fails or when no secret is configured (fail-closed).
+     */
     public function handleWebhook(array $payload, Request $request, array $config): ?PaymentWebhookResult
     {
         return null;

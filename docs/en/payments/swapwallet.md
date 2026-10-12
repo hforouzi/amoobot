@@ -32,7 +32,7 @@ Optional keys include `api_secret`, `webhook_secret`, `pay_currency`, `network`,
 
 Amount conversion uses the configured store amount unit and rate snapshot. Keep rate settings current.
 
-Webhook signature validation is used when `webhook_secret` is configured. Pending, partial, underpaid, and expired states should be handled as payment status signals, not direct provisioning.
+`webhook_secret` is required: webhooks without a valid signature are rejected (fail-closed). Pending, partial, underpaid, and expired states should be handled as payment status signals, not direct provisioning.
 
 ## Setup
 

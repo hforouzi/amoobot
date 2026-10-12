@@ -44,6 +44,16 @@
         "fa": "لینک پرداخت تستی",
         "en": "Demo payment URL"
       }
+    },
+    {
+      "key": "auto_confirm_for_testing",
+      "type": "boolean",
+      "required": false,
+      "default": false,
+      "label": {
+        "fa": "تأیید خودکار (فقط تست؛ هرگز روی فروشگاه واقعی)",
+        "en": "Auto-confirm (testing only; never on a live shop)"
+      }
     }
   ]
 }

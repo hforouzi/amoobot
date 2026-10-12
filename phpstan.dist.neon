@@ -6,6 +6,9 @@ parameters:
     paths:
         - src
         - tests
+    # Sample plugins are exercised by tests/Payment/Contract; scan them for symbols (not analysed).
+    scanDirectories:
+        - docs/plugins
     tmpDir: var/cache/phpstan
     symfony:
         containerXmlPath: var/cache/dev/App_KernelDevDebugContainer.xml

@@ -19,7 +19,7 @@ App\Payment\Plugin\PaymentGatewayPluginInterface
 ## DTOها
 
 - `PaymentRequestResult`: نتیجه ساخت پرداخت و اطلاعات لینک یا provider.
-- `PaymentVerificationResult`: نتیجه verify و اطلاعات مرجع provider.
+- `PaymentVerificationResult`: نتیجه verify، اطلاعات مرجع provider و `amount` + `currency` تأییدشده (برای تأیید خودکار الزامی).
 - `PaymentWebhookResult`: نتیجه Webhook وقتی پلاگین Webhook پشتیبانی کند.
 
 ## configSchema
@@ -55,4 +55,28 @@ php bin/console app:plugin:doctor plugin_code
 php bin/console app:payment:test-plugin-gateway GATEWAY_ID
 ```
 
-پلاگین نباید مستقیم `PaymentApprovalService` را صدا بزند، سرویس بسازد یا secretها را log کند.
+## قرارداد verify (سخت‌گیرانه)
+
+پلاگین فقط پاسخ می‌دهد: آیا این پرداخت واقعاً انجام شده، چه مبلغی و با چه ارزی. بقیهٔ کارها (قفل،
+جلوگیری از تکرار، بررسی مبلغ، ساخت سرویس، اعلان‌ها) را `PaymentSettlementService` انجام می‌دهد.
+
+1. **مبالغ به تومان هستند.** برای درگاه ریالی مبلغ را با
+   `App\Payment\Domain\Money\AmountNormalizer::toRial($amount)` (تومان × ۱۰) ارسال کنید.
+2. **مرجع درگاه را ذخیره کنید.** شناسهٔ درگاه را از `createPayment()` به‌صورت `transactionId` /
+   `authority` برگردانید. callback و webhook **فقط** با همین مرجع ذخیره‌شده به پرداخت وصل می‌شوند،
+   نه با شناسهٔ پرداخت یا سفارش آموبات.
+3. **`verifyPayment()` باید `amount` و `currency` را** همان‌طور که درگاه تأیید می‌کند برگرداند
+   (رشتهٔ عددی، مثل `amount: "1500000", currency: "IRR"`) و برای بررسی از مرجع ذخیره‌شده استفاده کند.
+4. **بدون مبلغ یا ارز ⇒ NEEDS_REVIEW.** نتیجهٔ پرداخت‌شده بدون این دو، ارز متفاوت یا مبلغ کمتر هرگز
+   خودکار تأیید نمی‌شود و ادمین باید بررسی کند. مبلغ بیشتر تأیید و علامت‌گذاری می‌شود.
+5. **قیمت به ارز دیگر:** اگر به USD/USDT و … دریافت می‌کنید، در `createPayment()`
+   `$payment->setExpectation($quotedAmount, $quotedCurrency)` را صدا بزنید.
+6. **Webhook باید fail-closed باشد.** در `handleWebhook()` امضا را بررسی کنید و اگر نادرست بود یا
+   secret تنظیم نشده بود `handled: false, message: "unauthorized"` برگردانید. بدنهٔ webhook هرگز
+   پرداخت‌شدن را تعیین نمی‌کند؛ فقط `verifyPayment()`.
+
+مسیرها: webhook در `/payment/webhook/plugin/{code}` و بازگشت مرورگر در `/payment/callback/plugin/{code}`.
+
+همچنین ببینید: [واحد مبالغ](../payments/amount-units.md).
+
+پلاگین نباید مستقیم `PaymentSettlementService` را صدا بزند، سرویس بسازد یا secretها را log کند.

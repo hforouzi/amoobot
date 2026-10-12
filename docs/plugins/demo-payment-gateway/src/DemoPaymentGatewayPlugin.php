@@ -49,9 +49,18 @@ final class DemoPaymentGatewayPlugin implements PaymentGatewayPluginInterface
      * @param array<string, mixed> $payload
      * @param array<string, mixed> $config
      */
+    /**
+     * A real plugin asks its provider here and reports the amount + currency the PROVIDER confirms.
+     *
+     * The demo has no provider, so "paid" comes from the request (?demo_paid=true). It therefore
+     * reports an amount only when `auto_confirm_for_testing` is enabled in its config; otherwise the
+     * payment lands in NEEDS_REVIEW (Amoobot never auto-confirms without amount + currency).
+     * Never enable auto_confirm_for_testing on a live shop: anyone could mark payments as paid.
+     */
     public function verifyPayment(Payment $payment, array $payload, array $config): PaymentVerificationResult
     {
         $paid = true === ($payload['demo_paid'] ?? false) || 'true' === (string) ($payload['demo_paid'] ?? '');
+        $autoConfirm = true === ($config['auto_confirm_for_testing'] ?? false);
 
         return new PaymentVerificationResult(
             success: true,
@@ -60,6 +69,8 @@ final class DemoPaymentGatewayPlugin implements PaymentGatewayPluginInterface
             refId: $paid ? 'demo_ref' : null,
             message: $paid ? 'Demo payment verified' : 'Demo payment is not paid',
             rawResponse: ['demo' => true, 'paid' => $paid],
+            amount: $paid && $autoConfirm ? (string) ($payment->getPayableAmount() ?? $payment->getAmount()) : null,
+            currency: $paid && $autoConfirm ? 'IRT' : null,
         );
     }
 

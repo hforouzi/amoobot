@@ -2,6 +2,10 @@
 
 The demo payment gateway plugin is for validating installation, autoloading, schema handling, and runtime adapter loading. It is not for real payments.
 
+> The demo has no real provider: `?demo_paid=true` marks a payment as paid. It therefore reports no
+> amount/currency unless `auto_confirm_for_testing` is enabled, so by default demo payments land in
+> **NEEDS_REVIEW**. Never enable `auto_confirm_for_testing` (or the demo plugin at all) on a live shop.
+
 ## Build
 
 ```bash

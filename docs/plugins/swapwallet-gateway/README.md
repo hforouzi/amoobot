@@ -43,7 +43,7 @@ Do not log or expose `api_key`, `api_secret`, or `webhook_secret`.
 
 ## Amount Conversion
 
-Amoobot order amounts are treated as IRR/Toman depending on `amount_unit`.
+Amoobot order amounts are Toman; keep `amount_unit` = `toman` (see docs/en/payments/amount-units.md).
 
 - `toman`: `priceAmount = payableAmount / finalRate`
 - `rial`: `priceAmount = (payableAmount / 10) / finalRate`
@@ -65,7 +65,7 @@ Configure `callback_base_url` to your public Amoobot base URL. The plugin sends:
 {callback_base_url}/payment/webhook/plugin/swapwallet
 ```
 
-The plugin validates HMAC-SHA256 webhook signatures when `webhook_secret` is configured. Unsigned webhooks must not be trusted for provisioning; the payment should still be verified through SwapWallet before final approval.
+Webhooks are **fail-closed**: `webhook_secret` is required and every webhook must carry a valid HMAC-SHA256 signature, otherwise it is rejected (401). Even a valid webhook only triggers `verifyPayment()`; the invoice `amount` ({number, unit}) reported by SwapWallet is then checked by Amoobot against the stored quote.
 
 ## Build ZIP
 

@@ -28,7 +28,7 @@ php bin/console app:plugin:doctor swapwallet
 - `invoice`: جریان صفحه پرداخت.
 - `direct`: جریان پرداخت مستقیم رمزارزی.
 
-تبدیل مبلغ بر اساس `amount_unit` و نرخ تنظیم‌شده انجام می‌شود. اگر `webhook_secret` تنظیم شود، امضای Webhook بررسی می‌شود.
+تبدیل مبلغ بر اساس `amount_unit` و نرخ تنظیم‌شده انجام می‌شود. تنظیم `webhook_secret` الزامی است و Webhook بدون امضای معتبر رد می‌شود.
 
 وضعیت‌های pending، partial، underpaid و expired فقط سیگنال وضعیت پرداخت هستند و نباید باعث ساخت مستقیم سرویس در پلاگین شوند.
 

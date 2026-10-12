@@ -68,6 +68,8 @@ with `payment_id`, `order_id`, and `tracking_code` query parameters when availab
 
 NovinoPay callback status is never trusted by itself. A payment is considered paid only when NovinoPay verification returns a successful status.
 
+Amounts: Amoobot stores Toman; the plugin charges and verifies `Toman × 10` in Rial and reports the verified Rial amount, which Amoobot checks against the order (mismatch => NEEDS_REVIEW).
+
 ## Test Driver Loading
 
 After creating a `PaymentGateway` instance from the admin installer:

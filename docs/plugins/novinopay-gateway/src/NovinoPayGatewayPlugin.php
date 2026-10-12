@@ -8,14 +8,23 @@ use App\Entity\Order;
 use App\Entity\Payment;
 use App\Payment\Domain\Dto\PaymentRequestResult;
 use App\Payment\Domain\Dto\PaymentVerificationResult;
+use App\Payment\Domain\Money\AmountNormalizer;
 use App\Payment\Plugin\PaymentGatewayPluginInterface;
 use App\Payment\Plugin\PaymentWebhookResult;
 use Symfony\Component\HttpClient\HttpClient;
+use Symfony\Contracts\HttpClient\HttpClientInterface;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Contracts\HttpClient\Exception\TransportExceptionInterface;
 
 final class NovinoPayGatewayPlugin implements PaymentGatewayPluginInterface
 {
+    /**
+     * Amoobot instantiates plugins without arguments; the client is injectable for tests.
+     */
+    public function __construct(private readonly ?HttpClientInterface $httpClient = null)
+    {
+    }
+
     private const REQUEST_PATH = '/payment/ipg/v2/request';
     private const VERIFY_PATH = '/payment/ipg/v2/verification';
 
@@ -152,6 +161,10 @@ final class NovinoPayGatewayPlugin implements PaymentGatewayPluginInterface
             );
         }
 
+        // Report what NovinoPay verified. Verify is bound to the amount we sent, so that amount is the
+        // fallback when the response does not echo it. Amoobot checks it against the order (Rial -> Toman).
+        $verifiedAmount = $this->stringOrNull($data['amount'] ?? null) ?? (string) $requestPayload['amount'];
+
         return new PaymentVerificationResult(
             success: true,
             paid: true,
@@ -159,6 +172,8 @@ final class NovinoPayGatewayPlugin implements PaymentGatewayPluginInterface
             refId: $this->stringOrNull($data['ref_id'] ?? null),
             message: $this->responseMessage($response, 'NovinoPay payment verified.'),
             rawResponse: $this->sanitize($response),
+            amount: $verifiedAmount,
+            currency: AmountNormalizer::RIAL,
         );
     }
 
@@ -237,9 +252,12 @@ final class NovinoPayGatewayPlugin implements PaymentGatewayPluginInterface
         return $baseUrl.'/payment/callback/plugin/novinopay'.('' !== $query ? '?'.$query : '');
     }
 
+    /**
+     * Amoobot amounts are Toman; NovinoPay charges Rial.
+     */
     private function paymentAmount(Payment $payment, Order $order): int
     {
-        return max(0, (int) ($payment->getPayableAmount() ?? $payment->getAmount() ?: $order->getAmount()));
+        return AmountNormalizer::toRial(max(0, (int) ($payment->getPayableAmount() ?? $payment->getAmount() ?: $order->getAmount())));
     }
 
     private function invoiceId(Payment $payment, Order $order): string
@@ -265,6 +283,12 @@ final class NovinoPayGatewayPlugin implements PaymentGatewayPluginInterface
      */
     private function findAuthority(Payment $payment, array $payload): ?string
     {
+        // The authority stored at createPayment time wins over anything in the callback.
+        $stored = $payment->getAuthority() ?? $payment->getGatewayTransactionId();
+        if (null !== $stored && '' !== trim($stored)) {
+            return $stored;
+        }
+
         foreach (['Authority', 'authority', 'transaction_id', 'transactionId'] as $key) {
             $value = $this->stringOrNull($payload[$key] ?? null);
             if (null !== $value) {
@@ -272,7 +296,7 @@ final class NovinoPayGatewayPlugin implements PaymentGatewayPluginInterface
             }
         }
 
-        return $payment->getAuthority() ?? $payment->getGatewayTransactionId();
+        return null;
     }
 
     /**
@@ -282,7 +306,7 @@ final class NovinoPayGatewayPlugin implements PaymentGatewayPluginInterface
      */
     private function postJson(string $url, array $payload): array
     {
-        $client = HttpClient::create(['timeout' => 20]);
+        $client = $this->httpClient ?? HttpClient::create(['timeout' => 20]);
         $response = $client->request('POST', $url, [
             'json' => $payload,
             'headers' => [
