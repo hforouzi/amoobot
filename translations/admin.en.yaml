@@ -50,6 +50,8 @@ status:
   failed: Failed
   rejected: Rejected
   cancelled: Cancelled
+  needs_review: Needs review
+  provisioning_failed: Provisioning failed
   expired: Expired
   suspended: Suspended
   deleted: Deleted

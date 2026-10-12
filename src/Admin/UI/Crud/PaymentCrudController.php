@@ -73,9 +73,23 @@ class PaymentCrudController extends AbstractCrudController
             IntegerField::new('amount')->setLabel('Amount'),
             IntegerField::new('payableAmount')->setLabel('Payable Amount'),
             TextField::new('currency')->setLabel('Currency'),
+            // Read-only: only PaymentSettlementService / the moderation actions may change a payment's status.
             TextField::new('status')
                 ->formatValue(static fn (mixed $value): string => AdminStatusBadge::html($value))
-                ->renderAsHtml(),
+                ->renderAsHtml()
+                ->hideOnForm(),
+            TextField::new('amountFlag')->setLabel('Amount flag')->hideOnForm(),
+            TextareaField::new('reviewReason')->setLabel('Review reason')->hideOnIndex()->hideOnForm(),
+            TextareaField::new('provisioningError')->setLabel('Provisioning error')->hideOnIndex()->hideOnForm(),
+            IntegerField::new('provisioningAttempts')->setLabel('Provisioning attempts')->hideOnIndex()->hideOnForm(),
+            DateTimeField::new('provisioningFailedAt')->setLabel('Provisioning failed at')->hideOnIndex()->hideOnForm(),
+            TextField::new('expectedAmount')->setLabel('Expected amount')->hideOnIndex()->hideOnForm(),
+            TextField::new('expectedCurrency')->setLabel('Expected currency')->hideOnIndex()->hideOnForm(),
+            TextField::new('verifiedAmount')->setLabel('Verified amount')->hideOnIndex()->hideOnForm(),
+            TextField::new('verifiedCurrency')->setLabel('Verified currency')->hideOnIndex()->hideOnForm(),
+            TextField::new('confirmationSource')->setLabel('Confirmation source')->hideOnIndex()->hideOnForm(),
+            IntegerField::new('confirmedByAdminId')->setLabel('Confirmed by admin #')->hideOnIndex()->hideOnForm(),
+            TextField::new('confirmedByTelegramId')->setLabel('Confirmed by Telegram ID')->hideOnIndex()->hideOnForm(),
             TextField::new('gatewayTransactionId')->hideOnIndex(),
             TextField::new('authority')->hideOnIndex(),
             TextField::new('paymentUrl')->hideOnIndex(),

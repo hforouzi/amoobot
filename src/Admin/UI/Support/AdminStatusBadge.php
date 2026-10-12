@@ -43,6 +43,8 @@ final class AdminStatusBadge
             'suspended' => 'secondary',
             'deleted' => 'secondary',
             'inactive' => 'secondary',
+            'needs_review' => 'warning',
+            'provisioning_failed' => 'danger',
         ];
     }
 
@@ -53,7 +55,8 @@ final class AdminStatusBadge
             'enabled', 'active', 'completed', 'paid', 'confirmed' => 'badge badge-success',
             'installed', 'pending', 'waiting_payment', 'payment_pending', 'submitted', 'processing' => 'badge badge-warning',
             'disabled', 'cancelled', 'expired', 'suspended', 'deleted', 'inactive' => 'badge badge-secondary',
-            'error', 'failed', 'rejected' => 'badge badge-danger',
+            'needs_review' => 'badge badge-warning',
+            'error', 'failed', 'rejected', 'provisioning_failed' => 'badge badge-danger',
             default => 'badge badge-secondary',
         };
 

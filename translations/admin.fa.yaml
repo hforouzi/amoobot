@@ -50,6 +50,8 @@ status:
   failed: ناموفق
   rejected: رد‌شده
   cancelled: لغو‌شده
+  needs_review: نیازمند بررسی
+  provisioning_failed: خطا در ساخت سرویس
   expired: منقضی
   suspended: تعلیق‌شده
   deleted: حذف‌شده

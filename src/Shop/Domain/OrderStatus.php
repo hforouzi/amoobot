@@ -17,6 +17,8 @@ final class OrderStatus
     public const CANCELLED = 'cancelled';
     public const EXPIRED = 'expired';
     public const FAILED = 'failed';
+    /** Paid, but the service could not be created/renewed on the panel yet. */
+    public const PROVISIONING_FAILED = 'provisioning_failed';
 
     public const ALL = [
         self::DRAFT,
@@ -30,5 +32,6 @@ final class OrderStatus
         self::CANCELLED,
         self::EXPIRED,
         self::FAILED,
+        self::PROVISIONING_FAILED,
     ];
 }

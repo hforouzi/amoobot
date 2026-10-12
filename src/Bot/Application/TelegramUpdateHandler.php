@@ -3512,6 +3512,7 @@ class TelegramUpdateHandler
             OrderStatus::FAILED => 'رد شده',
             OrderStatus::CANCELLED => 'لغو شده',
             OrderStatus::EXPIRED => 'منقضی شده',
+            OrderStatus::PROVISIONING_FAILED => 'پرداخت شده، در حال پیگیری ساخت سرویس',
             default => $status,
         };
     }
@@ -3523,6 +3524,8 @@ class TelegramUpdateHandler
             PaymentStatus::SUBMITTED => 'ارسال رسید',
             PaymentStatus::CONFIRMED => 'تایید شده',
             PaymentStatus::REJECTED => 'رد شده',
+            PaymentStatus::NEEDS_REVIEW => 'در حال بررسی توسط پشتیبانی',
+            PaymentStatus::PROVISIONING_FAILED => 'پرداخت شده، در حال پیگیری ساخت سرویس',
             default => '-',
         };
     }

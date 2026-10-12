@@ -8,6 +8,7 @@ use App\Payment\Domain\PaymentStatus;
 use Doctrine\ORM\Mapping as ORM;
 
 #[ORM\Entity]
+#[ORM\Index(name: 'idx_payment_status', columns: ['status'])]
 class Payment
 {
     #[ORM\Id]
@@ -57,6 +58,41 @@ class Payment
 
     #[ORM\Column(length: 16, nullable: true)]
     private ?string $expectedCurrency = null;
+
+    /** Amount/currency the gateway reported when it was verified (audit trail). */
+    #[ORM\Column(length: 64, nullable: true)]
+    private ?string $verifiedAmount = null;
+
+    #[ORM\Column(length: 16, nullable: true)]
+    private ?string $verifiedCurrency = null;
+
+    /** e.g. "overpaid": confirmed, but worth a look. */
+    #[ORM\Column(length: 32, nullable: true)]
+    private ?string $amountFlag = null;
+
+    /** Why the payment is in NEEDS_REVIEW. */
+    #[ORM\Column(type: 'text', nullable: true)]
+    private ?string $reviewReason = null;
+
+    /** Last provisioning error (PROVISIONING_FAILED). */
+    #[ORM\Column(type: 'text', nullable: true)]
+    private ?string $provisioningError = null;
+
+    #[ORM\Column(nullable: true)]
+    private ?\DateTimeImmutable $provisioningFailedAt = null;
+
+    #[ORM\Column(options: ['default' => 0])]
+    private int $provisioningAttempts = 0;
+
+    /** Which flow settled the payment (admin, telegram_admin, zibal_callback, nowpayments_webhook, ...). */
+    #[ORM\Column(length: 64, nullable: true)]
+    private ?string $confirmationSource = null;
+
+    #[ORM\Column(nullable: true)]
+    private ?int $confirmedByAdminId = null;
+
+    #[ORM\Column(length: 64, nullable: true)]
+    private ?string $confirmedByTelegramId = null;
 
     #[ORM\Column(type: 'json', nullable: true)]
     private ?array $callbackPayload = null;
@@ -301,6 +337,114 @@ class Payment
     {
         $this->expectedAmount = $amount;
         $this->expectedCurrency = null === $currency ? null : strtoupper(trim($currency));
+
+        return $this;
+    }
+
+    public function getVerifiedAmount(): ?string
+    {
+        return $this->verifiedAmount;
+    }
+
+    public function getVerifiedCurrency(): ?string
+    {
+        return $this->verifiedCurrency;
+    }
+
+    public function setVerifiedMoney(?string $amount, ?string $currency): self
+    {
+        $this->verifiedAmount = $amount;
+        $this->verifiedCurrency = $currency;
+
+        return $this;
+    }
+
+    public function getAmountFlag(): ?string
+    {
+        return $this->amountFlag;
+    }
+
+    public function setAmountFlag(?string $amountFlag): self
+    {
+        $this->amountFlag = $amountFlag;
+
+        return $this;
+    }
+
+    public function getReviewReason(): ?string
+    {
+        return $this->reviewReason;
+    }
+
+    public function setReviewReason(?string $reviewReason): self
+    {
+        $this->reviewReason = $reviewReason;
+
+        return $this;
+    }
+
+    public function getProvisioningError(): ?string
+    {
+        return $this->provisioningError;
+    }
+
+    public function setProvisioningError(?string $provisioningError): self
+    {
+        $this->provisioningError = $provisioningError;
+
+        return $this;
+    }
+
+    public function getProvisioningFailedAt(): ?\DateTimeImmutable
+    {
+        return $this->provisioningFailedAt;
+    }
+
+    public function setProvisioningFailedAt(?\DateTimeImmutable $provisioningFailedAt): self
+    {
+        $this->provisioningFailedAt = $provisioningFailedAt;
+
+        return $this;
+    }
+
+    public function getProvisioningAttempts(): int
+    {
+        return $this->provisioningAttempts;
+    }
+
+    public function incrementProvisioningAttempts(): self
+    {
+        ++$this->provisioningAttempts;
+
+        return $this;
+    }
+
+    public function getConfirmationSource(): ?string
+    {
+        return $this->confirmationSource;
+    }
+
+    public function setConfirmationSource(?string $confirmationSource): self
+    {
+        $this->confirmationSource = $confirmationSource;
+
+        return $this;
+    }
+
+    public function getConfirmedByAdminId(): ?int
+    {
+        return $this->confirmedByAdminId;
+    }
+
+    public function getConfirmedByTelegramId(): ?string
+    {
+        return $this->confirmedByTelegramId;
+    }
+
+    public function setConfirmedBy(?int $adminId, ?string $telegramId): self
+    {
+        $this->confirmedByAdminId = $adminId;
+        $this->confirmedByTelegramId = $telegramId;
 
         return $this;
     }
