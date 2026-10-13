@@ -3,6 +3,7 @@ services:
 ###> doctrine/doctrine-bundle ###
   database:
     image: mysql:${MYSQL_VERSION:-8.0}
+    restart: unless-stopped
     environment:
       MYSQL_DATABASE: ${MYSQL_DATABASE:-amoobot}
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}

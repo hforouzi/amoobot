@@ -5,6 +5,7 @@ Amoobot یک فروشگاه VPN مبتنی بر تلگرام است که با Sy
 ## فهرست
 
 - [نصب و راه‌اندازی](installation.md)
+- [استقرار Production (Runbook)](deployment.md)
 - [راهنمای پنل ادمین](admin-guide.md)
 - [راهنمای بات تلگرام](telegram-bot.md)
 - [محتوای بات تلگرام](telegram-bot-content.md)
