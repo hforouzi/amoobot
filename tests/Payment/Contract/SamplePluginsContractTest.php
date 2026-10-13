@@ -46,9 +46,9 @@ final class SamplePluginsContractTest extends IntegrationTestCase
         return $this->createPayment($order, $gateway, PaymentStatus::PENDING);
     }
 
-    private function adapter(PaymentGatewayPluginInterface $plugin, string $code): PluginPaymentGatewayDriverAdapter
+    private function adapter(PaymentGatewayPluginInterface $plugin, string $code, bool $testingShortcutsAllowed = false): PluginPaymentGatewayDriverAdapter
     {
-        return new PluginPaymentGatewayDriverAdapter((new Plugin())->setCode($code), $plugin);
+        return new PluginPaymentGatewayDriverAdapter((new Plugin())->setCode($code), $plugin, $testingShortcutsAllowed);
     }
 
     private function mockClient(): MockHttpClient
@@ -104,7 +104,8 @@ final class SamplePluginsContractTest extends IntegrationTestCase
     public function testDemoPluginNeverAutoConfirmsByDefault(): void
     {
         $payment = $this->paymentFor('demo_payment_gateway', []);
-        $plugin = $this->adapter(new DemoPaymentGatewayPlugin(), 'demo_payment_gateway');
+        // A test installation (APP_ENV=test): testing shortcuts allowed. Production: DemoPluginProductionGuardTest.
+        $plugin = $this->adapter(new DemoPaymentGatewayPlugin(), 'demo_payment_gateway', testingShortcutsAllowed: true);
 
         $verification = $plugin->verifyPayment($payment, ['demo_paid' => 'true']);
 

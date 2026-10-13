@@ -96,6 +96,11 @@ notifications).
    for callbacks/webhooks (rule 2 still applies). Never put payment or order ids in a return URL as
    the way to find the payment.
 
+8. **Testing shortcuts only outside production.** Every config array Amoobot passes contains
+   `_amoobot_testing_shortcuts_allowed` (true only in `dev`/`test` or with debug on); in production the
+   core also removes `auto_confirm_for_testing`. Anything that trusts the request instead of the
+   provider (like the demo plugin's `demo_paid`) must be gated on that flag.
+
 Endpoints: webhooks `/payment/webhook/plugin/{code}` (the unified `/payment/webhook/{type}/{code}`
 with type `plugin`), browser returns `/payment/callback/plugin/{code}`.
 

@@ -90,6 +90,11 @@ php bin/console app:payment:test-plugin-gateway GATEWAY_ID
    تایید» با به‌روزرسانی خودکار نشان می‌دهد. توکن هرگز برای پیدا کردن پرداخت در callback/webhook استفاده
    نمی‌شود (قانون ۲ پابرجاست).
 
+8. **میان‌بر تست فقط خارج از production.** هر آرایهٔ config که آموبات به پلاگین می‌دهد کلید
+   `_amoobot_testing_shortcuts_allowed` دارد (فقط در `dev`/`test` یا با debug برابر true)؛ در production هسته
+   `auto_confirm_for_testing` را هم حذف می‌کند. هر چیزی که به‌جای درگاه به درخواست اعتماد می‌کند (مثل `demo_paid`
+   در پلاگین دمو) باید به این کلید وابسته باشد.
+
 مسیرها: webhook در `/payment/webhook/plugin/{code}` و بازگشت مرورگر در `/payment/callback/plugin/{code}`.
 
 همچنین ببینید: [واحد مبالغ](../payments/amount-units.md).

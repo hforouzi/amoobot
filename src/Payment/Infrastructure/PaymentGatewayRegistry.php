@@ -13,6 +13,7 @@ use App\Plugin\PaymentPluginDoctor;
 use App\Plugin\PluginAutoloader;
 use App\Plugin\PluginRegistry;
 use Psr\Log\LoggerInterface;
+use Symfony\Component\DependencyInjection\Attribute\Autowire;
 
 final class PaymentGatewayRegistry
 {
@@ -30,6 +31,10 @@ final class PaymentGatewayRegistry
         private readonly PluginAutoloader $pluginAutoloader,
         private readonly PaymentPluginDoctor $pluginDoctor,
         private readonly LoggerInterface $logger,
+        #[Autowire('%kernel.environment%')]
+        private readonly string $environment = 'prod',
+        #[Autowire('%kernel.debug%')]
+        private readonly bool $debug = false,
     ) {
         foreach ($drivers as $driver) {
             $type = trim($driver->getType());
@@ -38,6 +43,15 @@ final class PaymentGatewayRegistry
             }
             $this->driversByType[$type] = $driver;
         }
+    }
+
+    /**
+     * Testing shortcuts (e.g. the demo plugin's auto_confirm_for_testing / demo_paid) are honoured only
+     * outside production: any non-prod environment, or a prod kernel with debug on.
+     */
+    public static function testingShortcutsAllowed(string $environment, bool $debug): bool
+    {
+        return $debug || 'prod' !== $environment;
     }
 
     public function resolveByType(string $type): PaymentGatewayInterface
@@ -159,6 +173,7 @@ final class PaymentGatewayRegistry
             ));
         }
 
-        return new PluginPaymentGatewayDriverAdapter($plugin, $instance);
+        // Testing shortcuts (e.g. the demo plugin's auto_confirm_for_testing) only outside production.
+        return new PluginPaymentGatewayDriverAdapter($plugin, $instance, self::testingShortcutsAllowed($this->environment, $this->debug));
     }
 }

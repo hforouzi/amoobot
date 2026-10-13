@@ -52,15 +52,19 @@ final class DemoPaymentGatewayPlugin implements PaymentGatewayPluginInterface
     /**
      * A real plugin asks its provider here and reports the amount + currency the PROVIDER confirms.
      *
-     * The demo has no provider, so "paid" comes from the request (?demo_paid=true). It therefore
-     * reports an amount only when `auto_confirm_for_testing` is enabled in its config; otherwise the
-     * payment lands in NEEDS_REVIEW (Amoobot never auto-confirms without amount + currency).
-     * Never enable auto_confirm_for_testing on a live shop: anyone could mark payments as paid.
+     * The demo has no provider, so "paid" comes from the request (?demo_paid=true). That is only
+     * acceptable on a test/debug installation: Amoobot sets `_amoobot_testing_shortcuts_allowed`
+     * (false in production, where it also strips `auto_confirm_for_testing` from the config). In
+     * production the demo therefore never reports a payment as paid, so its public callback cannot
+     * create NEEDS_REVIEW payments or admin alerts.
+     * On a test installation it reports an amount only with `auto_confirm_for_testing`; otherwise
+     * the payment lands in NEEDS_REVIEW (Amoobot never auto-confirms without amount + currency).
      */
     public function verifyPayment(Payment $payment, array $payload, array $config): PaymentVerificationResult
     {
-        $paid = true === ($payload['demo_paid'] ?? false) || 'true' === (string) ($payload['demo_paid'] ?? '');
-        $autoConfirm = true === ($config['auto_confirm_for_testing'] ?? false);
+        $testingAllowed = true === ($config['_amoobot_testing_shortcuts_allowed'] ?? false);
+        $paid = $testingAllowed && (true === ($payload['demo_paid'] ?? false) || 'true' === (string) ($payload['demo_paid'] ?? ''));
+        $autoConfirm = $testingAllowed && true === ($config['auto_confirm_for_testing'] ?? false);
 
         return new PaymentVerificationResult(
             success: true,

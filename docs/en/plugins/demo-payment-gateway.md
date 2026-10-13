@@ -5,6 +5,13 @@ The demo payment gateway plugin is for validating installation, autoloading, sch
 > The demo has no real provider: `?demo_paid=true` marks a payment as paid. It therefore reports no
 > amount/currency unless `auto_confirm_for_testing` is enabled, so by default demo payments land in
 > **NEEDS_REVIEW**. Never enable `auto_confirm_for_testing` (or the demo plugin at all) on a live shop.
+>
+> **Production guard (core).** With `APP_ENV=prod` and `APP_DEBUG=0`, Amoobot strips
+> `auto_confirm_for_testing` from every plugin's config and passes
+> `_amoobot_testing_shortcuts_allowed: false`. The demo then never reports a payment as paid, so its
+> public callback (`/payment/callback/plugin/demo_payment_gateway`) cannot create NEEDS_REVIEW
+> payments or admin alerts. Testing shortcuts work only in the `dev`/`test` environments or with
+> debug on. A disabled plugin or an inactive gateway is ignored by the callback/webhook routes.
 
 ## Build
 

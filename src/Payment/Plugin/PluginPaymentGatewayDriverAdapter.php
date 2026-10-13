@@ -18,9 +18,16 @@ use Symfony\Component\HttpFoundation\Request;
 
 final class PluginPaymentGatewayDriverAdapter implements PaymentGatewayInterface, NotificationAwareGatewayInterface
 {
+    /** Config key the core sets for every plugin call: true only outside production (test env or debug). */
+    public const CONFIG_TESTING_SHORTCUTS = '_amoobot_testing_shortcuts_allowed';
+    /** Testing-only config keys removed from a plugin's config in production, whatever the admin stored. */
+    public const TESTING_ONLY_CONFIG_KEYS = ['auto_confirm_for_testing'];
+
     public function __construct(
         private readonly Plugin $plugin,
         private readonly PaymentGatewayPluginInterface $inner,
+        // Fail closed: shortcuts are off unless the registry says this is a test/debug kernel.
+        private readonly bool $testingShortcutsAllowed = false,
     ) {
     }
 
@@ -70,7 +77,7 @@ final class PluginPaymentGatewayDriverAdapter implements PaymentGatewayInterface
             return GatewayNotification::rejected(404, 'webhook_not_supported');
         }
 
-        $result = $this->inner->handleWebhook($payload, $request, is_array($gateway->getConfig()) ? $gateway->getConfig() : []);
+        $result = $this->inner->handleWebhook($payload, $request, $this->runtimeConfig(is_array($gateway->getConfig()) ? $gateway->getConfig() : []));
         if (null === $result || !$result->handled) {
             $message = null === $result ? 'webhook_not_handled' : ($result->message ?? 'webhook_not_handled');
 
@@ -90,6 +97,23 @@ final class PluginPaymentGatewayDriverAdapter implements PaymentGatewayInterface
     {
         $gateway = $payment->getGateway();
 
-        return null !== $gateway && is_array($gateway->getConfig()) ? $gateway->getConfig() : [];
+        return $this->runtimeConfig(null !== $gateway && is_array($gateway->getConfig()) ? $gateway->getConfig() : []);
+    }
+
+    /**
+     * @param array<string, mixed> $config
+     *
+     * @return array<string, mixed>
+     */
+    private function runtimeConfig(array $config): array
+    {
+        if (!$this->testingShortcutsAllowed) {
+            foreach (self::TESTING_ONLY_CONFIG_KEYS as $key) {
+                unset($config[$key]);
+            }
+        }
+        $config[self::CONFIG_TESTING_SHORTCUTS] = $this->testingShortcutsAllowed;
+
+        return $config;
     }
 }
