@@ -26,7 +26,9 @@ use Symfony\Contracts\HttpClient\HttpClientInterface;
  *
  * Status mapping:
  *   PAID (settled by PaymentSettlementService): finished, confirmed
- *   PARTIALLY PAID: reported as paid with a pro-rated amount, so settlement parks it as NEEDS_REVIEW
+ *   PARTIALLY PAID: reported as paid with an amount pro-rated from pay_amount/actually_paid, or with
+ *                   no amount (=> NEEDS_REVIEW) when either is missing; a pro-rated shortfall is
+ *                   judged by the underpayment tolerance like any other
  *   PENDING (do not provision): waiting, confirming
  *   FAILED (do not provision): failed, expired, refunded
  */
@@ -392,7 +394,7 @@ final class NowPaymentsGateway implements PaymentGatewayInterface, NotificationA
             $payment->setFailedAt($payment->getFailedAt() ?? new \DateTimeImmutable());
         }
 
-        [$reportedAmount, $reportedCurrency] = $this->reportedPriceAmount($raw);
+        [$reportedAmount, $reportedCurrency] = $this->reportedPriceAmount($raw, $status);
 
         return new PaymentVerificationResult(
             success: true,
@@ -481,7 +483,7 @@ final class NowPaymentsGateway implements PaymentGatewayInterface, NotificationA
             return new PaymentVerificationResult(success: false, paid: false, message: self::PAYMENT_NOT_REPORTED_MESSAGE, rawResponse: is_array($raw) ? $raw : null);
         }
 
-        [$reportedAmount, $reportedCurrency] = $this->reportedPriceAmount($raw);
+        [$reportedAmount, $reportedCurrency] = $this->reportedPriceAmount($raw, $status);
 
         return new PaymentVerificationResult(
             success: true,
@@ -611,7 +613,7 @@ final class NowPaymentsGateway implements PaymentGatewayInterface, NotificationA
      *
      * @return array{?string, ?string}
      */
-    private function reportedPriceAmount(array $raw): array
+    private function reportedPriceAmount(array $raw, string $status): array
     {
         $priceAmount = is_numeric($raw['price_amount'] ?? null) ? (float) $raw['price_amount'] : null;
         $priceCurrency = strtoupper(trim((string) ($raw['price_currency'] ?? '')));
@@ -621,6 +623,11 @@ final class NowPaymentsGateway implements PaymentGatewayInterface, NotificationA
 
         $payAmount = is_numeric($raw['pay_amount'] ?? null) ? (float) $raw['pay_amount'] : null;
         $actuallyPaid = is_numeric($raw['actually_paid'] ?? null) ? (float) $raw['actually_paid'] : null;
+        // A partial payment without both crypto amounts (e.g. some invoice-mode responses) cannot be
+        // pro-rated; reporting the full price_amount would confirm it. Amount missing => NEEDS_REVIEW.
+        if (in_array($status, self::PARTIALLY_PAID_STATUSES, true) && (null === $payAmount || $payAmount <= 0 || null === $actuallyPaid)) {
+            return [null, null];
+        }
         if (null !== $payAmount && $payAmount > 0 && null !== $actuallyPaid && $actuallyPaid < $payAmount) {
             // Round down so a shortfall can never be rounded up into a match.
             $priceAmount = floor($priceAmount * ($actuallyPaid / $payAmount) * 100) / 100;
