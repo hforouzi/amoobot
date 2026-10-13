@@ -2128,8 +2128,16 @@ class TelegramUpdateHandler
         $result = $this->paymentSettlementService->settle($payment, VerifiedPayment::fromGateway($verify), 'telegram_payment_check');
         [$text, $event] = match ($result->outcome) {
             SettlementOutcome::CONFIRMED => ['پرداخت تایید شد.', 'payment_check_confirmed'],
-            SettlementOutcome::ALREADY_PROCESSED => [PaymentStatus::CONFIRMED === $result->payment?->getStatus() ? 'پرداخت تایید شد.' : 'این پرداخت قبلاً ثبت شده و در حال پیگیری است.', 'payment_check_already_processed'],
-            SettlementOutcome::NEEDS_REVIEW => ['مبلغ یا ارز پرداختی با سفارش مطابقت ندارد؛ پرداخت برای بررسی به پشتیبانی ارسال شد.', 'payment_check_needs_review'],
+            SettlementOutcome::ALREADY_PROCESSED => [match ($result->payment?->getStatus()) {
+                PaymentStatus::CONFIRMED => 'پرداخت تایید شد.',
+                PaymentStatus::NEEDS_REVIEW => 'پرداخت دریافت شده و در حال بررسی توسط پشتیبانی است.',
+                PaymentStatus::PROVISIONING_FAILED => 'پرداخت دریافت شده؛ ساخت سرویس توسط پشتیبانی پیگیری می‌شود.',
+                PaymentStatus::REJECTED => 'این پرداخت رد یا لغو شده است. اگر مبلغی از حساب شما کسر شده، با پشتیبانی تماس بگیرید.',
+                default => 'وضعیت پرداخت تغییر نکرد. لطفاً کمی بعد دوباره بررسی کنید.',
+            }, 'payment_check_already_processed'],
+            SettlementOutcome::NEEDS_REVIEW => [$result->payment?->isLatePaymentInReview()
+                ? 'پرداخت پس از لغو یا پایان مهلت سفارش دریافت شد؛ از بین نرفته و برای بررسی به پشتیبانی ارسال شد.'
+                : 'مبلغ یا ارز پرداختی با سفارش مطابقت ندارد؛ پرداخت برای بررسی به پشتیبانی ارسال شد.', 'payment_check_needs_review'],
             SettlementOutcome::PROVISIONING_FAILED => ['پرداخت دریافت شد اما ساخت سرویس با خطا مواجه شد؛ پشتیبانی مطلع شد.', 'payment_check_provisioning_failed'],
             default => ['بررسی پرداخت انجام نشد. لطفاً کمی بعد دوباره تلاش کنید.', 'payment_check_confirm_failed'],
         };

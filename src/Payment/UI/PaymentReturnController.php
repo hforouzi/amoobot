@@ -161,7 +161,8 @@ final class PaymentReturnController extends AbstractController
             PaymentStatus::CONFIRMED => 'paid',
             PaymentStatus::NEEDS_REVIEW => 'review',
             PaymentStatus::PROVISIONING_FAILED => 'provision_failed',
-            PaymentStatus::REJECTED => 'failed',
+            // Cancelled/expired unpaid: not a failed payment. A later "paid" still goes to review.
+            PaymentStatus::REJECTED => $payment->isRejectedUnpaid() ? 'cancelled' : 'failed',
             default => 'pending',
         };
     }

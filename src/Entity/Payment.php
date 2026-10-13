@@ -18,6 +18,8 @@ class Payment
     /** confirmationSource / adminNote of a pending payment the customer cancelled (bot cancel buttons). */
     public const SOURCE_CUSTOMER_CANCEL = 'customer_cancel';
     public const NOTE_CUSTOMER_CANCEL = 'Cancelled by customer';
+    /** Review reasons of payments paid after their cancel/expiry start with this. */
+    public const REVIEW_PREFIX_LATE_PAYMENT = 'paid after ';
 
     #[ORM\Id]
     #[ORM\GeneratedValue]
@@ -233,13 +235,33 @@ class Payment
     }
 
     /**
-     * Rejected by the incomplete-order expiry job (not by an admin or the gateway). The customer may
-     * still pay such a payment at the gateway, so a later "paid" must reach PaymentSettlementService.
+     * Rejected while still unpaid, by the incomplete-order expiry job or by the customer cancelling
+     * (not by an admin, not reported failed by the gateway). The customer may still complete such a
+     * payment at the gateway, so a later "paid" must reach PaymentSettlementService (-> NEEDS_REVIEW).
      */
+    public function isRejectedUnpaid(): bool
+    {
+        return $this->isRejectedByOrderExpiry() || $this->isCancelledByCustomer();
+    }
+
     public function isRejectedByOrderExpiry(): bool
     {
         return PaymentStatus::REJECTED === $this->status
             && (self::SOURCE_ORDER_EXPIRY === $this->confirmationSource || self::NOTE_ORDER_EXPIRY === $this->adminNote);
+    }
+
+    public function isCancelledByCustomer(): bool
+    {
+        return PaymentStatus::REJECTED === $this->status
+            && (self::SOURCE_CUSTOMER_CANCEL === $this->confirmationSource || self::NOTE_CUSTOMER_CANCEL === $this->adminNote);
+    }
+
+    /**
+     * In review because the money arrived after the payment had been cancelled or expired.
+     */
+    public function isLatePaymentInReview(): bool
+    {
+        return PaymentStatus::NEEDS_REVIEW === $this->status && str_starts_with((string) $this->reviewReason, self::REVIEW_PREFIX_LATE_PAYMENT);
     }
 
     /**
@@ -247,7 +269,7 @@ class Payment
      */
     public function acceptsGatewayVerification(): bool
     {
-        return in_array($this->status, PaymentStatus::SETTLEABLE, true) || $this->isRejectedByOrderExpiry();
+        return in_array($this->status, PaymentStatus::SETTLEABLE, true) || $this->isRejectedUnpaid();
     }
 
     public function ensureReturnToken(): string

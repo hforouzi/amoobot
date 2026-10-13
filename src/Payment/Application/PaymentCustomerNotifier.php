@@ -60,7 +60,9 @@ class PaymentCustomerNotifier
 
     public function underReview(Payment $payment): void
     {
-        $this->deliver($payment, 'under_review', fn (): array => [$this->botTextResolver->message('payment.under_review')]);
+        // A late payment (after cancel/expiry) is not an amount problem: say what actually happened.
+        $key = $payment->isLatePaymentInReview() ? 'payment.under_review_late' : 'payment.under_review';
+        $this->deliver($payment, 'under_review', fn (): array => [$this->botTextResolver->message($key)]);
     }
 
     public function provisioningDelayed(Payment $payment): void

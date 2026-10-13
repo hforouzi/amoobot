@@ -274,8 +274,8 @@ class PaymentSettlementService
             $connection->beginTransaction();
             [$payment, $order] = $this->lock($paymentId);
 
-            // The customer paid after the expiry job had rejected the payment: never ignore money.
-            if ($checkAmount && $payment->isRejectedByOrderExpiry()) {
+            // The customer paid after the payment was cancelled or expired unpaid: never ignore money.
+            if ($checkAmount && $payment->isRejectedUnpaid()) {
                 return $this->parkLatePayment($payment, $order, $verified, $source);
             }
 
@@ -436,9 +436,14 @@ class PaymentSettlementService
             $payment->setGatewayTransactionId($verified->transactionId);
         }
 
+        $cancelled = $payment->isCancelledByCustomer();
+
         return $this->parkForReview($payment, sprintf(
-            'paid after expiry: order #%d had expired (%s) and the payment was rejected unpaid; the gateway now reports it paid. %s',
+            '%s%s: order #%d was %s (%s) and the payment rejected unpaid; the gateway now reports it paid. %s',
+            Payment::REVIEW_PREFIX_LATE_PAYMENT,
+            $cancelled ? 'cancel' : 'expiry',
             $order->getId() ?? 0,
+            $cancelled ? 'cancelled by the customer' : 'expired',
             $order->getStatus(),
             $match->describe()
         ), $source, $match);
