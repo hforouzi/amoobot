@@ -440,9 +440,10 @@ class PaymentSettlementService
             'panelId' => $inbound?->getPanel()?->getId() ?? 0,
             'driverType' => (string) ($inbound?->getPanel()?->getType() ?? 'dummy'),
         ],
-            // A retry after a failed attempt (admin Retry, repair-stuck) first looks for the client
-            // that attempt may already have created on the panel, and adopts it instead of a second one.
-            adoptExisting: PaymentStatus::PROVISIONING_FAILED === $payment->getStatus(),
+            // Every attempt first looks for the order's client on the panel and adopts it: an earlier
+            // attempt may have created it and then died before the commit (crash, timeout, kill), and
+            // the next webhook/retry must not create a second one. Safe: the UUID is derived from the order.
+            adoptExisting: true,
         );
     }
 

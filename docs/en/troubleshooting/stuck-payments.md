@@ -29,8 +29,8 @@ The command never provisions or renews anything. Marked payments appear in
 
 ### Retry never creates a second client
 
-Every retry (admin **Retry provisioning**, also after this command) first looks for the order's
-client on the panel and, if it exists, adopts it (rebuilds the service row from the panel) instead of
+Every provisioning attempt (first webhook/callback, admin **Retry provisioning**, also after this
+command) first looks for the order's client on the panel and, if it exists, adopts it (rebuilds the service row from the panel) instead of
 creating another one. A client matches by its UUID, which is derived from the order id with the app
 secret, or by email when the name is the generated `tg_<telegram id>_order_<order id>`. A
 customer-chosen username that exists with a different UUID stops the retry with an error, because it

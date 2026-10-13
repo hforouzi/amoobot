@@ -11,7 +11,11 @@ use App\Payment\Application\Settlement\SettlementOutcome;
 use App\Payment\Domain\PaymentStatus;
 use App\Provisioning\Application\VpnProvisioningService;
 use App\Shop\Domain\OrderStatus;
+use App\Payment\Domain\PaymentGatewayType;
 use App\Tests\Support\IntegrationTestCase;
+use Symfony\Bundle\FrameworkBundle\KernelBrowser;
+use Symfony\Component\Process\PhpExecutableFinder;
+use Symfony\Component\Process\Process;
 use Symfony\Bundle\FrameworkBundle\Console\Application;
 use Symfony\Component\Console\Tester\CommandTester;
 
@@ -89,7 +93,7 @@ final class ProvisioningIdempotencyTest extends IntegrationTestCase
 
         $this->settlement()->approveByAdmin($this->createPayment($order, null, PaymentStatus::SUBMITTED), 1, null, 'test');
         self::assertSame($uuid, array_values($this->driver()->clients)[0]['uuid']);
-        self::assertSame(0, $this->driver()->lookupCalls, 'a first attempt does not look up the panel');
+        self::assertSame(1, $this->driver()->lookupCalls, 'every attempt looks the client up first');
     }
 
     public function testRepairStuckWithServiceMissingAdoptsTheExistingClient(): void
@@ -149,9 +153,59 @@ final class ProvisioningIdempotencyTest extends IntegrationTestCase
 
         self::assertSame(SettlementOutcome::CONFIRMED, $this->retry($payment));
 
-        self::assertSame(1, $this->driver()->lookupCalls);
+        self::assertSame(2, $this->driver()->lookupCalls, 'first attempt and retry');
         self::assertSame(2, $this->driver()->createCalls);
         self::assertCount(1, $this->driver()->clients);
         self::assertSame(1, $this->countServicesForOrder($order));
+    }
+    /**
+     * A settlement process is killed after the panel created the client but before the database
+     * commit. The next ordinary webhook/callback for the payment must adopt that client.
+     */
+    public function testKilledBetweenCreateServiceAndCommitThenTheNextWebhookAdopts(): void
+    {
+        $stateFile = sys_get_temp_dir().'/amoobot-test-panel-'.bin2hex(random_bytes(4)).'.json';
+        $this->driver()->stateFile = $stateFile;
+        $gateway = $this->createGateway(PaymentGatewayType::ZIBAL, ['merchant' => 'm', 'callback_base_url' => 'https://shop.test']);
+        $order = $this->createOrder($this->createUser(), $this->createPlan(150000, $this->createTestInbound()));
+        $payment = $this->createPayment($order, $gateway, PaymentStatus::PENDING);
+        $payment->setGatewayTransactionId('931')->setAuthority('931');
+        $this->em->flush();
+        $this->em->getProxyFactory()->generateProxyClasses($this->em->getMetadataFactory()->getAllMetadata());
+
+        try {
+            $php = (new PhpExecutableFinder())->find(false) ?: 'php';
+            $settle = new Process([$php, 'tests/Support/bin/settle-payment.php', (string) $payment->getId(), '150000'], dirname(__DIR__, 2), [
+                'APP_ENV' => 'test',
+                'TEST_PANEL_STATE_FILE' => $stateFile,
+                'TEST_PANEL_SLEEP_AFTER_CREATE_MS' => '30000',
+            ], null, 60);
+            $settle->start();
+            $deadline = microtime(true) + 30;
+            while (!is_file($stateFile) && microtime(true) < $deadline && $settle->isRunning()) {
+                usleep(100_000);
+            }
+            self::assertFileExists($stateFile, 'the panel client was created: '.$settle->getErrorOutput().$settle->getOutput());
+            $settle->stop(0); // hard kill: no commit, no cleanup
+            self::assertFalse($settle->isSuccessful());
+
+            self::assertSame(PaymentStatus::PENDING, $this->row('payment', (int) $payment->getId())['status'], 'rolled back');
+            self::assertSame(0, $this->countServicesForOrder($order));
+            $panelClient = array_values(json_decode((string) file_get_contents($stateFile), true))[0];
+
+            // An ordinary gateway callback for the same payment.
+            $this->http->onJson('gateway.zibal.ir/v1/verify', ['result' => 100, 'amount' => 1500000, 'refNumber' => 'R1']);
+            $client = new KernelBrowser(self::$kernel);
+            $client->disableReboot();
+            $client->request('GET', '/payment/callback/zibal', ['trackId' => '931', 'success' => '1', 'status' => '2']);
+
+            self::assertSame(PaymentStatus::CONFIRMED, $this->row('payment', (int) $payment->getId())['status']);
+            self::assertSame(0, $this->driver()->createCalls, 'adopted, no second client');
+            self::assertCount(1, json_decode((string) file_get_contents($stateFile), true));
+            self::assertSame(1, $this->countServicesForOrder($order));
+            self::assertSame($panelClient['uuid'], $this->em->getConnection()->fetchOne('SELECT client_uuid FROM vpn_service WHERE order_id = ?', [$order->getId()]));
+        } finally {
+            @unlink($stateFile);
+        }
     }
 }

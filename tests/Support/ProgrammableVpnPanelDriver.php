@@ -22,6 +22,10 @@ use App\Provisioning\Domain\VpnPanelDriverInterface;
  * - $clients: what the panel holds, keyed by email; findExistingService() searches it
  * - $lookupFails: findExistingService() throws (panel unreadable)
  * - TEST_PANEL_DELAY_MS env var: sleeps inside createService, used to overlap concurrent settlements
+ * - $stateFile / TEST_PANEL_STATE_FILE env var: $clients persisted in a JSON file, so the "panel"
+ *   outlives a PHP process that is killed (shared by the test and its subprocesses)
+ * - TEST_PANEL_SLEEP_AFTER_CREATE_MS env var: sleeps after the client was created (and saved), giving a
+ *   test the moment to kill the process between createService and the database commit
  * - $usage / $usageFails: what getUsage() reports (the panel's current state of a client)
  */
 final class ProgrammableVpnPanelDriver implements VpnPanelDriverInterface, ExistingClientAwareDriverInterface
@@ -38,6 +42,7 @@ final class ProgrammableVpnPanelDriver implements VpnPanelDriverInterface, Exist
     public bool $lookupFails = false;
     /** @var array<string, array{uuid: string, email: string, subId: string}> */
     public array $clients = [];
+    public ?string $stateFile = null;
 
     public function failNext(int $times = 1): void
     {
@@ -60,6 +65,7 @@ final class ProgrammableVpnPanelDriver implements VpnPanelDriverInterface, Exist
         $this->usageFails = false;
         $this->lookupFails = false;
         $this->clients = [];
+        $this->stateFile = null;
     }
 
     public function supports(?VpnPanel $panel): bool
@@ -75,12 +81,18 @@ final class ProgrammableVpnPanelDriver implements VpnPanelDriverInterface, Exist
             usleep($delay * 1000);
         }
         $this->maybeFail('createService');
+        $this->loadState();
         if (isset($this->clients[$request->username])) {
             throw new \RuntimeException('Duplicate email: '.$request->username); // like 3x-ui
         }
 
         $uuid = $request->clientUuid ?? bin2hex(random_bytes(6));
         $this->clients[$request->username] = ['uuid' => $uuid, 'email' => $request->username, 'subId' => bin2hex(random_bytes(6))];
+        $this->saveState();
+        $sleep = (int) ($_SERVER['TEST_PANEL_SLEEP_AFTER_CREATE_MS'] ?? getenv('TEST_PANEL_SLEEP_AFTER_CREATE_MS') ?: 0);
+        if ($sleep > 0) {
+            usleep($sleep * 1000);
+        }
         if ($this->failAfterCreate) {
             $this->failAfterCreate = false;
             throw new \RuntimeException('Simulated timeout after the panel created the client');
@@ -95,6 +107,7 @@ final class ProgrammableVpnPanelDriver implements VpnPanelDriverInterface, Exist
         if ($this->lookupFails) {
             throw new \RuntimeException('Simulated panel outage during client lookup');
         }
+        $this->loadState();
 
         foreach ($this->clients as $client) {
             if (null !== $request->clientUuid && $client['uuid'] === $request->clientUuid) {
@@ -150,6 +163,29 @@ final class ProgrammableVpnPanelDriver implements VpnPanelDriverInterface, Exist
             subId: $client['subId'],
             configLinks: ['vless://test'],
         );
+    }
+
+    private function stateFile(): ?string
+    {
+        $file = $this->stateFile ?? ((string) ($_SERVER['TEST_PANEL_STATE_FILE'] ?? getenv('TEST_PANEL_STATE_FILE') ?: ''));
+
+        return '' !== $file ? $file : null;
+    }
+
+    private function loadState(): void
+    {
+        $file = $this->stateFile();
+        if (null !== $file && is_file($file)) {
+            $this->clients = json_decode((string) file_get_contents($file), true) ?: [];
+        }
+    }
+
+    private function saveState(): void
+    {
+        $file = $this->stateFile();
+        if (null !== $file) {
+            file_put_contents($file, (string) json_encode($this->clients), LOCK_EX);
+        }
     }
 
     private function maybeFail(string $operation): void

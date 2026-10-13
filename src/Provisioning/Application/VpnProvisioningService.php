@@ -51,7 +51,8 @@ class VpnProvisioningService
 
     /**
      * @param array<string, scalar|null> $meta
-     * @param bool $adoptExisting look for this order's client on the panel first (retry after a failed attempt)
+     * @param bool $adoptExisting look for this order's client on the panel first and adopt it (drivers
+     *                            implementing ExistingClientAwareDriverInterface; others always create)
      */
     public function provisionOrder(Order $order, array $meta = [], bool $adoptExisting = false): VpnService
     {
