@@ -48,6 +48,8 @@ class PaymentSettlementService
 
     /** Payments an admin may approve (manual receipt or a parked review). */
     private const ADMIN_APPROVABLE = [PaymentStatus::PENDING, PaymentStatus::SUBMITTED, PaymentStatus::NEEDS_REVIEW];
+    /** Order states a customer may still cancel (nothing paid, nothing provisioned). */
+    private const CUSTOMER_CANCELLABLE_ORDER_STATUSES = [OrderStatus::WAITING_PAYMENT, OrderStatus::PAYMENT_PENDING, OrderStatus::PENDING, OrderStatus::DRAFT];
     private const REJECTABLE = [PaymentStatus::PENDING, PaymentStatus::SUBMITTED, PaymentStatus::NEEDS_REVIEW, PaymentStatus::PROVISIONING_FAILED];
 
     public function __construct(
@@ -89,6 +91,62 @@ class PaymentSettlementService
     public function retryProvisioning(Payment $payment, ?int $adminId, ?string $adminTelegramId, string $source): SettlementResult
     {
         return $this->run($payment, VerifiedPayment::byAdmin($adminId, $adminTelegramId), $source, [PaymentStatus::PROVISIONING_FAILED], false);
+    }
+
+    /**
+     * Customer cancels an unpaid order (bot "cancel" buttons, incomplete-order flow).
+     *
+     * Under the order lock and then each payment's lock (the same order settle() uses), it re-checks
+     * that the order is still open and that no payment is confirmed, in review or failed provisioning;
+     * only then are its pending/submitted payments rejected (confirmationSource customer_cancel) and
+     * the order cancelled. A cancel racing with a settlement therefore either waits and sees the
+     * confirmed state (ALREADY_PROCESSED) or happens first, in which case a later "paid" goes to
+     * NEEDS_REVIEW ("paid after cancel"). It never overwrites CONFIRMED/PROVISIONED.
+     */
+    public function cancelByCustomer(Order $order, string $source = Payment::SOURCE_CUSTOMER_CANCEL): SettlementResult
+    {
+        $orderId = (int) $order->getId();
+        $connection = $this->entityManager->getConnection();
+
+        try {
+            $this->entityManager->flush();
+            $connection->beginTransaction();
+            $order = $this->entityManager->find(Order::class, $orderId) ?? throw new \RuntimeException(sprintf('Order #%d not found.', $orderId));
+            $this->entityManager->refresh($order, LockMode::PESSIMISTIC_WRITE);
+
+            $payments = [];
+            foreach ($this->entityManager->getRepository(Payment::class)->findBy(['order' => $order], ['id' => 'ASC']) as $payment) {
+                $this->entityManager->refresh($payment, LockMode::PESSIMISTIC_WRITE);
+                $payments[] = $payment;
+            }
+
+            $blocking = array_filter($payments, static fn (Payment $p): bool => in_array($p->getStatus(), [PaymentStatus::CONFIRMED, PaymentStatus::NEEDS_REVIEW, PaymentStatus::PROVISIONING_FAILED], true));
+            if (!in_array($order->getStatus(), self::CUSTOMER_CANCELLABLE_ORDER_STATUSES, true) || null !== $order->getProvisionedAt() || [] !== $blocking) {
+                $connection->commit();
+
+                return new SettlementResult(SettlementOutcome::ALREADY_PROCESSED, sprintf('Order is %s and can no longer be cancelled.', $order->getStatus()));
+            }
+
+            foreach ($payments as $payment) {
+                if (in_array($payment->getStatus(), PaymentStatus::SETTLEABLE, true)) {
+                    $payment
+                        ->setStatus(PaymentStatus::REJECTED)
+                        ->setAdminNote(Payment::NOTE_CUSTOMER_CANCEL)
+                        // A late "paid" for this payment goes to NEEDS_REVIEW (parkLatePayment).
+                        ->setConfirmationSource($source);
+                }
+            }
+            $order->setStatus(OrderStatus::CANCELLED);
+            $this->entityManager->flush();
+            $connection->commit();
+        } catch (\Throwable $e) {
+            $this->rollbackAndReset();
+            $this->logger->error('Customer cancel failed.', ['order_id' => $orderId, 'error' => $e->getMessage()]);
+
+            return new SettlementResult(SettlementOutcome::ERROR, 'Order could not be cancelled; try again.');
+        }
+
+        return new SettlementResult(SettlementOutcome::REJECTED, 'Order cancelled by the customer.');
     }
 
     public function reject(Payment $payment, ?string $reason, ?int $adminId, ?string $adminTelegramId, string $source): SettlementResult

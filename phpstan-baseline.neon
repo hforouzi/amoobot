@@ -199,12 +199,6 @@ parameters:
 			path: src/Bot/Application/TelegramUpdateHandler.php
 
 		-
-			message: '#^Instanceof between App\\Entity\\Payment and App\\Entity\\Payment will always evaluate to true\.$#'
-			identifier: instanceof.alwaysTrue
-			count: 1
-			path: src/Bot/Application/TelegramUpdateHandler.php
-
-		-
 			message: '#^Instanceof between null and App\\Entity\\Payment will always evaluate to false\.$#'
 			identifier: instanceof.alwaysFalse
 			count: 1
@@ -800,12 +794,6 @@ parameters:
 
 		-
 			message: '#^Instanceof between App\\Entity\\OrderDraft and App\\Entity\\OrderDraft will always evaluate to true\.$#'
-			identifier: instanceof.alwaysTrue
-			count: 1
-			path: src/Shop/Application/IncompleteOrderService.php
-
-		-
-			message: '#^Instanceof between App\\Entity\\Payment and App\\Entity\\Payment will always evaluate to true\.$#'
 			identifier: instanceof.alwaysTrue
 			count: 1
 			path: src/Shop/Application/IncompleteOrderService.php

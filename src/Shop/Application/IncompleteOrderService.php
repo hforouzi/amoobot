@@ -8,6 +8,8 @@ use App\Entity\Order;
 use App\Entity\OrderDraft;
 use App\Entity\Payment;
 use App\Entity\User;
+use App\Payment\Application\Settlement\PaymentSettlementService;
+use App\Payment\Application\Settlement\SettlementOutcome;
 use App\Payment\Domain\PaymentStatus;
 use App\Shop\Domain\OrderDraftStatus;
 use App\Shop\Domain\OrderStatus;
@@ -17,6 +19,7 @@ final class IncompleteOrderService
 {
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
+        private readonly PaymentSettlementService $paymentSettlementService,
     ) {
     }
 
@@ -106,20 +109,16 @@ final class IncompleteOrderService
             return null;
         }
 
-        $order->setStatus(OrderStatus::CANCELLED);
         $payments = $this->entityManager->getRepository(Payment::class)->findBy(['order' => $order], ['id' => 'DESC']);
         $latestPayment = $payments[0] ?? null;
         if ($latestPayment instanceof Payment && PaymentStatus::PENDING !== $latestPayment->getStatus()) {
             return null;
         }
-        foreach ($payments as $payment) {
-            if ($payment instanceof Payment && PaymentStatus::PENDING === $payment->getStatus()) {
-                $payment->setStatus(PaymentStatus::REJECTED);
-            }
-        }
-        $this->entityManager->flush();
 
-        return $context;
+        // Locked and re-checked in the settlement service: never overwrites a confirmed payment.
+        $result = $this->paymentSettlementService->cancelByCustomer($order);
+
+        return SettlementOutcome::REJECTED === $result->outcome ? $context : null;
     }
 
     private function findLatestActiveDraft(User $user): ?OrderDraft

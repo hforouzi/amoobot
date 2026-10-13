@@ -2223,11 +2223,12 @@ class TelegramUpdateHandler
             return;
         }
 
-        if (PaymentStatus::PENDING === $payment->getStatus()) {
-            $payment->setStatus(PaymentStatus::REJECTED);
+        // Locked and re-checked in the settlement service: never overwrites a confirmed payment.
+        if (SettlementOutcome::REJECTED !== $this->paymentSettlementService->cancelByCustomer($order)->outcome) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'امکان لغو این پرداخت وجود ندارد.', 'popup_payment_cancel_not_allowed');
+
+            return;
         }
-        $order->setStatus(OrderStatus::CANCELLED);
-        $this->entityManager->flush();
 
         $this->telegramApiClient->answerCallbackQuery($callbackId, 'سفارش ناتمام حذف شد.', true);
     }
@@ -3081,14 +3082,12 @@ class TelegramUpdateHandler
             return;
         }
 
-        $order->setStatus(OrderStatus::CANCELLED);
-        $payments = $this->entityManager->getRepository(Payment::class)->findBy(['order' => $order]);
-        foreach ($payments as $item) {
-            if ($item instanceof Payment && PaymentStatus::PENDING === $item->getStatus()) {
-                $item->setStatus(PaymentStatus::REJECTED);
-            }
+        // Locked and re-checked in the settlement service: never overwrites a confirmed payment.
+        if (SettlementOutcome::REJECTED !== $this->paymentSettlementService->cancelByCustomer($order)->outcome) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'امکان لغو این سفارش وجود ندارد.', 'order_cancel_not_allowed');
+
+            return;
         }
-        $this->entityManager->flush();
 
         $this->showPopupOrMessage($chatId, $callbackId, 'سفارش ناتمام حذف شد.', 'order_cancelled');
     }

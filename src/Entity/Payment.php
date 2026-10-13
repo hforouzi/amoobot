@@ -15,6 +15,9 @@ class Payment
     /** confirmationSource / adminNote of a pending payment rejected because its order expired unpaid. */
     public const SOURCE_ORDER_EXPIRY = 'order_expiry';
     public const NOTE_ORDER_EXPIRY = 'Auto expired incomplete order';
+    /** confirmationSource / adminNote of a pending payment the customer cancelled (bot cancel buttons). */
+    public const SOURCE_CUSTOMER_CANCEL = 'customer_cancel';
+    public const NOTE_CUSTOMER_CANCEL = 'Cancelled by customer';
 
     #[ORM\Id]
     #[ORM\GeneratedValue]
