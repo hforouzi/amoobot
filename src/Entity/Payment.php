@@ -200,6 +200,10 @@ class Payment
     #[ORM\Column(length: 64, nullable: true)]
     private ?string $returnToken = null;
 
+    /** Set when an admin rejected the payment and recorded that the money was returned (e.g. a duplicate). */
+    #[ORM\Column(nullable: true)]
+    private ?\DateTimeImmutable $refundedAt = null;
+
     public function __construct()
     {
         $this->createdAt = new \DateTimeImmutable();
@@ -227,6 +231,18 @@ class Payment
     {
         // 32 random bytes, base64url without padding: 43 characters.
         return rtrim(strtr(base64_encode(random_bytes(32)), '+/', '-_'), '=');
+    }
+
+    public function getRefundedAt(): ?\DateTimeImmutable
+    {
+        return $this->refundedAt;
+    }
+
+    public function setRefundedAt(?\DateTimeImmutable $refundedAt): self
+    {
+        $this->refundedAt = $refundedAt;
+
+        return $this;
     }
 
     public function getReturnToken(): ?string

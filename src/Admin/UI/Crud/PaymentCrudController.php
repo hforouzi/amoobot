@@ -69,7 +69,14 @@ class PaymentCrudController extends AbstractCrudController
             ->setCssClass('btn btn-warning')
             ->displayIf(fn (Payment $payment): bool => in_array($payment->getStatus(), [PaymentStatus::PENDING, PaymentStatus::SUBMITTED, PaymentStatus::NEEDS_REVIEW, PaymentStatus::PROVISIONING_FAILED], true));
 
-        foreach ([$confirm, $retry, $reject] as $action) {
+        // Closing a duplicate (or any reviewed payment) whose money was sent back to the customer.
+        $rejectRefunded = Action::new('rejectPaymentRefunded', 'Reject (refunded)')
+            ->linkToUrl(fn (Payment $payment): string => $this->generateUrl('admin_payment_reject', $this->routeParameters($payment) + ['refunded' => 1]))
+            ->renderAsForm()
+            ->setCssClass('btn btn-secondary')
+            ->displayIf(fn (Payment $payment): bool => in_array($payment->getStatus(), [PaymentStatus::NEEDS_REVIEW, PaymentStatus::PROVISIONING_FAILED], true));
+
+        foreach ([$confirm, $retry, $reject, $rejectRefunded] as $action) {
             $actions->add(Action::INDEX, $action)->add(Action::DETAIL, $action);
         }
 
@@ -106,6 +113,7 @@ class PaymentCrudController extends AbstractCrudController
                 ->renderAsHtml()
                 ->hideOnForm(),
             TextField::new('amountFlag')->setLabel('Amount flag')->hideOnForm(),
+            DateTimeField::new('refundedAt')->setLabel('Refunded at')->hideOnIndex()->hideOnForm(),
             TextareaField::new('reviewReason')->setLabel('Review reason')->hideOnIndex()->hideOnForm(),
             TextareaField::new('provisioningError')->setLabel('Provisioning error')->hideOnIndex()->hideOnForm(),
             IntegerField::new('provisioningAttempts')->setLabel('Provisioning attempts')->hideOnIndex()->hideOnForm(),

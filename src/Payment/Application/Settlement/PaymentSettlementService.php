@@ -149,7 +149,12 @@ class PaymentSettlementService
         return new SettlementResult(SettlementOutcome::REJECTED, 'Order cancelled by the customer.');
     }
 
-    public function reject(Payment $payment, ?string $reason, ?int $adminId, ?string $adminTelegramId, string $source): SettlementResult
+    /**
+     * Admin rejection. Also closes a duplicate payment for an order another payment already
+     * fulfilled: the payment is rejected, the fulfilled order is left as it is. $refunded records that
+     * the money was returned to the customer.
+     */
+    public function reject(Payment $payment, ?string $reason, ?int $adminId, ?string $adminTelegramId, string $source, bool $refunded = false): SettlementResult
     {
         $paymentId = (int) $payment->getId();
         $connection = $this->entityManager->getConnection();
@@ -158,7 +163,7 @@ class PaymentSettlementService
             $connection->beginTransaction();
             [$payment, $order] = $this->lock($paymentId);
 
-            if (!in_array($payment->getStatus(), self::REJECTABLE, true) || $this->fulfilledByPayment($order) instanceof Payment) {
+            if (!in_array($payment->getStatus(), self::REJECTABLE, true)) {
                 $connection->commit();
 
                 return new SettlementResult(SettlementOutcome::ALREADY_PROCESSED, 'Payment has already been processed.', $payment);
@@ -168,8 +173,12 @@ class PaymentSettlementService
                 ->setStatus(PaymentStatus::REJECTED)
                 ->setAdminNote($reason)
                 ->setConfirmationSource($source)
-                ->setConfirmedBy($adminId, $adminTelegramId);
-            $order->setStatus(OrderStatus::FAILED);
+                ->setConfirmedBy($adminId, $adminTelegramId)
+                ->setRefundedAt($refunded ? new \DateTimeImmutable() : null);
+            // A duplicate payment of a fulfilled order: close the payment, never touch the order.
+            if (!$this->isOrderFulfilled($order)) {
+                $order->setStatus(OrderStatus::FAILED);
+            }
             $this->entityManager->flush();
             $connection->commit();
         } catch (\Throwable $e) {
@@ -181,7 +190,7 @@ class PaymentSettlementService
 
         $this->customerNotifier->rejected($payment);
 
-        return new SettlementResult(SettlementOutcome::REJECTED, 'Payment rejected.', $payment);
+        return new SettlementResult(SettlementOutcome::REJECTED, $refunded ? 'Payment rejected and recorded as refunded.' : 'Payment rejected.', $payment);
     }
 
     /**
@@ -305,6 +314,18 @@ class PaymentSettlementService
 
             $fulfilledBy = $this->fulfilledByPayment($order);
             if ($fulfilledBy instanceof Payment || OrderStatus::PROVISIONED === $order->getStatus()) {
+                if ($verified->byAdmin) {
+                    // Approve/Retry on a duplicate: fulfilling again would provision twice. Do not
+                    // re-park it in review either; tell the admin what to do instead.
+                    $connection->commit();
+
+                    return new SettlementResult(SettlementOutcome::ORDER_ALREADY_FULFILLED, sprintf(
+                        'Order #%d is already fulfilled%s; approving would provision it twice. Reject this payment instead (and mark it refunded once the money is returned).',
+                        $order->getId() ?? 0,
+                        $fulfilledBy instanceof Payment ? sprintf(' by payment #%d', $fulfilledBy->getId() ?? 0) : ''
+                    ), $payment);
+                }
+
                 return $this->parkForReview($payment, sprintf(
                     'Order #%d is already fulfilled%s; this looks like a duplicate payment.',
                     $order->getId() ?? 0,
@@ -528,6 +549,13 @@ class PaymentSettlementService
         }
 
         return null;
+    }
+
+    private function isOrderFulfilled(Order $order): bool
+    {
+        return $this->fulfilledByPayment($order) instanceof Payment
+            || in_array($order->getStatus(), [OrderStatus::PROVISIONED, OrderStatus::COMPLETED], true)
+            || null !== $order->getProvisionedAt();
     }
 
     private function serviceFor(Order $order): ?VpnService

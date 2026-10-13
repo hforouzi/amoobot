@@ -110,6 +110,7 @@ final class BotContentRegistry
             'payment.check_pending' => ['title' => 'Payment pending', 'body' => 'پرداخت هنوز تایید نشده است. پس از پرداخت چند دقیقه صبر کنید و دوباره بررسی کنید.', 'category' => 'payments'],
             'payment.confirmed' => ['title' => 'Payment confirmed', 'body' => '✅ پرداخت شما تایید شد.', 'category' => 'payments'],
             'payment.rejected' => ['title' => 'Payment rejected', 'body' => '❌ پرداخت شما رد شد. لطفا مجدد رسید معتبر ارسال کنید یا با پشتیبانی تماس بگیرید.', 'category' => 'payments'],
+            'payment.rejected_refunded' => ['title' => 'Payment rejected and refunded', 'body' => '↩️ این پرداخت (برای مثال پرداخت تکراری) رد شد و مبلغ آن به شما بازگردانده شد. سفارش و سرویس شما تغییری نکرده است.', 'category' => 'payments'],
             'payment.failed' => ['title' => 'Payment failed', 'body' => 'پرداخت ناموفق بود.', 'category' => 'payments'],
             'payment.under_review' => ['title' => 'Payment under review', 'body' => '⏳ پرداخت شما ثبت شد و برای بررسی به پشتیبانی ارسال شد (مبلغ یا ارز پرداختی با سفارش مطابقت نداشت). نتیجه به شما اطلاع داده می‌شود.', 'category' => 'payments'],
             'payment.under_review_late' => ['title' => 'Payment received after cancel/expiry', 'body' => '⏳ پرداخت شما پس از لغو یا پایان مهلت سفارش دریافت شد. پرداخت از بین نرفته و برای بررسی به پشتیبانی ارسال شد؛ نتیجه به شما اطلاع داده می‌شود.', 'category' => 'payments'],

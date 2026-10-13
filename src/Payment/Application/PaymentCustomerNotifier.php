@@ -55,7 +55,8 @@ class PaymentCustomerNotifier
 
     public function rejected(Payment $payment): void
     {
-        $this->deliver($payment, 'rejected', fn (): array => [$this->botTextResolver->message('payment.rejected')]);
+        $key = null !== $payment->getRefundedAt() ? 'payment.rejected_refunded' : 'payment.rejected';
+        $this->deliver($payment, 'rejected', fn (): array => [$this->botTextResolver->message($key)]);
     }
 
     public function underReview(Payment $payment): void

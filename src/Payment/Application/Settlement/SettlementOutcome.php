@@ -15,6 +15,12 @@ enum SettlementOutcome: string
     /** Verified, but fulfilment failed; rolled back and marked for retry. */
     case PROVISIONING_FAILED = 'provisioning_failed';
     case REJECTED = 'rejected';
+    /**
+     * Admin approve/retry refused: the order is already fulfilled by another payment, so fulfilling
+     * again would provision twice. Nothing changed; the admin should reject this payment (and record
+     * a refund) instead.
+     */
+    case ORDER_ALREADY_FULFILLED = 'order_already_fulfilled';
     /** Infrastructure error before any state change (e.g. lock timeout). Safe to retry the request. */
     case ERROR = 'error';
 }

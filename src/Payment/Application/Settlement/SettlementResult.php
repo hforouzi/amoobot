@@ -58,6 +58,7 @@ final readonly class SettlementResult
             SettlementOutcome::NEEDS_REVIEW => 'پرداخت دریافت شد و برای بررسی به پشتیبانی ارسال شد.',
             SettlementOutcome::PROVISIONING_FAILED => 'پرداخت دریافت شد؛ سرویس شما به‌زودی آماده می‌شود. نیازی به پرداخت مجدد نیست.',
             SettlementOutcome::REJECTED => 'این پرداخت رد شد.',
+            SettlementOutcome::ORDER_ALREADY_FULFILLED => 'پرداخت دریافت شد و برای بررسی به پشتیبانی ارسال شد.',
             SettlementOutcome::ERROR => 'ثبت پرداخت موقتاً ممکن نشد؛ لطفاً کمی بعد دوباره تلاش کنید.',
         };
     }

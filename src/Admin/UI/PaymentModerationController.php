@@ -61,7 +61,8 @@ class PaymentModerationController extends AbstractController
         }
 
         $note = $request->request->get('note');
-        $result = $settlement->reject($payment, is_string($note) ? $note : null, $this->currentAdminId(), null, 'easyadmin_payment_reject');
+        $refunded = '1' === (string) ($request->query->get('refunded') ?? $request->request->get('refunded') ?? '');
+        $result = $settlement->reject($payment, is_string($note) ? $note : null, $this->currentAdminId(), null, 'easyadmin_payment_reject', $refunded);
 
         return $this->back($request, $result);
     }
@@ -91,7 +92,7 @@ class PaymentModerationController extends AbstractController
     {
         $this->addFlash(match ($result->outcome) {
             SettlementOutcome::CONFIRMED => 'success',
-            SettlementOutcome::REJECTED, SettlementOutcome::NEEDS_REVIEW => 'warning',
+            SettlementOutcome::REJECTED, SettlementOutcome::NEEDS_REVIEW, SettlementOutcome::ORDER_ALREADY_FULFILLED => 'warning',
             SettlementOutcome::ALREADY_PROCESSED => 'info',
             default => 'danger',
         }, $result->message);
