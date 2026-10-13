@@ -33,6 +33,7 @@ final class ProgrammableVpnPanelDriver implements VpnPanelDriverInterface, Exist
     public const TYPE = 'test';
 
     private int $failuresLeft = 0;
+    private ?string $failureMessage = null;
     private bool $failAfterCreate = false;
     public int $createCalls = 0;
     public int $renewCalls = 0;
@@ -44,9 +45,10 @@ final class ProgrammableVpnPanelDriver implements VpnPanelDriverInterface, Exist
     public array $clients = [];
     public ?string $stateFile = null;
 
-    public function failNext(int $times = 1): void
+    public function failNext(int $times = 1, ?string $message = null): void
     {
         $this->failuresLeft = $times;
+        $this->failureMessage = $message;
     }
 
     public function failNextAfterCreate(): void
@@ -192,7 +194,7 @@ final class ProgrammableVpnPanelDriver implements VpnPanelDriverInterface, Exist
     {
         if ($this->failuresLeft > 0) {
             --$this->failuresLeft;
-            throw new \RuntimeException(sprintf('Simulated panel outage during %s (token=supersecret123)', $operation));
+            throw new \RuntimeException($this->failureMessage ?? sprintf('Simulated panel outage during %s (token=supersecret123)', $operation));
         }
     }
 }

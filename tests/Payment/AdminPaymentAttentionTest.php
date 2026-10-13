@@ -102,6 +102,24 @@ final class AdminPaymentAttentionTest extends IntegrationTestCase
         self::assertSame(1, $this->countServicesForOrder($order));
     }
 
+    public function testFlashMessagesFromPanelErrorsAreEscaped(): void
+    {
+        $order = $this->createOrder($this->createUser(), $this->createPlan(150000, $this->createTestInbound()));
+        $payment = $this->createPayment($order, null, PaymentStatus::SUBMITTED);
+        $this->loginAdmin();
+        $crawler = $this->client->request('GET', '/admin/payment');
+        $form = $crawler->filter(sprintf('form[action*="/admin/payment/%d/confirm"]', $payment->getId()));
+        // The panel answers with markup in its error message.
+        $this->driver()->failNext(1, '<img src=x onerror=alert(1)>');
+
+        $this->client->request('POST', (string) $form->attr('action'));
+        $this->client->followRedirect();
+
+        $content = (string) $this->client->getResponse()->getContent();
+        self::assertStringNotContainsString('<img src=x onerror', $content);
+        self::assertStringContainsString('&lt;img src=x onerror=alert(1)&gt;', $content);
+    }
+
     public function testBotAdminCanListAndRetryAndOthersCannot(): void
     {
         $order = $this->createOrder($this->createUser(), $this->createPlan(150000, $this->createTestInbound()));

@@ -95,7 +95,9 @@ class PaymentModerationController extends AbstractController
             SettlementOutcome::REJECTED, SettlementOutcome::NEEDS_REVIEW, SettlementOutcome::ORDER_ALREADY_FULFILLED => 'warning',
             SettlementOutcome::ALREADY_PROCESSED => 'info',
             default => 'danger',
-        }, $result->message);
+            // EasyAdmin renders flash messages as raw HTML, and these messages can carry text from a
+            // gateway or panel (review reasons, provisioning errors): escape them.
+        }, htmlspecialchars($result->message, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'));
 
         return $this->redirectBack($request);
     }
