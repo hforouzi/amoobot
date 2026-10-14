@@ -250,6 +250,66 @@ WantedBy=timers.target
 EOF
 }
 
+# valid_dir_path PATH PARENTS_RE  ->  0 for exactly /<parent>/<one name>, never "/", ".." or a system directory
+valid_dir_path() {
+  [[ "$1" =~ ^/($2)/[A-Za-z0-9._-]+$ && "${1##*/}" != "." && "${1##*/}" != ".." ]]
+}
+
+# resolve_deploy_home  sets DEPLOY_HOME from passwd (default /home/USER) and refuses anything but /home/<name>
+resolve_deploy_home() {
+  DEPLOY_HOME="$(getent passwd "$DEPLOY_USER" | cut -d: -f6 || true)"
+  DEPLOY_HOME="${DEPLOY_HOME:-/home/$DEPLOY_USER}"
+  [[ "$DEPLOY_HOME" =~ ^/home/[a-z_][a-z0-9_-]*$ ]] \
+    || die "Home of ${DEPLOY_USER} is '${DEPLOY_HOME}'; expected /home/<name> (it is chowned and gets SSH keys)."
+}
+
+# verify_target_ops COMMIT  refuses a target commit (before anything is paused or checked out) that lacks a file of the
+# root-owned ops layout: installing it would leave root without its scripts, or put an older deploy.sh in place that
+# runs checkout files as root again.
+verify_target_ops() {
+  local commit="$1" path missing=() target_deploy
+  for path in "${ROOT_OPS_FILES[@]}" bin/console; do
+    sudo -H -u "$DEPLOY_USER" git -C "$APP_DIR" cat-file -e "${commit}:${path}" 2> /dev/null || missing+=("$path")
+  done
+  (( ${#missing[@]} == 0 )) \
+    || die "Refusing to deploy ${commit}: it lacks ${missing[*]}. Nothing was paused or checked out."
+  # Into a variable, not "| grep -q": grep exiting early would make git fail with SIGPIPE under pipefail.
+  target_deploy="$(git_blob "$commit" deploy.sh)" || die "Cannot read deploy.sh from ${commit}."
+  grep -qx 'ROOT_LIB_DIR="/usr/local/lib/amoobot"' <<< "$target_deploy" \
+    || die "Refusing to deploy ${commit}: its deploy.sh predates the root-owned ops layout (${ROOT_LIB_DIR}); it would run checkout files as root again. Nothing was paused or checked out."
+}
+
+# database_table_count  ->  number of tables in the app database (root-owned lib; DATABASE_URL from this script)
+database_table_count() {
+  (
+    # shellcheck source=bin/lib/database-url.sh
+    source "${ROOT_LIB_DIR}/lib/database-url.sh"
+    load_database_url "$APP_DIR"
+    trap 'rm -f "${DB_OPTS_FILE:-}"' EXIT
+    write_db_options_file
+    client="$(command -v mariadb || command -v mysql)"
+    "$client" --defaults-extra-file="$DB_OPTS_FILE" -N -B \
+      -e 'SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE()' "$DB_NAME"
+  )
+}
+
+# restore_instructions  how to get back to the database state before this deploy
+restore_instructions() {
+  # Values are prepared outside the here-doc: quotes inside ${..:+..} in a here-doc break bash's parser.
+  local dump="${PRE_DEPLOY_BACKUP_FILE:-${BACKUP_DIR}/${DB_NAME}_pre-deploy_<time>.sql.gz}" note="" ref
+  ref="${PREVIOUS_COMMIT:-<commit that matches the backup>}"
+  [[ -n "${PRE_DEPLOY_BACKUP_FILE:-}" ]] && note="      # taken by this deploy: ${PRE_DEPLOY_BACKUP_FILE}"
+  cat >&2 <<EOF
+
+Scheduled jobs stay PAUSED. To return to the state before this deploy:
+  ls -lt ${BACKUP_DIR}/${DB_NAME}_pre-deploy_*.sql.gz | head -3${note}
+  sudo systemctl stop php${PHP_VERSION}-fpm
+  sudo amoobot-restore ${dump} --yes
+  sudo amoobot-deploy --app-only --ref ${ref}
+Or deploy the release that matches the current schema again.
+EOF
+}
+
 # root_ops_dest PATH  ->  where the root-owned copy of a ROOT_OPS_FILES entry is installed
 root_ops_dest() {
   case "$1" in
@@ -589,6 +649,10 @@ if [[ -n "${DEPLOY_SSH_PUBLIC_KEY:-}" ]]; then
   fi
 fi
 [[ "$BACKUP_RETENTION_DAYS" =~ ^[0-9]+$ ]] || die "BACKUP_RETENTION_DAYS must be a number."
+# Validated before anything runs: these are used with recursive chown/chmod, rm and in root-owned scripts.
+valid_dir_path "$APP_DIR" 'var/www|srv' || die "APP_DIR must be /var/www/<name> or /srv/<name> (A-Z a-z 0-9 . _ -; got '${APP_DIR}')."
+valid_dir_path "$BACKUP_DIR" 'var/backups|srv' \
+  || die "BACKUP_DIR must be /var/backups/<name> or /srv/<name> (A-Z a-z 0-9 . _ -; got '${BACKUP_DIR}')."
 [[ "$TELEGRAM_BOT_TOKEN" =~ ^[0-9]+:[A-Za-z0-9_-]{30,}$ ]] || die "TELEGRAM_BOT_TOKEN does not look like a BotFather token."
 [[ "$TELEGRAM_ADMIN_CHAT_ID" =~ ^-?[0-9]+$ ]] || die "TELEGRAM_ADMIN_CHAT_ID must be numeric."
 (( ${#APP_SECRET} >= 32 )) || die "APP_SECRET must be at least 32 characters."
@@ -644,7 +708,8 @@ if (( ! APP_ONLY )); then
 
 step "1/18" "Updating system..."
 run apt-get update
-run apt-get upgrade -y
+# Non-interactive, and keep locally modified config files (e.g. sshd_config) instead of prompting or overwriting.
+run env DEBIAN_FRONTEND=noninteractive apt-get -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold upgrade -y
 
 ########################################
 # INSTALL PACKAGES
@@ -718,8 +783,7 @@ step "5/18" "Hardening server (deploy user, SSH key-only, firewall 22/80/443, re
 if ! id "$DEPLOY_USER" > /dev/null 2>&1; then
   run useradd --create-home --shell /bin/bash "$DEPLOY_USER"
 fi
-DEPLOY_HOME="$(getent passwd "$DEPLOY_USER" | cut -d: -f6 || true)"
-DEPLOY_HOME="${DEPLOY_HOME:-/home/$DEPLOY_USER}"
+resolve_deploy_home
 run install -d -m 700 -o "$DEPLOY_USER" -g "$DEPLOY_USER" "$DEPLOY_HOME/.ssh"
 auth_keys="$DEPLOY_HOME/.ssh/authorized_keys"
 # A dry run works on a copy, so it reports what would be added without touching the real file.
@@ -851,8 +915,7 @@ fi # APP_ONLY
 step "7/18" "Fetching code (${DEPLOY_REF})..."
 
 id "$DEPLOY_USER" > /dev/null 2>&1 || (( DRY_RUN )) || die "Deploy user ${DEPLOY_USER} does not exist; run once without --app-only."
-DEPLOY_HOME="$(getent passwd "$DEPLOY_USER" | cut -d: -f6 || true)"
-DEPLOY_HOME="${DEPLOY_HOME:-/home/$DEPLOY_USER}"
+resolve_deploy_home
 DEPLOY_KEY="$DEPLOY_HOME/.ssh/amoobot_deploy_ed25519"
 GIT_SSH="ssh -i ${DEPLOY_KEY} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
 
@@ -890,15 +953,21 @@ if (( ! DRY_RUN )); then
   PREVIOUS_COMMIT="$(sudo -H -u "$DEPLOY_USER" git -C "$APP_DIR" rev-parse --verify -q HEAD || true)"
 fi
 as "$DEPLOY_USER" git -C "$APP_DIR" fetch --prune --tags origin
-# From here until step 16 the code, cache and schema change: no scheduled job may run meanwhile.
-pause_scheduled_jobs
 if (( DRY_RUN )); then
-  log "[dry-run] check out ${DEPLOY_REF} (origin/${DEPLOY_REF}, a tag, or a commit)"
+  log "[dry-run] resolve ${DEPLOY_REF} (origin/${DEPLOY_REF}, a tag, or a commit); refuse it unless it has every root-owned ops file (git cat-file -e) - before pausing anything"
 else
   TARGET_COMMIT="$(sudo -H -u "$DEPLOY_USER" git -C "$APP_DIR" rev-parse --verify -q "origin/${DEPLOY_REF}^{commit}" \
     || sudo -H -u "$DEPLOY_USER" git -C "$APP_DIR" rev-parse --verify -q "${DEPLOY_REF}^{commit}" \
     || true)"
   [[ -n "$TARGET_COMMIT" ]] || die "Ref '${DEPLOY_REF}' not found on origin (branch, tag or commit)."
+  # Checked before the jobs are paused: a refused rollback leaves the running release untouched.
+  verify_target_ops "$TARGET_COMMIT"
+fi
+# From here until step 16 the code, cache and schema change: no scheduled job may run meanwhile.
+pause_scheduled_jobs
+if (( DRY_RUN )); then
+  log "[dry-run] check out ${DEPLOY_REF}"
+else
   sudo -H -u "$DEPLOY_USER" git -C "$APP_DIR" checkout -q --detach "$TARGET_COMMIT"
   install -d -m 755 "$STATE_DIR"
   printf '%s %s -> %s (%s)\n' "$(date -u +%FT%TZ)" "${PREVIOUS_COMMIT:-none}" "$TARGET_COMMIT" "$DEPLOY_REF" >> "$STATE_DIR/releases.log"
@@ -973,18 +1042,44 @@ run chmod 600 "$APP_DIR/.env.prod.local"
 step "11/18" "Clearing cache, running migrations..."
 
 # Fresh cache first: a prod container left over from the previous release must not run the new migrations.
-run rm -rf "$APP_DIR/var/cache/prod"
+# As the web user (var/ is its directory): root never deletes inside the deploy-writable tree.
+as "$WEB_USER" rm -rf "$APP_DIR/var/cache/prod"
 console cache:warmup
 console assets:install public
 
-if (( ! DRY_RUN )) && [[ -n "${PREVIOUS_COMMIT:-}" ]] && ! console doctrine:migrations:up-to-date > /dev/null 2>&1; then
-  log "Pending migrations: taking a pre-migration backup first..."
-  # Root-owned copy; it reads DATABASE_URL from ${DB_URL_FILE}, never from the checkout.
-  "${ROOT_SBIN_DIR}/amoobot-backup" pre-deploy
+# Backup whenever migrations are pending and the database already holds data, whatever was deployed before (a server
+# restored from a dump, or a first run of this script against an existing database, has no previous commit).
+PRE_DEPLOY_BACKUP_FILE=""
+if (( DRY_RUN )); then
+  log "[dry-run] if migrations are pending AND the database already has tables: ${ROOT_SBIN_DIR}/amoobot-backup pre-deploy"
+elif ! console doctrine:migrations:up-to-date > /dev/null 2>&1; then
+  tables="$(database_table_count)"
+  [[ "$tables" =~ ^[0-9]+$ ]] || die "Could not count the tables of the database (got '${tables}')."
+  if (( tables > 0 )); then
+    log "Pending migrations and ${tables} existing tables: taking a pre-migration backup first..."
+    # Root-owned copy; it reads DATABASE_URL from ${DB_URL_FILE}, never from the checkout.
+    backup_out="$("${ROOT_SBIN_DIR}/amoobot-backup" pre-deploy)"
+    log "$backup_out"
+    PRE_DEPLOY_BACKUP_FILE="$(sed -n 's/^Backup written to \(.*\) ([^)]*)$/\1/p' <<< "$backup_out")"
+  else
+    log "Pending migrations on an empty database (first install): no backup needed."
+  fi
 fi
-# No "|| true": a failed migration stops the deploy.
-console doctrine:migrations:migrate --allow-no-migration
-console doctrine:migrations:up-to-date
+# No "|| true": a failed migration stops the deploy (before step 16, so the scheduled jobs stay paused).
+if ! console doctrine:migrations:migrate --allow-no-migration; then
+  restore_instructions
+  die "doctrine:migrations:migrate failed."
+fi
+# Exit 1: migrations still pending. Exit 2: the database has migrations this code does not know (e.g. a rollback to a
+# release older than the schema) - the code and the schema do not match.
+if console doctrine:migrations:up-to-date --fail-on-unregistered; then
+  :
+else
+  rc=$?
+  restore_instructions
+  (( rc == 2 )) && die "The database has executed migrations that ${TARGET_COMMIT:-this release} does not contain (up-to-date exit 2): code and schema do not match."
+  die "Migrations are not up to date after migrate (up-to-date exit ${rc})."
+fi
 console lint:container
 
 ########################################

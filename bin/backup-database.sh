@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Dump the Amoobot MariaDB/MySQL database to BACKUP_DIR/<db>_<label>_<UTC timestamp>.sql.gz and delete dumps
+# Dump the Amoobot MariaDB/MySQL database to BACKUP_DIR/<db>_<label>_<UTC timestamp>.sql.gz and delete NIGHTLY dumps
 # older than BACKUP_RETENTION_DAYS. Installed as a nightly cron job by deploy.sh; restore with bin/restore-database.sh.
 #
 #   DATABASE_URL  from the environment, else /etc/amoobot/database.env (root-owned, written by deploy.sh); see
@@ -60,8 +60,10 @@ gzip -t "$PARTIAL" || die "Backup archive failed its integrity check; previous b
 zcat "$PARTIAL" | tail -n 1 | grep -q 'Dump completed' || die "Dump is incomplete (no 'Dump completed' trailer)."
 mv "$PARTIAL" "$OUT"
 
+# Only nightly dumps rotate. pre-deploy / pre-restore / manual dumps are the way back from a bad release or restore
+# and are never deleted automatically (remove them by hand once they are no longer needed).
 if (( BACKUP_RETENTION_DAYS > 0 )); then
-  find "$BACKUP_DIR" -maxdepth 1 -type f -name "${DB_NAME}_*.sql.gz" -mtime +"$BACKUP_RETENTION_DAYS" -print -delete \
+  find "$BACKUP_DIR" -maxdepth 1 -type f -name "${DB_NAME}_nightly_*.sql.gz" -mtime +"$BACKUP_RETENTION_DAYS" -print -delete \
     | sed 's/^/Rotated out: /'
 fi
 

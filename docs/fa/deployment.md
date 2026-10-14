@@ -136,7 +136,15 @@ sudo amoobot-deploy --app-only --ref v1.5.0
   هر چهار فایل در `/usr/local/sbin` و مالک root هستند و اسکریپت را با محیط تمیز (`env -i`) اجرا می‌کنند. cron بکاپ، بکاپ قبل از
   migration و unitهای systemd هم فقط همین مسیرها را اجرا می‌کنند. اسکریپت‌های بکاپ/بازگردانی `DATABASE_URL` را فقط از
   `/etc/amoobot/database.env` (مالک root، `600`، ساخته‌شده در مرحله‌ی 9) می‌خوانند و هیچ‌وقت `.env.local.php` برنامه را به‌عنوان root بارگذاری نمی‌کنند.
-- اگر migration جدید وجود داشته باشد، قبل از آن خودکار یک بکاپ با برچسب `pre-deploy` در `/var/backups/amoobot` گرفته می‌شود.
+- اگر migration اجرانشده وجود داشته باشد **و** دیتابیس از قبل جدول داشته باشد، قبل از migration خودکار یک بکاپ با برچسب `pre-deploy` در
+  `/var/backups/amoobot` گرفته می‌شود (مستقل از اینکه قبلاً چه کامیتی deploy شده؛ مثلاً سروری که از dump بازگردانی شده هم بکاپ می‌گیرد).
+  روی دیتابیس خالی (اولین نصب) بکاپی لازم نیست.
+- بعد از migration، `doctrine:migrations:up-to-date --fail-on-unregistered` اجرا می‌شود. کد خروج `2` یعنی دیتابیس migrationهایی دارد که این
+  کد نمی‌شناسد (کد و schema با هم نمی‌خوانند، مثلاً rollback به نسخه‌ی قدیمی‌تر از schema). deploy **قبل از فعال کردن دوباره‌ی timerها**
+  متوقف می‌شود و دستور دقیق بازگردانی بکاپ `pre-deploy` را چاپ می‌کند.
+- مسیرها قبل از هر کاری بررسی می‌شوند: `APP_DIR` باید `/var/www/<نام>` یا `/srv/<نام>`، `BACKUP_DIR` باید `/var/backups/<نام>` یا
+  `/srv/<نام>` و home کاربر deploy باید `/home/<نام>` باشد (این مسیرها با `chown -R`/`chmod -R`/`rm` استفاده می‌شوند).
+- `apt-get upgrade` غیرتعاملی است و فایل‌های پیکربندی تغییرکرده‌ی محلی (مثلاً sshd) را نگه می‌دارد (`--force-confdef --force-confold`).
 - اگر فایل‌های tracked روی سرور دستی تغییر کرده باشند، اسکریپت متوقف می‌شود (هیچ تغییری روی سرور دور ریخته نمی‌شود).
 - اجرای کامل (بدون `--app-only`) بسته‌های سیستم را هم به‌روز می‌کند؛ هر چند وقت یک‌بار در زمان کم‌ترافیک انجام دهید.
 
@@ -148,6 +156,11 @@ sudo amoobot-deploy --app-only --ref v1.5.0
 tail -n 5 /var/lib/amoobot/releases.log        # <زمان> <کامیت قبلی> -> <کامیت جدید> (ref)
 sudo amoobot-deploy --app-only --ref <کامیت قبلی>
 ```
+
+قبل از متوقف کردن کارها و قبل از checkout، اسکریپت با `git cat-file -e <کامیت>:<مسیر>` بررسی می‌کند که کامیت مقصد همه‌ی فایل‌های
+عملیاتی (`deploy.sh`، اسکریپت‌های بکاپ/بازگردانی/کارهای زمان‌بندی‌شده، `bin/lib/database-url.sh`، `bin/console`) را دارد و `deploy.sh` آن
+از ساختار root‌مالک `/usr/local/lib/amoobot` استفاده می‌کند. وگرنه **رد می‌کند** و نسخه‌ی در حال اجرا دست نمی‌خورد. بنابراین rollback به
+کامیت‌های قبل از این تغییر امنیتی ممکن نیست (آن نسخه‌ها فایل‌های پوشه‌ی برنامه را با root اجرا می‌کردند).
 
 **دیتابیس:** migrationها فقط رو به جلو اجرا می‌شوند. اگر نسخه‌ی خراب migration داشته که با کد قدیمی سازگار نیست:
 
@@ -166,7 +179,9 @@ sudo amoobot-deploy --app-only --ref <کامیت قبلی>   # PHP-FPM و timer�
 
 - cron: `/etc/cron.d/amoobot-backup` (پیش‌فرض هر شب 03:30) ← `/usr/local/sbin/amoobot-backup nightly` (نسخه‌ی root‌مالک `bin/backup-database.sh`)
 - `DATABASE_URL` برای بکاپ و بازگردانی: `/etc/amoobot/database.env` (مالک root، `600`)
-- مقصد: `/var/backups/amoobot` (مالک root، `700`)؛ نگهداری `BACKUP_RETENTION_DAYS` روز (پیش‌فرض 14)
+- مقصد: `/var/backups/amoobot` (مالک root، `700`)؛ بکاپ‌های **`nightly`** بعد از `BACKUP_RETENTION_DAYS` روز (پیش‌فرض 14) پاک می‌شوند.
+  بکاپ‌های `pre-deploy`، `pre-restore` و `manual` راه برگشت از یک نسخه یا restore خراب هستند و **هیچ‌وقت خودکار پاک نمی‌شوند**؛
+  هر چند وقت یک‌بار قدیمی‌ها را دستی پاک کنید (`ls -lt /var/backups/amoobot`).
 - لاگ: `/var/log/amoobot-backup.log`
 - هر فایل `<db>_<برچسب>_<UTC>.sql.gz` است. برچسب‌ها: `nightly`، `pre-deploy`، `pre-restore`. بکاپ ناقص هیچ‌وقت جایگزین فایل سالم نمی‌شود (هم `gzip -t` و هم بررسی خط `Dump completed`).
 - پسورد دیتابیس از طریق فایل option موقت با دسترسی `600` به mysqldump داده می‌شود و در لیست پروسه‌ها دیده نمی‌شود.
@@ -376,7 +391,9 @@ checker یک timer غیرفعال را `INACTIVE` گزارش می‌کند و `r
 | خطای certbot | DNS هنوز به سرور اشاره نمی‌کند یا پورت 80 بسته است |
 | `healthz` ← 503 | اتصال دیتابیس: `systemctl status mariadb`، و `/var/log/php8.4-fpm.log` و `/var/log/nginx/amoobot_error.log` (این شاخه monolog ندارد، پس خطاهای برنامه در لاگ PHP-FPM/nginx ثبت می‌شوند) |
 | بات جواب نمی‌دهد | `app:telegram:webhook-info` (خصوصی)، `/var/log/nginx/amoobot_error.log`، و اینکه پاسخ‌های 403 در access log نیامده باشند |
-| خطای migration | deploy متوقف می‌شود و کد جدید روی سرور است اما دیتابیس ناقص. یا مشکل را رفع و دوباره deploy کنید، یا طبق بخش ۴ Rollback کنید |
+| خطای migration | deploy متوقف می‌شود (کارهای زمان‌بندی‌شده متوقف می‌مانند) و دستور بازگردانی بکاپ `pre-deploy` همین deploy را چاپ می‌کند. کد جدید روی سرور است اما دیتابیس ناقص. یا مشکل را رفع و دوباره deploy کنید، یا طبق بخش ۴ Rollback کنید |
+| `up-to-date exit 2` | دیتابیس migrationهایی دارد که کد deploy‌شده ندارد (rollback به نسخه‌ی قدیمی‌تر از schema). نسخه‌ی جدیدتر را دوباره deploy کنید یا بکاپ `pre-deploy` مناسب را بازگردانی کنید (دستورها در خروجی deploy) |
+| `Refusing to deploy <کامیت>` | کامیت مقصد یکی از فایل‌های عملیاتی را ندارد یا قدیمی‌تر از ساختار `/usr/local/lib/amoobot` است. چیزی تغییر نکرده؛ کامیت جدیدتری انتخاب کنید |
 | هشدار «scheduled job FAILED» | `journalctl -u amoobot-job-<job> -n 50` و `/var/log/amoobot/<job>.log`. نتیجه‌ی `timeout` یعنی کار از `TimeoutStartSec` بیشتر طول کشیده (معمولاً پنل کند یا در دسترس نیست) |
 | کاری هیچ‌وقت اجرا نمی‌شود | `systemctl list-timers 'amoobot-job-*'`. اگر deploy قبلی شکست خورده باشد، timerها متوقف مانده‌اند. یک deploy موفق اجرا کنید |
 | هشدار نمی‌رسد | `systemctl status 'amoobot-job-alert@*'`: معمولاً `TELEGRAM_ADMIN_CHAT_ID` اشتباه است، یا بات در آن چت پیام نفرستاده/عضو نیست |

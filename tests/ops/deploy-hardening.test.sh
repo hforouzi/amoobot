@@ -254,6 +254,137 @@ else
   skip "$DRY_RUN_SKIP"
 fi
 
+echo "== path validation, migrations, backups, rollback (group 3)"
+set_globals
+load_fn valid_dir_path resolve_deploy_home
+for p in /var/www/amoobot /srv/amoobot /var/www/bot.example-2_x; do
+  check "APP_DIR $p accepted" valid_dir_path "$p" 'var/www|srv'
+done
+for p in / /var/www /var/www/ /var/www/.. /var/www/. /var/www/a/b /etc/amoobot "/var/www/a b" var/www/amoobot /var/www/amoobot/ '/var/www/$(id)'; do
+  check "APP_DIR '$p' rejected" not valid_dir_path "$p" 'var/www|srv'
+done
+check "BACKUP_DIR /var/backups/amoobot accepted" valid_dir_path /var/backups/amoobot 'var/backups|srv'
+check "BACKUP_DIR /var/backups/.. rejected" not valid_dir_path /var/backups/.. 'var/backups|srv'
+home_case() { ( getent() { printf 'deploy:x:1001:1001::%s:/bin/bash\n' "$HOME_FIELD"; }; die() { echo DIE; exit 1; }
+                HOME_FIELD="$1"; resolve_deploy_home; echo "$DEPLOY_HOME" ) }
+check "deploy home /home/deploy accepted" test "$(home_case /home/deploy)" = /home/deploy
+check "deploy home '/' refused (it is chowned)" test "$(home_case /)" = DIE
+check "deploy home /var/www refused" test "$(home_case /var/www)" = DIE
+
+if can_dry_run; then
+  for bad in /var/www/.. / /etc; do
+    { grep -v '^APP_DIR=' "$WORK/prod.env"; echo "APP_DIR=$bad"; } > "$WORK/badpath.env"
+    dry_run "$WORK/badpath.env"
+    check "dry-run with APP_DIR=$bad stops in the preflight, before any chown" bash -c \
+      '[[ $1 -ne 0 ]] && grep -q "APP_DIR must be" <<< "$2" && ! grep -q "chown" <<< "$2"' _ "$RC" "$OUT"
+  done
+  { cat "$WORK/prod.env"; echo "BACKUP_DIR=/var/backups/.."; } > "$WORK/badbackup.env"
+  dry_run "$WORK/badbackup.env"
+  check "BACKUP_DIR=/var/backups/.. is refused" bash -c '[[ $1 -ne 0 ]] && grep -q "BACKUP_DIR must be" <<< "$2"' _ "$RC" "$OUT"
+  OUT="$BASE_OUT"
+  check "apt-get upgrade is non-interactive and keeps local config files" grep -qF \
+    '[dry-run] env DEBIAN_FRONTEND=noninteractive apt-get -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold upgrade -y' <<< "$OUT"
+  check "old prod cache is removed as the web user, not root" grep -qF '[dry-run] sudo -H -u www-data -- rm -rf /var/www/amoobot/var/cache/prod' <<< "$OUT"
+  check "target ops files are verified before the jobs are paused" bash -c \
+    'v=$(grep -n "refuse it unless it has every root-owned ops file" <<< "$1" | cut -d: -f1); p=$(grep -n "pause scheduled jobs" <<< "$1" | cut -d: -f1); [[ -n $v && -n $p && $v -lt $p ]]' _ "$OUT"
+else
+  skip "$DRY_RUN_SKIP"
+fi
+
+# Step 11 (backup decision + post-migrate check), extracted from deploy.sh and run against stubs.
+STEP11="$(sed -n '/^PRE_DEPLOY_BACKUP_FILE=""$/,/^console lint:container$/p' "$ROOT/deploy.sh")"
+check "step 11 block found in deploy.sh" test -n "$STEP11"
+check "backup decision no longer depends on PREVIOUS_COMMIT" not grep -q 'PREVIOUS_COMMIT' <<< "$STEP11"
+load_fn restore_instructions
+mkdir -p "$WORK/sbin"
+printf '#!/usr/bin/env bash\necho "backup $*" >> "%s/calls"\necho "Backup written to /var/backups/amoobot/amoobot_pre-deploy_20261014T120000Z.sql.gz (12K)"\n' "$WORK" > "$WORK/sbin/amoobot-backup"
+chmod +x "$WORK/sbin/amoobot-backup"
+step11_case() {  # step11_case <pending 0|1> <tables> <migrate rc> <up-to-date --fail-on-unregistered rc>
+  ( set -e
+    die() { printf 'DIE: %s\n' "$*"; exit 1; }
+    console() {
+      echo "console $*" >> "$WORK/calls"
+      case "$*" in
+        "doctrine:migrations:up-to-date") return "$PENDING" ;;
+        "doctrine:migrations:migrate --allow-no-migration") return "$MIGRATE_RC" ;;
+        "doctrine:migrations:up-to-date --fail-on-unregistered") return "$UTD_RC" ;;
+      esac
+    }
+    database_table_count() { echo "table-count" >> "$WORK/calls"; echo "$TABLES"; }
+    DRY_RUN=0 PENDING="$1" TABLES="$2" MIGRATE_RC="$3" UTD_RC="$4" ROOT_SBIN_DIR="$WORK/sbin" DB_NAME=amoobot PHP_VERSION=8.4
+    PREVIOUS_COMMIT=abc123 TARGET_COMMIT=def456 BACKUP_DIR=/var/backups/amoobot
+    : > "$WORK/calls"
+    eval "$STEP11"
+    echo "REACHED-END backup=${PRE_DEPLOY_BACKUP_FILE}" ) 2>&1
+}
+out="$(step11_case 1 5 0 0)"
+check "pending + existing tables -> pre-deploy backup, then migrate" bash -c \
+  'grep -q "^backup pre-deploy$" "$1" && grep -q "REACHED-END backup=/var/backups/amoobot/amoobot_pre-deploy_20261014T120000Z.sql.gz" <<< "$2" &&
+   [[ $(grep -n "^backup" "$1" | cut -d: -f1) -lt $(grep -n "migrate --allow" "$1" | cut -d: -f1) ]]' _ "$WORK/calls" "$out"
+out="$(step11_case 1 0 0 0)"
+check "pending + empty database (first install) -> no backup" bash -c '! grep -q "^backup" "$1" && grep -q "REACHED-END" <<< "$2"' _ "$WORK/calls" "$out"
+out="$(step11_case 0 5 0 0)"
+check "nothing pending -> no backup, tables not even counted" bash -c '! grep -qE "^(backup|table-count)" "$1" && grep -q "REACHED-END" <<< "$2"' _ "$WORK/calls" "$out"
+out="$(step11_case 1 5 0 2)"
+check "up-to-date exit 2 (unregistered migrations) -> stop with restore instructions" bash -c \
+  'grep -q "DIE: The database has executed migrations that def456 does not contain" <<< "$1" &&
+   grep -q "sudo amoobot-restore /var/backups/amoobot/amoobot_pre-deploy_20261014T120000Z.sql.gz --yes" <<< "$1" &&
+   grep -q "Scheduled jobs stay PAUSED" <<< "$1" && ! grep -q REACHED-END <<< "$1"' _ "$out"
+check "  ...and it is checked with --fail-on-unregistered" grep -q 'up-to-date --fail-on-unregistered' "$WORK/calls"
+out="$(step11_case 0 5 0 2)"
+check "exit 2 without a backup this run -> instructions point at the latest pre-deploy dumps" bash -c \
+  'grep -q "ls -lt /var/backups/amoobot/amoobot_pre-deploy_\*.sql.gz" <<< "$1" && grep -q "amoobot-restore /var/backups/amoobot/amoobot_pre-deploy_<time>.sql.gz --yes" <<< "$1" &&
+   grep -q -- "--ref abc123" <<< "$1" && ! grep -qi "bad substitution" <<< "$1"' _ "$out"
+out="$(step11_case 0 5 0 1)"
+check "still pending after migrate (exit 1) -> stop" bash -c 'grep -q "DIE: Migrations are not up to date" <<< "$1" && ! grep -q REACHED-END <<< "$1"' _ "$out"
+out="$(step11_case 1 5 3 0)"
+check "failed migrate -> stop with restore instructions" bash -c 'grep -q "DIE: doctrine:migrations:migrate failed" <<< "$1" && grep -q amoobot-restore <<< "$1"' _ "$out"
+
+# --ref rollback: a target commit must contain every root-owned ops file (checked with git cat-file -e).
+if have git; then
+  load_fn git_blob verify_target_ops
+  eval "$(sed -n '/^ROOT_OPS_FILES=(/,/)$/p' "$ROOT/deploy.sh")"
+  R="$WORK/repo"; git init -q "$R"; git -C "$R" config user.email t@t; git -C "$R" config user.name t
+  for f in "${ROOT_OPS_FILES[@]}" bin/console; do mkdir -p "$R/$(dirname "$f")"; echo "# $f" > "$R/$f"; done
+  echo 'ROOT_LIB_DIR="/usr/local/lib/amoobot"' >> "$R/deploy.sh"
+  git -C "$R" add -A; git -C "$R" commit -qm good; GOOD="$(git -C "$R" rev-parse HEAD)"
+  sed -i 's#^ROOT_LIB_DIR=.*##' "$R/deploy.sh"; git -C "$R" commit -qam old-layout; OLD="$(git -C "$R" rev-parse HEAD)"
+  git -C "$R" rm -q bin/check-scheduled-jobs.sh; git -C "$R" commit -qm missing; MISSING="$(git -C "$R" rev-parse HEAD)"
+  verify_case() { ( sudo() { while (( $# )); do case "$1" in -H|-n) shift ;; -u) shift 2 ;; --) shift; break ;; *) break ;; esac; done; "$@"; }
+                    die() { printf 'DIE: %s\n' "$*"; exit 1; }
+                    APP_DIR="$R" DEPLOY_USER=deploy; verify_target_ops "$1" && echo OK ) 2>&1; }
+  check "target with every ops file and the root layout -> accepted" test "$(verify_case "$GOOD")" = OK
+  check "target missing an ops file -> refused, nothing paused" grep -q 'DIE: Refusing to deploy .* lacks bin/check-scheduled-jobs.sh. Nothing was paused' <<< "$(verify_case "$MISSING")"
+  check "target with a pre-hardening deploy.sh -> refused" grep -q 'DIE: Refusing to deploy .* predates the root-owned ops layout' <<< "$(verify_case "$OLD")"
+  check "the real pre-hardening commit 250ff44 would be refused" bash -c \
+    '! git -C "$1" show 250ff44:deploy.sh 2>/dev/null | grep -qx "ROOT_LIB_DIR=\"/usr/local/lib/amoobot\""' _ "$ROOT"
+  check "this checkout's deploy.sh carries the layout marker verify_target_ops looks for" \
+    grep -qx 'ROOT_LIB_DIR="/usr/local/lib/amoobot"' "$ROOT/deploy.sh"
+else
+  skip "rollback verification (git not installed)"
+fi
+
+# Backup rotation: only <db>_nightly_* dumps expire; pre-deploy / pre-restore / manual dumps are kept.
+if have php && have gzip; then
+  B="$WORK/backups"; mkdir -p "$B" "$WORK/fakebin"
+  printf '#!/usr/bin/env bash\necho "CREATE TABLE t (id int);"\necho "-- Dump completed on 2026-10-14"\n' > "$WORK/fakebin/mariadb-dump"
+  chmod +x "$WORK/fakebin/mariadb-dump"
+  for label in nightly pre-deploy pre-restore manual; do touch -d '30 days ago' "$B/amoobot_${label}_20260901T033000Z.sql.gz"; done
+  touch -d '30 days ago' "$B/otherdb_nightly_20260901T033000Z.sql.gz"
+  touch -d '2 days ago' "$B/amoobot_nightly_20261012T033000Z.sql.gz"
+  out="$(PATH="$WORK/fakebin:$PATH" DATABASE_URL='mysql://u:p@127.0.0.1:3306/amoobot' BACKUP_DIR="$B" BACKUP_RETENTION_DAYS=14 \
+    BACKUP_LABEL=nightly bash "$ROOT/bin/backup-database.sh" 2>&1)"; rc=$?
+  check "backup run succeeds with a stub dump" test "$rc" -eq 0
+  check "old nightly dump rotated out" test ! -e "$B/amoobot_nightly_20260901T033000Z.sql.gz"
+  check "recent nightly dump kept" test -e "$B/amoobot_nightly_20261012T033000Z.sql.gz"
+  for label in pre-deploy pre-restore manual; do
+    check "old ${label} dump is never rotated" test -e "$B/amoobot_${label}_20260901T033000Z.sql.gz"
+  done
+  check "another database's dumps are left alone" test -e "$B/otherdb_nightly_20260901T033000Z.sql.gz"
+else
+  skip "backup rotation (needs php and gzip)"
+fi
+
 echo
 echo "passed: $PASS  failed: $FAIL  skipped: $SKIP"
 (( FAIL == 0 ))
