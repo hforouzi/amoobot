@@ -194,6 +194,9 @@ sudo amoobot-deploy --app-only --ref v1.5.0
   کاربر `deploy` می‌نویسد (فایل موقت و `mv`، پس symlink جایگزین می‌شود نه دنبال)، پوشه‌های `var/` و `public/bundles` را مالک خودشان می‌سازد و
   `chmod` می‌کند و root فقط `chown -h` و `chown -R -h -P` اجرا می‌کند. اگر `~deploy/.ssh`، `authorized_keys`، `var/`، `public/`،
   `public/bundles` یا `.env.local.php` symlink باشد deploy **متوقف می‌شود**.
+- مقادیری که در فایل‌های root (cron، unitها، nginx، فایل option دیتابیس) نوشته می‌شوند قبل از هر کاری بررسی می‌شوند: `BACKUP_CRON` فقط پنج
+  فیلد از `0-9 * / , -` یا `@daily`/`@hourly`/`@weekly`؛ `PHP_VERSION` مثل `8.4`؛ `REPO_URL` فقط `git@...` یا `ssh://...` بدون فاصله، کوتیشن یا
+  کاراکتر کنترلی؛ نام کاربر و میزبان دیتابیس بدون کاراکتر کنترلی، `"` یا `\`، و پسورد بدون کاراکتر کنترلی.
 - مسیرها قبل از هر کاری بررسی می‌شوند: `APP_DIR` باید `/var/www/<نام>` یا `/srv/<نام>`، `BACKUP_DIR` باید `/var/backups/<نام>` یا
   `/srv/<نام>` و home کاربر deploy باید `/home/<نام>` باشد (این مسیرها با `chown -R`/`chmod -R`/`rm` استفاده می‌شوند).
 - `apt-get upgrade` غیرتعاملی است و فایل‌های پیکربندی تغییرکرده‌ی محلی (مثلاً sshd) را نگه می‌دارد (`--force-confdef --force-confold`).

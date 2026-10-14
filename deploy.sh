@@ -1032,6 +1032,16 @@ if [[ -n "${DEPLOY_SSH_PUBLIC_KEY:-}" ]]; then
   fi
 fi
 [[ "$BACKUP_RETENTION_DAYS" =~ ^[0-9]+$ ]] || die "BACKUP_RETENTION_DAYS must be a number."
+# BACKUP_CRON becomes the schedule of a root cron line: five plain fields or @daily/@hourly/@weekly, nothing else.
+backup_cron_re='^(@(daily|hourly|weekly)|([0-9*/,-]+ ){4}[0-9*/,-]+)$'
+[[ "$BACKUP_CRON" =~ $backup_cron_re ]] \
+  || die "BACKUP_CRON must be five cron fields of 0-9 * / , - (e.g. '30 3 * * *') or @daily/@hourly/@weekly (got '${BACKUP_CRON}')."
+# PHP_VERSION ends up in package names, unit paths and the nginx fastcgi socket path.
+[[ "$PHP_VERSION" =~ ^[0-9]+\.[0-9]+$ ]] || die "PHP_VERSION must look like 8.4 (got '${PHP_VERSION}')."
+# REPO_URL is fetched by root over SSH only: git@host:path or ssh://..., no spaces, quotes or control characters.
+repo_url_re='^(git@|ssh://)[^[:space:][:cntrl:]"'"'"'\\]+$'
+[[ "$REPO_URL" =~ $repo_url_re ]] \
+  || die "REPO_URL must be an SSH URL starting with git@ or ssh:// (no spaces, quotes or control characters)."
 # Validated before anything runs: these are used with recursive chown/chmod, rm and in root-owned scripts.
 valid_dir_path "$APP_DIR" 'var/www|srv' || die "APP_DIR must be /var/www/<name> or /srv/<name> (A-Z a-z 0-9 . _ -; got '${APP_DIR}')."
 valid_dir_path "$BACKUP_DIR" 'var/backups|srv' \

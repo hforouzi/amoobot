@@ -420,6 +420,54 @@ else
   skip "$DRY_RUN_SKIP"
 fi
 
+echo "== input validation: BACKUP_CRON, PHP_VERSION, REPO_URL, option-file values (group 6, 2nd review)"
+if can_dry_run; then
+  val_case() {  # val_case KEY VALUE -> RC, OUT
+    { grep -v "^$1=" "$WORK/prod.env"; printf '%s=%s\n' "$1" "$2"; } > "$WORK/val.env"; dry_run "$WORK/val.env"
+  }
+  for v in '30 3 * * *' '*/15 * * * *' '0 1,13 * * 1-5' '@daily' '@hourly' '@weekly'; do
+    val_case BACKUP_CRON "$v"; check "BACKUP_CRON '$v' accepted" test "$RC" -eq 0
+  done
+  for v in '30 3 * *' '30 3 * * * root touch /tmp/x #' '@reboot' '* * * * * ;id' "30 3 * * *\ty" 'a b c d e'; do
+    val_case BACKUP_CRON "$v"
+    check "BACKUP_CRON '$v' refused" bash -c '[[ $1 -ne 0 ]] && grep -q "BACKUP_CRON must be five cron fields" <<< "$2"' _ "$RC" "$OUT"
+  done
+  val_case BACKUP_CRON '15 4 * * 0'
+  check "accepted BACKUP_CRON is what the root cron line gets" grep -qF '+ 15 4 * * 0 root /usr/local/sbin/amoobot-backup nightly' <<< "$OUT"
+  for v in 8.4 8.3 10.0; do val_case PHP_VERSION "$v"; check "PHP_VERSION '$v' accepted" test "$RC" -eq 0; done
+  for v in '8' '8.4;' '8.4 nginx' '../8.4' '8.4.1' 'x.y'; do
+    val_case PHP_VERSION "$v"
+    check "PHP_VERSION '$v' refused" bash -c '[[ $1 -ne 0 ]] && grep -q "PHP_VERSION must look like 8.4" <<< "$2"' _ "$RC" "$OUT"
+  done
+  for v in git@github.com:hforouzi/amoobot.git ssh://git@github.com/hforouzi/amoobot.git ssh://git@git.example.com:2222/a/b.git; do
+    val_case REPO_URL "$v"; check "REPO_URL '$v' accepted" test "$RC" -eq 0
+  done
+  for v in '-oProxyCommand=x' 'https://github.com/hforouzi/amoobot.git' 'file:///tmp/repo' 'ext::sh -c x' '/srv/repo.git' 'git@github.com:a/b c.git' "git@github.com:a/b'.git" 'ssh://git@host/a"b'; do
+    val_case REPO_URL "$v"
+    check "REPO_URL '$v' refused" bash -c '[[ $1 -ne 0 ]] && grep -q "REPO_URL must be an SSH URL" <<< "$2"' _ "$RC" "$OUT"
+  done
+else
+  skip "$DRY_RUN_SKIP"
+fi
+if have php; then
+  opt_case() {  # opt_case DATABASE_URL -> output, rc; the options file is printed when written
+    env -u DATABASE_URL bash -c 'source "$1"; DATABASE_URL="$2" load_database_url /nonexistent; write_db_options_file; cat "$DB_OPTS_FILE"; rm -f "$DB_OPTS_FILE"' \
+      _ "$ROOT/bin/lib/database-url.sh" "$1" 2>&1
+  }
+  out="$(opt_case 'mysql://app:p%22w%5Cd@db.internal:3307/amoobot')"
+  check "option file: normal user/host, password quote and backslash escaped" bash -c \
+    'grep -qx "user=\"app\"" <<< "$1" && grep -qx "host=\"db.internal\"" <<< "$1" && grep -qxF "password=\"p\\\"w\\\\d\"" <<< "$1" && grep -qx "port=3307" <<< "$1"' _ "$out"
+  for u in 'a%0Ahost%3Devil' 'a%22b' 'a%5Cb' 'a%09b'; do
+    out="$(opt_case "mysql://${u}:pw@127.0.0.1:3306/amoobot")"; rc=$?
+    check "option file: user '${u}' (control char/quote/backslash) refused, nothing written" bash -c \
+      '[[ $1 -ne 0 ]] && grep -q "contains a control character, quote or backslash" <<< "$2" && ! grep -q "^\[client\]" <<< "$2"' _ "$rc" "$out"
+  done
+  out="$(opt_case 'mysql://app:pw%0Aplugin-dir%3D%2Ftmp@127.0.0.1:3306/amoobot')"; rc=$?
+  check "option file: a newline in the password is refused" bash -c '[[ $1 -ne 0 ]] && grep -q "password contains a control character" <<< "$2"' _ "$rc" "$out"
+else
+  skip "option-file value tests (php not installed)"
+fi
+
 echo "== path validation, migrations, backups, rollback (group 3)"
 set_globals
 load_fn valid_dir_path resolve_deploy_home
