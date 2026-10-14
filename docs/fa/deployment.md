@@ -33,7 +33,7 @@
 | 9 | ساخت `.env.prod.local` (600) و `.env.local.php` (`composer dump-env prod`) داخل پوشه‌ی برنامه |
 | 10 | دسترسی‌ها: کد متعلق به `deploy`، فقط‌خواندنی برای `www-data`؛ `var/` قابل نوشتن برای `www-data` |
 | 11 | پاک کردن کش، warmup، **بکاپ قبل از migration** (اگر migration جدید باشد)، اجرای همه‌ی migrationها (خطا = توقف)، `lint:container` |
-| 12–13 | پیکربندی Nginx، گواهی Let's Encrypt با تمدید خودکار (`certbot.timer`) و ریدایرکت HTTP به HTTPS |
+| 12–13 | پیکربندی Nginx (IPv4 و در صورت وجود IPv6)، گواهی Let's Encrypt با تمدید خودکار (`certbot.timer`) و ریدایرکت HTTP به HTTPS. تا وقتی گواهی نیست، پورت 80 فقط `/.well-known/acme-challenge/` را سرو می‌کند و بقیه 503 است. HSTS فقط بعد از موفقیت `https://DOMAIN/healthz` در مرحله‌ی 18 |
 | 14 | worker پیام‌رسان فقط وقتی transport به نام `async` تعریف شده باشد (فعلاً تعریف نشده، پس نصب نمی‌شود) |
 | 15 | cron بکاپ شبانه |
 | 16 | نصب کارهای زمان‌بندی‌شده (systemd timer) و ادامه دادن آن‌ها (بخش ۸). از قبل از checkout در مرحله‌ی 7 تا این مرحله متوقف هستند |
@@ -154,6 +154,22 @@ sudo amoobot-deploy --app-only --ref v1.5.0
 - اگر فایل‌های tracked روی سرور دستی تغییر کرده باشند، اسکریپت متوقف می‌شود (هیچ تغییری روی سرور دور ریخته نمی‌شود).
 - اجرای کامل (بدون `--app-only`) بسته‌های سیستم را هم به‌روز می‌کند؛ هر چند وقت یک‌بار در زمان کم‌ترافیک انجام دهید.
 
+### Nginx، HTTPS و محافظت از پنل ادمین
+
+- **قبل از گواهی:** پیکربندی موقت پورت 80 فقط چالش ACME (`/.well-known/acme-challenge/`، پوشه‌ی `/var/www/letsencrypt`) را جواب می‌دهد و هر
+  مسیر دیگر `503` است؛ برنامه هیچ‌وقت روی HTTP ساده سرو نمی‌شود.
+- **IPv6:** اگر کرنل IPv6 دارد (`/proc/net/if_inet6`)، `listen [::]:80` و `listen [::]:443 ssl` هم اضافه می‌شوند. برای رکورد AAAA لازم است.
+- **HSTS:** `Strict-Transport-Security: max-age=31536000` (بدون `includeSubDomains`) فقط وقتی فرستاده می‌شود که مرحله‌ی 18 یک‌بار
+  `https://DOMAIN/healthz` را با گواهی معتبر با موفقیت گرفته باشد (فایل وضعیت `/var/lib/amoobot/hsts-enabled`). بعد از آن مرورگرها یک سال
+  فقط با HTTPS وصل می‌شوند؛ اگر دامنه را عوض می‌کنید یا HTTPS را برمی‌دارید این را در نظر بگیرید.
+- **Webhook در access log نیست:** location `^~ /telegram/webhook/` با `access_log off` و مستقیم به PHP-FPM (بدون try_files، تا
+  redirect داخلی به `index.php` دوباره لاگ نشود). رمز URL پس در `/var/log/nginx/amoobot_access.log` نمی‌آید.
+- **ورود ادمین:** سیمفونی `login_throttling` (۵ تلاش ناموفق در ۱۵ دقیقه برای هر ایمیل+IP، و ۲۵ برای هر IP) و nginx
+  `limit_req` برای `= /admin/login` (۱۰ درخواست در دقیقه برای هر IP، burst ۱۰، پاسخ `429`).
+- **`ADMIN_ALLOW_IPS` (اختیاری):** فهرست IP یا CIDR (IPv4/IPv6، جدا با کاما). اگر پر باشد فقط همین‌ها به `/admin` و `/admin/login` دسترسی دارند
+  (بقیه `403`). خالی (پیش‌فرض) یعنی بدون محدودیت IP. پشت CDN یا reverse proxy، nginx آدرس proxy را می‌بیند؛ در آن حالت این
+  تنظیم و `limit_req` هر دو روی IP proxy کار می‌کنند، پس یا خالی بگذارید یا real_ip را جداگانه تنظیم کنید.
+
 ---
 
 ## ۴. Rollback
@@ -245,6 +261,8 @@ curl -fsS https://DOMAIN/healthz
 - [ ] `sudo -u www-data php /var/www/amoobot/bin/console about --env=prod` ← Environment `prod` و Debug `false`
 - [ ] `curl -fsS https://DOMAIN/healthz` ← `{"status":"ok"}`
 - [ ] `curl -I http://DOMAIN` ← ریدایرکت 301 به https
+- [ ] `curl -sI https://DOMAIN/healthz | grep -i strict-transport` بعد از اولین deploy موفق، هدر HSTS را نشان می‌دهد
+- [ ] `grep -c telegram/webhook /var/log/nginx/amoobot_access.log` ← `0`
 - [ ] `doctrine:migrations:up-to-date` موفق است
 - [ ] MariaDB: `sudo mysql -N -e 'SELECT @@GLOBAL.sql_mode'` ← `STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION`
 - [ ] ادمین ساخته شده و ورود به `/admin` کار می‌کند
@@ -396,7 +414,8 @@ checker یک timer غیرفعال را `INACTIVE` گزارش می‌کند و `r
 | توقف در مرحله‌ی 7 | deploy key در GitHub ثبت نشده است. کلید چاپ‌شده را اضافه کنید |
 | خطای certbot | DNS هنوز به سرور اشاره نمی‌کند یا پورت 80 بسته است |
 | `healthz` ← 503 | اتصال دیتابیس: `systemctl status mariadb`، و `/var/log/php8.4-fpm.log` و `/var/log/nginx/amoobot_error.log` (این شاخه monolog ندارد، پس خطاهای برنامه در لاگ PHP-FPM/nginx ثبت می‌شوند) |
-| بات جواب نمی‌دهد | `app:telegram:webhook-info` (خصوصی)، `/var/log/nginx/amoobot_error.log`، و اینکه پاسخ‌های 403 در access log نیامده باشند |
+| بات جواب نمی‌دهد | `app:telegram:webhook-info` (خصوصی؛ `last_error_message` مثلاً `403` یا `503` را نشان می‌دهد) و `/var/log/nginx/amoobot_error.log`. درخواست‌های `/telegram/webhook/` عمداً در access log **ثبت نمی‌شوند** (URL رمز را دارد)؛ error log ممکن است در خطاهای upstream آدرس را داشته باشد، پس آن را هم جایی کپی نکنید |
+| `/admin/login` پاسخ 429 یا 403 می‌دهد | 429: محدودیت nginx (۱۰ درخواست در دقیقه برای هر IP، با burst ۱۰). پیام «Too many failed login attempts»: `login_throttling` سیمفونی (۵ تلاش ناموفق در ۱۵ دقیقه برای هر ایمیل+IP)؛ ۱۵ دقیقه صبر کنید. 403: IP شما در `ADMIN_ALLOW_IPS` نیست |
 | خطای migration | deploy متوقف می‌شود (کارهای زمان‌بندی‌شده متوقف می‌مانند) و دستور بازگردانی بکاپ `pre-deploy` همین deploy را چاپ می‌کند. کد جدید روی سرور است اما دیتابیس ناقص. یا مشکل را رفع و دوباره deploy کنید، یا طبق بخش ۴ Rollback کنید |
 | Webhook یا `/payment/` پاسخ 503 می‌دهد | deploy قبلی وسط کار شکست خورده و حالت نگهداری مانده است (پیام `still answer 503` در خروجی). مشکل را رفع و `sudo amoobot-deploy --app-only` را اجرا کنید، یا اگر نسخه‌ی فعلی سالم است با root: `printf '' > /etc/nginx/snippets/amoobot-maintenance.conf && nginx -t && systemctl reload nginx` |
 | `up-to-date exit 2` | دیتابیس migrationهایی دارد که کد deploy‌شده ندارد (rollback به نسخه‌ی قدیمی‌تر از schema). نسخه‌ی جدیدتر را دوباره deploy کنید یا بکاپ `pre-deploy` مناسب را بازگردانی کنید (دستورها در خروجی deploy) |

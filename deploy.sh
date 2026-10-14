@@ -46,6 +46,10 @@ DB_URL_FILE="/etc/amoobot/database.env"
 # Included by the /telegram/webhook/ and /payment/ locations: "return 503" while a deploy changes code, cache and schema.
 NGINX_SITE="/etc/nginx/sites-available/amoobot"
 NGINX_MAINTENANCE_FILE="/etc/nginx/snippets/amoobot-maintenance.conf"
+# ACME http-01 webroot (the port-80 server serves nothing else before the certificate exists).
+ACME_WEBROOT="/var/www/letsencrypt"
+# HSTS is sent only after this deploy (or an earlier one) has verified https://DOMAIN/healthz end to end.
+HSTS_STATE_FILE="${STATE_DIR}/hsts-enabled"
 
 # Scheduled jobs, installed as systemd timers in step 16 (intervals and reasons: docs/fa/automation.md).
 #   name | lock group | OnCalendar | timeout (s) | interval (s) | console command
@@ -67,6 +71,7 @@ JOBS_MANIFEST="${STATE_DIR}/scheduled-jobs.conf"
 # Keys used only by this script; never written into the application's env.
 DEPLOY_ONLY_KEYS=" DOMAIN LETSENCRYPT_EMAIL REPO_URL APP_DIR PHP_VERSION DEPLOY_USER DEPLOY_REF DEPLOY_SSH_PUBLIC_KEY "
 DEPLOY_ONLY_KEYS+="SSH_PERMIT_ROOT_LOGIN DB_NAME DB_USER DB_PASSWORD BACKUP_DIR BACKUP_RETENTION_DAYS BACKUP_CRON "
+DEPLOY_ONLY_KEYS+="ADMIN_ALLOW_IPS "
 # Application keys that may also come from the process environment instead of the env file.
 APP_KEYS="APP_SECRET APP_DEFAULT_LOCALE APP_SHARE_DIR DEFAULT_URI DATABASE_URL MESSENGER_TRANSPORT_DSN
  TELEGRAM_BOT_TOKEN TELEGRAM_WEBHOOK_SECRET TELEGRAM_WEBHOOK_SECRET_TOKEN TELEGRAM_ADMIN_CHAT_ID TELEGRAM_PROXY
@@ -302,6 +307,28 @@ maintenance_instructions() {
     Or, if the running release is fine, lift it by hand (as root):
       printf '' > ${NGINX_MAINTENANCE_FILE} && nginx -t && systemctl reload nginx
 EOF
+}
+
+# valid_ip_or_cidr VALUE  ->  0 for an IPv4/IPv6 address, optionally with a /prefix (used in nginx allow rules)
+valid_ip_or_cidr() {
+  local ip="${1%%/*}" bits="" o
+  if [[ "$1" == */* ]]; then bits="${1#*/}"; [[ "$bits" =~ ^[0-9]{1,3}$ ]] || return 1; fi
+  if [[ "$ip" =~ ^([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})$ ]]; then
+    for o in "${BASH_REMATCH[@]:1}"; do (( 10#$o <= 255 )) || return 1; done
+    [[ -z "$bits" ]] || (( 10#$bits <= 32 ))
+  elif [[ "$ip" =~ ^[0-9A-Fa-f:]+$ && "$ip" == *:* ]]; then
+    [[ -z "$bits" ]] || (( 10#$bits <= 128 ))
+  else
+    return 1
+  fi
+}
+
+# admin_access_rules  ->  nginx allow/deny lines for ADMIN_ALLOW_LIST (nothing when empty = no IP restriction)
+admin_access_rules() {
+  local ip
+  (( ${#ADMIN_ALLOW_LIST[@]} )) || return 0
+  for ip in "${ADMIN_ALLOW_LIST[@]}"; do printf '        allow %s;\n' "$ip"; done
+  printf '        deny all;\n'
 }
 
 # valid_dir_path PATH PARENTS_RE  ->  0 for exactly /<parent>/<one name>, never "/", ".." or a system directory
@@ -663,6 +690,7 @@ BACKUP_DIR="${BACKUP_DIR:-$DEFAULT_BACKUP_DIR}"
 BACKUP_RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-$DEFAULT_BACKUP_RETENTION_DAYS}"
 BACKUP_CRON="${BACKUP_CRON:-$DEFAULT_BACKUP_CRON}"
 SSH_PERMIT_ROOT_LOGIN="${SSH_PERMIT_ROOT_LOGIN:-prohibit-password}"
+ADMIN_ALLOW_IPS="${ADMIN_ALLOW_IPS:-}"
 LETSENCRYPT_EMAIL="${LETSENCRYPT_EMAIL:-admin@${DOMAIN}}"
 
 # APP_ENV / APP_DEBUG are enforced: anything other than prod / 0 is a hard error, never silently accepted.
@@ -707,6 +735,13 @@ fi
 valid_dir_path "$APP_DIR" 'var/www|srv' || die "APP_DIR must be /var/www/<name> or /srv/<name> (A-Z a-z 0-9 . _ -; got '${APP_DIR}')."
 valid_dir_path "$BACKUP_DIR" 'var/backups|srv' \
   || die "BACKUP_DIR must be /var/backups/<name> or /srv/<name> (A-Z a-z 0-9 . _ -; got '${BACKUP_DIR}')."
+# Optional: only these addresses/networks may reach /admin (comma or space separated). Empty = no IP restriction.
+ADMIN_ALLOW_LIST=()
+read -ra admin_ips <<< "${ADMIN_ALLOW_IPS//,/ }"
+for ip in "${admin_ips[@]}"; do
+  valid_ip_or_cidr "$ip" || die "ADMIN_ALLOW_IPS: '${ip}' is not an IPv4/IPv6 address or CIDR."
+  ADMIN_ALLOW_LIST+=("$ip")
+done
 [[ "$TELEGRAM_BOT_TOKEN" =~ ^[0-9]+:[A-Za-z0-9_-]{30,}$ ]] || die "TELEGRAM_BOT_TOKEN does not look like a BotFather token."
 [[ "$TELEGRAM_ADMIN_CHAT_ID" =~ ^-?[0-9]+$ ]] || die "TELEGRAM_ADMIN_CHAT_ID must be numeric."
 (( ${#APP_SECRET} >= 32 )) || die "APP_SECRET must be at least 32 characters."
@@ -1147,8 +1182,28 @@ set_maintenance off
 step "12/18" "Configuring Nginx..."
 
 CERT_DIR="/etc/letsencrypt/live/${DOMAIN}"
+# IPv6 listeners only where the kernel has IPv6 (nginx refuses to start on "listen [::]" otherwise).
+NGINX_IPV6=0
+[[ -e /proc/net/if_inet6 ]] && NGINX_IPV6=1
 
-# The application locations; shared by the HTTP-only bootstrap config and the HTTPS config.
+# listen_lines PORT [ssl]  ->  "listen PORT;" plus the IPv6 listener when available
+listen_lines() {
+  printf '    listen %s%s;\n' "$1" "${2:+ $2}"
+  (( NGINX_IPV6 )) && printf '    listen [::]:%s%s;\n' "$1" "${2:+ $2}"
+  return 0
+}
+
+# ACME http-01 challenges (certbot's nginx plugin adds exact-match locations for its tokens; the webroot serves files).
+acme_location() {
+  cat <<EOF
+    location ^~ /.well-known/acme-challenge/ {
+        root ${ACME_WEBROOT};
+        default_type text/plain;
+    }
+EOF
+}
+
+# The application locations of the HTTPS server.
 app_locations() {
   cat <<EOF
     root ${APP_DIR}/public;
@@ -1166,9 +1221,11 @@ app_locations() {
         try_files \$uri /index.php\$is_args\$args;
     }
 
-    # 503 + Retry-After while a deploy runs (${NGINX_MAINTENANCE_FILE}); Telegram retries the update.
+    # The URL contains TELEGRAM_WEBHOOK_SECRET, so these requests are never written to the access log.
     # fastcgi directly (no try_files): an internal redirect to /index.php would be logged by that location instead.
+    # 503 + Retry-After while a deploy runs (${NGINX_MAINTENANCE_FILE}); Telegram retries the update.
     location ^~ /telegram/webhook/ {
+        access_log off;
         include ${NGINX_MAINTENANCE_FILE};
         fastcgi_pass unix:/run/php/php${PHP_VERSION}-fpm.sock;
         include fastcgi_params;
@@ -1183,20 +1240,40 @@ app_locations() {
         try_files \$uri /index.php\$is_args\$args;
     }
 
-    location ~ ^/index\\.php(/|\$) {
+    # Admin login: rate-limited here as well as by Symfony's login_throttling (5 failures / 15 min).
+    location = /admin/login {
+        limit_req zone=amoobot_admin_login burst=10 nodelay;
+        limit_req_status 429;
+$(admin_access_rules)
+        try_files \$uri /index.php\$is_args\$args;
+    }
+EOF
+  if (( ${#ADMIN_ALLOW_LIST[@]} )); then
+    cat <<EOF
+
+    # ADMIN_ALLOW_IPS: only these addresses may reach the admin panel.
+    location ^~ /admin {
+$(admin_access_rules)
+        try_files \$uri /index.php\$is_args\$args;
+    }
+EOF
+  fi
+  cat <<EOF
+
+    location ~ ^/index\.php(/|\$) {
         fastcgi_pass unix:/run/php/php${PHP_VERSION}-fpm.sock;
-        fastcgi_split_path_info ^(.+\\.php)(/.*)\$;
+        fastcgi_split_path_info ^(.+\.php)(/.*)\$;
         include fastcgi_params;
         fastcgi_param SCRIPT_FILENAME \$realpath_root\$fastcgi_script_name;
         fastcgi_param DOCUMENT_ROOT \$realpath_root;
         internal;
     }
 
-    location ~ \\.php\$ {
+    location ~ \.php\$ {
         return 404;
     }
 
-    location ~ /\\. {
+    location ~ /\. {
         deny all;
     }
 
@@ -1206,22 +1283,28 @@ EOF
 }
 
 render_nginx() {
+  local hsts=""
+  # Only after HTTPS was verified (step 18); without includeSubDomains, other hosts of the domain are not affected.
+  [[ -e "$HSTS_STATE_FILE" ]] && hsts='    add_header Strict-Transport-Security "max-age=31536000" always;'
   if [[ -f "$CERT_DIR/fullchain.pem" ]]; then
     cat <<EOF
 # Managed by amoobot deploy.sh
+limit_req_zone \$binary_remote_addr zone=amoobot_admin_login:10m rate=10r/m;
+
 server {
-    listen 80;
+$(listen_lines 80)
     server_name ${DOMAIN};
     server_tokens off;
 
-    # Inside a location (not at server level) so certbot's ACME challenge location still wins on renewal.
+$(acme_location)
+
     location / {
         return 301 https://\$host\$request_uri;
     }
 }
 
 server {
-    listen 443 ssl;
+$(listen_lines 443 ssl)
     server_name ${DOMAIN};
 
     ssl_certificate ${CERT_DIR}/fullchain.pem;
@@ -1230,18 +1313,26 @@ server {
     ssl_prefer_server_ciphers off;
     ssl_session_cache shared:amoobot_ssl:10m;
     ssl_session_timeout 1d;
+${hsts}
 
 $(app_locations)
 }
 EOF
   else
+    # Before the certificate exists nothing is served over plain HTTP except the ACME challenge.
     cat <<EOF
-# Managed by amoobot deploy.sh (HTTP only until the certificate exists)
+# Managed by amoobot deploy.sh (no certificate yet: only ACME challenges are served, everything else is 503)
 server {
-    listen 80;
+$(listen_lines 80)
     server_name ${DOMAIN};
+    server_tokens off;
 
-$(app_locations)
+$(acme_location)
+
+    location / {
+        add_header Retry-After 300 always;
+        return 503;
+    }
 }
 EOF
   fi
@@ -1250,6 +1341,7 @@ EOF
 apply_nginx() {
   # The site includes the maintenance file, so it must exist (normally "off" here) before nginx -t.
   [[ -f "$NGINX_MAINTENANCE_FILE" ]] || render_maintenance off | write_file "$NGINX_MAINTENANCE_FILE" 644 root:root
+  run install -d -m 755 -o root -g root "$ACME_WEBROOT"
   render_nginx | write_file "$NGINX_SITE" 644 root:root --show-diff
   run ln -sf "$NGINX_SITE" /etc/nginx/sites-enabled/amoobot
   run rm -f /etc/nginx/sites-enabled/default
@@ -1455,6 +1547,15 @@ if (( ! DRY_RUN )); then
     (( i == 5 )) && die "https://${DOMAIN}/healthz did not return 200; see ${APP_DIR}/var/log and /var/log/nginx/amoobot_error.log."
     sleep 3
   done
+  # HTTPS works end to end (certificate validated by curl): from now on browsers may be told to use HTTPS only.
+  if [[ ! -e "$HSTS_STATE_FILE" ]]; then
+    install -d -m 755 "$STATE_DIR"
+    touch "$HSTS_STATE_FILE"
+    apply_nginx
+    log "HTTPS verified: HSTS enabled (Strict-Transport-Security max-age=31536000; state: ${HSTS_STATE_FILE})."
+  fi
+else
+  log "[dry-run] after https://${DOMAIN}/healthz returns 200: enable HSTS (${HSTS_STATE_FILE}) and reload nginx"
 fi
 
 console app:plugin:list || true

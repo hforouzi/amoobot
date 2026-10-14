@@ -404,7 +404,8 @@ echo "== webhook/payment maintenance during the deploy (group 4)"
 set_globals
 NGINX_SITE=/etc/nginx/sites-available/amoobot NGINX_MAINTENANCE_FILE=/etc/nginx/snippets/amoobot-maintenance.conf
 PHP_VERSION=8.4 DOMAIN=bot.example.test CERT_DIR="$WORK/no-cert"
-load_fn render_maintenance set_maintenance maintenance_instructions on_exit app_locations render_nginx
+ADMIN_ALLOW_LIST=() NGINX_IPV6=0   # deploy.sh's preflight always sets these
+load_fn render_maintenance set_maintenance maintenance_instructions on_exit app_locations render_nginx admin_access_rules listen_lines acme_location
 check "maintenance on = 503 with Retry-After" bash -c '[[ "$1" == *"add_header Retry-After 120 always;"*"return 503;"* ]]' _ "$(render_maintenance on)"
 check "maintenance off = no directives" not grep -qE 'return|add_header' <<< "$(render_maintenance off)"
 APP_LOC="$(app_locations)"
@@ -455,12 +456,15 @@ fi
 
 # Real nginx (only where an nginx binary runs, e.g. Laragon on Windows): render the site, point it at a scratch prefix
 # on 127.0.0.1, and check the actual responses. PHP-FPM is not running, so passing through to PHP shows up as 502.
-NGX_PID=""
+NGX_MASTER="" NGX_N=0
 ngx_ok() { have nginx && have curl && nginx -v > /dev/null 2>&1; }
 ngx_path() { if have cygpath; then cygpath -m "$1"; else printf '%s' "$1"; fi; }
-# ngx_prepare  -> fresh scratch prefix NGX (NGXW = the path as nginx sees it) and a free-ish port NGX_PORT
+# Windows nginx PIDs are Windows PIDs: check/kill them with tasklist/taskkill there, kill elsewhere.
+ngx_alive() { if have taskkill; then tasklist //FI "PID eq $1" 2> /dev/null | grep -qi nginx; else kill -0 "$1" 2> /dev/null; fi; }
+ngx_kill() { if have taskkill; then taskkill //F //T //PID "$1" > /dev/null 2>&1; else kill "$1" 2> /dev/null; fi; }
+# ngx_prepare  -> a NEW scratch prefix NGX per instance (NGXW = the path as nginx sees it) and a free-ish port NGX_PORT
 ngx_prepare() {
-  NGX="$WORK/ngx"; rm -rf "$NGX"; mkdir -p "$NGX/logs" "$NGX/temp" "$NGX/conf" "$NGX/public" "$NGX/acme"
+  NGX_N=$((NGX_N + 1)); NGX="$WORK/ngx$NGX_N"; mkdir -p "$NGX/logs" "$NGX/temp" "$NGX/conf" "$NGX/public" "$NGX/acme"
   NGXW="$(ngx_path "$NGX")"; NGX_PORT=$((20000 + RANDOM % 20000))
   render_maintenance off > "$NGX/conf/maint.conf"
 }
@@ -477,12 +481,23 @@ $1
 }
 EOF
   nginx -p "${NGXW}/" -c "${NGXW}/conf/nginx.conf" -t > "$NGX/t.out" 2>&1 || return 1
+  rm -f "$NGX/logs/nginx.pid"
   ( cd "$NGX" && nginx -p "${NGXW}/" -c "${NGXW}/conf/nginx.conf" > /dev/null 2>&1 & )
-  for _ in 1 2 3 4 5 6 7 8 9 10; do curl -s -o /dev/null "http://127.0.0.1:${NGX_PORT}/" && return 0; sleep 0.3; done
+  for _ in $(seq 1 20); do [[ -s "$NGX/logs/nginx.pid" ]] && break; sleep 0.2; done
+  NGX_MASTER="$(tr -dc 0-9 < "$NGX/logs/nginx.pid" 2> /dev/null)"
+  for _ in $(seq 1 15); do curl -s -m 2 -o /dev/null "http://127.0.0.1:${NGX_PORT}/ready-probe.php" && return 0; sleep 0.3; done
+  ngx_stop
   return 1
 }
-ngx_stop() { [[ -n "${NGXW:-}" ]] && nginx -p "${NGXW}/" -c "${NGXW}/conf/nginx.conf" -s quit > /dev/null 2>&1; sleep 0.5; }
-trap 'ngx_stop; rm -rf "$WORK"' EXIT
+# ngx_stop  graceful quit, then force-kill the master's process tree if it is still there after ~5 s
+ngx_stop() {
+  [[ -n "${NGX_MASTER:-}" ]] || return 0
+  nginx -p "${NGXW}/" -c "${NGXW}/conf/nginx.conf" -s quit > /dev/null 2>&1
+  for _ in $(seq 1 25); do ngx_alive "$NGX_MASTER" || break; sleep 0.2; done
+  ngx_alive "$NGX_MASTER" && ngx_kill "$NGX_MASTER"
+  NGX_MASTER=""
+}
+trap 'ngx_stop; if [[ -n "${KEEP_WORK:-}" ]]; then echo "kept $WORK"; else rm -rf "$WORK"; fi' EXIT
 # ngx_site TEXT  ->  TEXT with server paths replaced by the scratch prefix and listen on 127.0.0.1:NGX_PORT
 ngx_site() {
   sed -e "s#/etc/nginx/snippets/amoobot-maintenance.conf#${NGXW}/conf/maint.conf#g" \
@@ -490,10 +505,11 @@ ngx_site() {
       -e "s#/var/www/amoobot/public#${NGXW}/public#g" -e "s#/var/www/letsencrypt#${NGXW}/acme#g" \
       -e "/listen \[::\]/d" -e "s#listen 80;#listen 127.0.0.1:${NGX_PORT};#" <<< "$1"
 }
-code() { curl -s -o /dev/null -w '%{http_code}' "$@"; }
+code() { curl -s -m 5 -o /dev/null -w '%{http_code}' "$@"; }
 if ngx_ok; then
   ngx_prepare
-  site="server {
+  site="limit_req_zone \$binary_remote_addr zone=amoobot_admin_login:10m rate=10r/m;
+server {
     listen 80;
     server_name localhost;
 $(app_locations)
@@ -501,7 +517,7 @@ $(app_locations)
   if ngx_start "$(ngx_site "$site")"; then
     render_maintenance on > "$NGX/conf/maint.conf"; ngx_reload
     check "nginx: webhook answers 503 during maintenance" test "$(code -X POST "http://127.0.0.1:${NGX_PORT}/telegram/webhook/abc")" = 503
-    check "nginx: ...with Retry-After" grep -qi '^Retry-After: 120' <<< "$(curl -s -D - -o /dev/null -X POST "http://127.0.0.1:${NGX_PORT}/telegram/webhook/abc")"
+    check "nginx: ...with Retry-After" grep -qi '^Retry-After: 120' <<< "$(curl -s -m 5 -D - -o /dev/null -X POST "http://127.0.0.1:${NGX_PORT}/telegram/webhook/abc")"
     check "nginx: payment callback answers 503 during maintenance" test "$(code "http://127.0.0.1:${NGX_PORT}/payment/callback/zibal")" = 503
     check "nginx: other pages are not affected" test "$(code "http://127.0.0.1:${NGX_PORT}/admin/login")" != 503
     render_maintenance off > "$NGX/conf/maint.conf"; ngx_reload
@@ -513,6 +529,155 @@ $(app_locations)
   fi
 else
   skip "real nginx checks (no runnable nginx binary)"
+fi
+
+echo "== nginx, HTTPS and admin protection (group 5)"
+set_globals
+NGINX_MAINTENANCE_FILE=/etc/nginx/snippets/amoobot-maintenance.conf ACME_WEBROOT=/var/www/letsencrypt PHP_VERSION=8.4 DOMAIN=bot.example.test
+HSTS_STATE_FILE="$WORK/hsts-enabled" CERT_DIR="$WORK/cert"; mkdir -p "$CERT_DIR"
+ADMIN_ALLOW_LIST=() NGINX_IPV6=0
+load_fn valid_ip_or_cidr admin_access_rules listen_lines acme_location app_locations render_nginx render_maintenance
+for ip in 203.0.113.7 10.0.0.0/8 192.168.1.0/24 0.0.0.0/0 2001:db8::1 2001:db8::/32 ::1; do check "ADMIN_ALLOW_IPS entry $ip accepted" valid_ip_or_cidr "$ip"; done
+for ip in 256.1.1.1 1.2.3 1.2.3.4/33 1.2.3.4/ 2001:db8::/129 example.com 'all;' '1.2.3.4;deny' '*' ''; do check "ADMIN_ALLOW_IPS entry '$ip' rejected" not valid_ip_or_cidr "$ip"; done
+
+BOOT="$(render_nginx)"   # no certificate yet
+check "bootstrap (before certbot): only the ACME challenge location and a 503 catch-all" bash -c \
+  '[[ $(grep -c "location " <<< "$1") -eq 2 ]] && grep -q "location ^~ /.well-known/acme-challenge/ {" <<< "$1" &&
+   grep -q "return 503;" <<< "$1" && ! grep -qE "fastcgi_pass|try_files|/telegram|/payment" <<< "$1"' _ "$BOOT"
+touch "$CERT_DIR/fullchain.pem"
+HTTPS="$(render_nginx)"
+WEBHOOK_BLOCK="$(block '\/telegram\/webhook\/' "$HTTPS")"
+check "webhook location: access_log off (the URL holds the secret)" grep -q '^        access_log off;$' <<< "$WEBHOOK_BLOCK"
+check "port 80 keeps ACME challenges reachable and redirects the rest" bash -c \
+  'sed -n "/^server {/,/^}/p" <<< "$1" | head -20 | grep -q "acme-challenge" && grep -q "return 301 https://\$host\$request_uri;" <<< "$1"' _ "$HTTPS"
+check "no IPv6 on the host -> no [::] listeners" not grep -q 'listen \[::\]' <<< "$HTTPS"
+NGINX_IPV6=1
+check "IPv6 on the host -> [::]:80 and [::]:443 ssl listeners" bash -c \
+  'grep -q "^    listen \[::\]:80;$" <<< "$1" && grep -q "^    listen \[::\]:443 ssl;$" <<< "$1" && grep -q "^    listen 443 ssl;$" <<< "$1"' _ "$(render_nginx)"
+check "  ...also on the bootstrap config" grep -q '^    listen \[::\]:80;$' <<< "$(rm -f "$CERT_DIR/fullchain.pem"; render_nginx)"
+touch "$CERT_DIR/fullchain.pem"; NGINX_IPV6=0
+check "no HSTS before HTTPS was verified" not grep -q Strict-Transport-Security <<< "$HTTPS"
+touch "$HSTS_STATE_FILE"
+check "HSTS once HTTPS was verified (443 server only)" bash -c \
+  '[[ $(grep -c "Strict-Transport-Security \"max-age=31536000\" always;" <<< "$1") -eq 1 ]] && ! sed -n "1,/listen 443/p" <<< "$1" | grep -q Strict' _ "$(render_nginx)"
+check "HSTS is switched on only after the healthz check in step 18" bash -c \
+  'awk "/^step \"18\/18\"/{s=1} s" "$1" | grep -q "touch \"\$HSTS_STATE_FILE\"" && ! awk "/^step \"18\/18\"/{exit} 1" "$1" | grep -q "touch \"\$HSTS_STATE_FILE\""' _ "$ROOT/deploy.sh"
+rm -f "$HSTS_STATE_FILE"
+LOGIN_BLOCK="$(sed -n '/location = \/admin\/login {/,/^    }/p' <<< "$HTTPS")"
+check "nginx rate-limits = /admin/login (429)" bash -c \
+  'grep -q "limit_req zone=amoobot_admin_login burst=10 nodelay;" <<< "$1" && grep -q "limit_req_status 429;" <<< "$1"' _ "$LOGIN_BLOCK"
+check "limit_req_zone defined once, outside the server blocks" bash -c \
+  '[[ $(grep -c "^limit_req_zone \$binary_remote_addr zone=amoobot_admin_login:10m rate=10r/m;$" <<< "$1") -eq 1 ]]' _ "$HTTPS"
+check "ADMIN_ALLOW_IPS empty -> no allow rules, no /admin block (only the dotfile deny)" bash -c '! grep -q "allow " <<< "$1" && ! grep -qF "location ^~ /admin {" <<< "$1" && [[ $(grep -c "deny all;" <<< "$1") -eq 1 ]]' _ "$HTTPS"
+ADMIN_ALLOW_LIST=(203.0.113.7 10.0.0.0/8)
+RESTRICTED="$(render_nginx)"
+check "ADMIN_ALLOW_IPS set -> allow each entry, deny all, on /admin and /admin/login" bash -c \
+  '[[ $(grep -c "^        allow 203.0.113.7;$" <<< "$1") -eq 2 && $(grep -c "^        allow 10.0.0.0/8;$" <<< "$1") -eq 2 && $(grep -c "^        deny all;$" <<< "$1") -eq 3 ]] &&
+   grep -q "location ^~ /admin {" <<< "$1"' _ "$RESTRICTED"
+ADMIN_ALLOW_LIST=()
+check "Symfony login_throttling: 5 attempts / 15 minutes on the admin firewall" bash -c \
+  'grep -A2 "^            login_throttling:" "$1" | grep -q "max_attempts: 5" && grep -A2 "^            login_throttling:" "$1" | grep -q "interval: .15 minutes."' _ "$ROOT/config/packages/security.yaml"
+
+if can_dry_run; then
+  { cat "$WORK/prod.env"; echo "ADMIN_ALLOW_IPS=203.0.113.7, 999.1.1.1"; } > "$WORK/badip.env"
+  dry_run "$WORK/badip.env"
+  check "invalid ADMIN_ALLOW_IPS stops the preflight" bash -c '[[ $1 -ne 0 ]] && grep -q "ADMIN_ALLOW_IPS: .999.1.1.1. is not" <<< "$2"' _ "$RC" "$OUT"
+  { cat "$WORK/prod.env"; echo "ADMIN_ALLOW_IPS=203.0.113.7, 10.0.0.0/8"; } > "$WORK/goodip.env"
+  dry_run "$WORK/goodip.env"
+  check "valid ADMIN_ALLOW_IPS accepted and not written into the app env" bash -c '[[ $1 -eq 0 ]] && ! grep -q "ADMIN_ALLOW_IPS=" <<< "$2"' _ "$RC" "$OUT"
+  OUT="$BASE_OUT"
+  check "dry-run shows the bootstrap site (503 + ACME only)" grep -q '^    + # Managed by amoobot deploy.sh (no certificate yet: only ACME challenges are served' <<< "$OUT"
+  check "dry-run announces HSTS only after the healthz check" grep -q 'after https://bot.example.test/healthz returns 200: enable HSTS' <<< "$OUT"
+else
+  skip "$DRY_RUN_SKIP"
+fi
+
+if ngx_ok; then
+  ngx_prepare; mkdir -p "$NGX/acme/.well-known/acme-challenge"; echo "token-content" > "$NGX/acme/.well-known/acme-challenge/tok123"
+  rm -f "$CERT_DIR/fullchain.pem"
+  if ngx_start "$(ngx_site "$(render_nginx)")"; then
+    check "nginx bootstrap: ACME challenge file is served" test "$(curl -s -m 5 "http://127.0.0.1:${NGX_PORT}/.well-known/acme-challenge/tok123")" = token-content
+    check "nginx bootstrap: unknown challenge -> 404" test "$(code "http://127.0.0.1:${NGX_PORT}/.well-known/acme-challenge/nope")" = 404
+    check "nginx bootstrap: everything else -> 503 (app not served over HTTP)" bash -c \
+      '[[ $(curl -s -m 5 -o /dev/null -w "%{http_code}" "$1/") == 503 && $(curl -s -m 5 -o /dev/null -w "%{http_code}" "$1/admin/login") == 503 && $(curl -s -m 5 -o /dev/null -w "%{http_code}" -X POST "$1/telegram/webhook/x") == 503 ]]' _ "http://127.0.0.1:${NGX_PORT}"
+    ngx_stop
+  else
+    fail "nginx could not start the bootstrap site"; head -5 "$NGX/t.out"
+  fi
+
+  # The HTTPS site, served over plain HTTP on 127.0.0.1 (no certificate needed for these checks).
+  ngx_prepare
+  plain="$(sed -n '/^server {/,$p' <<< "$HTTPS" | awk 'BEGIN{n=0} /^server \{/{n++} n==2' | sed -e 's#^    listen 443 ssl;#    listen 80;#' -e '/ssl_/d')"
+  site="limit_req_zone \$binary_remote_addr zone=amoobot_admin_login:10m rate=10r/m;
+$plain"
+  if ngx_start "$(ngx_site "$site")"; then
+    SECRET="websecret$RANDOM$RANDOM"
+    curl -s -m 5 -o /dev/null -X POST "http://127.0.0.1:${NGX_PORT}/telegram/webhook/${SECRET}"
+    curl -s -m 5 -o /dev/null "http://127.0.0.1:${NGX_PORT}/payment/callback/zibal?marker=logged"
+    sleep 0.5
+    check "nginx: webhook URL secret is not in the access log" not grep -qF "$SECRET" "$NGX/logs/amoobot_access.log"
+    check "nginx: other requests are still logged" grep -q 'marker=logged' "$NGX/logs/amoobot_access.log"
+    codes="$(for _ in $(seq 1 25); do code "http://127.0.0.1:${NGX_PORT}/admin/login"; echo; done | sort | uniq -c | tr '\n' ' ')"
+    check "nginx: rapid /admin/login requests get 429 (codes: ${codes})" grep -q ' 429' <<< " $codes"
+    ngx_stop
+  else
+    fail "nginx could not start the HTTPS site (as HTTP)"; head -5 "$NGX/t.out"
+  fi
+
+  ngx_prepare
+  ADMIN_ALLOW_LIST=(203.0.113.7)
+  touch "$CERT_DIR/fullchain.pem"   # render the HTTPS variant again (the bootstrap check removed it)
+  plain="$(render_nginx | awk 'BEGIN{n=0} /^server \{/{n++} n==2' | sed -e 's#^    listen 443 ssl;#    listen 80;#' -e '/ssl_/d')"
+  if ngx_start "$(ngx_site "limit_req_zone \$binary_remote_addr zone=amoobot_admin_login:10m rate=10r/m;
+$plain")"; then
+    check "nginx: ADMIN_ALLOW_IPS blocks other clients from /admin/login (403)" test "$(code "http://127.0.0.1:${NGX_PORT}/admin/login")" = 403
+    check "nginx: ...and from the rest of /admin (403)" test "$(code "http://127.0.0.1:${NGX_PORT}/admin/payment")" = 403
+    check "nginx: ...but not from public pages" test "$(code "http://127.0.0.1:${NGX_PORT}/payment/success")" != 403
+    ngx_stop
+  else
+    fail "nginx could not start the restricted site"; head -5 "$NGX/t.out"
+  fi
+  ADMIN_ALLOW_LIST=(127.0.0.1)
+  ngx_prepare
+  plain="$(render_nginx | awk 'BEGIN{n=0} /^server \{/{n++} n==2' | sed -e 's#^    listen 443 ssl;#    listen 80;#' -e '/ssl_/d')"
+  if ngx_start "$(ngx_site "limit_req_zone \$binary_remote_addr zone=amoobot_admin_login:10m rate=10r/m;
+$plain")"; then
+    check "nginx: an allowed client reaches /admin (502 = passed to PHP)" test "$(code "http://127.0.0.1:${NGX_PORT}/admin/payment")" = 502
+    ngx_stop
+  fi
+  ADMIN_ALLOW_LIST=()
+
+  # Real TLS with a throwaway self-signed certificate: HSTS only after verification, 301 on port 80.
+  if have openssl; then
+    ngx_prepare
+    # MSYS_NO_PATHCONV: Git Bash would otherwise turn "/CN=..." into a Windows path (so the files get ngx_path'd paths).
+    MSYS_NO_PATHCONV=1 openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj "/CN=bot.example.test" \
+      -keyout "$(ngx_path "$NGX/privkey.pem")" -out "$(ngx_path "$NGX/fullchain.pem")" > /dev/null 2>&1
+    [[ -s "$NGX/fullchain.pem" ]] || fail "openssl could not create the throwaway test certificate"
+    TLS_PORT=$((NGX_PORT + 1))
+    tls_site() { render_nginx | sed -e "s#${CERT_DIR}#${NGXW}#g" -e "s#listen 443 ssl;#listen 127.0.0.1:${TLS_PORT} ssl;#"; }
+    cp "$NGX/fullchain.pem" "$CERT_DIR/fullchain.pem"
+    if ngx_start "$(ngx_site "$(tls_site)")"; then
+      check "nginx TLS: port 80 redirects to https" test "$(code "http://127.0.0.1:${NGX_PORT}/admin/login")" = 301
+      check "nginx TLS: answers over TLS, without Strict-Transport-Security before verification" bash -c \
+        'grep -q "^HTTP/" <<< "$1" && ! grep -qi "^strict-transport-security" <<< "$1"' _ "$(curl -sk -m 5 -D - -o /dev/null --resolve "bot.example.test:${TLS_PORT}:127.0.0.1" "https://bot.example.test:${TLS_PORT}/healthz")"
+      ngx_stop
+      touch "$HSTS_STATE_FILE"   # what step 18 does after a verified https://DOMAIN/healthz
+      if ngx_start "$(ngx_site "$(tls_site)")"; then
+        check "nginx TLS: Strict-Transport-Security after verification" grep -qi '^strict-transport-security: max-age=31536000' \
+          <<< "$(curl -sk -m 5 -D - -o /dev/null --resolve "bot.example.test:${TLS_PORT}:127.0.0.1" "https://bot.example.test:${TLS_PORT}/healthz")"
+        ngx_stop
+      else
+        fail "nginx could not restart the TLS site with HSTS"
+      fi
+      rm -f "$HSTS_STATE_FILE"
+    else
+      skip "nginx TLS checks (this nginx could not load the TLS site)"; head -3 "$NGX/t.out"
+    fi
+    rm -f "$CERT_DIR/fullchain.pem"
+  fi
+else
+  skip "real nginx checks for group 5 (no runnable nginx binary)"
 fi
 
 echo
