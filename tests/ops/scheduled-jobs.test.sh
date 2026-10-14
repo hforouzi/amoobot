@@ -210,6 +210,16 @@ else
 fi
 
 echo "== deploy.sh --dry-run preview and idempotent writes"
+# dry_run SCRIPT ENV_FILE  a dry run needs no root; as root (the Linux container) it runs as nobody, because root may only
+# read --env-file from /etc/amoobot.
+dry_run() {
+  if [[ "$EUID" -eq 0 ]] && command -v setpriv > /dev/null 2>&1; then
+    chmod 755 "$WORK"; chmod 644 "$1" "$2"
+    (cd / && setpriv --reuid=65534 --regid=65534 --clear-groups env HOME=/nonexistent bash "$1" --dry-run --env-file "$2" 2>&1)
+  else
+    bash "$1" --dry-run --env-file "$2" 2>&1
+  fi
+}
 # deploy.sh validates secrets with {32,256}; MSYS/Git Bash regex caps repetition at 255, so its dry-run cannot pass there.
 if have openssl && [[ x =~ ^x{1,256}$ ]]; then
   rnd() { openssl rand -hex 32; }
@@ -223,7 +233,7 @@ TELEGRAM_WEBHOOK_SECRET_TOKEN=$(rnd)
 TELEGRAM_ADMIN_CHAT_ID=-1001234567
 EOF
   cp "$ROOT/deploy.sh" "$WORK/deploy.sh"
-  out="$(bash "$WORK/deploy.sh" --dry-run --env-file "$WORK/prod.env" 2>&1)"; rc=$?
+  out="$(dry_run "$WORK/deploy.sh" "$WORK/prod.env")"; rc=$?
   jobs_part="$(sed -n '/^\[16\/18\]/,/^\[17\/18\]/p' <<< "$out")"
   check "dry-run exits 0" test "$rc" -eq 0
   check "dry-run lists the job table" grep -qE '^  sync +\*:0/15 +lifecycle +1500s +app:automation:run --only=sync' <<< "$jobs_part"
@@ -239,10 +249,10 @@ EOF
   done < "$WORK/prod.env"
   check "dry-run prints no secret value" test "$leak" -eq 0
   sed 's/^SCHEDULED_JOBS=(/SCHEDULED_JOBS=(\n  "bad|x|*:0\/5|60|300|app:payments:repair-stuck --apply"/' "$ROOT/deploy.sh" > "$WORK/deploy-bad.sh"
-  out="$(bash "$WORK/deploy-bad.sh" --dry-run --env-file "$WORK/prod.env" 2>&1)"; rc=$?
+  out="$(dry_run "$WORK/deploy-bad.sh" "$WORK/prod.env")"; rc=$?
   check "preflight refuses to schedule repair-stuck" bash -c '[[ $1 -ne 0 ]] && grep -q "must never be scheduled" <<< "$2"' _ "$rc" "$out"
   sed 's/app:payments:repair-stuck --apply/app:plans:adjust-prices --percent=50/' "$WORK/deploy-bad.sh" > "$WORK/deploy-destructive.sh"
-  out="$(bash "$WORK/deploy-destructive.sh" --dry-run --env-file "$WORK/prod.env" 2>&1)"; rc=$?
+  out="$(dry_run "$WORK/deploy-destructive.sh" "$WORK/prod.env")"; rc=$?
   check "preflight refuses other unreviewed commands" bash -c '[[ $1 -ne 0 ]] && grep -q "only the six reviewed automation tasks" <<< "$2"' _ "$rc" "$out"
 
   # write_file for real (as the current user): new -> changed, same content -> unchanged, edit -> changed.

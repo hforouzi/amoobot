@@ -7,8 +7,10 @@
 #
 #   --dry-run    print what would be done; changes nothing (does not need root)
 #   --app-only   skip server provisioning (steps 1-6); only update code, env, DB, cache, proxy, webhook
-#   --ref        what to deploy (default: DEPLOY_REF from the env file, else "main"); also used for rollback
-#   --env-file   server-only settings/secrets file (default: /etc/amoobot/.env.prod.local, root-owned, chmod 600)
+#   --ref        a branch or tag on origin, or a full commit hash contained in one (default: DEPLOY_REF from the env
+#                file, else "main"); resolved in the root-owned mirror; also used for rollback
+#   --env-file   server-only settings/secrets file directly in /etc/amoobot/ (default: /etc/amoobot/.env.prod.local,
+#                root-owned, chmod 600; opened once and checked through the open fd)
 #
 # This file contains NO secrets. Secrets belong ONLY in the root-owned env file (/etc/amoobot/.env.prod.local); see
 # .env.prod.example and docs/fa/deployment.md. Passing them as "sudo VAR=... amoobot-deploy" is not supported: they
@@ -22,6 +24,8 @@ umask 027
 ########################################
 
 DEFAULT_ENV_FILE="/etc/amoobot/.env.prod.local"
+# As root, --env-file must be a file directly in this root-only directory (it is opened once and checked via the fd).
+ENV_FILE_DIR="/etc/amoobot"
 DEFAULT_REPO_URL="git@github.com:hforouzi/amoobot.git"
 DEFAULT_APP_DIR="/var/www/amoobot"
 DEFAULT_PHP_VERSION="8.4"
@@ -854,7 +858,31 @@ refresh_github_known_hosts() {
   rm -f "$tmp"
 }
 
-# load_env_file PATH: KEY=VALUE lines only (no shell code is executed). The process environment wins.
+# open_env_file PATH  opens PATH ONCE on fd 3 and checks the file that was actually opened (via /proc/self/fd/3), so it
+# cannot be swapped between the check and the read. As root: only a regular file directly in ENV_FILE_DIR (root-owned, not
+# group/other-writable), not a link, owned by root with mode 600. Returns 1 when PATH does not exist.
+open_env_file() {
+  local path="$1" info dir_info
+  if (( EUID == 0 )); then
+    [[ "$path" == "${ENV_FILE_DIR}/"* && "${path#"${ENV_FILE_DIR}/"}" =~ ^[A-Za-z0-9._-]+$ && "${path##*/}" != "." && "${path##*/}" != ".." ]] \
+      || die "--env-file must be a file directly in ${ENV_FILE_DIR}/ (got '${path}')."
+    dir_info="$(stat -c '%U %a %F' "$ENV_FILE_DIR" 2> /dev/null || true)"
+    [[ ! -L "$ENV_FILE_DIR" && "$dir_info" =~ ^root\ ([0-7]+)\ directory$ ]] && (( (8#${BASH_REMATCH[1]} & 8#022) == 0 )) \
+      || die "${ENV_FILE_DIR} must be a root-owned directory not writable by group/others (is: ${dir_info:-missing})."
+    [[ ! -L "$path" ]] || die "${path} is a symbolic link; refusing to read settings through it."
+  fi
+  [[ -e "$path" ]] || return 1
+  exec 3< "$path" || die "Cannot open ${path}."
+  info="$(stat -L -c '%a %U %F' /proc/self/fd/3)"
+  [[ "$info" == *" regular file" ]] || die "${path} is not a regular file."
+  if (( EUID == 0 )) && [[ "${info% regular file}" != "600 root" ]]; then
+    die "${path} must be owned by root with mode 600 (is: ${info% regular file}). Fix: chown root:root ${path} && chmod 600 ${path}"
+  fi
+  return 0
+}
+
+# load_env_file NAME: KEY=VALUE lines from fd 3 (opened by open_env_file; NAME is only used in messages). No shell code is
+# executed. The process environment wins.
 load_env_file() {
   local file="$1" line key value n=0 seen=" "
   while IFS= read -r line || [[ -n "$line" ]]; do
@@ -877,7 +905,8 @@ load_env_file() {
     if [[ -z "${!key+x}" ]]; then
       printf -v "$key" '%s' "$value"
     fi
-  done < "$file"
+  done <&3
+  exec 3<&-
 }
 
 require_var() {
@@ -895,7 +924,7 @@ while (( $# )); do
     --app-only) APP_ONLY=1 ;;
     --ref)      [[ -n "${2:-}" ]] || die "--ref needs a value"; CLI_REF="$2"; shift ;;
     --env-file) [[ -n "${2:-}" ]] || die "--env-file needs a value"; ENV_FILE="$2"; shift ;;
-    -h|--help)  sed -n '2,15p' "$0"; exit 0 ;;
+    -h|--help)  sed -n '2,17p' "$0"; exit 0 ;;
     *)          die "Unknown option: $1 (see --help)" ;;
   esac
   shift
@@ -933,12 +962,8 @@ fi
 
 step "0" "Loading settings and secrets..."
 
-if [[ -f "$ENV_FILE" ]]; then
-  if (( ! DRY_RUN )); then
-    perms="$(stat -c '%a %U' "$ENV_FILE")"
-    [[ "$perms" == "600 root" ]] \
-      || die "${ENV_FILE} must be owned by root with mode 600 (is: ${perms}). Fix: chown root:root ${ENV_FILE} && chmod 600 ${ENV_FILE}"
-  fi
+# Checked even for --dry-run as root: a dry run must not read arbitrary root-only files either.
+if open_env_file "$ENV_FILE"; then
   load_env_file "$ENV_FILE"
   log "Read ${#ENV_FILE_KEYS[@]} settings from ${ENV_FILE} (values not shown)."
 else

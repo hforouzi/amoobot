@@ -52,8 +52,12 @@
 sudo amoobot-deploy --dry-run          # فقط نمایش؛ هیچ تغییری نمی‌دهد و رمزها را چاپ نمی‌کند
 sudo amoobot-deploy --app-only         # بدون مراحل 1 تا 6 (برای به‌روزرسانی سریع کد)
 sudo amoobot-deploy --ref v1.4.0       # branch یا tag روی origin، یا hash کامل ۴۰ کاراکتری کامیتی که در یکی از آن‌هاست (برای Rollback هم)
-sudo amoobot-deploy --env-file /path   # فایل تنظیمات دیگر (پیش‌فرض /etc/amoobot/.env.prod.local)
+sudo amoobot-deploy --env-file /etc/amoobot/other.env   # فایل تنظیمات دیگر (پیش‌فرض /etc/amoobot/.env.prod.local)
 ```
+
+`--env-file` (با root، حتی با `--dry-run`) فقط فایلی **مستقیماً داخل `/etc/amoobot/`** را قبول می‌کند: فایل معمولی (نه symlink)، مالک root با
+دسترسی `600`، در پوشه‌ای که مالک آن root است و برای گروه/دیگران قابل نوشتن نیست. فایل یک‌بار باز می‌شود و همان فایل بازشده (از طریق
+`/proc/self/fd`) بررسی و خوانده می‌شود، پس نمی‌توان آن را بین بررسی و خواندن عوض کرد.
 
 ---
 

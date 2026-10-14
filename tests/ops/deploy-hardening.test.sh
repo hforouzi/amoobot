@@ -52,8 +52,16 @@ TELEGRAM_WEBHOOK_SECRET_TOKEN=$(rnd 32)
 TELEGRAM_ADMIN_CHAT_ID=-1001234567
 EOF
 }
-# dry_run ENV_FILE [deploy.sh]  ->  OUT, RC
-dry_run() { OUT="$(bash "${2:-$ROOT/deploy.sh}" --dry-run --env-file "$1" 2>&1)"; RC=$?; }
+# dry_run ENV_FILE [deploy.sh]  ->  OUT, RC. A dry run needs no root; as root (the Linux container) it runs as nobody,
+# because root may only read --env-file from /etc/amoobot (tested separately below).
+dry_run() {
+  if [[ "$EUID" -eq 0 ]] && have setpriv; then
+    chmod 755 "$WORK"; chmod 644 "$1"
+    OUT="$(cd / && setpriv --reuid=65534 --regid=65534 --clear-groups env HOME=/nonexistent bash "${2:-$ROOT/deploy.sh}" --dry-run --env-file "$1" 2>&1)"; RC=$?
+  else
+    OUT="$(bash "${2:-$ROOT/deploy.sh}" --dry-run --env-file "$1" 2>&1)"; RC=$?
+  fi
+}
 no_secret_printed() {
   local k v leak=0
   while IFS='=' read -r k v; do
@@ -349,6 +357,45 @@ if can_dry_run; then
   check "dry-run: .env.prod.local written as the deploy user via temp file + rename" grep -qF '[dry-run] write /var/www/amoobot/.env.prod.local (600 deploy, written as deploy via temp file + rename)' <<< "$OUT"
 else
   skip "$DRY_RUN_SKIP"
+fi
+
+echo "== --env-file: opened once, checked via the fd, only from /etc/amoobot as root (group 3, 2nd review)"
+set_globals
+load_fn open_env_file load_env_file refuse_symlink
+check "load_env_file reads only from the already-opened fd 3" bash -c \
+  'sed -n "/^load_env_file() {/,/^}/p" "$1" | grep -q "done <&3" && ! sed -n "/^load_env_file() {/,/^}/p" "$1" | grep -q "done < \"\$file\""' _ "$ROOT/deploy.sh"
+check "the opened file is checked through /proc/self/fd/3 (stat -L)" grep -q "stat -L -c '%a %U %F' /proc/self/fd/3" "$ROOT/deploy.sh"
+if [[ "$EUID" -eq 0 ]] && have setpriv; then
+  ED="$WORK/etc-amoobot"; install -d -m 700 "$ED"; printf 'DOMAIN=first.example.test\n' > "$ED/.env.prod.local"; chmod 600 "$ED/.env.prod.local"
+  env_case() { ( die() { printf 'DIE: %s\n' "$*"; exit 1; }; warn() { :; }; log() { :; }
+                 ENV_FILE_DIR="$ED" ENV_FILE_KEYS=(); unset DOMAIN
+                 if open_env_file "$1"; then eval "${2:-:}"; load_env_file "$1"; echo "DOMAIN=${DOMAIN:-}"; else echo MISSING; fi ) 2>&1; }
+  check "root: a 600 root-owned file in the directory is read" test "$(env_case "$ED/.env.prod.local")" = "DOMAIN=first.example.test"
+  out="$(env_case "$ED/.env.prod.local" 'printf "DOMAIN=swapped.example.test\n" > "$ED/new"; chmod 600 "$ED/new"; mv -f "$ED/new" "$ED/.env.prod.local"')"
+  check "root: swapping the file after the check does not change what is read (same fd)" test "$out" = "DOMAIN=first.example.test"
+  printf 'DOMAIN=first.example.test\n' > "$ED/.env.prod.local"; chmod 600 "$ED/.env.prod.local"
+  check "root: a path outside the directory is refused" grep -q 'DIE: --env-file must be a file directly in' <<< "$(env_case "$WORK/prod.env")"
+  check "root: '..' out of the directory is refused" grep -q 'DIE: --env-file must be a file directly in' <<< "$(env_case "$ED/../prod.env")"
+  check "root: a subdirectory path is refused" grep -q 'DIE: --env-file must be a file directly in' <<< "$(env_case "$ED/sub/x.env")"
+  ln -sfn "$WORK/prod.env" "$ED/link.env"
+  check "root: a symlink in the directory is refused" grep -q 'DIE: .*link.env is a symbolic link' <<< "$(env_case "$ED/link.env")"
+  cp "$ED/.env.prod.local" "$ED/wide.env"; chmod 644 "$ED/wide.env"
+  check "root: mode 644 is refused" grep -q 'DIE: .*must be owned by root with mode 600 (is: 644 root)' <<< "$(env_case "$ED/wide.env")"
+  cp "$ED/.env.prod.local" "$ED/nobody.env"; chmod 600 "$ED/nobody.env"; chown 65534 "$ED/nobody.env"
+  check "root: a file not owned by root is refused" grep -q 'DIE: .*must be owned by root with mode 600' <<< "$(env_case "$ED/nobody.env")"
+  mkdir -p "$ED/dir.env"
+  check "root: a directory is refused" grep -q 'DIE: .*not a regular file' <<< "$(env_case "$ED/dir.env")"
+  chmod 770 "$ED"
+  check "root: a group-writable parent directory is refused" grep -q 'DIE: .*must be a root-owned directory not writable' <<< "$(env_case "$ED/.env.prod.local")"
+  chmod 700 "$ED"
+  check "root: a missing default file is reported as missing (not an error)" test "$(env_case "$ED/none.env")" = MISSING
+  if can_dry_run; then
+    out="$(bash "$ROOT/deploy.sh" --dry-run --env-file "$WORK/prod.env" 2>&1)"; rc=$?
+    check "root: even --dry-run refuses an --env-file outside /etc/amoobot (no reading root-only files)" bash -c \
+      '[[ $1 -ne 0 ]] && grep -q "env-file must be a file directly in /etc/amoobot/" <<< "$2"' _ "$rc" "$out"
+  fi
+else
+  skip "--env-file root checks (need root and setpriv: run in the Linux/WSL container as root)"
 fi
 
 echo "== path validation, migrations, backups, rollback (group 3)"
