@@ -66,6 +66,8 @@ no_secret_printed() {
 set_globals() {
   APP_DIR=/var/www/amoobot BACKUP_DIR=/var/backups/amoobot BACKUP_RETENTION_DAYS=14 WEB_USER=www-data DEPLOY_USER=deploy
   ROOT_LIB_DIR=/usr/local/lib/amoobot ROOT_SBIN_DIR=/usr/local/sbin DB_URL_FILE=/etc/amoobot/database.env DRY_RUN=1
+  REPO_URL=git@github.com:hforouzi/amoobot.git MIRROR_DIR=/var/lib/amoobot/mirror.git STATE_DIR=/var/lib/amoobot
+  ALLOWED_SIGNERS_FILE=/etc/amoobot/allowed_signers GIT_ENV_PATH="$PATH" MIRROR_PROTOCOL=ssh
 }
 die() { printf 'DIE: %s\n' "$*" >&2; return 1; }
 log() { printf '%s\n' "$*"; }
@@ -208,6 +210,8 @@ render_sudoers > "$WORK/sudoers"
 check "sudoers grants exactly the four wrappers, no ALL command" bash -c \
   'grep -q "^deploy ALL=(root) NOPASSWD: AMOOBOT_OPS$" "$1" && ! grep -qE "NOPASSWD: *ALL" "$1" &&
    [[ $(grep -o "/usr/local/sbin/amoobot-[a-z-]*" "$1" | sort -u | tr "\n" " ") == "/usr/local/sbin/amoobot-backup /usr/local/sbin/amoobot-check-jobs /usr/local/sbin/amoobot-deploy /usr/local/sbin/amoobot-restore " ]]' _ "$WORK/sudoers"
+check "sudoers comment states the real trust model (any origin ref; GitHub write access = root)" bash -c \
+  'grep -q "can deploy ANY branch, tag or commit that exists on origin" "$1" && grep -q "protect GitHub write access" "$1" && ! grep -q "^#include" "$1"' _ "$WORK/sudoers"
 if have visudo; then
   check "visudo -cf accepts the rendered sudoers" visudo -cf "$WORK/sudoers"
 else
@@ -355,28 +359,112 @@ check "still pending after migrate (exit 1) -> stop" bash -c 'grep -q "DIE: Migr
 out="$(step11_case 1 5 3 0)"
 check "failed migrate -> stop with restore instructions" bash -c 'grep -q "DIE: doctrine:migrations:migrate failed" <<< "$1" && grep -q amoobot-restore <<< "$1"' _ "$out"
 
-# --ref rollback: a target commit must contain every root-owned ops file (checked with git cat-file -e).
+# --ref rollback: a target commit must contain every root-owned ops file (checked with git cat-file -e in the mirror).
 if have git; then
-  load_fn git_blob verify_target_ops
+  load_fn mirror_git git_blob verify_target_ops
   eval "$(sed -n '/^ROOT_OPS_FILES=(/,/)$/p' "$ROOT/deploy.sh")"
   R="$WORK/repo"; git init -q "$R"; git -C "$R" config user.email t@t; git -C "$R" config user.name t
   for f in "${ROOT_OPS_FILES[@]}" bin/console; do mkdir -p "$R/$(dirname "$f")"; echo "# $f" > "$R/$f"; done
-  echo 'ROOT_LIB_DIR="/usr/local/lib/amoobot"' >> "$R/deploy.sh"
+  printf '%s\n' 'ROOT_LIB_DIR="/usr/local/lib/amoobot"' 'MIRROR_DIR="/var/lib/amoobot/mirror.git"' >> "$R/deploy.sh"
   git -C "$R" add -A; git -C "$R" commit -qm good; GOOD="$(git -C "$R" rev-parse HEAD)"
+  sed -i 's#^MIRROR_DIR=.*##' "$R/deploy.sh"; git -C "$R" commit -qam pre-mirror; PREMIRROR="$(git -C "$R" rev-parse HEAD)"
   sed -i 's#^ROOT_LIB_DIR=.*##' "$R/deploy.sh"; git -C "$R" commit -qam old-layout; OLD="$(git -C "$R" rev-parse HEAD)"
   git -C "$R" rm -q bin/check-scheduled-jobs.sh; git -C "$R" commit -qm missing; MISSING="$(git -C "$R" rev-parse HEAD)"
-  verify_case() { ( sudo() { while (( $# )); do case "$1" in -H|-n) shift ;; -u) shift 2 ;; --) shift; break ;; *) break ;; esac; done; "$@"; }
-                    die() { printf 'DIE: %s\n' "$*"; exit 1; }
-                    APP_DIR="$R" DEPLOY_USER=deploy; verify_target_ops "$1" && echo OK ) 2>&1; }
+  verify_case() { ( die() { printf 'DIE: %s\n' "$*"; exit 1; }
+                    MIRROR_DIR="$R/.git"; verify_target_ops "$1" && echo OK ) 2>&1; }
   check "target with every ops file and the root layout -> accepted" test "$(verify_case "$GOOD")" = OK
   check "target missing an ops file -> refused, nothing paused" grep -q 'DIE: Refusing to deploy .* lacks bin/check-scheduled-jobs.sh. Nothing was paused' <<< "$(verify_case "$MISSING")"
-  check "target with a pre-hardening deploy.sh -> refused" grep -q 'DIE: Refusing to deploy .* predates the root-owned ops layout' <<< "$(verify_case "$OLD")"
+  check "target with a pre-hardening deploy.sh -> refused" grep -q 'DIE: Refusing to deploy .* predates the root-owned mirror' <<< "$(verify_case "$OLD")"
+  check "target whose deploy.sh still installs from the checkout (no mirror) -> refused" grep -q 'DIE: Refusing to deploy .* predates the root-owned mirror' <<< "$(verify_case "$PREMIRROR")"
   check "the real pre-hardening commit 250ff44 would be refused" bash -c \
     '! git -C "$1" show 250ff44:deploy.sh 2>/dev/null | grep -qx "ROOT_LIB_DIR=\"/usr/local/lib/amoobot\""' _ "$ROOT"
-  check "this checkout's deploy.sh carries the layout marker verify_target_ops looks for" \
-    grep -qx 'ROOT_LIB_DIR="/usr/local/lib/amoobot"' "$ROOT/deploy.sh"
+  check "this checkout's deploy.sh carries both layout markers verify_target_ops looks for" bash -c \
+    'grep -qx "ROOT_LIB_DIR=\"/usr/local/lib/amoobot\"" "$1" && grep -qx "MIRROR_DIR=\"/var/lib/amoobot/mirror.git\"" "$1"' _ "$ROOT/deploy.sh"
 else
   skip "rollback verification (git not installed)"
+fi
+
+echo "== root-owned mirror: what root installs never comes from the deploy user's repository (group 1, 2nd review)"
+check "git_blob / verify_target_ops read only the mirror (no git -C \$APP_DIR, no sudo -u deploy)" bash -c \
+  'for f in git_blob verify_target_ops resolve_target_ref; do sed -n "/^$f() {/,/^}/p" "$1" | grep -qE "APP_DIR|DEPLOY_USER" && exit 1; done; exit 0' _ "$ROOT/deploy.sh"
+check "TARGET_COMMIT is resolved in the mirror, never with git -C \$APP_DIR rev-parse" bash -c \
+  '! grep -nE "git -C \"\\\$APP_DIR\" rev-parse --verify" "$1" && grep -q "TARGET_COMMIT=\"\$(resolve_target_ref \"\$DEPLOY_REF\")\"" "$1"' _ "$ROOT/deploy.sh"
+check "mirror git runs with a clean environment (no global/system config, no replace refs)" bash -c \
+  'sed -n "/^mirror_git() {/,/^}/p" "$1" | grep -q "env -i .*GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_NO_REPLACE_OBJECTS=1"' _ "$ROOT/deploy.sh"
+check "mirror ssh: pinned known_hosts, StrictHostKeyChecking=yes, no user ssh config" bash -c \
+  'grep -q "^MIRROR_SSH=\"ssh -F /dev/null -i \${ROOT_REPO_KEY} -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=\${repo_known_hosts} -o GlobalKnownHostsFile=/dev/null\"" "$1"' _ "$ROOT/deploy.sh"
+if have git && [[ "$EUID" -eq 0 ]]; then
+  load_fn mirror_git git_blob update_mirror resolve_target_ref verify_allowed_signers_file fill_checkout
+  O="$WORK/origin.git"; git init -q --bare "$O"
+  W="$WORK/upstream"; git init -q -b main "$W"; git -C "$W" config user.email t@t; git -C "$W" config user.name t
+  echo 'echo v1' > "$W/deploy.sh"; git -C "$W" add -A; git -C "$W" commit -qm one; C1="$(git -C "$W" rev-parse HEAD)"
+  echo 'echo v2' > "$W/deploy.sh"; git -C "$W" commit -qam two; C2="$(git -C "$W" rev-parse HEAD)"
+  git -C "$W" tag -a v1 -m "annotated" "$C1"; git -C "$W" tag light "$C1"
+  git -C "$W" branch gone "$C1"
+  git -C "$W" push -q "$O" main gone v1 light
+  mirror_case() { ( die() { printf 'DIE: %s\n' "$*"; exit 1; }; MIRROR_DIR="$WORK/mirror.git" MIRROR_PROTOCOL=file STATE_DIR="$WORK/state"
+                    REPO_URL="file://$O"; "$@" ) 2>&1; }
+  out="$(mirror_case bash -c 'true')"  # (subshell sanity)
+  out="$(mirror_case update_mirror; echo "ok=$?")"
+  check "mirror created and fetched as root" bash -c '[[ -f "$1/HEAD" && $(stat -c "%U %a" "$1") == "root 700" ]]' _ "$WORK/mirror.git"
+  res() { mirror_case resolve_target_ref "$1"; }
+  check "--ref main resolves to origin's main" test "$(res main)" = "$C2"
+  check "--ref v1 (annotated tag) resolves to the tagged commit" test "$(res v1)" = "$C1"
+  check "--ref <full hash contained in an origin ref> is accepted" test "$(res "$C1")" = "$C1"
+  check "--ref <short hash> is refused" grep -q 'is not a branch or tag on origin' <<< "$(res "${C1:0:12}")"
+  # A commit created only in the deploy user's checkout is not in the mirror at all.
+  D="$WORK/deploy-checkout"; git clone -q "$O" "$D"; git -C "$D" config user.email x@x; git -C "$D" config user.name x
+  echo 'echo forged' > "$D/deploy.sh"; git -C "$D" commit -qam forged; FORGED="$(git -C "$D" rev-parse HEAD)"
+  check "a commit that exists only in the deploy user's checkout is refused" grep -q 'is not a branch or tag on origin' <<< "$(res "$FORGED")"
+  # An object that is in the mirror but reachable from no origin ref (e.g. after a force-push) is refused too.
+  DANGLING="$(mirror_case mirror_git commit-tree -m dangling "$(mirror_case mirror_git rev-parse "$C1^{tree}")")"
+  check "a commit in the mirror that no origin ref contains is refused" grep -q 'is not a branch or tag on origin' <<< "$(res "$DANGLING")"
+  git -C "$W" push -q "$O" :gone; mirror_case update_mirror > /dev/null
+  check "a branch deleted on origin is pruned from the mirror and refused" grep -q 'is not a branch or tag on origin' <<< "$(res gone)"
+  check "git_blob reads the commit from the mirror, not the checkout" test "$(mirror_case git_blob "$C2" deploy.sh)" = "echo v2"
+
+  if have ssh-keygen; then
+    ssh-keygen -q -t ed25519 -N '' -C signer -f "$WORK/signer" > /dev/null; ssh-keygen -q -t ed25519 -N '' -C other -f "$WORK/other" > /dev/null
+    git -C "$W" -c gpg.format=ssh -c user.signingkey="$WORK/signer" tag -s v2 -m signed "$C2"
+    git -C "$W" -c gpg.format=ssh -c user.signingkey="$WORK/other" tag -s v2-other -m signed-by-other "$C2"
+    git -C "$W" push -q "$O" v2 v2-other; mirror_case update_mirror > /dev/null
+    printf 't@t namespaces="git" %s\n' "$(cut -d' ' -f1,2 < "$WORK/signer.pub")" > "$WORK/allowed_signers"; chmod 644 "$WORK/allowed_signers"
+    sres() { ( ALLOWED_SIGNERS_FILE="$WORK/allowed_signers" REQUIRE_SIGNED_TAG=yes; mirror_case resolve_target_ref "$1" ); }
+    check "REQUIRE_SIGNED_TAG: tag signed by an allowed key -> accepted" test "$(sres v2)" = "$C2"
+    check "REQUIRE_SIGNED_TAG: tag signed by another key -> refused" grep -q 'no valid signature' <<< "$(sres v2-other)"
+    check "REQUIRE_SIGNED_TAG: unsigned annotated tag -> refused" grep -q 'no valid signature' <<< "$(sres v1)"
+    check "REQUIRE_SIGNED_TAG: lightweight tag -> refused" grep -q 'lightweight tag' <<< "$(sres light)"
+    check "REQUIRE_SIGNED_TAG: a branch -> refused" grep -q 'is not a tag on origin' <<< "$(sres main)"
+    chmod 664 "$WORK/allowed_signers"
+    check "REQUIRE_SIGNED_TAG: group-writable allowed-signers file -> refused" grep -q 'not writable by group/others' <<< "$(sres v2)"
+    chmod 644 "$WORK/allowed_signers"
+    check "REQUIRE_SIGNED_TAG: missing allowed-signers file -> refused" grep -q 'needs' <<< "$( (ALLOWED_SIGNERS_FILE="$WORK/none" REQUIRE_SIGNED_TAG=yes; mirror_case resolve_target_ref v2) )"
+  else
+    skip "signed tag tests (ssh-keygen not installed)"
+  fi
+
+  # fill_checkout: clone (first deploy) and later fetch, both from a bundle; the deploy user needs no GitHub access.
+  fill_case() { ( die() { printf 'DIE: %s\n' "$*"; exit 1; }
+                  sudo() { while (( $# )); do case "$1" in -H|-n) shift ;; -u) shift 2 ;; --) shift; break ;; *) break ;; esac; done; "$@"; }
+                  MIRROR_DIR="$WORK/mirror.git" MIRROR_PROTOCOL=file BUNDLE_DIR="$WORK/bundle" DEPLOY_USER=root APP_DIR="$WORK/app-checkout"
+                  REPO_URL="file://$O"; fill_checkout "$1"; git -C "$APP_DIR" rev-parse HEAD ) 2>&1; }
+  rm -rf "$WORK/app-checkout"; mkdir -p "$WORK/app-checkout"
+  check "first deploy: checkout cloned from the bundle at the resolved commit" test "$(fill_case "$C1" | tail -1)" = "$C1"
+  check "next deploy: checkout fetched from the bundle and moved to the new commit" test "$(fill_case "$C2" | tail -1)" = "$C2"
+  check "the bundle is removed after the fetch" test ! -e "$WORK/bundle/release.bundle"
+  check "the checkout's origin is REPO_URL (for people), never fetched by root" test "$(git -C "$WORK/app-checkout" remote get-url origin)" = "file://$O"
+else
+  skip "mirror tests (need git and root: run in the Linux/WSL container as root)"
+fi
+if can_dry_run; then
+  OUT="$BASE_OUT"
+  check "dry-run fetches the repository as root into the root-owned mirror" grep -qF '[dry-run] fetch git@github.com:hforouzi/amoobot.git AS ROOT into /var/lib/amoobot/mirror.git (root:root 700) with /etc/amoobot/repo_deploy_ed25519' <<< "$OUT"
+  check "dry-run resolves the ref in the mirror before pausing anything" bash -c \
+    'v=$(grep -n "resolve main in the root-owned mirror" <<< "$1" | cut -d: -f1); p=$(grep -n "pause scheduled jobs" <<< "$1" | cut -d: -f1); [[ -n $v && -n $p && $v -lt $p ]]' _ "$OUT"
+  check "dry-run fills the checkout from a bundle, not from GitHub" grep -q 'from a bundle of the root-owned mirror (no GitHub access for deploy)' <<< "$OUT"
+  check "dry-run never configures a deploy-user git key any more" not grep -q 'core.sshCommand' <<< "$OUT"
+else
+  skip "$DRY_RUN_SKIP"
 fi
 
 # Backup rotation: only <db>_nightly_* dumps expire; pre-deploy / pre-restore / manual dumps are kept.
@@ -469,11 +557,12 @@ ngx_prepare() {
   render_maintenance off > "$NGX/conf/maint.conf"
 }
 ngx_reload() { nginx -p "${NGXW}/" -c "${NGXW}/conf/nginx.conf" -s reload > /dev/null 2>&1; sleep 0.8; }
-# ngx_start SERVER_BLOCKS  -> starts nginx on NGX_PORT with the given server blocks (paths already substituted)
+# ngx_start SERVER_BLOCKS  -> starts nginx on NGX_PORT with the given server blocks (paths already substituted). As root
+# (the Linux container) the workers run as root too: the scratch dir is private (mktemp -d, 700).
 ngx_start() {
   printf 'fastcgi_param QUERY_STRING $query_string;\nfastcgi_param REQUEST_METHOD $request_method;\nfastcgi_param SCRIPT_NAME $fastcgi_script_name;\nfastcgi_param REQUEST_URI $request_uri;\n' > "$NGX/conf/fastcgi_params"
   cat > "$NGX/conf/nginx.conf" <<EOF
-worker_processes 1; error_log ${NGXW}/logs/error.log; pid ${NGXW}/logs/nginx.pid;
+worker_processes 1; error_log ${NGXW}/logs/error.log; pid ${NGXW}/logs/nginx.pid;$( [[ "$EUID" -eq 0 ]] && printf ' user root;' )
 events { worker_connections 64; }
 http {
   client_body_temp_path ${NGXW}/temp; proxy_temp_path ${NGXW}/temp; fastcgi_temp_path ${NGXW}/temp; uwsgi_temp_path ${NGXW}/temp; scgi_temp_path ${NGXW}/temp;
@@ -839,8 +928,7 @@ fi
 if can_dry_run; then
   OUT="$BASE_OUT"
   check "dry-run fetches GitHub's host keys over HTTPS" grep -q "fetch GitHub's SSH host keys from https://api.github.com/meta (HTTPS) -> /etc/ssh/amoobot_github_known_hosts" <<< "$OUT"
-  check "git's sshCommand: StrictHostKeyChecking=yes with the pinned file" grep -qF \
-    'core.sshCommand ssh -i /home/deploy/.ssh/amoobot_deploy_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/etc/ssh/amoobot_github_known_hosts' <<< "$OUT"
+  check "root's mirror fetch uses the pinned GitHub file for github.com" grep -q 'repo_known_hosts="\$GITHUB_KNOWN_HOSTS"' "$ROOT/deploy.sh"
 else
   skip "$DRY_RUN_SKIP"
 fi

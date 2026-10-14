@@ -34,7 +34,7 @@
 | 1–4 | `apt upgrade`، نصب Nginx، MariaDB، Supervisor، ufw، certbot، PHP 8.4 (PPA ondrej) و Composer (با بررسی امضای نصب‌کننده) |
 | 5 | کاربر غیر root به نام `deploy` (با sudo فقط برای `amoobot-*`)، SSH فقط با کلید (فقط اگر ورود `deploy` با کلید تأیید شود)، فایروال فقط 22/80/443، سیاست restart خودکار برای nginx/php-fpm/mariadb/supervisor/cron |
 | 6 | تنظیم `sql_mode = STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION`، ساخت دیتابیس و کاربر (و همگام کردن پسورد) |
-| 7 | گرفتن کد با **deploy key فقط‌خواندنی** و checkout روی ref خواسته‌شده؛ ثبت در `/var/lib/amoobot/releases.log`؛ نصب اسکریپت‌هایی که root اجرا می‌کند از **آبجکت‌های git همان کامیت** در `/usr/local/lib/amoobot` (بخش ۳) |
+| 7 | root با **deploy key فقط‌خواندنیِ متعلق به root** (`/etc/amoobot/repo_deploy_ed25519`) مخزن را در **آینه‌ی root‌مالک** `/var/lib/amoobot/mirror.git` می‌گیرد، `--ref` را فقط با branchها و tagهای origin در همین آینه resolve می‌کند و اسکریپت‌هایی را که root اجرا می‌کند از همین آینه در `/usr/local/lib/amoobot` نصب می‌کند؛ checkout کاربر `deploy` از یک bundle همان کامیت پر می‌شود؛ ثبت در `/var/lib/amoobot/releases.log` (بخش ۳، «مدل اعتماد») |
 | 8 | `composer install --no-dev --optimize-autoloader` |
 | 9 | ساخت `.env.prod.local` (600) و `.env.local.php` (`composer dump-env prod`) داخل پوشه‌ی برنامه |
 | 10 | دسترسی‌ها: کد متعلق به `deploy`، فقط‌خواندنی برای `www-data`؛ `var/` قابل نوشتن برای `www-data` |
@@ -51,7 +51,7 @@
 ```bash
 sudo amoobot-deploy --dry-run          # فقط نمایش؛ هیچ تغییری نمی‌دهد و رمزها را چاپ نمی‌کند
 sudo amoobot-deploy --app-only         # بدون مراحل 1 تا 6 (برای به‌روزرسانی سریع کد)
-sudo amoobot-deploy --ref v1.4.0       # branch، tag یا commit مشخص (برای Rollback هم)
+sudo amoobot-deploy --ref v1.4.0       # branch یا tag روی origin، یا hash کامل ۴۰ کاراکتری کامیتی که در یکی از آن‌هاست (برای Rollback هم)
 sudo amoobot-deploy --env-file /path   # فایل تنظیمات دیگر (پیش‌فرض /etc/amoobot/.env.prod.local)
 ```
 
@@ -90,8 +90,10 @@ sudo nano /etc/amoobot/.env.prod.local
   اگر فقط `ssh.socket` فعال باشد sshd هنوز اجرا نشده و اتصال بعدی تنظیمات جدید را می‌خواند.
 
 > **توجه:** این اسکریپت نمی‌تواند یک ورود واقعی SSH را امتحان کند (کلید خصوصی شما را ندارد). قبل از بستن نشست فعلی حتماً در ترمینال دیگر
-> `ssh deploy@SERVER` و `sudo amoobot-deploy --dry-run` را امتحان کنید. کاربر `deploy` با `amoobot-deploy` می‌تواند هر commitی از مخزن را deploy کند
-> و آن commit با دسترسی root اجرا می‌شود؛ پس کلید `deploy` را مثل کلید root محافظت کنید.
+> `ssh deploy@SERVER` و `sudo amoobot-deploy --dry-run` را امتحان کنید. کاربر `deploy` با `amoobot-deploy` می‌تواند هر branch، tag یا
+> commitی را که **روی origin (GitHub) وجود دارد** deploy کند و اسکریپت‌های عملیاتی آن commit با root اجرا می‌شوند. پس `deploy` دقیقاً تا جایی
+> معادل root است که **دسترسی نوشتن روی مخزن GitHub** هست: دسترسی نوشتن GitHub (و کلیدهای امضای `REQUIRE_SIGNED_TAG`) را مثل root محافظت
+> کنید. هیچ چیزی که `deploy` روی خود سرور تغییر دهد (checkout یا `.git` آن) با root نصب یا اجرا نمی‌شود (بخش ۳، «مدل اعتماد»).
 
 ```bash
 # 2) اسکریپت را به سرور بیاورید و ابتدا dry-run بگیرید
@@ -102,14 +104,15 @@ ssh root@SERVER 'bash /root/deploy.sh --dry-run'
 ssh root@SERVER 'bash /root/deploy.sh'
 ```
 
-**اولین اجرا در مرحله‌ی 7 عمداً متوقف می‌شود** و کلید عمومی deploy key را چاپ می‌کند:
-GitHub ← مخزن ← Settings ← Deploy keys ← Add deploy key. کلید را بچسبانید و **Allow write access را تیک نزنید**. سپس اسکریپت را دوباره اجرا کنید.
+**اولین اجرا در مرحله‌ی 7 عمداً متوقف می‌شود** (قبل از متوقف کردن هر چیزی) و کلید عمومی deploy key متعلق به root
+(`/etc/amoobot/repo_deploy_ed25519.pub`) را چاپ می‌کند: GitHub ← مخزن ← Settings ← Deploy keys ← Add deploy key. کلید را بچسبانید و
+**Allow write access را تیک نزنید**. سپس اسکریپت را دوباره اجرا کنید. کاربر `deploy` دیگر هیچ کلیدی برای GitHub لازم ندارد.
 
 **کلید میزبان GitHub:** اسکریپت به اولین کلیدی که سرور SSH نشان می‌دهد اعتماد نمی‌کند (`accept-new` حذف شده). کلیدهای منتشرشده‌ی GitHub
 در هر deploy از `https://api.github.com/meta` (فقط HTTPS با گواهی معتبر) گرفته، با `ssh-keygen` بررسی و در
 `/etc/ssh/amoobot_github_known_hosts` (مالک root، `644`) نوشته می‌شوند؛ git با `StrictHostKeyChecking=yes` و همین فایل کار می‌کند.
 اگر GitHub در دسترس نباشد فایل قبلی نگه داشته می‌شود؛ اگر فایلی نباشد deploy متوقف می‌شود. برای مخزنی غیر از github.com کلید میزبان
-خودکار گرفته نمی‌شود: اثر انگشت را از مستندات سرویس‌دهنده بگیرید و کلید تأییدشده را به `~deploy/.ssh/known_hosts` اضافه کنید.
+خودکار گرفته نمی‌شود: اثر انگشت را از مستندات سرویس‌دهنده بگیرید و کلید تأییدشده را در `/etc/amoobot/repo_known_hosts` (مالک root) بگذارید.
 
 **نسخه‌ی Composer:** نصب‌کننده با SHA-384 منتشرشده بررسی می‌شود، اما آخرین نسخه‌ی پایدار Composer را نصب می‌کند. برای ثابت نگه داشتن
 نسخه، در مرحله‌ی 4 به فراخوانی `composer-setup.php` گزینه‌ی `--version=<2.x.y>` را اضافه کنید و آگاهانه به‌روز کنید؛ Composer موجود دست
@@ -138,9 +141,25 @@ sudo amoobot-deploy --app-only --ref v1.5.0
 ```
 
 - اسکریپت قبل از اجرا از روی خودش یک کپی می‌گیرد، پس checkout کد جدید وسط کار مشکلی ایجاد نمی‌کند. توجه: در این حالت **نسخه‌ی فعلیِ** `deploy.sh` اجرا می‌شود و نسخه‌ی جدید از اجرای بعدی.
-- **root هیچ فایلی از پوشه‌ی برنامه را اجرا نمی‌کند.** کاربر `deploy` مالک `/var/www/amoobot` است و می‌تواند آن را تغییر دهد، پس
-  `deploy.sh`، اسکریپت‌های بکاپ/بازگردانی، اسکریپت‌های کارهای زمان‌بندی‌شده و `bin/lib/` با `git cat-file blob <کامیت>:<مسیر>`
-  (محتوای commit‌شده، نه فایل روی دیسک) در `/usr/local/lib/amoobot` (مالک root، `755`/`644`) نصب می‌شوند. ورودی‌ها:
+- **مدل اعتماد: root هیچ چیزی را از مخزنی که کاربر `deploy` کنترل می‌کند نصب یا اجرا نمی‌کند.** کاربر `deploy` مالک
+  `/var/www/amoobot` **و `.git` آن** است، پس می‌تواند هم فایل‌ها و هم آبجکت‌ها و refهای git آن را بسازد یا عوض کند. به همین دلیل:
+  - root مخزن را خودش، با کلید فقط‌خواندنی `/etc/amoobot/repo_deploy_ed25519` (مالک root، `600`) و کلید میزبان pin‌شده، در آینه‌ی bare
+    `/var/lib/amoobot/mirror.git` (مالک root، `700`) می‌گیرد؛ فقط branchهای origin (به‌صورت `refs/remotes/origin/*`) و tagها.
+  - `--ref` فقط این‌ها را قبول می‌کند: branch روی origin، tag روی origin، یا hash کامل ۴۰ کاراکتری که یکی از branchها یا tagهای origin آن را
+    شامل شود. hash کوتاه، کامیتی که فقط در checkout کاربر `deploy` ساخته شده و آبجکتی که هیچ ref از origin به آن نمی‌رسد (مثلاً بعد از
+    force-push) **رد می‌شوند**.
+  - `deploy.sh`، اسکریپت‌های بکاپ/بازگردانی، اسکریپت‌های کارهای زمان‌بندی‌شده و `bin/lib/` با `git --git-dir=<آینه> cat-file blob <کامیت>:<مسیر>`
+    در `/usr/local/lib/amoobot` (مالک root، `755`/`644`) نصب می‌شوند؛ فهرست migrationهای کامیت مقصد هم از آینه خوانده می‌شود (بخش ۴).
+  - checkout برنامه از یک bundle همان کامیت (در `/run/amoobot-deploy`، فقط برای گروه `deploy` خواندنی) با کاربر `deploy` پر می‌شود؛ root
+    هیچ‌وقت داخل مخزن کاربر `deploy` دستور git اجرا نمی‌کند و `deploy` دیگر کلید GitHub ندارد. کلید قدیمی `~deploy/.ssh/amoobot_deploy_ed25519`
+    را از Deploy keys در GitHub پاک کنید.
+  - **نتیجه:** کاربر `deploy` می‌تواند هر ref موجود روی origin را deploy کند؛ این دقیقاً به اندازه‌ی دسترسی نوشتن روی مخزن GitHub معادل root
+    است. دسترسی نوشتن GitHub را مثل root محافظت کنید، یا `REQUIRE_SIGNED_TAG=yes` را فعال کنید (پایین‌تر).
+  - **ارتقای یک سرور قدیمی به این نسخه:** `amoobot-deploy` نصب‌شده هنوز نسخه‌ی قبلی است و این نسخه را یک‌بار به روش قدیم (از checkout) نصب
+    می‌کند. اگر احتمال می‌دهید checkout دستکاری شده باشد، ارتقا را مثل اولین نصب از یک کپی root‌مالک و بررسی‌شده انجام دهید:
+    `scp deploy.sh root@SERVER:/root/deploy.sh` و `sudo bash /root/deploy.sh --app-only`. بعد از آن rollback به کامیت‌های قبل از آینه رد می‌شود.
+
+  ورودی‌ها:
 
   | دستور | کار |
   |---|---|
@@ -170,6 +189,23 @@ sudo amoobot-deploy --app-only --ref v1.5.0
 - اگر فایل‌های tracked روی سرور دستی تغییر کرده باشند، اسکریپت متوقف می‌شود (هیچ تغییری روی سرور دور ریخته نمی‌شود).
 - اجرای کامل (بدون `--app-only`) بسته‌های سیستم را هم به‌روز می‌کند؛ هر چند وقت یک‌بار در زمان کم‌ترافیک انجام دهید.
 
+### فقط tagهای امضاشده (`REQUIRE_SIGNED_TAG=yes`، اختیاری)
+
+با این تنظیم `amoobot-deploy` فقط **tag annotated و امضاشده** را قبول می‌کند که امضای آن با `git verify-tag` در برابر
+`/etc/amoobot/allowed_signers` (مالک root، غیرقابل نوشتن برای گروه/دیگران) معتبر باشد؛ branch، hash، tag سبک (lightweight) و tag بدون امضا یا با
+کلید دیگر رد می‌شوند. آن‌وقت حتی کسی که دسترسی نوشتن GitHub دارد بدون کلید امضا نمی‌تواند چیزی را با root اجرا کند.
+
+```bash
+# روی لپ‌تاپ امضاکننده (کلید SSH جداگانه، ترجیحاً روی کلید سخت‌افزاری):
+git config gpg.format ssh && git config user.signingkey ~/.ssh/amoobot_release_ed25519.pub
+git tag -s v1.6.0 -m "release v1.6.0" && git push origin v1.6.0
+# روی سرور (یک‌بار؛ فرمت allowed signers گیت):
+echo 'release@example namespaces="git" ssh-ed25519 AAAA...' | sudo tee /etc/amoobot/allowed_signers > /dev/null
+sudo chown root:root /etc/amoobot/allowed_signers && sudo chmod 644 /etc/amoobot/allowed_signers
+# در /etc/amoobot/.env.prod.local:  REQUIRE_SIGNED_TAG=yes   و   DEPLOY_REF=v1.6.0
+sudo amoobot-deploy --app-only --ref v1.6.0
+```
+
 ### Nginx، HTTPS و محافظت از پنل ادمین
 
 - **قبل از گواهی:** پیکربندی موقت پورت 80 فقط چالش ACME (`/.well-known/acme-challenge/`، پوشه‌ی `/var/www/letsencrypt`) را جواب می‌دهد و هر
@@ -195,10 +231,11 @@ tail -n 5 /var/lib/amoobot/releases.log        # <زمان> <کامیت قبلی
 sudo amoobot-deploy --app-only --ref <کامیت قبلی>
 ```
 
-قبل از متوقف کردن کارها و قبل از checkout، اسکریپت با `git cat-file -e <کامیت>:<مسیر>` بررسی می‌کند که کامیت مقصد همه‌ی فایل‌های
-عملیاتی (`deploy.sh`، اسکریپت‌های بکاپ/بازگردانی/کارهای زمان‌بندی‌شده، `bin/lib/database-url.sh`، `bin/console`) را دارد و `deploy.sh` آن
-از ساختار root‌مالک `/usr/local/lib/amoobot` استفاده می‌کند. وگرنه **رد می‌کند** و نسخه‌ی در حال اجرا دست نمی‌خورد. بنابراین rollback به
-کامیت‌های قبل از این تغییر امنیتی ممکن نیست (آن نسخه‌ها فایل‌های پوشه‌ی برنامه را با root اجرا می‌کردند).
+`<کامیت قبلی>` باید روی origin باشد (در یک branch یا tag؛ hash کامل ۴۰ کاراکتری). قبل از متوقف کردن کارها و قبل از checkout، اسکریپت
+در آینه‌ی root‌مالک با `git cat-file -e <کامیت>:<مسیر>` بررسی می‌کند که کامیت مقصد همه‌ی فایل‌های عملیاتی (`deploy.sh`، اسکریپت‌های
+بکاپ/بازگردانی/کارهای زمان‌بندی‌شده، `bin/lib/`، `bin/console`) را دارد و `deploy.sh` آن از `/usr/local/lib/amoobot` **و** آینه‌ی
+`/var/lib/amoobot/mirror.git` استفاده می‌کند. وگرنه **رد می‌کند** و نسخه‌ی در حال اجرا دست نمی‌خورد. بنابراین rollback به کامیت‌های قبل از
+آینه ممکن نیست (آن نسخه‌ها فایل‌های root را از checkout کاربر `deploy` نصب می‌کردند).
 
 **دیتابیس:** migrationها فقط رو به جلو اجرا می‌شوند. اگر نسخه‌ی خراب migration داشته که با کد قدیمی سازگار نیست:
 
@@ -256,7 +293,7 @@ curl -fsS https://DOMAIN/healthz
 | `APP_SECRET` | `openssl rand -hex 32` | نشست‌ها و remember-me ادمین‌ها باطل می‌شود |
 | `DB_PASSWORD` | `openssl rand -hex 24` (فقط `A-Z a-z 0-9 . _ ~ -`) | اسکریپت در مرحله‌ی 6 پسورد کاربر MariaDB را هم عوض می‌کند. **بدون `--app-only` اجرا کنید** |
 | کلیدهای درگاه پرداخت | در پنل ادمین ← درگاه‌ها | مستقل از deploy |
-| deploy key گیت | `rm ~deploy/.ssh/amoobot_deploy_ed25519*`، اجرای deploy و ثبت کلید جدید در GitHub (کلید قبلی را حذف کنید) | — |
+| deploy key گیت (root) | `sudo rm /etc/amoobot/repo_deploy_ed25519*`، اجرای deploy و ثبت کلید جدید در GitHub (کلید قبلی را حذف کنید) | deploy تا ثبت کلید، قبل از متوقف کردن چیزی، متوقف می‌شود |
 
 بعد از هر چرخش: `curl -fsS https://DOMAIN/healthz` و یک پیام آزمایشی به بات.
 
@@ -271,7 +308,8 @@ curl -fsS https://DOMAIN/healthz
 - [ ] ورود `ssh deploy@SERVER` با کلید کار می‌کند و ورود با پسورد رد می‌شود
 - [ ] `sudo -l -U deploy` فقط چهار دستور `/usr/local/sbin/amoobot-*` را نشان می‌دهد
 - [ ] `sudo ufw status` فقط 22، 80 و 443 را نشان می‌دهد
-- [ ] deploy key در GitHub **بدون** دسترسی نوشتن است
+- [ ] deploy key در GitHub **بدون** دسترسی نوشتن است و فقط کلید root (`/etc/amoobot/repo_deploy_ed25519.pub`) ثبت است
+- [ ] دسترسی نوشتن مخزن GitHub (و branch protection برای `main`) مثل دسترسی root محدود است؛ یا `REQUIRE_SIGNED_TAG=yes` فعال است
 
 **برنامه**
 - [ ] خروجی deploy بدون خطا تا «Amoobot deployment completed»

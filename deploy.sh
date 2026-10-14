@@ -35,9 +35,21 @@ REQUIRED_SQL_MODE="STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBS
 WEB_USER="www-data"
 STATE_DIR="/var/lib/amoobot"
 
-# Everything root (or systemd) executes is a root-owned copy taken from the deployed commit's git objects, never a file
-# in the checkout (the deploy user can edit those). Entry points: /usr/local/sbin/amoobot-{deploy,backup,restore,check-jobs}.
+# Everything root (or systemd) executes is a root-owned copy taken from the deployed commit in a ROOT-OWNED mirror of
+# REPO_URL, never from the deploy user's checkout (the deploy user owns that .git and could forge its objects and refs).
+# Entry points: /usr/local/sbin/amoobot-{deploy,backup,restore,check-jobs}.
 ROOT_LIB_DIR="/usr/local/lib/amoobot"
+# Bare mirror fetched as root with a root-owned read-only deploy key; --ref is resolved only against origin's branches and
+# tags in it. The deploy user's checkout is filled from a bundle of the resolved commit and needs no GitHub access.
+MIRROR_DIR="/var/lib/amoobot/mirror.git"
+ROOT_REPO_KEY="/etc/amoobot/repo_deploy_ed25519"
+# Verified SSH host keys for a REPO_URL host other than github.com (root-owned; GitHub's come from its API, see below).
+ROOT_KNOWN_HOSTS="/etc/amoobot/repo_known_hosts"
+# REQUIRE_SIGNED_TAG=yes: only tags signed by a key in this file (git's SSH allowed-signers format) can be deployed.
+ALLOWED_SIGNERS_FILE="/etc/amoobot/allowed_signers"
+# Root-owned, deploy-group-readable directory for the bundle the checkout is fetched from (removed after the fetch).
+BUNDLE_DIR="/run/amoobot-deploy"
+GIT_ENV_PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 ROOT_SBIN_DIR="/usr/local/sbin"
 ROOT_OPS_FILES=(deploy.sh bin/backup-database.sh bin/restore-database.sh bin/scheduled-job.sh
   bin/scheduled-job-alert.sh bin/check-scheduled-jobs.sh bin/lib/database-url.sh bin/lib/monitor-ping.sh)
@@ -80,7 +92,7 @@ JOBS_MANIFEST="${STATE_DIR}/scheduled-jobs.conf"
 # Keys used only by this script; never written into the application's env.
 DEPLOY_ONLY_KEYS=" DOMAIN LETSENCRYPT_EMAIL REPO_URL APP_DIR PHP_VERSION DEPLOY_USER DEPLOY_REF DEPLOY_SSH_PUBLIC_KEY "
 DEPLOY_ONLY_KEYS+="SSH_PERMIT_ROOT_LOGIN DB_NAME DB_USER DB_PASSWORD BACKUP_DIR BACKUP_RETENTION_DAYS BACKUP_CRON "
-DEPLOY_ONLY_KEYS+="ADMIN_ALLOW_IPS MONITOR_PING_URL "
+DEPLOY_ONLY_KEYS+="ADMIN_ALLOW_IPS MONITOR_PING_URL REQUIRE_SIGNED_TAG "
 # Application keys that may also come from the process environment (for non-secret overrides; secrets: env file only).
 APP_KEYS="APP_SECRET APP_DEFAULT_LOCALE APP_SHARE_DIR DEFAULT_URI DATABASE_URL MESSENGER_TRANSPORT_DSN
  TELEGRAM_BOT_TOKEN TELEGRAM_WEBHOOK_SECRET TELEGRAM_WEBHOOK_SECRET_TOKEN TELEGRAM_ADMIN_CHAT_ID TELEGRAM_PROXY
@@ -362,14 +374,15 @@ resolve_deploy_home() {
 verify_target_ops() {
   local commit="$1" path missing=() target_deploy
   for path in "${ROOT_OPS_FILES[@]}" bin/console; do
-    sudo -H -u "$DEPLOY_USER" git -C "$APP_DIR" cat-file -e "${commit}:${path}" 2> /dev/null || missing+=("$path")
+    mirror_git cat-file -e "${commit}:${path}" 2> /dev/null || missing+=("$path")
   done
   (( ${#missing[@]} == 0 )) \
     || die "Refusing to deploy ${commit}: it lacks ${missing[*]}. Nothing was paused or checked out."
   # Into a variable, not "| grep -q": grep exiting early would make git fail with SIGPIPE under pipefail.
   target_deploy="$(git_blob "$commit" deploy.sh)" || die "Cannot read deploy.sh from ${commit}."
   grep -qx 'ROOT_LIB_DIR="/usr/local/lib/amoobot"' <<< "$target_deploy" \
-    || die "Refusing to deploy ${commit}: its deploy.sh predates the root-owned ops layout (${ROOT_LIB_DIR}); it would run checkout files as root again. Nothing was paused or checked out."
+    && grep -qx 'MIRROR_DIR="/var/lib/amoobot/mirror.git"' <<< "$target_deploy" \
+    || die "Refusing to deploy ${commit}: its deploy.sh predates the root-owned mirror (${MIRROR_DIR}); it would install root-run files from the deploy user's checkout again. Nothing was paused or checked out."
 }
 
 # database_table_count  ->  number of tables in the app database (root-owned lib; DATABASE_URL from this script)
@@ -442,12 +455,101 @@ EOF
   esac
 }
 
-# git_blob COMMIT PATH  ->  the committed content of PATH (read as the deploy user; replace refs ignored, no filters)
-git_blob() {
-  sudo -H -u "$DEPLOY_USER" env GIT_NO_REPLACE_OBJECTS=1 git -C "$APP_DIR" cat-file blob "$1:$2"
+# mirror_git ARGS...  git on the root-owned mirror with a clean environment: no system/global config, no replace refs,
+# no prompts, only the SSH transport (MIRROR_PROTOCOL, overridable for offline tests). MIRROR_SSH is set in step 7.
+MIRROR_PROTOCOL="ssh"
+mirror_git() {
+  env -i PATH="$GIT_ENV_PATH" HOME=/root GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_NO_REPLACE_OBJECTS=1 \
+    GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND="${MIRROR_SSH:-ssh -F /dev/null -o BatchMode=yes}" \
+    git --git-dir="$MIRROR_DIR" -c protocol.allow=never -c "protocol.${MIRROR_PROTOCOL}.allow=always" -c core.hooksPath=/dev/null "$@"
 }
 
-# install_root_ops COMMIT  installs ROOT_OPS_FILES from COMMIT's git objects into ROOT_LIB_DIR, plus the wrappers.
+# git_blob COMMIT PATH  ->  the committed content of PATH from the root-owned mirror (never the deploy user's checkout)
+git_blob() {
+  mirror_git cat-file blob "$1:$2"
+}
+
+# update_mirror  creates the root-owned bare mirror if needed and fetches origin's branches and tags into it (as root).
+# Sets MIRROR_FETCH_OK=1/0; the caller explains how to register the key when the fetch fails.
+update_mirror() {
+  MIRROR_FETCH_OK=0
+  install -d -m 755 -o root -g root "$STATE_DIR"
+  if [[ ! -f "$MIRROR_DIR/HEAD" ]]; then
+    install -d -m 700 -o root -g root "$MIRROR_DIR"
+    env -i PATH="$GIT_ENV_PATH" HOME=/root GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null git init -q --bare "$MIRROR_DIR"
+  fi
+  chown -R -h root:root "$MIRROR_DIR"
+  chmod 700 "$MIRROR_DIR"
+  # Only origin's branches (as refs/remotes/origin/*) and tags; --prune drops refs deleted upstream.
+  if mirror_git fetch -q --prune --prune-tags --no-write-fetch-head "$REPO_URL" \
+       '+refs/heads/*:refs/remotes/origin/*' '+refs/tags/*:refs/tags/*'; then
+    MIRROR_FETCH_OK=1
+  fi
+}
+
+# resolve_target_ref REF  ->  prints the commit to deploy. Only origin's refs count: a branch (refs/remotes/origin/REF), a
+# tag (refs/tags/REF) or a full 40-hex commit that one of them contains. With REQUIRE_SIGNED_TAG=yes only a tag signed by
+# a key in ALLOWED_SIGNERS_FILE. Returns 1 (message on stderr) when the ref is not acceptable.
+resolve_target_ref() {
+  local ref="$1" sha tag_obj
+  if [[ "${REQUIRE_SIGNED_TAG:-no}" == yes ]]; then
+    tag_obj="$(mirror_git rev-parse --verify -q "refs/tags/${ref}")" \
+      || { echo "REQUIRE_SIGNED_TAG=yes: '${ref}' is not a tag on origin." >&2; return 1; }
+    [[ "$(mirror_git cat-file -t "$tag_obj")" == tag ]] \
+      || { echo "REQUIRE_SIGNED_TAG=yes: '${ref}' is a lightweight tag (no signature)." >&2; return 1; }
+    verify_allowed_signers_file || return 1
+    mirror_git -c gpg.format=ssh -c gpg.ssh.allowedSignersFile="$ALLOWED_SIGNERS_FILE" verify-tag "$tag_obj" > /dev/null 2>&1 \
+      || { echo "REQUIRE_SIGNED_TAG=yes: tag '${ref}' has no valid signature from ${ALLOWED_SIGNERS_FILE}." >&2; return 1; }
+    mirror_git rev-parse --verify -q "${tag_obj}^{commit}"
+    return
+  fi
+  if sha="$(mirror_git rev-parse --verify -q "refs/remotes/origin/${ref}^{commit}")" \
+     || sha="$(mirror_git rev-parse --verify -q "refs/tags/${ref}^{commit}")"; then
+    printf '%s\n' "$sha"
+    return 0
+  fi
+  if [[ "$ref" =~ ^[0-9a-f]{40}$ ]] && sha="$(mirror_git rev-parse --verify -q "${ref}^{commit}")" \
+     && [[ -n "$(mirror_git for-each-ref --count=1 --contains "$sha" refs/remotes/origin refs/tags)" ]]; then
+    printf '%s\n' "$sha"
+    return 0
+  fi
+  echo "Ref '${ref}' is not a branch or tag on origin, nor a full commit hash contained in one." >&2
+  return 1
+}
+
+# verify_allowed_signers_file  the signers file must be a regular root-owned file nobody else can write
+verify_allowed_signers_file() {
+  local owner mode
+  [[ -f "$ALLOWED_SIGNERS_FILE" && ! -L "$ALLOWED_SIGNERS_FILE" ]] \
+    || { echo "REQUIRE_SIGNED_TAG=yes needs ${ALLOWED_SIGNERS_FILE} (git SSH allowed-signers format)." >&2; return 1; }
+  read -r owner mode < <(stat -c '%u %a' "$ALLOWED_SIGNERS_FILE")
+  [[ "$owner" == 0 ]] && (( (8#$mode & 8#022) == 0 )) \
+    || { echo "${ALLOWED_SIGNERS_FILE} must be owned by root and not writable by group/others." >&2; return 1; }
+}
+
+# fill_checkout COMMIT  the deploy user's checkout gets COMMIT from a bundle made from the root-owned mirror (no GitHub
+# access, no git run as root inside the deploy-owned repository).
+fill_checkout() {
+  local commit="$1" bundle="${BUNDLE_DIR}/release.bundle" head
+  install -d -m 750 -o root -g "$DEPLOY_USER" "$BUNDLE_DIR"
+  rm -f "$bundle"
+  mirror_git update-ref refs/amoobot/deploy "$commit"
+  mirror_git bundle create -q "$bundle" refs/amoobot/deploy
+  chown root:"$DEPLOY_USER" "$bundle"
+  chmod 640 "$bundle"
+  if [[ ! -d "$APP_DIR/.git" ]]; then
+    # First deploy: an empty repository; origin records REPO_URL for people, root never fetches through it.
+    sudo -H -u "$DEPLOY_USER" git -C "$APP_DIR" init -q
+    sudo -H -u "$DEPLOY_USER" git -C "$APP_DIR" remote add origin "$REPO_URL"
+  fi
+  sudo -H -u "$DEPLOY_USER" git -C "$APP_DIR" fetch -q --no-tags "$bundle" refs/amoobot/deploy
+  rm -f "$bundle"
+  sudo -H -u "$DEPLOY_USER" git -C "$APP_DIR" checkout -q --detach "$commit"
+  head="$(sudo -H -u "$DEPLOY_USER" git -C "$APP_DIR" rev-parse HEAD)"
+  [[ "$head" == "$commit" ]] || die "The checkout is at ${head}, expected ${commit}."
+}
+
+# install_root_ops COMMIT  installs ROOT_OPS_FILES from COMMIT in the root-owned mirror into ROOT_LIB_DIR, plus wrappers.
 install_root_ops() {
   local commit="$1" path dest mode tmp
   run install -d -m 755 -o root -g root "$ROOT_LIB_DIR" "$ROOT_LIB_DIR/lib"
@@ -455,7 +557,7 @@ install_root_ops() {
     dest="$(root_ops_dest "$path")"
     mode=755; [[ "$path" == bin/lib/* ]] && mode=644
     if (( DRY_RUN )); then
-      log "[dry-run] install ${path} from git objects of ${commit} (not the checkout) -> ${dest} (${mode} root:root)"
+      log "[dry-run] install ${path} from git objects of ${commit} in the root-owned mirror (not the checkout) -> ${dest} (${mode} root:root)"
       continue
     fi
     tmp="$(mktemp)"
@@ -531,8 +633,11 @@ ssh_login_problems() {
 
 render_sudoers() {
   cat <<EOF
-# Managed by amoobot deploy.sh: ${DEPLOY_USER} may run ONLY these root-owned entry points without a password
-# (installed from the deployed commit, see ${ROOT_LIB_DIR}). Anything else needs root. Arguments are allowed.
+# Managed by amoobot deploy.sh: ${DEPLOY_USER} may run ONLY these root-owned entry points without a password.
+# Trust model: amoobot-deploy can deploy ANY branch, tag or commit that exists on origin (${REPO_URL}), and the deployed
+# commit's ops scripts run as root. So ${DEPLOY_USER} is root-equivalent exactly as far as GitHub WRITE access to that
+# repository reaches: protect GitHub write access (and REQUIRE_SIGNED_TAG's signing keys) like root. Nothing the deploy
+# user can change on this server (its checkout, its .git) is installed or run as root (see ${MIRROR_DIR}).
 Cmnd_Alias AMOOBOT_OPS = ${ROOT_SBIN_DIR}/amoobot-deploy, ${ROOT_SBIN_DIR}/amoobot-backup, ${ROOT_SBIN_DIR}/amoobot-restore, ${ROOT_SBIN_DIR}/amoobot-check-jobs
 ${DEPLOY_USER} ALL=(root) NOPASSWD: AMOOBOT_OPS
 EOF
@@ -813,6 +918,8 @@ fi
 [[ "$DB_NAME" =~ ^[A-Za-z0-9_]+$ && "$DB_USER" =~ ^[A-Za-z0-9_]+$ ]] || die "DB_NAME / DB_USER may only contain A-Z a-z 0-9 _."
 [[ "$DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]*$ && "$DEPLOY_USER" != "root" ]] || die "DEPLOY_USER must be a non-root user name."
 [[ "$SSH_PERMIT_ROOT_LOGIN" =~ ^(no|prohibit-password)$ ]] || die "SSH_PERMIT_ROOT_LOGIN must be 'no' or 'prohibit-password'."
+REQUIRE_SIGNED_TAG="${REQUIRE_SIGNED_TAG:-no}"
+[[ "$REQUIRE_SIGNED_TAG" =~ ^(yes|no)$ ]] || die "REQUIRE_SIGNED_TAG must be 'yes' or 'no'."
 if [[ -n "${DEPLOY_SSH_PUBLIC_KEY:-}" ]]; then
   if command -v ssh-keygen > /dev/null 2>&1; then
     valid_ssh_public_key "$DEPLOY_SSH_PUBLIC_KEY" \
@@ -1106,40 +1213,44 @@ step "7/18" "Fetching code (${DEPLOY_REF})..."
 
 id "$DEPLOY_USER" > /dev/null 2>&1 || (( DRY_RUN )) || die "Deploy user ${DEPLOY_USER} does not exist; run once without --app-only."
 resolve_deploy_home
-DEPLOY_KEY="$DEPLOY_HOME/.ssh/amoobot_deploy_ed25519"
-# Never accept-new: an unknown host key is refused. For github.com the keys come from GitHub's API over HTTPS.
+# The root-owned mirror is fetched as root with a root-owned read-only key. Never accept-new: an unknown host key is
+# refused. For github.com the keys come from GitHub's API over HTTPS; other hosts need a verified ROOT_KNOWN_HOSTS.
 repo_host="${REPO_URL#ssh://}"; repo_host="${repo_host#*@}"; repo_host="${repo_host%%[:/]*}"
-GIT_SSH="ssh -i ${DEPLOY_KEY} -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes"
-if [[ "$REPO_URL" == git@* || "$REPO_URL" == ssh://* ]] && [[ "$repo_host" == github.com ]]; then
-  GIT_SSH+=" -o UserKnownHostsFile=${GITHUB_KNOWN_HOSTS}"
+if [[ "$repo_host" == github.com ]]; then
+  repo_known_hosts="$GITHUB_KNOWN_HOSTS"
   if (( DRY_RUN )); then
     log "[dry-run] fetch GitHub's SSH host keys from ${GITHUB_META_URL} (HTTPS) -> ${GITHUB_KNOWN_HOSTS}; git uses StrictHostKeyChecking=yes"
   else
     refresh_github_known_hosts
   fi
+else
+  repo_known_hosts="$ROOT_KNOWN_HOSTS"
+  [[ -s "$ROOT_KNOWN_HOSTS" ]] || (( DRY_RUN )) || die "${repo_host} is not github.com: put its verified SSH host key into ${ROOT_KNOWN_HOSTS} (root-owned; compare ssh-keyscan's fingerprint with your git provider's documentation), then re-run."
 fi
-
-if [[ "$REPO_URL" == git@* || "$REPO_URL" == ssh://* ]]; then
-  if [[ ! -f "$DEPLOY_KEY" ]]; then
-    as "$DEPLOY_USER" ssh-keygen -q -t ed25519 -N '' -C "amoobot-deploy@$(hostname)" -f "$DEPLOY_KEY"
+MIRROR_SSH="ssh -F /dev/null -i ${ROOT_REPO_KEY} -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=${repo_known_hosts} -o GlobalKnownHostsFile=/dev/null"
+if (( DRY_RUN )); then
+  log "[dry-run] fetch ${REPO_URL} AS ROOT into ${MIRROR_DIR} (root:root 700) with ${ROOT_REPO_KEY}: origin's branches and tags only"
+  log "[dry-run] resolve ${DEPLOY_REF} in the root-owned mirror (origin/${DEPLOY_REF}, a tag, or a full commit hash contained in one$( [[ "${REQUIRE_SIGNED_TAG:-no}" == yes ]] && echo '; REQUIRE_SIGNED_TAG=yes: only a tag signed by a key in '"${ALLOWED_SIGNERS_FILE}")); refuse it unless it has every root-owned ops file (git cat-file -e) - before pausing anything"
+else
+  if [[ ! -f "$ROOT_REPO_KEY" ]]; then
+    install -d -m 700 -o root -g root "${ROOT_REPO_KEY%/*}"
+    ( umask 077; ssh-keygen -q -t ed25519 -N '' -C "amoobot-root@$(hostname)" -f "$ROOT_REPO_KEY" )
   fi
-  if (( ! DRY_RUN )) && ! sudo -H -u "$DEPLOY_USER" GIT_SSH_COMMAND="$GIT_SSH" git ls-remote --heads "$REPO_URL" > /dev/null 2>&1; then
+  [[ ! -L "$ROOT_REPO_KEY" && "$(stat -c '%U %a' "$ROOT_REPO_KEY")" == "root 600" ]] \
+    || die "${ROOT_REPO_KEY} must be a regular file owned by root with mode 600."
+  update_mirror
+  if (( ! MIRROR_FETCH_OK )); then
     log ""
-    log "The server cannot read ${REPO_URL}. Add this PUBLIC key as a read-only Deploy key"
+    log "The server (as root) cannot read ${REPO_URL}. Add this PUBLIC key as a read-only Deploy key"
     log "(GitHub > repo > Settings > Deploy keys > Add, leave 'Allow write access' UNCHECKED):"
     log ""
-    cat "${DEPLOY_KEY}.pub"
+    cat "${ROOT_REPO_KEY}.pub"
     log ""
-    if [[ "$repo_host" != github.com ]]; then
-      log "${repo_host} is not github.com: its SSH host key is not fetched automatically and unknown keys are refused."
-      log "Get the fingerprint from your git provider's documentation, then add the verified key to ${DEPLOY_HOME}/.ssh/known_hosts"
-      log "(e.g. ssh-keyscan ${repo_host} > /tmp/k; ssh-keygen -lf /tmp/k; compare; append only if it matches)."
-      log ""
-    fi
-    die "Repository not readable with the deploy key. Add the key above, then re-run."
+    die "Repository not readable with ${ROOT_REPO_KEY}. Add the key above, then re-run. Nothing was paused or checked out."
   fi
-else
-  warn "REPO_URL is not an SSH URL; the read-only deploy key is not used."
+  TARGET_COMMIT="$(resolve_target_ref "$DEPLOY_REF")" || die "Refusing to deploy '${DEPLOY_REF}' (see above). Nothing was paused or checked out."
+  # Checked before the jobs are paused: a refused rollback leaves the running release untouched.
+  verify_target_ops "$TARGET_COMMIT"
 fi
 
 run install -d -m 750 -o "$DEPLOY_USER" -g "$WEB_USER" "$APP_DIR"
@@ -1147,41 +1258,34 @@ if [[ -d "$APP_DIR/.git" ]]; then
   # Earlier versions of this script left the checkout owned by root/www-data.
   run chown -R "$DEPLOY_USER:$WEB_USER" "$APP_DIR"
   [[ -d "$APP_DIR/var" ]] && run chown -R "$WEB_USER:$WEB_USER" "$APP_DIR/var"
-  as "$DEPLOY_USER" git -C "$APP_DIR" remote set-url origin "$REPO_URL"
-else
-  as "$DEPLOY_USER" env GIT_SSH_COMMAND="$GIT_SSH" git clone "$REPO_URL" "$APP_DIR"
 fi
-[[ "$REPO_URL" == git@* || "$REPO_URL" == ssh://* ]] && as "$DEPLOY_USER" git -C "$APP_DIR" config core.sshCommand "$GIT_SSH"
-
-if (( ! DRY_RUN )); then
+if (( ! DRY_RUN )) && [[ -d "$APP_DIR/.git" ]]; then
   dirty="$(sudo -H -u "$DEPLOY_USER" git -C "$APP_DIR" status --porcelain --untracked-files=no)"
   [[ -z "$dirty" ]] || die "Tracked files were modified on the server in ${APP_DIR}; inspect with 'git status' and revert before deploying."
-  PREVIOUS_COMMIT="$(sudo -H -u "$DEPLOY_USER" git -C "$APP_DIR" rev-parse --verify -q HEAD || true)"
 fi
-as "$DEPLOY_USER" git -C "$APP_DIR" fetch --prune --tags origin
-if (( DRY_RUN )); then
-  log "[dry-run] resolve ${DEPLOY_REF} (origin/${DEPLOY_REF}, a tag, or a commit); refuse it unless it has every root-owned ops file (git cat-file -e) - before pausing anything"
-else
-  TARGET_COMMIT="$(sudo -H -u "$DEPLOY_USER" git -C "$APP_DIR" rev-parse --verify -q "origin/${DEPLOY_REF}^{commit}" \
-    || sudo -H -u "$DEPLOY_USER" git -C "$APP_DIR" rev-parse --verify -q "${DEPLOY_REF}^{commit}" \
-    || true)"
-  [[ -n "$TARGET_COMMIT" ]] || die "Ref '${DEPLOY_REF}' not found on origin (branch, tag or commit)."
-  # Checked before the jobs are paused: a refused rollback leaves the running release untouched.
-  verify_target_ops "$TARGET_COMMIT"
+# What is deployed comes from root's own record, never from the deploy-owned checkout.
+PREVIOUS_COMMIT=""
+if [[ -r "$STATE_DIR/deployed-commit" ]]; then
+  PREVIOUS_COMMIT="$(head -c 41 "$STATE_DIR/deployed-commit" | tr -d '\n')"
+elif [[ -r "$STATE_DIR/releases.log" ]]; then
+  # Servers deployed before deployed-commit existed: the target of the last recorded release.
+  PREVIOUS_COMMIT="$(tail -n 1 "$STATE_DIR/releases.log" | sed -n 's/^.* -> \([0-9a-f]\{40\}\) .*$/\1/p')"
 fi
+[[ "$PREVIOUS_COMMIT" =~ ^[0-9a-f]{40}$ ]] || PREVIOUS_COMMIT=""
 # From here until step 16 the code, cache and schema change: no scheduled job may run meanwhile.
 pause_scheduled_jobs
 # ...and until the end of step 11 Telegram and the gateways get 503 (they retry) instead of half-updated code.
 set_maintenance on
 if (( DRY_RUN )); then
-  log "[dry-run] check out ${DEPLOY_REF}"
+  log "[dry-run] check out ${DEPLOY_REF} in ${APP_DIR} as ${DEPLOY_USER}, from a bundle of the root-owned mirror (no GitHub access for ${DEPLOY_USER})"
 else
-  sudo -H -u "$DEPLOY_USER" git -C "$APP_DIR" checkout -q --detach "$TARGET_COMMIT"
+  fill_checkout "$TARGET_COMMIT"
   install -d -m 755 "$STATE_DIR"
+  printf '%s\n' "$TARGET_COMMIT" > "$STATE_DIR/deployed-commit"
   printf '%s %s -> %s (%s)\n' "$(date -u +%FT%TZ)" "${PREVIOUS_COMMIT:-none}" "$TARGET_COMMIT" "$DEPLOY_REF" >> "$STATE_DIR/releases.log"
   log "Deploying ${TARGET_COMMIT} (previous: ${PREVIOUS_COMMIT:-none}). History: ${STATE_DIR}/releases.log"
 fi
-# Root-run scripts come from the commit's git objects, so an edited file in the checkout never runs as root.
+# Root-run scripts come from the commit in the root-owned mirror, so nothing the deploy user can edit runs as root.
 install_root_ops "${TARGET_COMMIT:-<target commit>}"
 
 cd "$APP_DIR" 2>/dev/null || (( DRY_RUN )) || die "Cannot enter ${APP_DIR}."
