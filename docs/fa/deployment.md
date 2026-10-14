@@ -136,6 +136,12 @@ sudo amoobot-deploy --app-only --ref v1.5.0
   هر چهار فایل در `/usr/local/sbin` و مالک root هستند و اسکریپت را با محیط تمیز (`env -i`) اجرا می‌کنند. cron بکاپ، بکاپ قبل از
   migration و unitهای systemd هم فقط همین مسیرها را اجرا می‌کنند. اسکریپت‌های بکاپ/بازگردانی `DATABASE_URL` را فقط از
   `/etc/amoobot/database.env` (مالک root، `600`، ساخته‌شده در مرحله‌ی 9) می‌خوانند و هیچ‌وقت `.env.local.php` برنامه را به‌عنوان root بارگذاری نمی‌کنند.
+- **حالت نگهداری برای Webhook و پرداخت:** از لحظه‌ی توقف کارها (قبل از checkout) تا پایان migrationها و `lint:container`، nginx برای
+  `/telegram/webhook/` و `/payment/` پاسخ `503` با `Retry-After: 120` می‌دهد (فایل `/etc/nginx/snippets/amoobot-maintenance.conf` که در
+  همان دو location با `include` آمده است). تلگرام و درگاه‌ها درخواست را دوباره می‌فرستند، پس آپدیت‌ها به کد نیمه‌کاره نمی‌رسند. بقیه‌ی سایت
+  عوض نمی‌شود. با موفقیت مرحله‌ی 11 همیشه برداشته می‌شود؛ اگر deploy وسط کار شکست بخورد **باقی می‌ماند** و اسکریپت دستور برداشتن آن را چاپ
+  می‌کند. توجه: کاربری که دقیقاً در همین چند دقیقه از صفحه‌ی پرداخت برمی‌گردد، صفحه‌ی خطای 503 می‌بیند و باید صفحه را دوباره باز کند.
+  در اولین deploy بعد از این تغییر (و اولین نصب) پیکربندی قبلی nginx هنوز این include را ندارد، پس این حالت از deploy بعدی فعال است.
 - اگر migration اجرانشده وجود داشته باشد **و** دیتابیس از قبل جدول داشته باشد، قبل از migration خودکار یک بکاپ با برچسب `pre-deploy` در
   `/var/backups/amoobot` گرفته می‌شود (مستقل از اینکه قبلاً چه کامیتی deploy شده؛ مثلاً سروری که از dump بازگردانی شده هم بکاپ می‌گیرد).
   روی دیتابیس خالی (اولین نصب) بکاپی لازم نیست.
@@ -392,6 +398,7 @@ checker یک timer غیرفعال را `INACTIVE` گزارش می‌کند و `r
 | `healthz` ← 503 | اتصال دیتابیس: `systemctl status mariadb`، و `/var/log/php8.4-fpm.log` و `/var/log/nginx/amoobot_error.log` (این شاخه monolog ندارد، پس خطاهای برنامه در لاگ PHP-FPM/nginx ثبت می‌شوند) |
 | بات جواب نمی‌دهد | `app:telegram:webhook-info` (خصوصی)، `/var/log/nginx/amoobot_error.log`، و اینکه پاسخ‌های 403 در access log نیامده باشند |
 | خطای migration | deploy متوقف می‌شود (کارهای زمان‌بندی‌شده متوقف می‌مانند) و دستور بازگردانی بکاپ `pre-deploy` همین deploy را چاپ می‌کند. کد جدید روی سرور است اما دیتابیس ناقص. یا مشکل را رفع و دوباره deploy کنید، یا طبق بخش ۴ Rollback کنید |
+| Webhook یا `/payment/` پاسخ 503 می‌دهد | deploy قبلی وسط کار شکست خورده و حالت نگهداری مانده است (پیام `still answer 503` در خروجی). مشکل را رفع و `sudo amoobot-deploy --app-only` را اجرا کنید، یا اگر نسخه‌ی فعلی سالم است با root: `printf '' > /etc/nginx/snippets/amoobot-maintenance.conf && nginx -t && systemctl reload nginx` |
 | `up-to-date exit 2` | دیتابیس migrationهایی دارد که کد deploy‌شده ندارد (rollback به نسخه‌ی قدیمی‌تر از schema). نسخه‌ی جدیدتر را دوباره deploy کنید یا بکاپ `pre-deploy` مناسب را بازگردانی کنید (دستورها در خروجی deploy) |
 | `Refusing to deploy <کامیت>` | کامیت مقصد یکی از فایل‌های عملیاتی را ندارد یا قدیمی‌تر از ساختار `/usr/local/lib/amoobot` است. چیزی تغییر نکرده؛ کامیت جدیدتری انتخاب کنید |
 | هشدار «scheduled job FAILED» | `journalctl -u amoobot-job-<job> -n 50` و `/var/log/amoobot/<job>.log`. نتیجه‌ی `timeout` یعنی کار از `TimeoutStartSec` بیشتر طول کشیده (معمولاً پنل کند یا در دسترس نیست) |

@@ -43,6 +43,9 @@ ROOT_OPS_FILES=(deploy.sh bin/backup-database.sh bin/restore-database.sh bin/sch
 ROOT_WRAPPERS=(deploy backup restore check-jobs)
 # DATABASE_URL for the root-run backup/restore scripts (root:root 600); they never load the app's .env.local.php.
 DB_URL_FILE="/etc/amoobot/database.env"
+# Included by the /telegram/webhook/ and /payment/ locations: "return 503" while a deploy changes code, cache and schema.
+NGINX_SITE="/etc/nginx/sites-available/amoobot"
+NGINX_MAINTENANCE_FILE="/etc/nginx/snippets/amoobot-maintenance.conf"
 
 # Scheduled jobs, installed as systemd timers in step 16 (intervals and reasons: docs/fa/automation.md).
 #   name | lock group | OnCalendar | timeout (s) | interval (s) | console command
@@ -97,9 +100,13 @@ trap 'on_error $? $LINENO' ERR
 
 JOBS_PAUSED=0
 JOB_LOCK_FDS=()
+MAINTENANCE_ON=0
 on_exit() {
   if (( $1 != 0 && JOBS_PAUSED )); then
     printf 'NOTE: scheduled jobs are PAUSED (amoobot-job-*.timer stopped) until a deploy completes successfully.\n' >&2
+  fi
+  if (( $1 != 0 && MAINTENANCE_ON )); then
+    maintenance_instructions
   fi
 }
 trap 'on_exit $?' EXIT
@@ -247,6 +254,53 @@ Unit=amoobot-job-${JOB_NAME}.service
 
 [Install]
 WantedBy=timers.target
+EOF
+}
+
+# render_maintenance on|off  ->  the include file. Telegram and the payment gateways retry a 503, so updates and
+# callbacks arrive after the deploy instead of hitting half-updated code.
+render_maintenance() {
+  if [[ "$1" == on ]]; then
+    printf '# Managed by amoobot deploy.sh: maintenance ON while a deploy updates code, cache and schema.\n'
+    printf 'add_header Retry-After 120 always;\nreturn 503;\n'
+  else
+    printf '# Managed by amoobot deploy.sh: maintenance OFF.\n'
+  fi
+}
+
+# set_maintenance on|off  writes the include and reloads nginx. Sets MAINTENANCE_ON (1 only if nginx really serves it).
+set_maintenance() {
+  local state="$1"
+  render_maintenance "$state" | write_file "$NGINX_MAINTENANCE_FILE" 644 root:root --show-diff
+  if (( DRY_RUN )); then
+    log "[dry-run] nginx -t && systemctl reload nginx   (webhook/payment maintenance ${state})"
+    return 0
+  fi
+  if ! grep -qF "include ${NGINX_MAINTENANCE_FILE};" "$NGINX_SITE" 2> /dev/null; then
+    # First deploy, or a site config from before this feature: it takes effect once step 12 has rewritten the config.
+    [[ "$state" == on ]] && log "Maintenance mode not active for this deploy (${NGINX_SITE} does not include it yet)."
+    MAINTENANCE_ON=0
+    return 0
+  fi
+  if nginx -t > /dev/null 2>&1 && systemctl reload nginx; then
+    MAINTENANCE_ON=$([[ "$state" == on ]] && echo 1 || echo 0)
+    log "Webhook/payment maintenance ${state^^} (${NGINX_MAINTENANCE_FILE})."
+  elif [[ "$state" == on ]]; then
+    render_maintenance off | write_file "$NGINX_MAINTENANCE_FILE" 644 root:root
+    warn "nginx did not accept the maintenance include; continuing WITHOUT maintenance mode."
+  else
+    die "nginx -t / reload failed while lifting maintenance mode; ${NGINX_MAINTENANCE_FILE} may still return 503."
+  fi
+}
+
+maintenance_instructions() {
+  cat >&2 <<EOF
+
+!!! /telegram/webhook/ and /payment/ still answer 503 (maintenance ON) because the deploy failed.
+!!! Telegram and the payment gateways retry, but users returning from a payment page see an error until it is lifted.
+    Fix the cause and re-run:            sudo amoobot-deploy --app-only
+    Or, if the running release is fine, lift it by hand (as root):
+      printf '' > ${NGINX_MAINTENANCE_FILE} && nginx -t && systemctl reload nginx
 EOF
 }
 
@@ -965,6 +1019,8 @@ else
 fi
 # From here until step 16 the code, cache and schema change: no scheduled job may run meanwhile.
 pause_scheduled_jobs
+# ...and until the end of step 11 Telegram and the gateways get 503 (they retry) instead of half-updated code.
+set_maintenance on
 if (( DRY_RUN )); then
   log "[dry-run] check out ${DEPLOY_REF}"
 else
@@ -1081,6 +1137,8 @@ else
   die "Migrations are not up to date after migrate (up-to-date exit ${rc})."
 fi
 console lint:container
+# Code, cache and schema are consistent again.
+set_maintenance off
 
 ########################################
 # NGINX CONFIG
@@ -1105,6 +1163,23 @@ app_locations() {
 
     location = /healthz {
         access_log off;
+        try_files \$uri /index.php\$is_args\$args;
+    }
+
+    # 503 + Retry-After while a deploy runs (${NGINX_MAINTENANCE_FILE}); Telegram retries the update.
+    # fastcgi directly (no try_files): an internal redirect to /index.php would be logged by that location instead.
+    location ^~ /telegram/webhook/ {
+        include ${NGINX_MAINTENANCE_FILE};
+        fastcgi_pass unix:/run/php/php${PHP_VERSION}-fpm.sock;
+        include fastcgi_params;
+        fastcgi_param SCRIPT_FILENAME \$realpath_root/index.php;
+        fastcgi_param SCRIPT_NAME /index.php;
+        fastcgi_param DOCUMENT_ROOT \$realpath_root;
+    }
+
+    # Payment callbacks and webhooks: same maintenance switch (gateways retry server-to-server notifications).
+    location ^~ /payment/ {
+        include ${NGINX_MAINTENANCE_FILE};
         try_files \$uri /index.php\$is_args\$args;
     }
 
@@ -1173,8 +1248,10 @@ EOF
 }
 
 apply_nginx() {
-  render_nginx | write_file /etc/nginx/sites-available/amoobot 644 root:root
-  run ln -sf /etc/nginx/sites-available/amoobot /etc/nginx/sites-enabled/amoobot
+  # The site includes the maintenance file, so it must exist (normally "off" here) before nginx -t.
+  [[ -f "$NGINX_MAINTENANCE_FILE" ]] || render_maintenance off | write_file "$NGINX_MAINTENANCE_FILE" 644 root:root
+  render_nginx | write_file "$NGINX_SITE" 644 root:root --show-diff
+  run ln -sf "$NGINX_SITE" /etc/nginx/sites-enabled/amoobot
   run rm -f /etc/nginx/sites-enabled/default
   run nginx -t
   run systemctl reload nginx

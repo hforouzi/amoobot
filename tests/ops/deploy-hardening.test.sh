@@ -22,8 +22,23 @@ have() { command -v "$1" > /dev/null 2>&1; }
 # deploy.sh validates secrets with {32,256}; MSYS/Git Bash regex caps repetition at 255, so its dry-run cannot pass there.
 can_dry_run() { have openssl && [[ x =~ ^x{1,256}$ ]]; }
 DRY_RUN_SKIP="dry-run tests (needs openssl and a regex engine allowing {32,256}: run on Linux/WSL, not Git Bash)"
-# load_fn NAME...  eval deploy.sh's function definitions (they start at column 0 and end with "}" at column 0)
-load_fn() { local f; for f in "$@"; do eval "$(sed -n "/^${f}() {/,/^}/p" "$ROOT/deploy.sh")"; done; }
+# load_fn NAME...  eval deploy.sh's function definitions: from "NAME() {" to the first column-0 "}" that is not inside a
+# here-doc (render_nginx's here-docs contain column-0 "}" lines).
+load_fn() {
+  local f line on hd body
+  for f in "$@"; do
+    body="" on=0 hd=""
+    while IFS= read -r line; do
+      if (( ! on )); then [[ "$line" == "$f() {" ]] || continue; on=1; fi
+      body+="$line"$'\n'
+      if [[ -n "$hd" ]]; then [[ "$line" == "$hd" ]] && hd=""; continue; fi
+      if [[ "$line" =~ \<\<-?\'?([A-Za-z_]+)\'? ]]; then hd="${BASH_REMATCH[1]}"; continue; fi
+      [[ "$line" == "}" ]] && break
+    done < "$ROOT/deploy.sh"
+    [[ -n "$body" ]] || { echo "load_fn: ${f} not found in deploy.sh" >&2; FAIL=$((FAIL + 1)); continue; }
+    eval "$body"
+  done
+}
 rnd() { openssl rand -hex "$1" | tr -d '\r'; }
 # Minimal valid settings for --dry-run (random throwaway secrets; checked below that none is printed).
 make_env() {
@@ -383,6 +398,121 @@ if have php && have gzip; then
   check "another database's dumps are left alone" test -e "$B/otherdb_nightly_20260901T033000Z.sql.gz"
 else
   skip "backup rotation (needs php and gzip)"
+fi
+
+echo "== webhook/payment maintenance during the deploy (group 4)"
+set_globals
+NGINX_SITE=/etc/nginx/sites-available/amoobot NGINX_MAINTENANCE_FILE=/etc/nginx/snippets/amoobot-maintenance.conf
+PHP_VERSION=8.4 DOMAIN=bot.example.test CERT_DIR="$WORK/no-cert"
+load_fn render_maintenance set_maintenance maintenance_instructions on_exit app_locations render_nginx
+check "maintenance on = 503 with Retry-After" bash -c '[[ "$1" == *"add_header Retry-After 120 always;"*"return 503;"* ]]' _ "$(render_maintenance on)"
+check "maintenance off = no directives" not grep -qE 'return|add_header' <<< "$(render_maintenance off)"
+APP_LOC="$(app_locations)"
+block() { sed -n "/location ^~ $1 {/,/^    }/p" <<< "$2"; }
+WEBHOOK_BLOCK="$(block '\/telegram\/webhook\/' "$APP_LOC")"; PAYMENT_BLOCK="$(block '\/payment\/' "$APP_LOC")"
+check "webhook location includes the maintenance switch" grep -qF 'include /etc/nginx/snippets/amoobot-maintenance.conf;' <<< "$WEBHOOK_BLOCK"
+check "payment location includes the maintenance switch" grep -qF 'include /etc/nginx/snippets/amoobot-maintenance.conf;' <<< "$PAYMENT_BLOCK"
+check "webhook location goes to PHP directly (no try_files redirect)" bash -c \
+  '! grep -q try_files <<< "$1" && grep -q "fastcgi_pass unix:/run/php/php8.4-fpm.sock;" <<< "$1" && grep -q "SCRIPT_FILENAME \$realpath_root/index.php;" <<< "$1"' _ "$WEBHOOK_BLOCK"
+
+maint_case() {  # maint_case <state> <site includes 0|1> <nginx -t rc> -> MAINTENANCE_ON, file content, calls
+  ( write_file() { cat > "$1"; }; warn() { echo "WARN: $*"; }; die() { echo "DIE: $*"; exit 1; }
+    nginx() { echo "nginx $*" >> "$WORK/m.calls"; return "$NGX_RC"; }
+    systemctl() { echo "systemctl $*" >> "$WORK/m.calls"; }
+    DRY_RUN=0 NGX_RC="$3" NGINX_SITE="$WORK/site" NGINX_MAINTENANCE_FILE="$WORK/maint.conf" MAINTENANCE_ON=0
+    : > "$WORK/m.calls"; if [[ "$2" == 1 ]]; then echo "include $WORK/maint.conf;" > "$WORK/site"; else echo "server {}" > "$WORK/site"; fi
+    set_maintenance "$1"; echo "ON=$MAINTENANCE_ON"; grep -c 'return 503' "$WORK/maint.conf"; cat "$WORK/m.calls" ) 2>&1
+}
+out="$(maint_case on 1 0)"
+check "on: file written, nginx tested and reloaded, flagged ON" bash -c \
+  'grep -q "^ON=1$" <<< "$1" && grep -qx 1 <<< "$1" && grep -q "nginx -t" <<< "$1" && grep -q "systemctl reload nginx" <<< "$1"' _ "$out"
+out="$(maint_case off 1 0)"
+check "off: return 503 removed and reloaded, flagged OFF" bash -c 'grep -q "^ON=0$" <<< "$1" && grep -qx 0 <<< "$1" && grep -q "reload nginx" <<< "$1"' _ "$out"
+out="$(maint_case on 0 0)"
+check "site without the include (first deploy): not reported as active" bash -c 'grep -q "^ON=0$" <<< "$1" && grep -q "not active for this deploy" <<< "$1" && ! grep -q reload <<< "$1"' _ "$out"
+out="$(maint_case on 1 1)"
+check "nginx rejects it when switching on: reverted to off, deploy continues" bash -c 'grep -q "^ON=0$" <<< "$1" && grep -qx 0 <<< "$1" && grep -q "WARN: .*WITHOUT maintenance" <<< "$1"' _ "$out"
+out="$(maint_case off 1 1)"
+check "lifting fails: deploy stops (instructions follow from on_exit)" grep -q 'DIE: .*lifting maintenance' <<< "$out"
+
+exit_case() { ( JOBS_PAUSED=0 MAINTENANCE_ON="$2"; on_exit "$1" ) 2>&1; }
+check "failed deploy with maintenance ON prints how to lift it" bash -c \
+  'grep -q "still answer 503" <<< "$1" && grep -q "sudo amoobot-deploy --app-only" <<< "$1" && grep -qF "printf '"''"' > /etc/nginx/snippets/amoobot-maintenance.conf && nginx -t && systemctl reload nginx" <<< "$1"' _ "$(exit_case 1 1)"
+check "successful exit prints nothing" test -z "$(exit_case 0 1)"
+check "failure without maintenance prints no maintenance text" not grep -q 503 <<< "$(exit_case 1 0)"
+
+if can_dry_run; then
+  OUT="$BASE_OUT"
+  check "maintenance ON after pausing jobs and before the checkout" bash -c \
+    'p=$(grep -n "pause scheduled jobs" <<< "$1" | cut -d: -f1); m=$(grep -n "webhook/payment maintenance on" <<< "$1" | cut -d: -f1); c=$(grep -n "\[dry-run\] check out" <<< "$1" | cut -d: -f1)
+     [[ -n $p && -n $m && -n $c && $p -lt $m && $m -lt $c ]]' _ "$OUT"
+  check "maintenance OFF after migrations + lint:container, before step 12" bash -c \
+    'l=$(grep -n "bin/console lint:container" <<< "$1" | head -1 | cut -d: -f1); m=$(grep -n "webhook/payment maintenance off" <<< "$1" | cut -d: -f1); s=$(grep -n "^\[12/18\]" <<< "$1" | cut -d: -f1)
+     [[ -n $l && -n $m && -n $s && $l -lt $m && $m -lt $s ]]' _ "$OUT"
+else
+  skip "$DRY_RUN_SKIP"
+fi
+
+# Real nginx (only where an nginx binary runs, e.g. Laragon on Windows): render the site, point it at a scratch prefix
+# on 127.0.0.1, and check the actual responses. PHP-FPM is not running, so passing through to PHP shows up as 502.
+NGX_PID=""
+ngx_ok() { have nginx && have curl && nginx -v > /dev/null 2>&1; }
+ngx_path() { if have cygpath; then cygpath -m "$1"; else printf '%s' "$1"; fi; }
+# ngx_prepare  -> fresh scratch prefix NGX (NGXW = the path as nginx sees it) and a free-ish port NGX_PORT
+ngx_prepare() {
+  NGX="$WORK/ngx"; rm -rf "$NGX"; mkdir -p "$NGX/logs" "$NGX/temp" "$NGX/conf" "$NGX/public" "$NGX/acme"
+  NGXW="$(ngx_path "$NGX")"; NGX_PORT=$((20000 + RANDOM % 20000))
+  render_maintenance off > "$NGX/conf/maint.conf"
+}
+ngx_reload() { nginx -p "${NGXW}/" -c "${NGXW}/conf/nginx.conf" -s reload > /dev/null 2>&1; sleep 0.8; }
+# ngx_start SERVER_BLOCKS  -> starts nginx on NGX_PORT with the given server blocks (paths already substituted)
+ngx_start() {
+  printf 'fastcgi_param QUERY_STRING $query_string;\nfastcgi_param REQUEST_METHOD $request_method;\nfastcgi_param SCRIPT_NAME $fastcgi_script_name;\nfastcgi_param REQUEST_URI $request_uri;\n' > "$NGX/conf/fastcgi_params"
+  cat > "$NGX/conf/nginx.conf" <<EOF
+worker_processes 1; error_log ${NGXW}/logs/error.log; pid ${NGXW}/logs/nginx.pid;
+events { worker_connections 64; }
+http {
+  client_body_temp_path ${NGXW}/temp; proxy_temp_path ${NGXW}/temp; fastcgi_temp_path ${NGXW}/temp; uwsgi_temp_path ${NGXW}/temp; scgi_temp_path ${NGXW}/temp;
+$1
+}
+EOF
+  nginx -p "${NGXW}/" -c "${NGXW}/conf/nginx.conf" -t > "$NGX/t.out" 2>&1 || return 1
+  ( cd "$NGX" && nginx -p "${NGXW}/" -c "${NGXW}/conf/nginx.conf" > /dev/null 2>&1 & )
+  for _ in 1 2 3 4 5 6 7 8 9 10; do curl -s -o /dev/null "http://127.0.0.1:${NGX_PORT}/" && return 0; sleep 0.3; done
+  return 1
+}
+ngx_stop() { [[ -n "${NGXW:-}" ]] && nginx -p "${NGXW}/" -c "${NGXW}/conf/nginx.conf" -s quit > /dev/null 2>&1; sleep 0.5; }
+trap 'ngx_stop; rm -rf "$WORK"' EXIT
+# ngx_site TEXT  ->  TEXT with server paths replaced by the scratch prefix and listen on 127.0.0.1:NGX_PORT
+ngx_site() {
+  sed -e "s#/etc/nginx/snippets/amoobot-maintenance.conf#${NGXW}/conf/maint.conf#g" \
+      -e "s#unix:/run/php/php[0-9.]*-fpm.sock#127.0.0.1:9#g" -e "s#/var/log/nginx/#${NGXW}/logs/#g" \
+      -e "s#/var/www/amoobot/public#${NGXW}/public#g" -e "s#/var/www/letsencrypt#${NGXW}/acme#g" \
+      -e "/listen \[::\]/d" -e "s#listen 80;#listen 127.0.0.1:${NGX_PORT};#" <<< "$1"
+}
+code() { curl -s -o /dev/null -w '%{http_code}' "$@"; }
+if ngx_ok; then
+  ngx_prepare
+  site="server {
+    listen 80;
+    server_name localhost;
+$(app_locations)
+}"
+  if ngx_start "$(ngx_site "$site")"; then
+    render_maintenance on > "$NGX/conf/maint.conf"; ngx_reload
+    check "nginx: webhook answers 503 during maintenance" test "$(code -X POST "http://127.0.0.1:${NGX_PORT}/telegram/webhook/abc")" = 503
+    check "nginx: ...with Retry-After" grep -qi '^Retry-After: 120' <<< "$(curl -s -D - -o /dev/null -X POST "http://127.0.0.1:${NGX_PORT}/telegram/webhook/abc")"
+    check "nginx: payment callback answers 503 during maintenance" test "$(code "http://127.0.0.1:${NGX_PORT}/payment/callback/zibal")" = 503
+    check "nginx: other pages are not affected" test "$(code "http://127.0.0.1:${NGX_PORT}/admin/login")" != 503
+    render_maintenance off > "$NGX/conf/maint.conf"; ngx_reload
+    check "nginx: after lifting, the webhook reaches PHP again (502: no PHP-FPM here)" test "$(code -X POST "http://127.0.0.1:${NGX_PORT}/telegram/webhook/abc")" = 502
+    check "nginx: after lifting, payment reaches PHP again" test "$(code "http://127.0.0.1:${NGX_PORT}/payment/callback/zibal")" = 502
+    ngx_stop
+  else
+    fail "nginx could not start the rendered site"; cat "$WORK/ngx/t.out" 2> /dev/null | head -5
+  fi
+else
+  skip "real nginx checks (no runnable nginx binary)"
 fi
 
 echo
