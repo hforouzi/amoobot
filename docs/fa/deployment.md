@@ -183,6 +183,10 @@ sudo amoobot-deploy --app-only --ref v1.5.0
 - بعد از migration، `doctrine:migrations:up-to-date --fail-on-unregistered` اجرا می‌شود. کد خروج `2` یعنی دیتابیس migrationهایی دارد که این
   کد نمی‌شناسد (کد و schema با هم نمی‌خوانند، مثلاً rollback به نسخه‌ی قدیمی‌تر از schema). deploy **قبل از فعال کردن دوباره‌ی timerها**
   متوقف می‌شود و دستور دقیق بازگردانی بکاپ `pre-deploy` را چاپ می‌کند.
+- **root از symlinkهای کاربر `deploy` یا `www-data` پیروی نمی‌کند.** `~deploy/.ssh/authorized_keys`، `.env.prod.local` و `.env.local` را خود
+  کاربر `deploy` می‌نویسد (فایل موقت و `mv`، پس symlink جایگزین می‌شود نه دنبال)، پوشه‌های `var/` و `public/bundles` را مالک خودشان می‌سازد و
+  `chmod` می‌کند و root فقط `chown -h` و `chown -R -h -P` اجرا می‌کند. اگر `~deploy/.ssh`، `authorized_keys`، `var/`، `public/`،
+  `public/bundles` یا `.env.local.php` symlink باشد deploy **متوقف می‌شود**.
 - مسیرها قبل از هر کاری بررسی می‌شوند: `APP_DIR` باید `/var/www/<نام>` یا `/srv/<نام>`، `BACKUP_DIR` باید `/var/backups/<نام>` یا
   `/srv/<نام>` و home کاربر deploy باید `/home/<نام>` باشد (این مسیرها با `chown -R`/`chmod -R`/`rm` استفاده می‌شوند).
 - `apt-get upgrade` غیرتعاملی است و فایل‌های پیکربندی تغییرکرده‌ی محلی (مثلاً sshd) را نگه می‌دارد (`--force-confdef --force-confold`).

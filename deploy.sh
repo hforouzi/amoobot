@@ -163,6 +163,8 @@ console() {
 FILE_CHANGED=0
 write_file() {
   local path="$1" mode="$2" owner="$3" show_diff="${4:-}" tmp state
+  # Only for root-owned destinations; files in deploy- or www-data-owned directories go through write_user_file.
+  [[ ! -L "$path" ]] || die "${path} is a symbolic link; refusing to write through it."
   tmp="$(mktemp)"
   cat > "$tmp"
   if [[ -f "$path" ]] && cmp -s "$tmp" "$path" 2>/dev/null; then
@@ -183,9 +185,76 @@ write_file() {
     install -D -m "$mode" -o "${owner%%:*}" -g "${owner##*:}" "$tmp" "$path"
   else
     chmod "$mode" "$path"
-    chown "$owner" "$path"
+    chown -h "$owner" "$path"
   fi
   rm -f "$tmp"
+}
+
+# refuse_symlink PATH...  stops when any PATH is a symbolic link. Root never follows a link the deploy user or www-data
+# could have planted (ownership/permission changes would land on whatever it points to).
+refuse_symlink() {
+  local p
+  for p in "$@"; do
+    [[ ! -L "$p" ]] || die "${p} is a symbolic link; refusing to continue (root never follows links in deploy- or www-data-owned paths)."
+  done
+}
+
+# read_as_user USER PATH  ->  PATH's content read with USER's rights (nothing when missing or unreadable)
+read_as_user() {
+  if (( EUID == 0 )); then
+    sudo -n -H -u "$1" -- cat -- "$2" 2> /dev/null || true
+  elif [[ -r "$2" ]]; then
+    cat -- "$2"
+  fi
+}
+
+# write_user_file PATH MODE USER[:GROUP]  content on stdin, written BY USER as a temp file renamed over PATH in the same
+# directory: a symlink planted at PATH is replaced, never followed, and root never writes into USER's directory. A
+# GROUP other than USER's own is set by root with chown -h (never follows a link). Content is never printed.
+write_user_file() {
+  local path="$1" mode="$2" user="${3%%:*}" group="" tmp
+  [[ "$3" == *:* ]] && group="${3#*:}"
+  tmp="$(mktemp)"
+  cat > "$tmp"
+  if (( DRY_RUN )); then
+    printf '[dry-run] write %s (%s %s, written as %s via temp file + rename)\n' "$path" "$mode" "$3" "$user"
+    rm -f "$tmp"
+    return 0
+  fi
+  sudo -H -u "$user" -- /bin/sh -c 'umask 077; t="$(mktemp "$1.XXXXXX")" && cat > "$t" && chmod "$2" "$t" && mv -f "$t" "$1"' \
+    sh "$path" "$mode" < "$tmp" || { rm -f "$tmp"; die "Could not write ${path} as ${user}."; }
+  rm -f "$tmp"
+  if [[ -n "$group" && "$group" != "$user" ]]; then
+    chown -h "${user}:${group}" "$path"
+  fi
+}
+
+# update_deploy_keys AUTH_KEYS  merges DEPLOY_SSH_PUBLIC_KEY and root's keys into the deploy user's authorized_keys,
+# written as the deploy user. Sets KEYS_PREVIEW to a root-owned temp copy of the resulting keys (what step 5 checks).
+update_deploy_keys() {
+  local auth_keys="$1" ssh_dir="${1%/*}"
+  refuse_symlink "$ssh_dir" "$auth_keys"
+  KEYS_PREVIEW="$(mktemp)"
+  read_as_user "$DEPLOY_USER" "$auth_keys" > "$KEYS_PREVIEW"
+  local before
+  before="$(cksum < "$KEYS_PREVIEW")"
+  if [[ -n "${DEPLOY_SSH_PUBLIC_KEY:-}" ]] && ! grep -qxF -- "$DEPLOY_SSH_PUBLIC_KEY" "$KEYS_PREVIEW"; then
+    printf '%s\n' "$DEPLOY_SSH_PUBLIC_KEY" >> "$KEYS_PREVIEW"
+    log "$( (( DRY_RUN )) && echo '[dry-run] add' || echo 'Added') DEPLOY_SSH_PUBLIC_KEY to ${auth_keys}."
+  fi
+  # Always merge root's keys (not only into an empty file): whoever administers root keeps access as the deploy user.
+  merge_authorized_keys /root/.ssh/authorized_keys "$KEYS_PREVIEW"
+  (( MERGED_KEYS )) && log "$( (( DRY_RUN )) && echo '[dry-run] add' || echo 'Added') ${MERGED_KEYS} key(s) from /root/.ssh/authorized_keys to ${auth_keys}."
+  if (( ! DRY_RUN )); then
+    as "$DEPLOY_USER" install -d -m 700 "$ssh_dir"
+    refuse_symlink "$ssh_dir" "$auth_keys"
+    if [[ "$(cksum < "$KEYS_PREVIEW")" != "$before" || ! -e "$auth_keys" ]]; then
+      write_user_file "$auth_keys" 600 "$DEPLOY_USER" < "$KEYS_PREVIEW"
+    else
+      as "$DEPLOY_USER" chmod 600 "$auth_keys"
+    fi
+  fi
+  return 0
 }
 
 # sql_quote VALUE  ->  'value' with \ and ' escaped (for statements fed to mysql on stdin, never on argv)
@@ -233,7 +302,9 @@ pause_scheduled_jobs() {
   install -d -m 750 -o "$WEB_USER" -g "$WEB_USER" "$JOBS_LOCK_DIR"
   for group in $(job_lock_groups); do
     lock="$JOBS_LOCK_DIR/$group.lock"
-    [[ -e "$lock" ]] || install -m 660 -o "$WEB_USER" -g "$WEB_USER" /dev/null "$lock"
+    # /run/amoobot belongs to www-data: create the lock as www-data, never through a link it planted.
+    [[ -e "$lock" || -L "$lock" ]] || sudo -H -u "$WEB_USER" -- /bin/sh -c 'umask 007; : >> "$1"' sh "$lock"
+    refuse_symlink "$lock"
     exec {fd}< "$lock"
     flock -w 900 "$fd" || die "Scheduled job group '${group}' is still running after 15 minutes; see 'systemctl list-units amoobot-job-*'."
     JOB_LOCK_FDS+=("$fd")
@@ -1081,25 +1152,10 @@ if ! id "$DEPLOY_USER" > /dev/null 2>&1; then
   run useradd --create-home --shell /bin/bash "$DEPLOY_USER"
 fi
 resolve_deploy_home
-run install -d -m 700 -o "$DEPLOY_USER" -g "$DEPLOY_USER" "$DEPLOY_HOME/.ssh"
 auth_keys="$DEPLOY_HOME/.ssh/authorized_keys"
-# A dry run works on a copy, so it reports what would be added without touching the real file.
-keys_target="$auth_keys"
-if (( DRY_RUN )); then
-  keys_target="$(mktemp)"
-  [[ -r "$auth_keys" ]] && cat "$auth_keys" > "$keys_target"
-else
-  touch "$auth_keys"
-fi
-if [[ -n "${DEPLOY_SSH_PUBLIC_KEY:-}" ]] && ! grep -qxF -- "$DEPLOY_SSH_PUBLIC_KEY" "$keys_target"; then
-  printf '%s\n' "$DEPLOY_SSH_PUBLIC_KEY" >> "$keys_target"
-  log "$( (( DRY_RUN )) && echo '[dry-run] add' || echo 'Added') DEPLOY_SSH_PUBLIC_KEY to ${auth_keys}."
-fi
-# Always merge root's keys (not only into an empty file): whoever administers root keeps access as the deploy user.
-merge_authorized_keys /root/.ssh/authorized_keys "$keys_target"
-(( MERGED_KEYS )) && log "$( (( DRY_RUN )) && echo '[dry-run] add' || echo 'Added') ${MERGED_KEYS} key(s) from /root/.ssh/authorized_keys to ${auth_keys}."
-run chown "$DEPLOY_USER:$DEPLOY_USER" "$auth_keys"
-run chmod 600 "$auth_keys"
+# Read and written as the deploy user (a dry run only reports): a symlink at ~/.ssh or authorized_keys stops the deploy.
+update_deploy_keys "$auth_keys"
+keys_target="$KEYS_PREVIEW"
 
 # Administration path for the deploy user: passwordless sudo for the root-owned entry points only (not ALL).
 install_root_wrappers
@@ -1117,7 +1173,7 @@ fi
 if (( ! DRY_RUN )) && ! sudo -n -l -U "$DEPLOY_USER" "${ROOT_SBIN_DIR}/amoobot-deploy" > /dev/null 2>&1; then
   login_problems+=("sudo -l -U ${DEPLOY_USER} does not allow ${ROOT_SBIN_DIR}/amoobot-deploy")
 fi
-(( DRY_RUN )) && rm -f "$keys_target"
+rm -f "$keys_target"
 if (( ${#login_problems[@]} )); then
   printf '  - %s\n' "${login_problems[@]}" >&2
   refusal="Refusing to disable SSH password login (and to set PermitRootLogin ${SSH_PERMIT_ROOT_LOGIN}): ${DEPLOY_USER} has no verified key login + sudo path (reasons above). That would risk locking you out. Set DEPLOY_SSH_PUBLIC_KEY (your .pub) and re-run."
@@ -1253,11 +1309,14 @@ else
   verify_target_ops "$TARGET_COMMIT"
 fi
 
+# APP_DIR's parent is root-owned, so only APP_DIR itself and var/ (in the deploy-owned APP_DIR) need the link check.
+refuse_symlink "$APP_DIR"
 run install -d -m 750 -o "$DEPLOY_USER" -g "$WEB_USER" "$APP_DIR"
 if [[ -d "$APP_DIR/.git" ]]; then
-  # Earlier versions of this script left the checkout owned by root/www-data.
-  run chown -R "$DEPLOY_USER:$WEB_USER" "$APP_DIR"
-  [[ -d "$APP_DIR/var" ]] && run chown -R "$WEB_USER:$WEB_USER" "$APP_DIR/var"
+  # Earlier versions of this script left the checkout owned by root/www-data. -h -P: never follow a link.
+  refuse_symlink "$APP_DIR/var"
+  run chown -R -h -P "$DEPLOY_USER:$WEB_USER" "$APP_DIR"
+  [[ -d "$APP_DIR/var" ]] && run chown -R -h -P "$WEB_USER:$WEB_USER" "$APP_DIR/var"
 fi
 if (( ! DRY_RUN )) && [[ -d "$APP_DIR/.git" ]]; then
   dirty="$(sudo -H -u "$DEPLOY_USER" git -C "$APP_DIR" status --porcelain --untracked-files=no)"
@@ -1323,16 +1382,17 @@ render_app_env() {
   done
 }
 
-render_app_env | write_file "$APP_DIR/.env.prod.local" 600 "$DEPLOY_USER:$DEPLOY_USER"
+render_app_env | write_user_file "$APP_DIR/.env.prod.local" 600 "$DEPLOY_USER"
 # The root-run backup/restore scripts read DATABASE_URL only from this root-owned file.
 [[ "$DATABASE_URL" != *$'\n'* ]] || die "DATABASE_URL must be a single line."
 run install -d -m 700 -o root -g root "${DB_URL_FILE%/*}"
 printf 'DATABASE_URL=%s\n' "$DATABASE_URL" | write_file "$DB_URL_FILE" 600 root:root
 # Replaces the old .env.local (which held secrets); now only the non-secret environment switch.
-printf 'APP_ENV=prod\nAPP_DEBUG=0\n' | write_file "$APP_DIR/.env.local" 640 "$DEPLOY_USER:$WEB_USER"
+printf 'APP_ENV=prod\nAPP_DEBUG=0\n' | write_user_file "$APP_DIR/.env.local" 640 "$DEPLOY_USER:$WEB_USER"
 as "$DEPLOY_USER" composer dump-env prod --working-dir="$APP_DIR" --no-interaction
-run chown "$DEPLOY_USER:$WEB_USER" "$APP_DIR/.env.local.php"
-run chmod 640 "$APP_DIR/.env.local.php"
+refuse_symlink "$APP_DIR/.env.local.php"
+run chown -h "$DEPLOY_USER:$WEB_USER" "$APP_DIR/.env.local.php"
+as "$DEPLOY_USER" chmod 640 "$APP_DIR/.env.local.php"
 
 ########################################
 # PERMISSIONS
@@ -1340,12 +1400,24 @@ run chmod 640 "$APP_DIR/.env.local.php"
 
 step "10/18" "Setting permissions..."
 
-run install -d -o "$WEB_USER" -g "$WEB_USER" "$APP_DIR/var" "$APP_DIR/var/plugins" "$APP_DIR/var/plugin_uploads" "$APP_DIR/var/log" "$APP_DIR/public/bundles"
-run chown -R "$WEB_USER:$WEB_USER" "$APP_DIR/var" "$APP_DIR/public/bundles"
-run chmod -R 775 "$APP_DIR/var"
-# Code: owned by the deploy user, readable (not writable) by PHP-FPM, closed to others.
-run chmod -R g+rX,o-rwx "$APP_DIR"
-run chmod 600 "$APP_DIR/.env.prod.local"
+# set_app_permissions  every directory is created and chmod-ed by its owner; root only runs chown -h / chown -R -h -P,
+# which never follow a symbolic link. A link at var/, public/ or public/bundles stops the deploy.
+set_app_permissions() {
+  refuse_symlink "$APP_DIR/var" "$APP_DIR/public" "$APP_DIR/public/bundles"
+  # Files the checkout just created belong to the deploy user's own group; PHP-FPM reads them through group www-data.
+  run chown -R -h -P "$DEPLOY_USER:$WEB_USER" "$APP_DIR"
+  as "$DEPLOY_USER" mkdir -p "$APP_DIR/var" "$APP_DIR/public/bundles"
+  run chown -h "$WEB_USER:$WEB_USER" "$APP_DIR/var" "$APP_DIR/public/bundles"
+  as "$WEB_USER" mkdir -p "$APP_DIR/var/plugins" "$APP_DIR/var/plugin_uploads" "$APP_DIR/var/log"
+  run chown -R -h -P "$WEB_USER:$WEB_USER" "$APP_DIR/var" "$APP_DIR/public/bundles"
+  # var/ and public/bundles: writable by PHP (www-data and its group), closed to others.
+  as "$WEB_USER" chmod -R ug+rwX,o-rwx "$APP_DIR/var" "$APP_DIR/public/bundles"
+  # Code: owned by the deploy user, readable (not writable) by PHP-FPM, closed to others. find skips links (! -type l).
+  as "$DEPLOY_USER" find "$APP_DIR" \( -path "$APP_DIR/var" -o -path "$APP_DIR/public/bundles" \) -prune \
+    -o -user "$DEPLOY_USER" ! -type l -exec chmod g+rX,o-rwx {} +
+  as "$DEPLOY_USER" chmod 600 "$APP_DIR/.env.prod.local"
+}
+set_app_permissions
 
 ########################################
 # CACHE & MIGRATIONS

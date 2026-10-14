@@ -273,6 +273,84 @@ else
   skip "$DRY_RUN_SKIP"
 fi
 
+echo "== root never follows deploy- or www-data-owned symlinks (group 2, 2nd review)"
+set_globals
+load_fn refuse_symlink read_as_user write_user_file write_file merge_authorized_keys update_deploy_keys set_app_permissions
+# Run "sudo -u X cmd" / "as X cmd" as the current user (the test cannot switch users); record every call.
+symlink_env() {
+  sudo() { while (( $# )); do case "$1" in -H|-n) shift ;; -u) shift 2 ;; --) shift; break ;; *) break ;; esac; done; "$@"; }
+  as() { shift; echo "as $*" >> "$WORK/sl.calls"; "$@"; }
+  run() { echo "run $*" >> "$WORK/sl.calls"; "$@"; }
+  chown() { echo "chown $*" >> "$WORK/sl.calls"; }
+  die() { printf 'DIE: %s\n' "$*"; exit 1; }
+}
+SL="$WORK/sl"; mkdir -p "$SL"; echo "precious" > "$SL/victim"; chmod 644 "$SL/victim"
+out="$( (symlink_env; ln -sfn "$SL/victim" "$SL/link"; refuse_symlink "$SL/ok" "$SL/link"; echo REACHED) )"
+check "refuse_symlink stops on a link" bash -c 'grep -q "DIE: .*link is a symbolic link" <<< "$1" && ! grep -q REACHED <<< "$1"' _ "$out"
+out="$( (symlink_env; DRY_RUN=0; ln -sfn "$SL/victim" "$SL/env-file"; printf 'SECRET=x\n' | write_user_file "$SL/env-file" 600 "$(id -un)"; echo rc=$?) 2>&1)"
+check "write_user_file replaces a planted link instead of writing through it" bash -c \
+  '[[ ! -L "$1/env-file" && -f "$1/env-file" && $(cat "$1/env-file") == "SECRET=x" && $(cat "$1/victim") == precious && $(stat -c %a "$1/victim") == 644 ]]' _ "$SL"
+check "  ...with the requested mode" test "$(stat -c %a "$SL/env-file")" = 600
+: > "$WORK/sl.calls"
+( symlink_env; DRY_RUN=0; printf 'X=1\n' | write_user_file "$SL/env-local" 640 "$(id -un):www-data" ) > /dev/null 2>&1
+check "write_user_file sets another group only with chown -h" grep -qx "chown -h $(id -un):www-data $SL/env-local" "$WORK/sl.calls"
+out="$( (symlink_env; DRY_RUN=0; ln -sfn "$SL/victim" "$SL/rootfile"; printf 'x\n' | write_file "$SL/rootfile" 644 root:root; echo REACHED) 2>&1)"
+check "write_file refuses to write through a link" bash -c 'grep -q "DIE: .*symbolic link" <<< "$1" && [[ $(cat "$2") == precious ]]' _ "$out" "$SL/victim"
+
+if have ssh-keygen; then
+  ssh-keygen -q -t ed25519 -N '' -C sl@example -f "$WORK/slkey" > /dev/null
+  keys_case() {  # keys_case <setup: none|link-keys|link-dir> -> output; HOME dir in $SL/home
+    rm -rf "$SL/home"; mkdir -p "$SL/home"
+    case "$1" in
+      link-keys) mkdir -p "$SL/home/.ssh"; ln -s "$SL/victim" "$SL/home/.ssh/authorized_keys" ;;
+      link-dir)  mkdir -p "$SL/elsewhere"; ln -s "$SL/elsewhere" "$SL/home/.ssh" ;;
+    esac
+    ( symlink_env; DRY_RUN=0 DEPLOY_USER="$(id -un)" DEPLOY_SSH_PUBLIC_KEY="$(cat "$WORK/slkey.pub")"
+      update_deploy_keys "$SL/home/.ssh/authorized_keys"; echo "REACHED preview=$(wc -l < "$KEYS_PREVIEW")" ) 2>&1
+  }
+  out="$(keys_case none)"
+  check "authorized_keys written as the deploy user, mode 600, ~/.ssh 700" bash -c \
+    'grep -q REACHED <<< "$1" && grep -qxF -- "$(cat "$3")" "$2/home/.ssh/authorized_keys" && [[ $(stat -c %a "$2/home/.ssh/authorized_keys") == 600 && $(stat -c %a "$2/home/.ssh") == 700 ]]' _ "$out" "$SL" "$WORK/slkey.pub"
+  out="$(keys_case link-keys)"
+  check "symlinked ~/.ssh/authorized_keys -> refused, link target untouched" bash -c \
+    'grep -q "DIE: .*authorized_keys is a symbolic link" <<< "$1" && ! grep -q REACHED <<< "$1" && [[ $(cat "$2/victim") == precious && $(stat -c %a "$2/victim") == 644 ]]' _ "$out" "$SL"
+  out="$(keys_case link-dir)"
+  check "symlinked ~/.ssh -> refused, nothing written" bash -c \
+    'grep -q "DIE: .*\.ssh is a symbolic link" <<< "$1" && [[ -z $(ls -A "$2/elsewhere") ]]' _ "$out" "$SL"
+else
+  skip "authorized_keys symlink tests (ssh-keygen not installed)"
+fi
+
+perm_case() {  # perm_case <path to replace with a link: var|public/bundles|public|none> -> output; calls in sl.calls
+  local A="$SL/app"; rm -rf "$A"; mkdir -p "$A/public" "$SL/target"; : > "$A/.env.prod.local"; : > "$WORK/sl.calls"
+  [[ "$1" != none ]] && { [[ "$1" == public ]] && rm -rf "$A/public"; ln -s "$SL/target" "$A/$1"; }
+  ( symlink_env; DRY_RUN=0 APP_DIR="$A" DEPLOY_USER="$(id -un)" WEB_USER="$(id -un)"; set_app_permissions; echo REACHED ) 2>&1
+}
+out="$(perm_case none)"
+check "step 10 without links: completes, root only uses chown -h / chown -R -h -P" bash -c \
+  'grep -q REACHED <<< "$1" && ! grep -E "^(run )?chown " "$2" | grep -vqE "^(run )?chown (-h|-R -h -P) "' _ "$out" "$WORK/sl.calls"
+check "  ...and every chmod runs as the owning user" bash -c '! grep -E "^run chmod" "$1" && grep -q "^as .*chmod -R ug+rwX,o-rwx" "$1"' _ "$WORK/sl.calls"
+for l in var public/bundles public; do
+  out="$(perm_case "$l")"
+  check "step 10: a link at ${l} -> refused before any chown or chmod" bash -c \
+    'grep -q "DIE: .*is a symbolic link" <<< "$1" && ! grep -qE "chown|chmod" "$2" && ! grep -q REACHED <<< "$1"' _ "$out" "$WORK/sl.calls"
+done
+check "no root 'install -d -o' / touch / >> on deploy-owned paths" bash -c \
+  '! grep -nE "install -d [^#]*-o \"\\\$(WEB_USER|DEPLOY_USER)\"[^#]*(DEPLOY_HOME|APP_DIR/)" "$1" && ! grep -nE "touch \"\\\$auth_keys\"|>> \"\\\$auth_keys\"" "$1"' _ "$ROOT/deploy.sh"
+check "every recursive chown uses -h -P (never follows links)" bash -c '! grep -nE "chown -R" "$1" | grep -v -- "-R -h"' _ "$ROOT/deploy.sh"
+check "no root chmod on the checkout, var/ or the env files (only as the owner)" bash -c \
+  '! grep -nE "^[[:space:]]*(run )?chmod .*APP_DIR" "$1"' _ "$ROOT/deploy.sh"
+check "the app env files are written by the deploy user, not root" bash -c \
+  'grep -q "write_user_file \"\$APP_DIR/.env.prod.local\" 600 \"\$DEPLOY_USER\"" "$1" && grep -q "write_user_file \"\$APP_DIR/.env.local\" 640" "$1"' _ "$ROOT/deploy.sh"
+check "job lock files are created as www-data and links refused" bash -c \
+  'sed -n "/^pause_scheduled_jobs() {/,/^}/p" "$1" | grep -q "sudo -H -u \"\$WEB_USER\"" && sed -n "/^pause_scheduled_jobs() {/,/^}/p" "$1" | grep -q "refuse_symlink \"\$lock\""' _ "$ROOT/deploy.sh"
+if can_dry_run; then
+  OUT="$BASE_OUT"
+  check "dry-run: .env.prod.local written as the deploy user via temp file + rename" grep -qF '[dry-run] write /var/www/amoobot/.env.prod.local (600 deploy, written as deploy via temp file + rename)' <<< "$OUT"
+else
+  skip "$DRY_RUN_SKIP"
+fi
+
 echo "== path validation, migrations, backups, rollback (group 3)"
 set_globals
 load_fn valid_dir_path resolve_deploy_home
