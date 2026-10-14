@@ -35,3 +35,6 @@ jobs:
         run: |
           APP_ENV=dev php bin/console cache:warmup
           vendor/bin/phpstan analyse --memory-limit=1G --no-progress
+      - run: php bin/console lint:container
+      # --parse-tags: config/services.yaml uses !tagged_iterator.
+      - run: php bin/console lint:yaml config --parse-tags
