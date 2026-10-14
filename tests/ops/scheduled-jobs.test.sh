@@ -143,6 +143,13 @@ if [[ -e "$ROOT/bin/check-scheduled-jobs.sh" ]]; then
   check "last run's exit code shown" grep -qE '^FAILED +broken.*last run rc=1' <<< "$out"
   check "summary line counts problems" grep -q '3 of 4 jobs need attention' <<< "$out"
 
+  printf '#!/usr/bin/env bash\ncase "$1" in\n  is-active) exit 0 ;;\n  is-failed) exit 1 ;;\nesac\n' > "$WORK/systemctl-ok"
+  out="$(bash "$CHECK" 2>&1)"; rc=$?
+  check "reset-failed cannot hide the last failed command" bash -c '[[ $1 -eq 2 ]] && grep -qE "^FAILED +broken.*last run rc=1" <<< "$2"' _ "$rc" "$out"
+  printf '# empty manifest\n' > "$WORK/manifest"
+  bash "$CHECK" > /dev/null 2>&1; rc=$?
+  check "empty manifest -> exit code 3 (unknown)" test "$rc" -eq 3
+
   # Backups (nightly cron) are checked too when the directory is readable.
   mkdir -p "$WORK/backups"; touch -d '30 hours ago' "$WORK/backups/amoobot_nightly_old.sql.gz"
   printf 'fresh 600 *:0/2\n' > "$WORK/manifest"
@@ -226,6 +233,9 @@ EOF
   sed 's/^SCHEDULED_JOBS=(/SCHEDULED_JOBS=(\n  "bad|x|*:0\/5|60|300|app:payments:repair-stuck --apply"/' "$ROOT/deploy.sh" > "$WORK/deploy-bad.sh"
   out="$(bash "$WORK/deploy-bad.sh" --dry-run --env-file "$WORK/prod.env" 2>&1)"; rc=$?
   check "preflight refuses to schedule repair-stuck" bash -c '[[ $1 -ne 0 ]] && grep -q "must never be scheduled" <<< "$2"' _ "$rc" "$out"
+  sed 's/app:payments:repair-stuck --apply/app:plans:adjust-prices --percent=50/' "$WORK/deploy-bad.sh" > "$WORK/deploy-destructive.sh"
+  out="$(bash "$WORK/deploy-destructive.sh" --dry-run --env-file "$WORK/prod.env" 2>&1)"; rc=$?
+  check "preflight refuses other unreviewed commands" bash -c '[[ $1 -ne 0 ]] && grep -q "only the six reviewed automation tasks" <<< "$2"' _ "$rc" "$out"
 
   # write_file for real (as the current user): new -> changed, same content -> unchanged, edit -> changed.
   eval "$(sed -n '/^FILE_CHANGED=0$/,/^}/p' "$ROOT/deploy.sh")"

@@ -223,6 +223,31 @@ curl -fsS https://DOMAIN/healthz
 ویرایش کنید و دوباره deploy کنید: unitها به‌روز می‌شوند و کارهای حذف‌شده غیرفعال و پاک می‌شوند.
 `sudo deploy.sh --dry-run` جدول کارها و متن کامل (یا diff) هر unit را قبل از نصب نشان می‌دهد.
 
+### فهرست کارها و شواهد انتخاب
+
+فاصله‌ها پیشنهاد عملیاتی هستند؛ کد فاصله‌ی اجباری تعیین نمی‌کند. همه با `app:automation:run --only=<task>` اجرا می‌شوند تا
+تنظیمات `automation.*` رعایت شود. بسته‌های `util-linux` (برای `flock`) و `logrotate` در مرحله‌ی نصب بسته‌ها نصب می‌شوند.
+
+| کار | فاصله و زمان | دستور مستقل متناظر / شاهد در کد | دلیل |
+|---|---|---|---|
+| `broadcasts` | هر ۲ دقیقه، `*:0/2` | `app:broadcast:run`؛ `src/Command/BroadcastRunCommand.php` و `src/Broadcast/BroadcastSender.php::runDue` | ارسال پیام‌های موعدرسیده با تأخیر کم؛ retry شکست‌ها خودکار نیست |
+| `orders` | هر ۱۰ دقیقه، `*:0/10` | `app:orders:expire-incomplete`؛ `src/Shop/Application/IncompleteOrderExpiryService.php::expire` | انقضای سفارش و پیش‌نویس قدیمی؛ پرداخت تأییدشده، نیازمند بررسی یا دارای رسید محافظت می‌شود |
+| `sync` | هر ۱۵ دقیقه، `*:0/15` | `app:service:sync-usage`؛ `src/Provisioning/Application/ServiceUsageSyncService.php::syncActiveServices` | دریافت مصرف و تاریخ انقضا از پنل |
+| `expiry` | هر ۱۵ دقیقه، `*:5/15` | `app:service:check-expiry`؛ `src/Provisioning/Application/ServiceExpiryChecker.php::checkAll` | تغییر وضعیت سرویس منقضی‌شده پس از sync، بدون حذف سرویس |
+| `suspend` | هر ۱۵ دقیقه، `*:8/15` | `src/Command/AutomationRunCommand.php` بخش `suspend`؛ `src/Provisioning/Application/ServiceAutoSuspendService.php` | تعلیق اختیاری انقضا/اتمام ترافیک؛ هر دو toggle پیش‌فرض خاموش هستند |
+| `notifications` | هر ۳۰ دقیقه، `*:10/30` | `app:service:send-notifications`؛ `src/Command/ServiceSendNotificationsCommand.php` | اعلان نزدیک انقضا، مصرف و انقضای نهایی |
+
+شاهد مشترک اجرای این شش کار: `src/Command/AutomationRunCommand.php` و [automation.md](automation.md).
+پیش‌فرض toggleها در `src/Provisioning/Application/AutomationSettingsProvider.php` است.
+تعلیق Sanaei در `src/Provisioning/Infrastructure/Sanaei3xui/Sanaei3xuiDriver.php::suspendService` فقط `enable=false` می‌کند؛
+client حذف نمی‌شود و تمدید دوباره آن را فعال می‌کند. زمان‌بندی هیچ toggleای را روشن نمی‌کند.
+
+سلامت پنل دستور دوره‌ای جداگانه ندارد: شکست `getUsage` در `ServiceUsageSyncService::syncOne` به شکست `sync` و هشدار تبدیل می‌شود
+(هر ۱۵ دقیقه، فقط پنل‌های سرویس‌های بررسی‌شده؛ پنل بدون سرویس بررسی نمی‌شود). `app:panel:test-login` یک ابزار دستی برای پنل مشخص است.
+دستورهای مستقل جدول جداگانه زمان‌بندی نمی‌شوند تا کارها دو بار اجرا نشوند. `app:broadcast:prepare/send/retry-failed` برای یک broadcast مشخص هستند.
+`app:payments:repair-stuck`، ابزارهای پرداخت/تعمیر/seed، تغییر قیمت، ایجاد client آزمایشی، حذف webhook و بازنویسی گروهی تنظیمات
+در زمان‌بندی نیستند؛ preflight فقط شش دستور جدول را می‌پذیرد.
+
 | چیز | محل |
 |---|---|
 | unitها | `/etc/systemd/system/amoobot-job-<job>.service` و `.timer`، هشدار: `amoobot-job-alert@.service` |
@@ -278,6 +303,20 @@ sudo systemctl stop 'amoobot-job-*.timer'              # توقف موقت هم�
 sudo systemctl start 'amoobot-job-*.timer'             # ادامه
 sudo systemctl reset-failed 'amoobot-job-*'            # پاک کردن وضعیت failed بعد از رفع مشکل
 ```
+
+برای غیرفعال کردن یک کار (مثلاً `notifications`):
+
+```bash
+sudo systemctl disable --now amoobot-job-notifications.timer
+# اگر همان کار اکنون در حال اجراست، برای توقف آن:
+sudo systemctl stop amoobot-job-notifications.service
+# فعال‌سازی مجدد:
+sudo systemctl enable --now amoobot-job-notifications.timer
+```
+
+deploy بعدی همه‌ی timerهای موجود در `SCHEDULED_JOBS` را دوباره فعال می‌کند. برای حذف پایدار، سطر همان کار را از آرایه حذف کنید؛
+deploy بعدی unitهای آن را غیرفعال و حذف می‌کند. برای توقف عملکرد بدون تغییر unit، toggle متناظر `automation.*` را در پنل خاموش کنید.
+checker یک timer غیرفعال را `INACTIVE` گزارش می‌کند و `reset-failed` به‌تنهایی شکست ثبت‌شده در فایل `last-run` را پاک نمی‌کند.
 
 ### شکست و هشدار
 

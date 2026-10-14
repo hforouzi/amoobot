@@ -399,6 +399,13 @@ for entry in "${SCHEDULED_JOBS[@]}"; do
   [[ "$JOB_TIMEOUT" =~ ^[0-9]+$ && "$JOB_INTERVAL" =~ ^[0-9]+$ && -n "$JOB_CALENDAR" && "$JOB_COMMAND" == app:* ]] \
     || die "SCHEDULED_JOBS: invalid entry '${entry}'."
   [[ "$JOB_COMMAND" != *repair-stuck* ]] || die "SCHEDULED_JOBS: app:payments:repair-stuck must never be scheduled."
+  # An allowlist prevents maintenance/payment/test commands (or --only=all) being added accidentally.
+  case "$JOB_COMMAND" in
+    'app:automation:run --only=broadcasts'|'app:automation:run --only=orders'|\
+    'app:automation:run --only=sync'|'app:automation:run --only=expiry'|\
+    'app:automation:run --only=suspend'|'app:automation:run --only=notifications') ;;
+    *) die "SCHEDULED_JOBS: only the six reviewed automation tasks may be scheduled." ;;
+  esac
   job_names+="$JOB_NAME "
 done
 
@@ -437,6 +444,8 @@ run apt-get install -y \
   software-properties-common \
   ufw \
   cron \
+  util-linux \
+  logrotate \
   gzip \
   certbot \
   python3-certbot-nginx

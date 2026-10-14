@@ -65,6 +65,10 @@ while read -r job max_age schedule _; do
   if [[ -r "$STATE_DIR/$job.last-run" ]]; then
     rc_last="$(grep -oE 'rc=[0-9]+' "$STATE_DIR/$job.last-run" | head -1)"
     [[ -n "$rc_last" ]] && notes+=("last run ${rc_last}")
+    # reset-failed (or a subsequent lock skip) must not hide a failed command recorded on disk.
+    if [[ -n "$rc_last" && "$rc_last" != 'rc=0' ]]; then
+      status="FAILED"
+    fi
   fi
   if ! "$SYSTEMCTL" is-active --quiet "amoobot-job-${job}.timer"; then
     status="INACTIVE"; notes+=("timer not active")
@@ -76,6 +80,11 @@ while read -r job max_age schedule _; do
   [[ "$status" == "OK" ]] || problems=$((problems + 1))
   row "$status" "$job" "$last" "$(human "$max_age")" "$(IFS=';'; echo "${notes[*]}" | sed 's/;/; /g')"
 done < "$MANIFEST"
+
+if (( total == 0 )); then
+  echo "UNKNOWN: ${MANIFEST} contains no scheduled jobs."
+  exit 3
+fi
 
 if [[ -d "$BACKUP_DIR" ]]; then
   if [[ -r "$BACKUP_DIR" && -x "$BACKUP_DIR" ]]; then
