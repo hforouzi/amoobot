@@ -99,6 +99,14 @@ for w in deploy backup restore check-jobs; do
     'grep -q "^exec .*/usr/local/lib/amoobot/" "$1" && ! grep -q "/var/www/amoobot/bin" "$1"' _ "$WORK/amoobot-$w"
   check "wrapper amoobot-$w is valid bash" bash -n "$WORK/amoobot-$w"
 done
+check "amoobot-deploy wrapper runs deploy.sh with a clean environment (env -i)" \
+  grep -q '^exec env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin HOME=/root LANG=C.UTF-8 /bin/bash /usr/local/lib/amoobot/deploy.sh "\$@"$' "$WORK/amoobot-deploy"
+mkdir -p "$WORK/envprobe/usr/local/lib/amoobot"
+printf '#!/bin/bash\nenv | sort\n' > "$WORK/envprobe/deploy.sh"
+sed "s#/usr/local/lib/amoobot/deploy.sh#$WORK/envprobe/deploy.sh#" "$WORK/amoobot-deploy" > "$WORK/amoobot-deploy-probe"
+out="$(BASH_ENV=/tmp/x LD_PRELOAD=/tmp/evil.so GIT_DIR=/tmp/g AMOOBOT_DEPLOY_REEXEC=1 bash "$WORK/amoobot-deploy-probe" --dry-run 2>&1)"
+check "  ...nothing from the caller's environment reaches it" bash -c \
+  '! grep -qE "^(BASH_ENV|LD_PRELOAD|GIT_DIR|AMOOBOT_DEPLOY_REEXEC)=" <<< "$1" && grep -q "^PATH=/usr/local/sbin:" <<< "$1"' _ "$out"
 check "backup/restore wrappers use a clean environment and the root-owned DATABASE_URL file" bash -c \
   'for f in "$@"; do grep -q "exec env -i .*AMOOBOT_DB_URL_FILE=/etc/amoobot/database.env" "$f" || exit 1; done' _ \
   "$WORK/amoobot-backup" "$WORK/amoobot-restore"
@@ -396,6 +404,20 @@ if [[ "$EUID" -eq 0 ]] && have setpriv; then
   fi
 else
   skip "--env-file root checks (need root and setpriv: run in the Linux/WSL container as root)"
+fi
+
+echo "== DEPLOY_REF validation (group 4, 2nd review)"
+if can_dry_run; then
+  for ref in main release/v1 v1.2.3 feature_x-1 0123456789abcdef0123456789abcdef01234567; do
+    { cat "$WORK/prod.env"; echo "DEPLOY_REF=$ref"; } > "$WORK/ref.env"; dry_run "$WORK/ref.env"
+    check "DEPLOY_REF '$ref' accepted" test "$RC" -eq 0
+  done
+  for ref in -main --upload-pack=x 'main;id' 'a b' 'v1..v2' '$(id)' 'main^{tree}' 'x:y' '~1'; do
+    { cat "$WORK/prod.env"; printf 'DEPLOY_REF=%s\n' "$ref"; } > "$WORK/ref.env"; dry_run "$WORK/ref.env"
+    check "DEPLOY_REF '$ref' refused in the preflight" bash -c '[[ $1 -ne 0 ]] && grep -q "DEPLOY_REF / --ref must match" <<< "$2" && ! grep -q "^\[1/18\]" <<< "$2"' _ "$RC" "$OUT"
+  done
+else
+  skip "$DRY_RUN_SKIP"
 fi
 
 echo "== path validation, migrations, backups, rollback (group 3)"

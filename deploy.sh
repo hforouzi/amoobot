@@ -507,7 +507,8 @@ render_root_wrapper() {
   printf '#!/bin/bash\n# Managed by amoobot deploy.sh: root-owned entry point for %s (installed from the deployed commit).\n' "$ROOT_LIB_DIR"
   case "$1" in
     deploy) cat <<EOF
-exec /bin/bash ${ROOT_LIB_DIR}/deploy.sh "\$@"
+# Clean environment like the other wrappers: nothing from the caller's environment reaches the root-run script.
+exec env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin HOME=/root LANG=C.UTF-8 /bin/bash ${ROOT_LIB_DIR}/deploy.sh "\$@"
 EOF
       ;;
     backup) cat <<EOF
@@ -1012,6 +1013,9 @@ fi
 
 [[ "$DOMAIN" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$ && "$DOMAIN" == *.* ]] || die "DOMAIN is not a valid hostname."
 [[ "$DB_NAME" =~ ^[A-Za-z0-9_]+$ && "$DB_USER" =~ ^[A-Za-z0-9_]+$ ]] || die "DB_NAME / DB_USER may only contain A-Z a-z 0-9 _."
+# A git ref name only: no option (leading "-"), no range ("..") and nothing a shell or git would interpret.
+[[ "$DEPLOY_REF" =~ ^[A-Za-z0-9._/-]+$ && "$DEPLOY_REF" != -* && "$DEPLOY_REF" != *..* ]] \
+  || die "DEPLOY_REF / --ref must match ^[A-Za-z0-9._/-]+\$, not start with '-' and not contain '..' (got '${DEPLOY_REF}')."
 [[ "$DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]*$ && "$DEPLOY_USER" != "root" ]] || die "DEPLOY_USER must be a non-root user name."
 [[ "$SSH_PERMIT_ROOT_LOGIN" =~ ^(no|prohibit-password)$ ]] || die "SSH_PERMIT_ROOT_LOGIN must be 'no' or 'prohibit-password'."
 REQUIRE_SIGNED_TAG="${REQUIRE_SIGNED_TAG:-no}"
