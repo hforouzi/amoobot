@@ -526,21 +526,69 @@ database_table_count() {
   )
 }
 
-# restore_instructions  how to get back to the database state before this deploy
+# restore_instructions [before-pause]  how to get back to a database state that matches a release. "before-pause": the
+# check before the checkout refused the target, nothing was paused and the running release is untouched.
 restore_instructions() {
   # Values are prepared outside the here-doc: quotes inside ${..:+..} in a here-doc break bash's parser.
-  local dump="${PRE_DEPLOY_BACKUP_FILE:-${BACKUP_DIR}/${DB_NAME}_pre-deploy_<time>.sql.gz}" note="" ref
+  local dump="${PRE_DEPLOY_BACKUP_FILE:-${BACKUP_DIR}/${DB_NAME}_pre-deploy_<time>.sql.gz}" note="" ref head
   ref="${PREVIOUS_COMMIT:-<commit that matches the backup>}"
+  head="Scheduled jobs stay PAUSED. To return to the state before this deploy:"
+  if [[ "${1:-}" == before-pause ]]; then
+    ref="${TARGET_COMMIT:-$DEPLOY_REF}"
+    head="Nothing was paused or checked out; the running release is untouched. To deploy ${DEPLOY_REF} anyway, first restore a dump made while a release matching it was deployed (this LOSES newer data):"
+  fi
   [[ -n "${PRE_DEPLOY_BACKUP_FILE:-}" ]] && note="      # taken by this deploy: ${PRE_DEPLOY_BACKUP_FILE}"
   cat >&2 <<EOF
 
-Scheduled jobs stay PAUSED. To return to the state before this deploy:
+${head}
   ls -lt ${BACKUP_DIR}/${DB_NAME}_pre-deploy_*.sql.gz | head -3${note}
-  sudo systemctl stop php${PHP_VERSION}-fpm
+  sudo systemctl stop php${PHP_VERSION}-fpm 'amoobot-job-*.timer' 'amoobot-job-*.service'
   sudo amoobot-restore ${dump} --yes
   sudo amoobot-deploy --app-only --ref ${ref}
 Or deploy the release that matches the current schema again.
 EOF
+}
+
+# executed_migrations  ->  versions recorded in doctrine_migration_versions (nothing when the table does not exist yet).
+# Root-owned lib and DATABASE_URL from ${DB_URL_FILE}, like database_table_count. Fails when the database cannot be read.
+executed_migrations() {
+  (
+    # shellcheck source=bin/lib/database-url.sh
+    source "${ROOT_LIB_DIR}/lib/database-url.sh"
+    load_database_url "$APP_DIR"
+    trap 'rm -f "${DB_OPTS_FILE:-}"' EXIT
+    write_db_options_file
+    client="$(command -v mariadb || command -v mysql)"
+    n="$("$client" --defaults-extra-file="$DB_OPTS_FILE" -N -B -e \
+      "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'doctrine_migration_versions'" "$DB_NAME")"
+    [[ "$n" == 1 ]] || exit 0
+    "$client" --defaults-extra-file="$DB_OPTS_FILE" -N -B -e 'SELECT version FROM doctrine_migration_versions' "$DB_NAME"
+  )
+}
+
+# target_migrations COMMIT  ->  the migration versions COMMIT contains (migrations/Version*.php, namespace DoctrineMigrations
+# as in config/packages/doctrine_migrations.yaml), read from the root-owned mirror
+target_migrations() {
+  mirror_git ls-tree --name-only "$1" migrations/ | sed -n 's#^migrations/\(Version[A-Za-z0-9_]*\)\.php$#DoctrineMigrations\\\1#p'
+}
+
+# check_schema_matches COMMIT  stops BEFORE anything is paused or checked out when the database has executed migrations
+# that COMMIT does not contain (a rollback to a release older than the schema). Step 11's up-to-date
+# --fail-on-unregistered (exit 2) stays as the second line of defence.
+check_schema_matches() {
+  local commit="$1" executed ahead
+  if [[ ! -r "$DB_URL_FILE" || ! -r "${ROOT_LIB_DIR}/lib/database-url.sh" ]]; then
+    log "No ${DB_URL_FILE} yet (first deploy): schema-vs-code check skipped."
+    return 0
+  fi
+  executed="$(executed_migrations)" \
+    || die "Cannot read the executed migrations from the database (is MariaDB running?). Nothing was paused or checked out."
+  [[ -n "$executed" ]] || return 0
+  ahead="$(comm -23 <(sort -u <<< "$executed") <(target_migrations "$commit" | sort -u))"
+  [[ -z "$ahead" ]] && return 0
+  printf '  - %s\n' "${ahead//$'\n'/$'\n'  - }" >&2
+  restore_instructions before-pause
+  die "The database has $(wc -l <<< "$ahead") executed migration(s) that ${commit} does not contain (listed above): that release is older than the schema. Nothing was paused or checked out."
 }
 
 # root_ops_dest PATH  ->  where the root-owned copy of a ROOT_OPS_FILES entry is installed
@@ -1508,6 +1556,7 @@ MIRROR_SSH="ssh -F /dev/null -i ${ROOT_REPO_KEY} -o IdentitiesOnly=yes -o BatchM
 if (( DRY_RUN )); then
   log "[dry-run] fetch ${REPO_URL} AS ROOT into ${MIRROR_DIR} (root:root 700) with ${ROOT_REPO_KEY}: origin's branches and tags only"
   log "[dry-run] resolve ${DEPLOY_REF} in the root-owned mirror (origin/${DEPLOY_REF}, a tag, or a full commit hash contained in one$( [[ "${REQUIRE_SIGNED_TAG:-no}" == yes ]] && echo '; REQUIRE_SIGNED_TAG=yes: only a tag signed by a key in '"${ALLOWED_SIGNERS_FILE}")); refuse it unless it has every root-owned ops file (git cat-file -e) - before pausing anything"
+  log "[dry-run] compare the database's executed migrations with ${DEPLOY_REF}'s migrations/ (from the mirror); refuse if the database is ahead - before pausing anything"
 else
   if [[ ! -f "$ROOT_REPO_KEY" ]]; then
     install -d -m 700 -o root -g root "${ROOT_REPO_KEY%/*}"
@@ -1528,6 +1577,7 @@ else
   TARGET_COMMIT="$(resolve_target_ref "$DEPLOY_REF")" || die "Refusing to deploy '${DEPLOY_REF}' (see above). Nothing was paused or checked out."
   # Checked before the jobs are paused: a refused rollback leaves the running release untouched.
   verify_target_ops "$TARGET_COMMIT"
+  check_schema_matches "$TARGET_COMMIT"
 fi
 
 # APP_DIR's parent is root-owned, so only APP_DIR itself and var/ (in the deploy-owned APP_DIR) need the link check.
@@ -1675,8 +1725,9 @@ if ! console doctrine:migrations:migrate --allow-no-migration; then
   restore_instructions
   die "doctrine:migrations:migrate failed."
 fi
-# Exit 1: migrations still pending. Exit 2: the database has migrations this code does not know (e.g. a rollback to a
-# release older than the schema) - the code and the schema do not match.
+# Second line of defence (check_schema_matches already ran before the checkout). Exit codes verified in
+# vendor/doctrine/migrations 3.9.7 (UpToDateCommand): 0 up to date; 1 migrations pending; 2 executed migrations the code
+# does not know, only with --fail-on-unregistered (2 wins when both apply; without the flag that case returns 0).
 if console doctrine:migrations:up-to-date --fail-on-unregistered; then
   :
 else

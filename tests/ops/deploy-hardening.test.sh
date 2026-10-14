@@ -769,6 +769,84 @@ else
   skip "backup rotation (needs php and gzip)"
 fi
 
+echo "== restore safety and schema-vs-code before the checkout (group 9, 2nd review)"
+if have gzip && have php; then
+  RB="$WORK/rb"; mkdir -p "$RB/backups" "$RB/elsewhere" "$RB/bin"
+  printf 'CREATE TABLE t (id int);\n-- Dump completed on 2026-10-14\n' | gzip > "$RB/backups/amoobot_manual_20261014T000000Z.sql.gz"
+  cp "$RB/backups/amoobot_manual_20261014T000000Z.sql.gz" "$RB/elsewhere/outside.sql.gz"
+  mkdir -p "$RB/backups/sub"; cp "$RB/backups/amoobot_manual_20261014T000000Z.sql.gz" "$RB/backups/sub/nested.sql.gz"
+  ln -s "$RB/elsewhere/outside.sql.gz" "$RB/backups/link.sql.gz"
+  # Stub client: records what it is asked, answers counts with 0.
+  printf '#!/usr/bin/env bash\necho "client $*" >> "%s/client.calls"; cat > /dev/null; echo 0\n' "$RB" > "$RB/bin/mariadb"; chmod +x "$RB/bin/mariadb"
+  printf '#!/usr/bin/env bash\n[[ "$1" == list-units ]] && printf "%%s" "$ACTIVE_UNITS"\nexit 0\n' > "$RB/bin/systemctl"; chmod +x "$RB/bin/systemctl"
+  restore_case() {  # restore_case <file> "<active units>" -> output, rc
+    : > "$RB/client.calls"
+    PATH="$RB/bin:$PATH" AMOOBOT_SYSTEMCTL="$RB/bin/systemctl" ACTIVE_UNITS="$2" BACKUP_DIR="$RB/backups" \
+      DATABASE_URL='mysql://u:p@127.0.0.1:3306/amoobot' bash "$ROOT/bin/restore-database.sh" "$1" --yes --no-safety-backup 2>&1
+  }
+  out="$(restore_case "$RB/backups/amoobot_manual_20261014T000000Z.sql.gz" "")"; rc=$?
+  check "restore: a dump in BACKUP_DIR with nothing live -> restored" bash -c '[[ $1 -eq 0 ]] && grep -q "Restore finished" <<< "$2" && grep -q -- "--binary-mode" "$3"' _ "$rc" "$out" "$RB/client.calls"
+  for f in "$RB/elsewhere/outside.sql.gz" "$RB/backups/sub/nested.sql.gz" "$RB/backups/../elsewhere/outside.sql.gz"; do
+    out="$(restore_case "$f" "")"; rc=$?
+    check "restore: $(basename "$f") outside BACKUP_DIR (or nested) -> refused, database untouched" bash -c \
+      '[[ $1 -ne 0 ]] && grep -q "must be a regular file directly in" <<< "$2" && [[ ! -s "$3" ]]' _ "$rc" "$out" "$RB/client.calls"
+  done
+  out="$(restore_case "$RB/backups/link.sql.gz" "")"; rc=$?
+  check "restore: a symlink in BACKUP_DIR -> refused" bash -c '[[ $1 -ne 0 ]] && grep -q "Refusing a symbolic link" <<< "$2" && [[ ! -s "$3" ]]' _ "$rc" "$out" "$RB/client.calls"
+  for units in 'php8.4-fpm.service loaded active running PHP' 'amoobot-job-sync.timer loaded active waiting x' 'amoobot-job-orders.service loaded activating start x'; do
+    out="$(restore_case "$RB/backups/amoobot_manual_20261014T000000Z.sql.gz" "$units")"; rc=$?
+    check "restore: refused while ${units%% *} is active, database untouched" bash -c \
+      '[[ $1 -ne 0 ]] && grep -q "Still active: $3" <<< "$2" && grep -q "systemctl stop php8.4-fpm" <<< "$2" && [[ ! -s "$4" ]]' _ "$rc" "$out" "${units%% *}" "$RB/client.calls"
+  done
+  check "restore: the live check asks for running oneshot jobs too (activating)" grep -q -- "--state=active,activating,reloading" "$ROOT/bin/restore-database.sh"
+else
+  skip "restore tests (need gzip and php)"
+fi
+
+if have git && [[ "$EUID" -eq 0 ]]; then
+  set_globals
+  load_fn mirror_git target_migrations check_schema_matches restore_instructions
+  SR="$WORK/schema-repo"; git init -q "$SR"; git -C "$SR" config user.email t@t; git -C "$SR" config user.name t
+  mkdir -p "$SR/migrations"; touch "$SR/migrations/Version20260101000000.php" "$SR/migrations/Version20260201000000.php" "$SR/migrations/README.md"
+  git -C "$SR" add -A; git -C "$SR" commit -qm old; OLDC="$(git -C "$SR" rev-parse HEAD)"
+  check "target migrations are read from the commit (mirror), namespaced like Doctrine stores them" test \
+    "$( (MIRROR_DIR="$SR/.git" MIRROR_PROTOCOL=file; target_migrations "$OLDC") | tr '\n' ' ')" = 'DoctrineMigrations\Version20260101000000 DoctrineMigrations\Version20260201000000 '
+  : > "$WORK/db.env"; mkdir -p "$WORK/rlib/lib"; : > "$WORK/rlib/lib/database-url.sh"
+  schema_case() {  # schema_case "<executed versions>" [db readable 0|1] -> output
+    ( die() { printf 'DIE: %s\n' "$*"; exit 1; }; log() { echo "LOG: $*"; }
+      executed_migrations() { [[ "${DB_OK:-1}" == 1 ]] || return 1; printf '%s' "$EXECUTED"; }
+      MIRROR_DIR="$SR/.git" MIRROR_PROTOCOL=file DB_URL_FILE="$WORK/db.env" ROOT_LIB_DIR="$WORK/rlib" EXECUTED="$1" DB_OK="${2:-1}"
+      DEPLOY_REF=v1.0 TARGET_COMMIT="$OLDC" PHP_VERSION=8.4 DB_NAME=amoobot BACKUP_DIR=/var/backups/amoobot
+      check_schema_matches "$OLDC"; echo REACHED ) 2>&1
+  }
+  out="$(schema_case $'DoctrineMigrations\\Version20260101000000\nDoctrineMigrations\\Version20260201000000')"
+  check "database at the target's schema -> deploy continues" grep -q REACHED <<< "$out"
+  out="$(schema_case $'DoctrineMigrations\\Version20260101000000')"
+  check "database behind the target (pending migrations) -> deploy continues (step 11 migrates)" grep -q REACHED <<< "$out"
+  out="$(schema_case $'DoctrineMigrations\\Version20260101000000\nDoctrineMigrations\\Version20260201000000\nDoctrineMigrations\\Version20260301000000')"
+  check "database AHEAD of the target -> refused before anything is paused, with the unknown version listed" bash -c \
+    'grep -q "DIE: The database has 1 executed migration(s) that .* does not contain" <<< "$1" && grep -q "Version20260301000000" <<< "$1" && ! grep -q REACHED <<< "$1"' _ "$out"
+  check "  ...and restore instructions that say nothing was paused and how to get a matching schema" bash -c \
+    'grep -q "Nothing was paused or checked out; the running release is untouched" <<< "$1" && grep -q "sudo amoobot-restore .* --yes" <<< "$1" && grep -q -- "--ref $2" <<< "$1" && ! grep -q "stay PAUSED" <<< "$1"' _ "$out" "$OLDC"
+  check "database unreadable -> stop before pausing (not silently skipped)" grep -q 'DIE: Cannot read the executed migrations' <<< "$(schema_case 'x' 0)"
+  out="$( (die() { printf 'DIE: %s\n' "$*"; exit 1; }; log() { echo "LOG: $*"; }; DB_URL_FILE="$WORK/none" ROOT_LIB_DIR="$WORK/rlib"
+           check_schema_matches "$OLDC"; echo REACHED) 2>&1 )"
+  check "first deploy (no database.env yet) -> check skipped with a note" bash -c 'grep -q "LOG: No .* yet (first deploy)" <<< "$1" && grep -q REACHED <<< "$1"' _ "$out"
+  check "schema check runs right after the ops check, before the jobs are paused" bash -c \
+    'c=$(grep -n "^  check_schema_matches \"\$TARGET_COMMIT\"" "$1" | cut -d: -f1); p=$(grep -n "^pause_scheduled_jobs$" "$1" | cut -d: -f1); [[ -n $c && -n $p && $c -lt $p ]]' _ "$ROOT/deploy.sh"
+  check "up-to-date --fail-on-unregistered stays as the second line of defence" grep -q 'console doctrine:migrations:up-to-date --fail-on-unregistered' "$ROOT/deploy.sh"
+else
+  skip "schema-vs-code tests (need git and root: Linux container)"
+fi
+check "doctrine/migrations exit codes documented from vendor (0 / 1 pending / 2 unregistered)" \
+  grep -q 'vendor/doctrine/migrations 3.9.7 (UpToDateCommand): 0 up to date; 1 migrations pending; 2 executed migrations' "$ROOT/deploy.sh"
+if [[ -r "$ROOT/vendor/doctrine/migrations/src/Tools/Console/Command/UpToDateCommand.php" ]]; then
+  check "  ...and vendor still returns 2 only with --fail-on-unregistered" bash -c \
+    'grep -q "if (\$input->getOption(.fail-on-unregistered.)) {" "$1" && grep -q "\$exitCode = 2;" "$1" && grep -q "\$exitCode = 1;" "$1"' _ "$ROOT/vendor/doctrine/migrations/src/Tools/Console/Command/UpToDateCommand.php"
+else
+  skip "doctrine/migrations exit code check (vendor/ not installed here)"
+fi
+
 echo "== webhook/payment maintenance during the deploy (group 4)"
 set_globals
 NGINX_SITE=/etc/nginx/sites-available/amoobot NGINX_MAINTENANCE_FILE=/etc/nginx/snippets/amoobot-maintenance.conf

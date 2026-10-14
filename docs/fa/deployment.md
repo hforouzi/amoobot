@@ -196,9 +196,14 @@ sudo amoobot-deploy --app-only --ref v1.5.0
 - اگر migration اجرانشده وجود داشته باشد **و** دیتابیس از قبل جدول داشته باشد، قبل از migration خودکار یک بکاپ با برچسب `pre-deploy` در
   `/var/backups/amoobot` گرفته می‌شود (مستقل از اینکه قبلاً چه کامیتی deploy شده؛ مثلاً سروری که از dump بازگردانی شده هم بکاپ می‌گیرد).
   روی دیتابیس خالی (اولین نصب) بکاپی لازم نیست.
-- بعد از migration، `doctrine:migrations:up-to-date --fail-on-unregistered` اجرا می‌شود. کد خروج `2` یعنی دیتابیس migrationهایی دارد که این
-  کد نمی‌شناسد (کد و schema با هم نمی‌خوانند، مثلاً rollback به نسخه‌ی قدیمی‌تر از schema). deploy **قبل از فعال کردن دوباره‌ی timerها**
-  متوقف می‌شود و دستور دقیق بازگردانی بکاپ `pre-deploy` را چاپ می‌کند.
+- **schema جلوتر از کد:** قبل از متوقف کردن کارها و قبل از checkout، نسخه‌های اجراشده در جدول `doctrine_migration_versions` (با root و
+  `/etc/amoobot/database.env`) با فهرست `migrations/Version*.php` کامیت مقصد (از آینه‌ی root‌مالک) مقایسه می‌شوند. اگر دیتابیس migrationی
+  داشته باشد که کامیت مقصد ندارد (rollback به نسخه‌ی قدیمی‌تر از schema)، deploy **رد می‌شود** و نسخه‌ی در حال اجرا دست نمی‌خورد؛ نسخه‌های
+  ناشناخته و راه بازگردانی یک بکاپ سازگار چاپ می‌شوند. اگر دیتابیس خوانده نشود هم deploy قبل از هر توقفی متوقف می‌شود.
+- خط دفاع دوم: بعد از migration، `doctrine:migrations:up-to-date --fail-on-unregistered` اجرا می‌شود. کدهای خروج (بررسی‌شده در
+  `doctrine/migrations` 3.9.7، `UpToDateCommand`): `0` به‌روز، `1` migration اجرانشده، `2` migrationهای اجراشده‌ای که کد نمی‌شناسد (فقط با
+  `--fail-on-unregistered`؛ اگر هر دو حالت باشد `2`؛ بدون این گزینه همین حالت `0` برمی‌گرداند). با `1` یا `2` deploy **قبل از فعال کردن دوباره‌ی
+  timerها** متوقف می‌شود و دستور دقیق بازگردانی بکاپ `pre-deploy` را چاپ می‌کند.
 - **root از symlinkهای کاربر `deploy` یا `www-data` پیروی نمی‌کند.** `~deploy/.ssh/authorized_keys`، `.env.prod.local` و `.env.local` را خود
   کاربر `deploy` می‌نویسد (فایل موقت و `mv`، پس symlink جایگزین می‌شود نه دنبال)، پوشه‌های `var/` و `public/bundles` را مالک خودشان می‌سازد و
   `chmod` می‌کند و root فقط `chown -h` و `chown -R -h -P` اجرا می‌کند. اگر `~deploy/.ssh`، `authorized_keys`، `var/`، `public/`،
@@ -301,6 +306,9 @@ curl -fsS https://DOMAIN/healthz
 ```
 
 `restore-database.sh` این کارها را انجام می‌دهد: بررسی سلامت آرشیو، بکاپ ایمنی `pre-restore`، حذف **همه‌ی** جدول‌ها و viewها، import و گزارش تعداد جدول‌ها و migrationها. بدون `--yes` اجرا نمی‌شود.
+قبل از هر کاری **رد می‌کند** اگر: فایل dump مستقیماً داخل `BACKUP_DIR` (`/var/backups/amoobot`، مسیر resolve‌شده) نباشد یا symlink باشد
+(dump دیگری را اول با root به همان پوشه کپی کنید)؛ یا PHP-FPM یا هر `amoobot-job-*.timer`/`amoobot-job-*.service` هنوز فعال باشد (پس دستور
+`systemctl stop` بالا الزامی است).
 
 **بکاپ خارج از سرور:** بکاپی که فقط روی همان سرور باشد در برابر از دست رفتن سرور محافظتی ندارد. پوشه‌ی `/var/backups/amoobot` را به‌طور منظم به جای دیگری (مثلاً با `rsync` یا `rclone`) و به‌صورت رمزنگاری‌شده منتقل کنید.
 
