@@ -182,6 +182,54 @@ else
   skip "unit validation (systemd-analyze not installed)"
 fi
 
+echo "== deploy.sh --dry-run preview and idempotent writes"
+if have openssl; then
+  rnd() { openssl rand -hex 32; }
+  cat > "$WORK/prod.env" <<EOF
+DOMAIN=bot.example.test
+DB_PASSWORD=$(openssl rand -hex 24)
+APP_SECRET=$(rnd)
+TELEGRAM_BOT_TOKEN=123456789:$(openssl rand -hex 20)
+TELEGRAM_WEBHOOK_SECRET=$(rnd)
+TELEGRAM_WEBHOOK_SECRET_TOKEN=$(rnd)
+TELEGRAM_ADMIN_CHAT_ID=-1001234567
+EOF
+  cp "$ROOT/deploy.sh" "$WORK/deploy.sh"
+  out="$(bash "$WORK/deploy.sh" --dry-run --env-file "$WORK/prod.env" 2>&1)"; rc=$?
+  jobs_part="$(sed -n '/^\[16\/18\]/,/^\[17\/18\]/p' <<< "$out")"
+  check "dry-run exits 0" test "$rc" -eq 0
+  check "dry-run lists the job table" grep -qE '^  sync +\*:0/15 +lifecycle +1500s +app:automation:run --only=sync' <<< "$jobs_part"
+  check "dry-run shows each new service file" grep -q '+ ExecStart=/bin/bash /var/www/amoobot/bin/scheduled-job.sh notifications lifecycle -- ' <<< "$jobs_part"
+  check "dry-run shows each new timer file" grep -q '+ OnCalendar=\*:5/15' <<< "$jobs_part"
+  check "dry-run shows the alert unit and logrotate" bash -c 'grep -q "amoobot-job-alert@.service" <<< "$1" && grep -q "+     rotate 14" <<< "$1"' _ "$jobs_part"
+  check "dry-run shows the manifest" grep -q '+ sync 4200 \*:0/15' <<< "$jobs_part"
+  check "dry-run would enable every timer" test "$(grep -c 'systemctl enable --now amoobot-job-' <<< "$jobs_part")" -eq 6
+  check "dry-run pauses jobs before the checkout" grep -q 'pause scheduled jobs' <<< "$out"
+  leak=0
+  while IFS='=' read -r k v; do
+    [[ "$k" =~ (SECRET|TOKEN|PASSWORD) ]] && grep -qF -- "$v" <<< "$out" && { leak=1; echo "  leaked: $k"; }
+  done < "$WORK/prod.env"
+  check "dry-run prints no secret value" test "$leak" -eq 0
+  sed 's/^SCHEDULED_JOBS=(/SCHEDULED_JOBS=(\n  "bad|x|*:0\/5|60|300|app:payments:repair-stuck --apply"/' "$ROOT/deploy.sh" > "$WORK/deploy-bad.sh"
+  out="$(bash "$WORK/deploy-bad.sh" --dry-run --env-file "$WORK/prod.env" 2>&1)"; rc=$?
+  check "preflight refuses to schedule repair-stuck" bash -c '[[ $1 -ne 0 ]] && grep -q "must never be scheduled" <<< "$2"' _ "$rc" "$out"
+
+  # write_file for real (as the current user): new -> changed, same content -> unchanged, edit -> changed.
+  eval "$(sed -n '/^FILE_CHANGED=0$/,/^}/p' "$ROOT/deploy.sh")"
+  # shellcheck disable=SC2034 # read by the write_file function eval'd above
+  DRY_RUN=0; me="$(id -un):$(id -gn)"; target="$WORK/etc/amoobot-job-x.timer"
+  write_file "$target" 644 "$me" --show-diff <<< one; first=$FILE_CHANGED
+  write_file "$target" 644 "$me" --show-diff <<< one; second=$FILE_CHANGED
+  write_file "$target" 644 "$me" --show-diff <<< two; third=$FILE_CHANGED
+  check "re-run: new file written, identical re-run unchanged, edit updates" test "$first$second$third" = "101"
+  check "re-run: file holds the latest content" grep -qx two "$target"
+  # "cmd | write_file" runs write_file in a subshell, so FILE_CHANGED (daemon-reload, timer restart) would be lost.
+  check "jobs step never pipes into write_file" \
+    bash -c '! sed -n "/^# SCHEDULED JOBS/,/^# WEBHOOK/p" "$1" | grep -q "| *write_file"' _ "$ROOT/deploy.sh"
+else
+  skip "dry-run tests (openssl not installed)"
+fi
+
 echo "== logrotate config"
 if have logrotate; then
   cfg="$(sed -n '/^write_file \/etc\/logrotate.d\/amoobot-jobs/,/^EOF/p' "$ROOT/deploy.sh" | sed '1d;$d' \

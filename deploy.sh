@@ -113,11 +113,12 @@ console() {
   as "$WEB_USER" php "$APP_DIR/bin/console" "$@" --env=prod --no-interaction
 }
 
-# write_file PATH MODE OWNER:GROUP   content on stdin; only replaces the file when the content changed.
-# Sets FILE_CHANGED=1/0. In --dry-run only reports changed/unchanged, never the content.
+# write_file PATH MODE OWNER:GROUP [--show-diff]   content on stdin; only replaces the file when the content changed.
+# Sets FILE_CHANGED=1/0. In --dry-run reports changed/unchanged; with --show-diff (only for files that never hold
+# secrets) it also prints the diff against the installed file, or the whole new file.
 FILE_CHANGED=0
 write_file() {
-  local path="$1" mode="$2" owner="$3" tmp state
+  local path="$1" mode="$2" owner="$3" show_diff="${4:-}" tmp state
   tmp="$(mktemp)"
   cat > "$tmp"
   if [[ -f "$path" ]] && cmp -s "$tmp" "$path" 2>/dev/null; then
@@ -127,6 +128,13 @@ write_file() {
   fi
   if (( DRY_RUN )); then
     printf '[dry-run] write %s (%s %s) - %s\n' "$path" "$mode" "$owner" "$state"
+    if [[ "$show_diff" == "--show-diff" ]] && (( FILE_CHANGED )); then
+      if [[ -f "$path" ]]; then
+        diff -u --label "installed: $path" --label "new: $path" "$path" "$tmp" | sed 's/^/    /' || true
+      else
+        sed 's/^/    + /' "$tmp"
+      fi
+    fi
   elif (( FILE_CHANGED )); then
     install -D -m "$mode" -o "${owner%%:*}" -g "${owner##*:}" "$tmp" "$path"
   else
@@ -898,13 +906,13 @@ run install -d -m 750 -o "$WEB_USER" -g "$WEB_USER" "$JOBS_LOG_DIR"
 run install -d -m 755 -o root -g root "$STATE_DIR"
 run install -d -m 755 -o "$WEB_USER" -g "$WEB_USER" "$JOBS_STATE_DIR"
 units_changed=0
-write_file /etc/tmpfiles.d/amoobot.conf 644 root:root <<EOF
+write_file /etc/tmpfiles.d/amoobot.conf 644 root:root --show-diff <<EOF
 # Managed by amoobot deploy.sh: lock files of the scheduled jobs (bin/scheduled-job.sh)
 d ${JOBS_LOCK_DIR} 0750 ${WEB_USER} ${WEB_USER} -
 EOF
 (( FILE_CHANGED )) && run systemd-tmpfiles --create /etc/tmpfiles.d/amoobot.conf
 
-write_file /etc/logrotate.d/amoobot-jobs 644 root:root <<EOF
+write_file /etc/logrotate.d/amoobot-jobs 644 root:root --show-diff <<EOF
 # Managed by amoobot deploy.sh: output of the scheduled jobs
 ${JOBS_LOG_DIR}/*.log {
     daily
@@ -918,7 +926,7 @@ ${JOBS_LOG_DIR}/*.log {
 }
 EOF
 
-write_file /etc/systemd/system/amoobot-job-alert@.service 644 root:root <<EOF
+write_file /etc/systemd/system/amoobot-job-alert@.service 644 root:root --show-diff <<EOF
 # Managed by amoobot deploy.sh: Telegram alert when a scheduled job unit fails (OnFailure=)
 [Unit]
 Description=Amoobot: Telegram alert for failed scheduled job %i
@@ -941,13 +949,13 @@ manifest="# Managed by amoobot deploy.sh: read by bin/check-scheduled-jobs.sh
 # job max_age_seconds (= 3 x interval + timeout) schedule"
 for entry in "${SCHEDULED_JOBS[@]}"; do
   parse_job "$entry"
-  render_job_service | write_file "/etc/systemd/system/amoobot-job-${JOB_NAME}.service" 644 root:root
+  write_file "/etc/systemd/system/amoobot-job-${JOB_NAME}.service" 644 root:root --show-diff < <(render_job_service)
   (( FILE_CHANGED )) && units_changed=1
-  render_job_timer | write_file "/etc/systemd/system/amoobot-job-${JOB_NAME}.timer" 644 root:root
+  write_file "/etc/systemd/system/amoobot-job-${JOB_NAME}.timer" 644 root:root --show-diff < <(render_job_timer)
   (( FILE_CHANGED )) && units_changed=1 && changed_timers+=("amoobot-job-${JOB_NAME}.timer")
   manifest+=$'\n'"${JOB_NAME} $((3 * JOB_INTERVAL + JOB_TIMEOUT)) ${JOB_CALENDAR}"
 done
-printf '%s\n' "$manifest" | write_file "$JOBS_MANIFEST" 644 root:root
+write_file "$JOBS_MANIFEST" 644 root:root --show-diff <<< "$manifest"
 
 # Jobs removed from SCHEDULED_JOBS: stop and delete their units.
 for timer_file in /etc/systemd/system/amoobot-job-*.timer; do

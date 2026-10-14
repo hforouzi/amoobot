@@ -36,8 +36,9 @@
 | 12–13 | پیکربندی Nginx، گواهی Let's Encrypt با تمدید خودکار (`certbot.timer`) و ریدایرکت HTTP به HTTPS |
 | 14 | worker پیام‌رسان فقط وقتی transport به نام `async` تعریف شده باشد (فعلاً تعریف نشده، پس نصب نمی‌شود) |
 | 15 | cron بکاپ شبانه |
-| 16 | ثبت Webhook تلگرام با رمز در URL **و** `secret_token` (هدر `X-Telegram-Bot-Api-Secret-Token`) |
-| 17 | بررسی نهایی: `APP_ENV=prod`، `APP_DEBUG=0` (یعنی میان‌برهای تست پلاگین‌ها مثل auto-confirm دموی پرداخت خاموش است) و `https://DOMAIN/healthz` = 200 |
+| 16 | نصب کارهای زمان‌بندی‌شده (systemd timer) و ادامه دادن آن‌ها (بخش ۸). از قبل از checkout در مرحله‌ی 7 تا این مرحله متوقف هستند |
+| 17 | ثبت Webhook تلگرام با رمز در URL **و** `secret_token` (هدر `X-Telegram-Bot-Api-Secret-Token`) |
+| 18 | بررسی نهایی: `APP_ENV=prod`، `APP_DEBUG=0` (یعنی میان‌برهای تست پلاگین‌ها مثل auto-confirm دموی پرداخت خاموش است)، فعال بودن همه‌ی timerها و `https://DOMAIN/healthz` = 200 |
 
 گزینه‌ها:
 
@@ -118,10 +119,10 @@ sudo /var/www/amoobot/deploy.sh --app-only --ref <کامیت قبلی>
 **دیتابیس:** migrationها فقط رو به جلو اجرا می‌شوند. اگر نسخه‌ی خراب migration داشته که با کد قدیمی سازگار نیست:
 
 ```bash
-sudo systemctl stop php8.4-fpm
+sudo systemctl stop php8.4-fpm 'amoobot-job-*.timer' 'amoobot-job-*.service'
 ls -lt /var/backups/amoobot/*_pre-deploy_*.sql.gz | head -3
 sudo /var/www/amoobot/bin/restore-database.sh /var/backups/amoobot/amoobot_pre-deploy_<زمان>.sql.gz --yes
-sudo /var/www/amoobot/deploy.sh --app-only --ref <کامیت قبلی>   # PHP-FPM را هم دوباره راه می‌اندازد
+sudo /var/www/amoobot/deploy.sh --app-only --ref <کامیت قبلی>   # PHP-FPM و timerها را هم دوباره راه می‌اندازد
 ```
 
 > داده‌هایی که بین بکاپ و بازگردانی ثبت شده‌اند (سفارش‌ها و پرداخت‌ها) از بین می‌روند. قبل از restore، بکاپ `pre-restore` خودکار گرفته می‌شود تا در صورت نیاز دستی بازیابی شوند.
@@ -140,11 +141,11 @@ sudo /var/www/amoobot/deploy.sh --app-only --ref <کامیت قبلی>   # PHP-F
 # بکاپ دستی
 sudo BACKUP_LABEL=manual /var/www/amoobot/bin/backup-database.sh
 
-# بازگردانی
-sudo systemctl stop php8.4-fpm
+# بازگردانی (کارهای زمان‌بندی‌شده هم متوقف شوند تا وسط restore چیزی ننویسند)
+sudo systemctl stop php8.4-fpm 'amoobot-job-*.timer' 'amoobot-job-*.service'
 sudo /var/www/amoobot/bin/restore-database.sh /var/backups/amoobot/<فایل>.sql.gz --yes
 sudo -u www-data php /var/www/amoobot/bin/console doctrine:migrations:status --env=prod
-sudo systemctl start php8.4-fpm
+sudo systemctl start php8.4-fpm 'amoobot-job-*.timer'
 curl -fsS https://DOMAIN/healthz
 ```
 
@@ -207,15 +208,64 @@ curl -fsS https://DOMAIN/healthz
 - [ ] بکاپ‌ها به خارج از سرور منتقل می‌شوند
 - [ ] `systemctl list-timers certbot.timer` فعال است (`sudo certbot renew --dry-run` موفق است)
 - [ ] مانیتورینگ uptime روی `https://DOMAIN/healthz`
-- [ ] وظایف زمان‌بندی‌شده‌ی برنامه (یادداشت پایین را ببینید) تصمیم‌گیری و فعال شده‌اند
-
-> **یادداشت وظایف زمان‌بندی‌شده:** `deploy.sh` قدیمی هیچ cron برنامه‌ای (مثلاً `app:automation:run`، `app:service:check-expiry`،
-> `app:service:sync-usage`، `app:service:send-notifications`، `app:orders:expire-incomplete`) نصب نمی‌کرد و این نسخه هم
-> چنین cronی اضافه نمی‌کند. زمان‌بندی آن‌ها را طبق [automation.md](automation.md) جداگانه تعیین کنید.
+- [ ] `systemctl list-timers 'amoobot-job-*'` شش timer نشان می‌دهد و ستون LAST یک ساعت بعد از deploy برای همه پر است
+- [ ] Toggleهای اتوماسیون در پنل ادمین بررسی شده‌اند (به‌خصوص «تعلیق خودکار»؛ پیش‌فرض خاموش)
+- [ ] `automation.batch_limit` بیشتر از تعداد کل سرویس‌هاست ([automation.md](automation.md))
+- [ ] هشدار آزمایشی رسیده است: `sudo -u www-data /var/www/amoobot/bin/scheduled-job-alert.sh failed test` (بعد `... recovered test`)
 
 ---
 
-## ۸. عیب‌یابی
+## ۸. کارهای زمان‌بندی‌شده (systemd timers)
+
+`deploy.sh` در مرحله‌ی 16 برای هر کار یک service از نوع `oneshot` و یک timer نصب می‌کند. فهرست کارها، فاصله‌ها و دلیل هر کدام در
+[automation.md](automation.md) آمده است. منبع اصلی آرایه‌ی `SCHEDULED_JOBS` در `deploy.sh` است. برای تغییر زمان‌بندی همان را
+ویرایش کنید و دوباره deploy کنید: unitها به‌روز می‌شوند و کارهای حذف‌شده غیرفعال و پاک می‌شوند.
+`sudo deploy.sh --dry-run` جدول کارها و متن کامل (یا diff) هر unit را قبل از نصب نشان می‌دهد.
+
+| چیز | محل |
+|---|---|
+| unitها | `/etc/systemd/system/amoobot-job-<job>.service` و `.timer`، هشدار: `amoobot-job-alert@.service` |
+| اجرای واقعی | `bin/scheduled-job.sh` با کاربر `www-data` (کاربر برنامه) |
+| خروجی کامل | `/var/log/amoobot/<job>.log` (چرخش روزانه، ۱۴ روز: `/etc/logrotate.d/amoobot-jobs`) |
+| خلاصه‌ی هر اجرا | `journalctl -u amoobot-job-<job>` |
+| آخرین اجرا / آخرین موفقیت | `/var/lib/amoobot/jobs/<job>.last-run` و `<job>.last-success` |
+| قفل‌ها | `/run/amoobot/<گروه>.lock` (`sync`، `expiry`، `suspend` و `notifications` در گروه `lifecycle` هستند و هم‌زمان اجرا نمی‌شوند) |
+
+### دیدن وضعیت آخرین اجرا
+
+```bash
+systemctl list-timers 'amoobot-job-*'                  # LAST = آخرین اجرا، NEXT = اجرای بعدی
+systemctl list-units --failed 'amoobot-job-*'          # کارهایی که آخرین اجرایشان شکست خورده
+systemctl status amoobot-job-sync.service              # Active/Result و کد خروج آخرین اجرا
+journalctl -u amoobot-job-sync -n 20                   # خلاصه‌ی اجراهای اخیر (rc و مدت)
+cat /var/lib/amoobot/jobs/sync.last-run                # <زمان> rc=<کد> duration=<ثانیه>
+tail -n 50 /var/log/amoobot/sync.log                   # خروجی کامل دستور
+```
+
+### کار با کارها
+
+```bash
+sudo systemctl start amoobot-job-sync.service          # اجرای فوری یک کار (همان کاربر، قفل و لاگ)
+sudo systemctl stop 'amoobot-job-*.timer'              # توقف موقت همه‌ی زمان‌بندی‌ها
+sudo systemctl start 'amoobot-job-*.timer'             # ادامه
+sudo systemctl reset-failed 'amoobot-job-*'            # پاک کردن وضعیت failed بعد از رفع مشکل
+```
+
+### شکست و هشدار
+
+- کد خروج کار همان کد خروج دستور است. پس شکست (یا گذشتن از `TimeoutStartSec`) یعنی unit در وضعیت **failed**.
+  `app:automation:run` اگر حتی یک مورد شکست بخورد (مثلاً یک پنل در دسترس نباشد) کد خطا برمی‌گرداند.
+- با شکست، `amoobot-job-alert@` یک پیام کوتاه به `TELEGRAM_ADMIN_CHAT_ID` می‌فرستد: نام کار، سرور، نتیجه‌ی systemd و آخرین
+  موفقیت. **خروجی کار در پیام نیست** (ممکن است داده‌ی مشتری داشته باشد). برای هر کار حداکثر یک هشدار در ساعت
+  (`ALERT_REPEAT_MINUTES`) فرستاده می‌شود و بعد از اولین اجرای موفق، پیام «recovered» می‌آید.
+- اگر قفل گروه بیش از ۲ دقیقه آزاد نشود (کار دیگری یا deploy در حال اجراست)، اجرا رد می‌شود (`SKIPPED` در لاگ، unit موفق).
+  اگر این وضعیت تکرار شود، بررسی تازگی (بخش بعد) آن را نشان می‌دهد.
+- هنگام deploy، timerها از قبل از checkout متوقف می‌شوند و deploy صبر می‌کند تا کار در حال اجرا تمام شود. اگر deploy شکست
+  بخورد، کارها **متوقف می‌مانند** (پیام `scheduled jobs are PAUSED`) تا یک deploy موفق انجام شود.
+
+---
+
+## ۹. عیب‌یابی
 
 | نشانه | بررسی |
 |---|---|
@@ -225,3 +275,6 @@ curl -fsS https://DOMAIN/healthz
 | `healthz` ← 503 | اتصال دیتابیس: `systemctl status mariadb`، و `/var/log/php8.4-fpm.log` و `/var/log/nginx/amoobot_error.log` (این شاخه monolog ندارد، پس خطاهای برنامه در لاگ PHP-FPM/nginx ثبت می‌شوند) |
 | بات جواب نمی‌دهد | `app:telegram:webhook-info` (خصوصی)، `/var/log/nginx/amoobot_error.log`، و اینکه پاسخ‌های 403 در access log نیامده باشند |
 | خطای migration | deploy متوقف می‌شود و کد جدید روی سرور است اما دیتابیس ناقص. یا مشکل را رفع و دوباره deploy کنید، یا طبق بخش ۴ Rollback کنید |
+| هشدار «scheduled job FAILED» | `journalctl -u amoobot-job-<job> -n 50` و `/var/log/amoobot/<job>.log`. نتیجه‌ی `timeout` یعنی کار از `TimeoutStartSec` بیشتر طول کشیده (معمولاً پنل کند یا در دسترس نیست) |
+| کاری هیچ‌وقت اجرا نمی‌شود | `systemctl list-timers 'amoobot-job-*'`. اگر deploy قبلی شکست خورده باشد، timerها متوقف مانده‌اند. یک deploy موفق اجرا کنید |
+| هشدار نمی‌رسد | `systemctl status 'amoobot-job-alert@*'`: معمولاً `TELEGRAM_ADMIN_CHAT_ID` اشتباه است، یا بات در آن چت پیام نفرستاده/عضو نیست |
