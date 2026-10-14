@@ -96,7 +96,7 @@ JOBS_MANIFEST="${STATE_DIR}/scheduled-jobs.conf"
 # Keys used only by this script; never written into the application's env.
 DEPLOY_ONLY_KEYS=" DOMAIN LETSENCRYPT_EMAIL REPO_URL APP_DIR PHP_VERSION DEPLOY_USER DEPLOY_REF DEPLOY_SSH_PUBLIC_KEY "
 DEPLOY_ONLY_KEYS+="SSH_PERMIT_ROOT_LOGIN DB_NAME DB_USER DB_PASSWORD BACKUP_DIR BACKUP_RETENTION_DAYS BACKUP_CRON "
-DEPLOY_ONLY_KEYS+="ADMIN_ALLOW_IPS MONITOR_PING_URL REQUIRE_SIGNED_TAG "
+DEPLOY_ONLY_KEYS+="ADMIN_ALLOW_IPS MONITOR_PING_URL REQUIRE_SIGNED_TAG I_HAVE_CONSOLE_ACCESS "
 # Application keys that may also come from the process environment (for non-secret overrides; secrets: env file only).
 APP_KEYS="APP_SECRET APP_DEFAULT_LOCALE APP_SHARE_DIR DEFAULT_URI DATABASE_URL MESSENGER_TRANSPORT_DSN
  TELEGRAM_BOT_TOKEN TELEGRAM_WEBHOOK_SECRET TELEGRAM_WEBHOOK_SECRET_TOKEN TELEGRAM_ADMIN_CHAT_ID TELEGRAM_PROXY
@@ -709,6 +709,104 @@ ssh_login_problems() {
   done
 }
 
+# sshd_effective USER  ->  sshd's effective configuration for a key login of USER (Match blocks evaluated for this
+# connection spec; Match Address/Host blocks for other client addresses cannot be evaluated here).
+sshd_effective() {
+  sshd -T -C "user=$1,host=localhost,addr=127.0.0.1" 2> /dev/null
+}
+
+# sshd_values KEY < sshd -T output  ->  every value of KEY (one per line; sshd prints lists on one or several lines)
+sshd_values() {
+  awk -v k="$1" '$1 == k { for (i = 2; i <= NF; i++) print $i }'
+}
+
+# sshd_pattern_match NAME PATTERN  ->  0 when NAME matches an sshd user/group pattern (* and ?; the @host part of
+# user@host is ignored here, see ssh_access_problems)
+sshd_pattern_match() {
+  local name="$1" pat="${2%%@*}"
+  # shellcheck disable=SC2053 # glob match is intended
+  [[ "$name" == $pat ]]
+}
+
+# ssh_access_problems USER HOME CHECK_PUBKEY < sshd -T output  ->  one line per reason sshd would refuse USER's key login
+# (empty = allowed). CHECK_PUBKEY=1 also requires pubkeyauthentication yes (only meaningful once the drop-in is in place).
+ssh_access_problems() {
+  local user="$1" home="$2" check_pubkey="$3" cfg groups g pat tok ok allow_n=0 allowed=0
+  cfg="$(cat)"
+  groups="$(id -nG "$user" 2> /dev/null || true)"
+  [[ -n "$cfg" ]] || { echo "sshd -T -C user=${user},host=localhost,addr=127.0.0.1 printed nothing (run it as root to see why)"; return 0; }
+  if (( check_pubkey )) && [[ "$(sshd_values pubkeyauthentication <<< "$cfg" | tail -1)" != yes ]]; then
+    echo "sshd: pubkeyauthentication is not 'yes' for ${user} (a Match block or another file overrides it)"
+  fi
+  ok=0
+  while read -r tok; do
+    case "$tok" in
+      .ssh/authorized_keys|%h/.ssh/authorized_keys|"${home}/.ssh/authorized_keys") ok=1 ;;
+      /home/%u/.ssh/authorized_keys) [[ "$home" == "/home/${user}" ]] && ok=1 ;;
+    esac
+  done < <(sshd_values authorizedkeysfile <<< "$cfg")
+  (( ok )) || echo "sshd: AuthorizedKeysFile ($(sshd_values authorizedkeysfile <<< "$cfg" | tr '\n' ' ')) does not include .ssh/authorized_keys for ${user}"
+  while read -r pat; do
+    [[ -n "$pat" ]] || continue
+    if sshd_pattern_match "$user" "${pat#!}"; then echo "sshd: DenyUsers ${pat} excludes ${user}"; fi
+  done < <(sshd_values denyusers <<< "$cfg")
+  while read -r pat; do
+    [[ -n "$pat" ]] || continue
+    allow_n=$((allow_n + 1))
+    [[ "$pat" == '!'* ]] && { sshd_pattern_match "$user" "${pat#!}" && { echo "sshd: AllowUsers ${pat} excludes ${user}"; allowed=-1000; }; continue; }
+    sshd_pattern_match "$user" "$pat" && allowed=$((allowed + 1))
+  done < <(sshd_values allowusers <<< "$cfg")
+  (( allow_n == 0 || allowed > 0 )) || echo "sshd: AllowUsers ($(sshd_values allowusers <<< "$cfg" | tr '\n' ' ')) does not include ${user}"
+  while read -r pat; do
+    [[ -n "$pat" ]] || continue
+    for g in $groups; do sshd_pattern_match "$g" "${pat#!}" && echo "sshd: DenyGroups ${pat} excludes ${user} (group ${g})"; done
+  done < <(sshd_values denygroups <<< "$cfg")
+  allow_n=0 allowed=0
+  while read -r pat; do
+    [[ -n "$pat" ]] || continue
+    allow_n=$((allow_n + 1))
+    for g in $groups; do
+      [[ "$pat" == '!'* ]] && { sshd_pattern_match "$g" "${pat#!}" && allowed=-1000; continue; }
+      sshd_pattern_match "$g" "$pat" && allowed=$((allowed + 1))
+    done
+  done < <(sshd_values allowgroups <<< "$cfg")
+  (( allow_n == 0 || allowed > 0 )) || echo "sshd: AllowGroups ($(sshd_values allowgroups <<< "$cfg" | tr '\n' ' ')) does not include a group of ${user} (${groups:-none})"
+  return 0
+}
+
+# other_admin_problems  ->  nothing when an account other than DEPLOY_USER can log in with a key AND has full sudo (sudo
+# -l -U shows "(ALL) ALL" or "(ALL : ALL) ALL", with a usable password unless NOPASSWD), or I_HAVE_CONSOLE_ACCESS=yes.
+# Needed for SSH_PERMIT_ROOT_LOGIN=no: the deploy user can only run the amoobot-* commands.
+other_admin_problems() {
+  local name uid home shell rights pw found=""
+  [[ "${I_HAVE_CONSOLE_ACCESS:-no}" == yes ]] && return 0
+  while IFS=: read -r name _ uid _ _ home shell; do
+    [[ "$uid" =~ ^[0-9]+$ ]] && (( uid >= 1000 && uid != 65534 )) && [[ "$name" != "$DEPLOY_USER" ]] || continue
+    [[ "$shell" != */nologin && "$shell" != */false && -n "$shell" ]] || continue
+    rights="$(sudo -n -l -U "$name" 2> /dev/null || true)"
+    grep -qE '^[[:space:]]*\(ALL( ?: ?ALL)?\)[[:space:]]+(NOPASSWD:[[:space:]]*)?ALL[[:space:]]*$' <<< "$rights" || continue
+    if ! grep -qE '^[[:space:]]*\(ALL( ?: ?ALL)?\)[[:space:]]+NOPASSWD:[[:space:]]*ALL[[:space:]]*$' <<< "$rights"; then
+      pw="$(passwd -S "$name" 2> /dev/null | awk '{print $2}')"
+      [[ "$pw" == P ]] || continue
+    fi
+    [[ -z "$(ssh_login_problems "$name" "$home")" ]] || continue
+    [[ -z "$(sshd_effective "$name" | ssh_access_problems "$name" "$home" 0)" ]] || continue
+    found="$name"; break
+  done < <(getent passwd)
+  [[ -n "$found" ]] && return 0
+  echo "SSH_PERMIT_ROOT_LOGIN=no, but no account other than ${DEPLOY_USER} can log in with a key AND has full sudo (sudo -l -U <user>: '(ALL) ALL'); ${DEPLOY_USER} can only run the amoobot-* commands. Create such an admin, keep 'prohibit-password', or set I_HAVE_CONSOLE_ACCESS=yes if you have a provider console with a root password."
+}
+
+# ssh_listen_ports  ->  the TCP port(s) SSH really listens on: ssh.socket's ListenStream when the socket is active
+# (Ubuntu 24.04 socket activation; sshd_config's Port is then not what listens), else sshd -T's port(s).
+ssh_listen_ports() {
+  if systemctl is-active --quiet ssh.socket 2> /dev/null; then
+    systemctl show ssh.socket -p Listen --value 2> /dev/null | grep -oE '[0-9]+ \(Stream\)' | cut -d' ' -f1 | sort -u
+  else
+    sshd -T 2> /dev/null | awk '$1 == "port" { print $2 }' | sort -u
+  fi
+}
+
 render_sudoers() {
   cat <<EOF
 # Managed by amoobot deploy.sh: ${DEPLOY_USER} may run ONLY these root-owned entry points without a password.
@@ -738,10 +836,11 @@ install_sudoers() {
   rm -f "$tmp"
 }
 
-# install_sshd_dropin PATH  (content on stdin) installs it, runs sshd -t, and on failure puts the previous file back
-# (or removes the new one) BEFORE stopping, so a bad file never stays in place. Sets SSHD_CHANGED.
+# install_sshd_dropin PATH [VERIFY_FN]  (content on stdin) installs it, runs sshd -t and then VERIFY_FN (prints problems
+# with the new file in place; nothing = OK), and on any failure puts the previous file back (or removes the new one)
+# BEFORE stopping and before ssh is reloaded, so a bad file never stays in place. Sets SSHD_CHANGED.
 install_sshd_dropin() {
-  local path="$1" tmp backup="" test_out
+  local path="$1" verify="${2:-}" tmp backup="" test_out problems=""
   tmp="$(mktemp)"
   cat > "$tmp"
   SSHD_CHANGED=0
@@ -765,6 +864,13 @@ install_sshd_dropin() {
     if [[ -n "$backup" ]]; then cp -p "$backup" "$path"; rm -f "$backup"; else rm -f "$path"; fi
     SSHD_CHANGED=0
     die "sshd -t rejected the new SSH config; ${path} was restored to its previous state and ssh was not reloaded. sshd said: ${test_out}"
+  fi
+  [[ -n "$verify" ]] && problems="$("$verify")"
+  if [[ -n "$problems" ]]; then
+    if [[ -n "$backup" ]]; then cp -p "$backup" "$path"; rm -f "$backup"; else rm -f "$path"; fi
+    SSHD_CHANGED=0
+    printf '  - %s\n' "$problems" >&2
+    die "With the new SSH config ${DEPLOY_USER:-the deploy user} could not log in (reasons above); ${path} was restored to its previous state and ssh was not reloaded."
   fi
   rm -f "$backup"
 }
@@ -1022,6 +1128,8 @@ fi
 [[ "$SSH_PERMIT_ROOT_LOGIN" =~ ^(no|prohibit-password)$ ]] || die "SSH_PERMIT_ROOT_LOGIN must be 'no' or 'prohibit-password'."
 REQUIRE_SIGNED_TAG="${REQUIRE_SIGNED_TAG:-no}"
 [[ "$REQUIRE_SIGNED_TAG" =~ ^(yes|no)$ ]] || die "REQUIRE_SIGNED_TAG must be 'yes' or 'no'."
+I_HAVE_CONSOLE_ACCESS="${I_HAVE_CONSOLE_ACCESS:-no}"
+[[ "$I_HAVE_CONSOLE_ACCESS" =~ ^(yes|no)$ ]] || die "I_HAVE_CONSOLE_ACCESS must be 'yes' or 'no'."
 if [[ -n "${DEPLOY_SSH_PUBLIC_KEY:-}" ]]; then
   if command -v ssh-keygen > /dev/null 2>&1; then
     valid_ssh_public_key "$DEPLOY_SSH_PUBLIC_KEY" \
@@ -1214,14 +1322,38 @@ fi
 if (( ! DRY_RUN )) && ! sudo -n -l -U "$DEPLOY_USER" "${ROOT_SBIN_DIR}/amoobot-deploy" > /dev/null 2>&1; then
   login_problems+=("sudo -l -U ${DEPLOY_USER} does not allow ${ROOT_SBIN_DIR}/amoobot-deploy")
 fi
+if (( DRY_RUN && EUID != 0 )); then
+  log "[dry-run] (not root: sshd -T -C user=${DEPLOY_USER} access check skipped; a real run refuses if sshd would not let ${DEPLOY_USER} in)"
+elif command -v sshd > /dev/null 2>&1 && id "$DEPLOY_USER" > /dev/null 2>&1; then
+  # The current config must already let the deploy user in (AllowUsers/DenyUsers/AllowGroups/DenyGroups, Match blocks,
+  # AuthorizedKeysFile); pubkeyauthentication is checked again with the drop-in in place, before ssh is reloaded.
+  mapfile -t -O "${#login_problems[@]}" login_problems < <(sshd_effective "$DEPLOY_USER" | ssh_access_problems "$DEPLOY_USER" "$DEPLOY_HOME" 0)
+elif (( ! DRY_RUN )); then
+  login_problems+=("sshd is not installed (cannot check what it would allow)")
+fi
+if [[ "$SSH_PERMIT_ROOT_LOGIN" == no ]] && (( ! DRY_RUN )); then
+  mapfile -t -O "${#login_problems[@]}" login_problems < <(other_admin_problems)
+elif [[ "$SSH_PERMIT_ROOT_LOGIN" == no ]]; then
+  log "[dry-run] SSH_PERMIT_ROOT_LOGIN=no: a real run requires another account with a key login and full sudo (sudo -l -U), or I_HAVE_CONSOLE_ACCESS=yes"
+fi
+# The firewall (below) allows only 22: SSH must really listen there (ssh.socket on 24.04 decides, not only sshd_config).
+if (( ! DRY_RUN )); then
+  ssh_ports="$(ssh_listen_ports | tr '\n' ' ')"
+  [[ "$ssh_ports" == "22 " ]] \
+    || login_problems+=("SSH listens on port(s) ${ssh_ports:-unknown }but the firewall only allows 22 (check ssh.socket ListenStream / sshd Port). Move SSH to 22 first.")
+fi
 rm -f "$keys_target"
 if (( ${#login_problems[@]} )); then
   printf '  - %s\n' "${login_problems[@]}" >&2
-  refusal="Refusing to disable SSH password login (and to set PermitRootLogin ${SSH_PERMIT_ROOT_LOGIN}): ${DEPLOY_USER} has no verified key login + sudo path (reasons above). That would risk locking you out. Set DEPLOY_SSH_PUBLIC_KEY (your .pub) and re-run."
+  refusal="Refusing to disable SSH password login (and to set PermitRootLogin ${SSH_PERMIT_ROOT_LOGIN}): ${DEPLOY_USER} has no verified key login + sudo path (reasons above). That would risk locking you out. Fix the reasons above (e.g. set DEPLOY_SSH_PUBLIC_KEY to your .pub) and re-run."
   if (( DRY_RUN )); then warn "a real run would stop here. ${refusal}"; else die "$refusal"; fi
 fi
+# dropin_login_check  run with the new drop-in in place, before ssh is reloaded: the deploy user's key login must still work.
+dropin_login_check() {
+  sshd_effective "$DEPLOY_USER" | ssh_access_problems "$DEPLOY_USER" "$DEPLOY_HOME" 1
+}
 # 00- so it is read before cloud-init's 50-cloud-init.conf (first value wins in sshd).
-install_sshd_dropin /etc/ssh/sshd_config.d/00-amoobot-hardening.conf <<EOF
+install_sshd_dropin /etc/ssh/sshd_config.d/00-amoobot-hardening.conf dropin_login_check <<EOF
 # Managed by amoobot deploy.sh
 PubkeyAuthentication yes
 PasswordAuthentication no
@@ -1235,9 +1367,6 @@ fi
 if (( ! DRY_RUN )); then
   [[ "$(sshd -T | awk '$1=="passwordauthentication"{print $2}')" == "no" ]] \
     || die "Password login is still enabled by another sshd config file; check /etc/ssh/sshd_config(.d)."
-  ssh_ports="$(sshd -T | awk '$1=="port"{print $2}' | sort -u | tr '\n' ' ')"
-  [[ "$ssh_ports" == "22 " ]] \
-    || die "sshd listens on port(s) ${ssh_ports}but the firewall only allows 22. Move SSH to 22 first, or you will be locked out."
 fi
 
 run ufw default deny incoming

@@ -267,6 +267,91 @@ check "running ssh.service is reloaded" test "$(reload_case "ssh.service ssh.soc
 check "socket-activated only (Ubuntu 24.04) -> no reload needed" test "$(reload_case "ssh.socket" | tr '\n' ' ')" = "rc=0 0 "
 check "no ssh daemon at all -> stop" grep -q DIE <<< "$(reload_case "" 2>&1)"
 
+echo "== SSH lockout: effective sshd config, second admin, real listening port (group 7, 2nd review)"
+load_fn sshd_values sshd_pattern_match ssh_access_problems other_admin_problems ssh_listen_ports
+ME="$(id -un)"; MYGROUP="$(id -gn)"
+base_cfg="port 22
+pubkeyauthentication yes
+passwordauthentication no
+authorizedkeysfile .ssh/authorized_keys .ssh/authorized_keys2"
+acc() { printf '%s\n%s\n' "$base_cfg" "${2:-}" | sed "s/^pubkeyauthentication yes$/pubkeyauthentication ${3:-yes}/" | ssh_access_problems "$ME" "/home/$ME" "$1"; }
+check "default config: no problem" test -z "$(acc 1)"
+check "AllowUsers without the deploy user -> problem" grep -q "AllowUsers (someone-else ) does not include $ME" <<< "$(acc 0 'allowusers someone-else')"
+check "AllowUsers with the deploy user (one line per entry) -> OK" test -z "$(acc 0 "$(printf 'allowusers someone-else\nallowusers %s' "$ME")")"
+check "AllowUsers user@host for the deploy user -> OK (operator's host restriction)" test -z "$(acc 0 "allowusers ${ME}@10.0.0.1")"
+check "AllowUsers wildcard matching the deploy user -> OK" test -z "$(acc 0 "allowusers ${ME:0:1}*")"
+check "DenyUsers matching the deploy user -> problem" grep -q "DenyUsers ${ME:0:1}\* excludes" <<< "$(acc 0 "denyusers ${ME:0:1}*")"
+check "AllowGroups without a group of the deploy user -> problem" grep -q 'AllowGroups (admins ) does not include a group' <<< "$(acc 0 'allowgroups admins')"
+check "AllowGroups with the deploy user's group -> OK" test -z "$(acc 0 "allowgroups ${MYGROUP}")"
+check "DenyGroups with the deploy user's group -> problem" grep -q "DenyGroups ${MYGROUP} excludes" <<< "$(acc 0 "denygroups ${MYGROUP}")"
+check "AuthorizedKeysFile elsewhere -> problem" grep -q 'AuthorizedKeysFile (/etc/ssh/keys/%u ) does not include' <<< "$(printf 'pubkeyauthentication yes\nauthorizedkeysfile /etc/ssh/keys/%%u\n' | ssh_access_problems "$ME" "/home/$ME" 0)"
+check "AuthorizedKeysFile %h/.ssh/authorized_keys -> OK" test -z "$(printf 'pubkeyauthentication yes\nauthorizedkeysfile %%h/.ssh/authorized_keys\n' | ssh_access_problems "$ME" "/home/$ME" 1)"
+check "pubkeyauthentication no with the drop-in in place -> problem" grep -q 'pubkeyauthentication is not' <<< "$(acc 1 '' no)"
+check "  ...but not before the drop-in (it sets PubkeyAuthentication yes first)" test -z "$(acc 0 '' no)"
+check "no sshd -T output -> problem" grep -q 'printed nothing' <<< "$(ssh_access_problems "$ME" "/home/$ME" 0 < /dev/null)"
+
+if have sshd && have ssh-keygen && [[ "$EUID" -eq 0 ]]; then
+  ssh-keygen -q -t ed25519 -N '' -f "$WORK/hostkey" > /dev/null
+  [[ -d /run/sshd ]] || install -d -m 755 /run/sshd   # sshd -T needs its privilege separation dir (present on a server)
+  real_acc() {  # real_acc "<sshd_config lines>"  -> problems from the REAL sshd -T -C output for this user
+    printf 'HostKey %s\n%s\n' "$WORK/hostkey" "$1" > "$WORK/sshd_cfg"   # sshd's default AuthorizedKeysFile applies
+    sshd -T -f "$WORK/sshd_cfg" -C "user=$ME,host=localhost,addr=127.0.0.1" 2>&1 | ssh_access_problems "$ME" "/home/$ME" 1
+  }
+  check "real sshd: plain config -> OK" test -z "$(real_acc '')"
+  check "real sshd: AllowUsers other1 other2 -> problem" grep -q 'AllowUsers (other1 other2 ) does not include' <<< "$(real_acc 'AllowUsers other1 other2')"
+  check "real sshd: AllowUsers other1 <deploy user> -> OK" test -z "$(real_acc "AllowUsers other1 $ME")"
+  check "real sshd: DenyGroups with the deploy user's group -> problem" grep -q 'DenyGroups' <<< "$(real_acc "DenyGroups $MYGROUP")"
+  check "real sshd: Match User <deploy user> with PubkeyAuthentication no -> problem" grep -q 'pubkeyauthentication is not' <<< "$(real_acc "Match User $ME
+    PubkeyAuthentication no")"
+  check "real sshd: Match User someone-else does not affect the deploy user" test -z "$(real_acc "Match User someone-else
+    PubkeyAuthentication no")"
+  check "real sshd: AuthorizedKeysFile only in /etc/ssh/keys -> problem" grep -q 'AuthorizedKeysFile' <<< "$(real_acc 'AuthorizedKeysFile /etc/ssh/keys/%u')"
+else
+  skip "real sshd -T -C checks (need sshd, ssh-keygen and root: Linux container)"
+fi
+
+admin_case() {  # admin_case "<passwd lines>" "<sudo -l output>" <passwd -S status> <login problems> [console]
+  ( getent() { printf '%s\n' "$PASSWD_LINES"; }
+    sudo() { printf '%s\n' "$SUDO_OUT"; }
+    passwd() { echo "admin $PW_STATUS 2026-01-01 0 99999 7 -1"; }
+    ssh_login_problems() { [[ -n "$LOGIN_PROBLEM" ]] && echo "$LOGIN_PROBLEM"; return 0; }
+    sshd_effective() { printf '%s\n' "$base_cfg"; }
+    DEPLOY_USER=deploy PASSWD_LINES="$1" SUDO_OUT="$2" PW_STATUS="$3" LOGIN_PROBLEM="$4" I_HAVE_CONSOLE_ACCESS="${5:-no}"
+    other_admin_problems; echo "rc=$?" )
+}
+ADMIN_LINE='admin:x:1000:1000::/home/admin:/bin/bash'
+DEPLOY_LINE='deploy:x:1001:1001::/home/deploy:/bin/bash'
+check "PermitRootLogin no: another admin with (ALL : ALL) ALL, a password and a key -> OK" test "$(admin_case "$ADMIN_LINE" '    (ALL : ALL) ALL' P '')" = "rc=0"
+check "  ...NOPASSWD: ALL with a locked password -> OK" test "$(admin_case "$ADMIN_LINE" '    (ALL) NOPASSWD: ALL' L '')" = "rc=0"
+check "  ...(ALL) ALL but a locked password (sudo would ask for it) -> problem" grep -q 'no account other than deploy' <<< "$(admin_case "$ADMIN_LINE" '    (ALL) ALL' L '')"
+check "  ...only limited sudo rights -> problem" grep -q 'no account other than deploy' <<< "$(admin_case "$ADMIN_LINE" '    (root) /usr/bin/apt' P '')"
+check "  ...admin cannot log in with a key -> problem" grep -q 'no account other than deploy' <<< "$(admin_case "$ADMIN_LINE" '    (ALL : ALL) ALL' P 'no valid key')"
+check "  ...only the deploy user itself -> problem" grep -q 'no account other than deploy' <<< "$(admin_case "$DEPLOY_LINE" '    (ALL : ALL) ALL' P '')"
+check "  ...nobody, but I_HAVE_CONSOLE_ACCESS=yes -> OK" test "$(admin_case "$DEPLOY_LINE" '' P '' yes)" = "rc=0"
+ports_case() {  # ports_case <socket active 0|1> "<Listen value>" "<sshd -T port lines>"
+  ( systemctl() { case "$1" in is-active) [[ "$SOCK" == 1 ]] ;; show) printf '%s\n' "$LISTEN" ;; esac; }
+    sshd() { printf '%s\n' "$PORTS"; }
+    SOCK="$1" LISTEN="$2" PORTS="$3"; ssh_listen_ports | tr '\n' ' ' )
+}
+check "ssh.socket active: its ListenStream decides (22)" test "$(ports_case 1 $'0.0.0.0:22 (Stream)\n[::]:22 (Stream)' 'port 2222')" = "22 "
+check "ssh.socket on 2222 while sshd_config says 22 -> 2222 (would be locked out by ufw)" test "$(ports_case 1 '[::]:2222 (Stream)' 'port 22')" = "2222 "
+check "no socket activation: sshd -T port(s)" test "$(ports_case 0 '' $'port 22\nport 2200')" = "22 2200 "
+check "step 5: access, second-admin and port checks run before the drop-in is written" bash -c \
+  'a=$(grep -n "ssh_access_problems \"\$DEPLOY_USER\" \"\$DEPLOY_HOME\" 0)" "$1" | head -1 | cut -d: -f1); o=$(grep -n "< <(other_admin_problems)" "$1" | cut -d: -f1)
+   p=$(grep -n "ssh_ports=\"\$(ssh_listen_ports" "$1" | cut -d: -f1); d=$(grep -n "^install_sshd_dropin /etc/ssh/sshd_config.d/00-amoobot-hardening.conf dropin_login_check" "$1" | cut -d: -f1)
+   [[ -n $a && -n $o && -n $p && -n $d && $a -lt $d && $o -lt $d && $p -lt $d ]]' _ "$ROOT/deploy.sh"
+verify_dropin_case() {  # verify_dropin_case "<problems printed by the verify function>" -> final file content + rc
+  ( die() { printf 'DIE: %s\n' "$*" >> "$WORK/vd.err"; echo "rc=1 changed=${SSHD_CHANGED:-}"; exit 1; }
+    sshd() { return 0; }; verify_fn() { printf '%s' "$VERIFY_OUT"; }
+    DRY_RUN=0 VERIFY_OUT="$1"; f="$WORK/vd.d/00.conf"; rm -rf "$WORK/vd.d"; mkdir -p "$WORK/vd.d"; printf 'PasswordAuthentication yes\n' > "$f"; : > "$WORK/vd.err"
+    ( install_sshd_dropin "$f" verify_fn <<< 'PasswordAuthentication no'; echo "rc=$? changed=${SSHD_CHANGED:-}" ) > "$WORK/vd.status" 2> /dev/null
+    cat "$f"; cat "$WORK/vd.status" )
+}
+load_fn install_sshd_dropin
+check "drop-in that would lock the deploy user out -> previous file restored, ssh not reloaded" bash -c \
+  '[[ "$1" == $'"'"'PasswordAuthentication yes\nrc=1 changed=0'"'"' ]] && grep -q "could not log in" "$2"' _ "$(verify_dropin_case 'sshd: AllowUsers (root ) does not include deploy')" "$WORK/vd.err"
+check "drop-in that keeps the deploy login -> installed" test "$(verify_dropin_case '')" = $'PasswordAuthentication no\nrc=0 changed=1'
+
 if can_dry_run; then
   OUT="$BASE_OUT"
   check "default PermitRootLogin is prohibit-password" grep -q '^    + PermitRootLogin prohibit-password$' <<< "$OUT"

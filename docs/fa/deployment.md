@@ -90,9 +90,18 @@ sudo nano /etc/amoobot/.env.prod.local
   `amoobot-deploy`، `amoobot-backup`، `amoobot-restore` و `amoobot-check-jobs` را می‌دهد، **نه** `ALL`.
 - `PasswordAuthentication no` (و `SSH_PERMIT_ROOT_LOGIN=no` اگر انتخاب شده) فقط وقتی نوشته می‌شود که: کاربر `deploy` shell دارد، حداقل یک
   کلید معتبر بدون `command=` دارد، مالکیت و دسترسی home، `.ssh` و `authorized_keys` با StrictModes سازگار است، و `sudo -l -U deploy`
-  اجازه‌ی `amoobot-deploy` را نشان می‌دهد. وگرنه deploy با فهرست دلیل‌ها **متوقف می‌شود** (dry-run همین را به‌صورت WARNING نشان می‌دهد).
-  پیش‌فرض `PermitRootLogin prohibit-password` است (root فقط با کلید).
-- فایل `/etc/ssh/sshd_config.d/00-amoobot-hardening.conf` نصب و سپس با `sshd -t` بررسی می‌شود؛ اگر رد شود، **قبل از توقف** نسخه‌ی قبلی
+  اجازه‌ی `amoobot-deploy` را نشان می‌دهد، **و** پیکربندی مؤثر sshd برای همین کاربر (`sshd -T -C user=deploy,host=localhost,addr=127.0.0.1`)
+  او را راه می‌دهد: در `AllowUsers`/`AllowGroups` هست (اگر تعریف شده باشند)، در `DenyUsers`/`DenyGroups` نیست، بلوک `Match` آن را نمی‌بندد و
+  `AuthorizedKeysFile` شامل `.ssh/authorized_keys` است. پورتی که SSH **واقعاً** روی آن گوش می‌دهد هم باید 22 باشد: وقتی `ssh.socket` فعال است
+  (Ubuntu 24.04) مقدار `systemctl show ssh.socket -p Listen` ملاک است، نه فقط `Port` در sshd_config. وگرنه deploy با فهرست دلیل‌ها **متوقف
+  می‌شود** (dry-run همین را به‌صورت WARNING نشان می‌دهد). پیش‌فرض `PermitRootLogin prohibit-password` است (root فقط با کلید).
+- **`SSH_PERMIT_ROOT_LOGIN=no`** فقط وقتی پذیرفته می‌شود که حساب دیگری (غیر از `deploy`) با کلید وارد شود و sudo کامل داشته باشد
+  (`sudo -l -U <user>` باید `(ALL) ALL` یا `(ALL : ALL) ALL` نشان دهد؛ اگر `NOPASSWD` نیست، پسورد قابل استفاده هم لازم است)، یا
+  `I_HAVE_CONSOLE_ACCESS=yes` تنظیم شده باشد (کنسول سرویس‌دهنده با پسورد root). `deploy` فقط چهار دستور `amoobot-*` را دارد و با آن نمی‌توان
+  مثلاً فایل تنظیمات را ویرایش کرد.
+- محدودیت: بلوک‌های `Match Address`/`Match Host` برای آدرس واقعی شما قابل ارزیابی نیستند (بررسی با `addr=127.0.0.1` است).
+- فایل `/etc/ssh/sshd_config.d/00-amoobot-hardening.conf` نصب و سپس با `sshd -t` و دوباره با `sshd -T -C user=deploy` (اینکه `pubkeyauthentication`
+  برای `deploy` واقعاً `yes` است و چیزی او را نمی‌بندد) بررسی می‌شود؛ اگر رد شود، **قبل از توقف** نسخه‌ی قبلی
   برگردانده (یا فایل جدید حذف) می‌شود و ssh دوباره بارگذاری نمی‌شود. در Ubuntu 24.04 اگر `ssh.service` در حال اجرا باشد reload می‌شود؛
   اگر فقط `ssh.socket` فعال باشد sshd هنوز اجرا نشده و اتصال بعدی تنظیمات جدید را می‌خواند.
 
