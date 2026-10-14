@@ -40,6 +40,10 @@ ROOT_LIB_DIR="/usr/local/lib/amoobot"
 ROOT_SBIN_DIR="/usr/local/sbin"
 ROOT_OPS_FILES=(deploy.sh bin/backup-database.sh bin/restore-database.sh bin/scheduled-job.sh
   bin/scheduled-job-alert.sh bin/check-scheduled-jobs.sh bin/lib/database-url.sh bin/lib/monitor-ping.sh)
+# GitHub's published SSH host keys (from https://api.github.com/meta over HTTPS); git uses StrictHostKeyChecking=yes.
+# In /etc/ssh (root-owned, readable by the deploy user's ssh; /etc/amoobot is root-only).
+GITHUB_KNOWN_HOSTS="/etc/ssh/amoobot_github_known_hosts"
+GITHUB_META_URL="https://api.github.com/meta"
 # Optional MONITOR_PING_URL for a dead-man's-switch monitor (root:root 600; systemd hands it to the job units).
 MONITOR_ENV_FILE="/etc/amoobot/monitor.env"
 # Root-owned timer that runs bin/check-scheduled-jobs.sh; a problem makes it a failed unit (and sends an alert).
@@ -641,6 +645,38 @@ paused_jobs_warning() {
 EOF
 }
 
+# render_github_known_hosts  (GitHub meta JSON on stdin)  ->  "github.com <type> <key>" lines from its "ssh_keys" array,
+# each one validated with ssh-keygen. Fails when no valid key is found.
+render_github_known_hosts() {
+  local keys key n=0
+  keys="$(tr -d '\r\n' | grep -oE '"ssh_keys"[[:space:]]*:[[:space:]]*\[[^]]*\]' || true)"
+  while IFS= read -r key; do
+    key="${key#\"}"; key="${key%\"}"
+    valid_ssh_public_key "$key" || continue
+    printf 'github.com %s\n' "$key"
+    n=$((n + 1))
+  done < <(grep -oE '"(ssh-ed25519|ecdsa-sha2-nistp256|ssh-rsa) [A-Za-z0-9+/]+=*"' <<< "$keys")
+  (( n > 0 ))
+}
+
+# refresh_github_known_hosts  fetches the keys over HTTPS (certificate-verified) instead of trusting whatever key the
+# first SSH connection presents. If GitHub cannot be reached, a previously fetched file is kept; without one, stop.
+refresh_github_known_hosts() {
+  local meta tmp
+  tmp="$(mktemp)"
+  if meta="$(curl -fsS --proto '=https' --tlsv1.2 --max-time 20 "$GITHUB_META_URL")" \
+     && render_github_known_hosts <<< "$meta" > "$tmp"; then
+    write_file "$GITHUB_KNOWN_HOSTS" 644 root:root < "$tmp"
+    log "GitHub SSH host keys: $(wc -l < "$tmp") key(s) from ${GITHUB_META_URL} -> ${GITHUB_KNOWN_HOSTS}"
+  elif [[ -s "$GITHUB_KNOWN_HOSTS" ]]; then
+    warn "Could not refresh GitHub's SSH host keys from ${GITHUB_META_URL}; keeping ${GITHUB_KNOWN_HOSTS}."
+  else
+    rm -f "$tmp"
+    die "Could not fetch GitHub's SSH host keys from ${GITHUB_META_URL}; refusing to trust an unverified host key."
+  fi
+  rm -f "$tmp"
+}
+
 # load_env_file PATH: KEY=VALUE lines only (no shell code is executed). The process environment wins.
 load_env_file() {
   local file="$1" line key value n=0 seen=" "
@@ -910,6 +946,9 @@ run apt-get install -y \
 ########################################
 
 step "4/18" "Installing Composer..."
+# Supply chain: the installer's SHA-384 is checked against composer.github.io, but it installs the LATEST stable
+# Composer. To pin, add --version=<2.x.y> to the composer-setup.php call below (and bump it deliberately); an existing
+# /usr/local/bin/composer is kept as is (update it with "composer self-update <2.x.y>").
 if command -v composer > /dev/null 2>&1; then
   log "Composer already installed."
 elif (( DRY_RUN )); then
@@ -1067,7 +1106,17 @@ step "7/18" "Fetching code (${DEPLOY_REF})..."
 id "$DEPLOY_USER" > /dev/null 2>&1 || (( DRY_RUN )) || die "Deploy user ${DEPLOY_USER} does not exist; run once without --app-only."
 resolve_deploy_home
 DEPLOY_KEY="$DEPLOY_HOME/.ssh/amoobot_deploy_ed25519"
-GIT_SSH="ssh -i ${DEPLOY_KEY} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+# Never accept-new: an unknown host key is refused. For github.com the keys come from GitHub's API over HTTPS.
+repo_host="${REPO_URL#ssh://}"; repo_host="${repo_host#*@}"; repo_host="${repo_host%%[:/]*}"
+GIT_SSH="ssh -i ${DEPLOY_KEY} -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes"
+if [[ "$REPO_URL" == git@* || "$REPO_URL" == ssh://* ]] && [[ "$repo_host" == github.com ]]; then
+  GIT_SSH+=" -o UserKnownHostsFile=${GITHUB_KNOWN_HOSTS}"
+  if (( DRY_RUN )); then
+    log "[dry-run] fetch GitHub's SSH host keys from ${GITHUB_META_URL} (HTTPS) -> ${GITHUB_KNOWN_HOSTS}; git uses StrictHostKeyChecking=yes"
+  else
+    refresh_github_known_hosts
+  fi
+fi
 
 if [[ "$REPO_URL" == git@* || "$REPO_URL" == ssh://* ]]; then
   if [[ ! -f "$DEPLOY_KEY" ]]; then
@@ -1080,6 +1129,12 @@ if [[ "$REPO_URL" == git@* || "$REPO_URL" == ssh://* ]]; then
     log ""
     cat "${DEPLOY_KEY}.pub"
     log ""
+    if [[ "$repo_host" != github.com ]]; then
+      log "${repo_host} is not github.com: its SSH host key is not fetched automatically and unknown keys are refused."
+      log "Get the fingerprint from your git provider's documentation, then add the verified key to ${DEPLOY_HOME}/.ssh/known_hosts"
+      log "(e.g. ssh-keyscan ${repo_host} > /tmp/k; ssh-keygen -lf /tmp/k; compare; append only if it matches)."
+      log ""
+    fi
     die "Repository not readable with the deploy key. Add the key above, then re-run."
   fi
 else

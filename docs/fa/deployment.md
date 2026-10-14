@@ -99,6 +99,16 @@ ssh root@SERVER 'bash /root/deploy.sh'
 **اولین اجرا در مرحله‌ی 7 عمداً متوقف می‌شود** و کلید عمومی deploy key را چاپ می‌کند:
 GitHub ← مخزن ← Settings ← Deploy keys ← Add deploy key. کلید را بچسبانید و **Allow write access را تیک نزنید**. سپس اسکریپت را دوباره اجرا کنید.
 
+**کلید میزبان GitHub:** اسکریپت به اولین کلیدی که سرور SSH نشان می‌دهد اعتماد نمی‌کند (`accept-new` حذف شده). کلیدهای منتشرشده‌ی GitHub
+در هر deploy از `https://api.github.com/meta` (فقط HTTPS با گواهی معتبر) گرفته، با `ssh-keygen` بررسی و در
+`/etc/ssh/amoobot_github_known_hosts` (مالک root، `644`) نوشته می‌شوند؛ git با `StrictHostKeyChecking=yes` و همین فایل کار می‌کند.
+اگر GitHub در دسترس نباشد فایل قبلی نگه داشته می‌شود؛ اگر فایلی نباشد deploy متوقف می‌شود. برای مخزنی غیر از github.com کلید میزبان
+خودکار گرفته نمی‌شود: اثر انگشت را از مستندات سرویس‌دهنده بگیرید و کلید تأییدشده را به `~deploy/.ssh/known_hosts` اضافه کنید.
+
+**نسخه‌ی Composer:** نصب‌کننده با SHA-384 منتشرشده بررسی می‌شود، اما آخرین نسخه‌ی پایدار Composer را نصب می‌کند. برای ثابت نگه داشتن
+نسخه، در مرحله‌ی 4 به فراخوانی `composer-setup.php` گزینه‌ی `--version=<2.x.y>` را اضافه کنید و آگاهانه به‌روز کنید؛ Composer موجود دست
+نمی‌خورد (`sudo composer self-update <2.x.y>`). وابستگی‌های PHP با `composer.lock` ثابت هستند.
+
 ```bash
 # 4) ساخت ادمین پنل و داده‌های اولیه
 cd /var/www/amoobot

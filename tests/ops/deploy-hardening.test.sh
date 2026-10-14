@@ -780,6 +780,72 @@ else
   skip "$DRY_RUN_SKIP"
 fi
 
+echo "== supply chain: pinned GitHub host keys (group 7)"
+check "StrictHostKeyChecking=accept-new is gone (no trust on first use)" not grep -q 'StrictHostKeyChecking=accept-new' "$ROOT/deploy.sh"
+REPO_HOST_LINE="$(grep -m1 '^repo_host=' "$ROOT/deploy.sh")"
+for case in "git@github.com:hforouzi/amoobot.git=github.com" "ssh://git@github.com/hforouzi/amoobot.git=github.com" \
+            "ssh://git@github.com:22/x/y.git=github.com" "git@gitlab.example.com:x/y.git=gitlab.example.com"; do
+  url="${case%=*}" want="${case##*=}"
+  check "repo host of $url is $want" test "$(REPO_URL="$url"; eval "$REPO_HOST_LINE"; echo "$repo_host")" = "$want"
+done
+if have ssh-keygen; then
+  set_globals
+  GITHUB_KNOWN_HOSTS="$WORK/gh_known_hosts" GITHUB_META_URL="https://api.github.com/meta"
+  load_fn valid_ssh_public_key render_github_known_hosts refresh_github_known_hosts
+  for t in ed25519 ecdsa rsa; do ssh-keygen -q -t "$t" -N '' -C '' -f "$WORK/gh_$t" > /dev/null; done
+  ssh-keygen -q -t ed25519 -N '' -C '' -f "$WORK/gh_decoy" > /dev/null
+  key() { cut -d' ' -f1,2 < "$WORK/gh_$1.pub"; }
+  # Shaped like the real response: pretty-printed, fingerprints, other arrays; plus one broken key and a decoy key
+  # outside "ssh_keys" that must not be picked up.
+  cat > "$WORK/meta.json" <<EOF
+{
+  "verifiable_password_authentication": false,
+  "ssh_key_fingerprints": { "SHA256_ED25519": "+DiY3wvvV6TuJJhbpZisF/zLDA0zPMSvHdkr4UvCOqU" },
+  "decoy": [ "$(key decoy)" ],
+  "ssh_keys": [
+    "$(key ed25519)",
+    "$(key ecdsa)",
+    "$(key rsa)",
+    "ssh-rsa AAAAbroken"
+  ],
+  "hooks": [ "192.30.252.0/22" ]
+}
+EOF
+  out="$(render_github_known_hosts < "$WORK/meta.json")"; rc=$?
+  check "known_hosts: the three valid ssh_keys, as github.com lines" bash -c \
+    '[[ $1 -eq 0 && $(wc -l <<< "$2") -eq 3 ]] && grep -qxF "github.com $3" <<< "$2" && grep -qxF "github.com $4" <<< "$2" && grep -qxF "github.com $5" <<< "$2"' \
+    _ "$rc" "$out" "$(key ed25519)" "$(key ecdsa)" "$(key rsa)"
+  check "known_hosts: keys outside ssh_keys and broken keys are ignored" bash -c \
+    '! grep -qF -- "$(cut -d" " -f2 < "$2")" <<< "$1" && ! grep -q AAAAbroken <<< "$1"' _ "$out" "$WORK/gh_decoy.pub"
+  check "known_hosts: a response without ssh_keys is refused" not render_github_known_hosts <<< '{"hooks": ["192.30.252.0/22"]}'
+  check "known_hosts: ssh -o accepts the generated file" bash -c 'printf "%s\n" "$1" > "$2" && ssh-keygen -F github.com -f "$2" > /dev/null' _ "$out" "$WORK/kh_probe"
+
+  refresh_case() {  # refresh_case <curl rc> <existing file 0|1> -> output + whether the file has the keys
+    ( write_file() { cat > "$1"; }; warn() { echo "WARN: $*"; }; die() { echo "DIE: $*"; exit 1; }
+      curl() { echo "curl $*" >> "$WORK/gh_curl.args"; [[ "$CURL_RC" == 0 ]] && cat "$WORK/meta.json"; return "$CURL_RC"; }
+      CURL_RC="$1"; rm -f "$GITHUB_KNOWN_HOSTS" "$WORK/gh_curl.args"; [[ "$2" == 1 ]] && echo "github.com ssh-ed25519 OLDKEY" > "$GITHUB_KNOWN_HOSTS"
+      refresh_github_known_hosts; echo "lines=$(wc -l < "$GITHUB_KNOWN_HOSTS")" ) 2>&1
+  }
+  out="$(refresh_case 0 0)"
+  check "fetch OK -> known_hosts written with the fetched keys" grep -q '^lines=3$' <<< "$out"
+  check "  ...over HTTPS only (--proto =https, TLS 1.2+)" grep -qF -- "--proto =https --tlsv1.2" "$WORK/gh_curl.args"
+  out="$(refresh_case 6 1)"
+  check "fetch fails, keys known from before -> keep them, warn" bash -c 'grep -q "^WARN: Could not refresh" <<< "$1" && grep -q "^lines=1$" <<< "$1"' _ "$out"
+  out="$(refresh_case 6 0)"
+  check "fetch fails, nothing known -> stop (no unverified trust)" grep -q '^DIE: Could not fetch GitHub' <<< "$out"
+else
+  skip "GitHub host key tests (ssh-keygen not installed)"
+fi
+if can_dry_run; then
+  OUT="$BASE_OUT"
+  check "dry-run fetches GitHub's host keys over HTTPS" grep -q "fetch GitHub's SSH host keys from https://api.github.com/meta (HTTPS) -> /etc/ssh/amoobot_github_known_hosts" <<< "$OUT"
+  check "git's sshCommand: StrictHostKeyChecking=yes with the pinned file" grep -qF \
+    'core.sshCommand ssh -i /home/deploy/.ssh/amoobot_deploy_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/etc/ssh/amoobot_github_known_hosts' <<< "$OUT"
+else
+  skip "$DRY_RUN_SKIP"
+fi
+check "deploy.sh documents how to pin the Composer version" grep -q -- '--version=<2.x.y>' "$ROOT/deploy.sh"
+
 echo
 echo "passed: $PASS  failed: $FAIL  skipped: $SKIP"
 (( FAIL == 0 ))
