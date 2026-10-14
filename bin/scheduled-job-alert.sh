@@ -2,7 +2,7 @@
 #
 # Telegram alert for scheduled Amoobot jobs (bin/scheduled-job.sh).
 #
-#   bin/scheduled-job-alert.sh failed <job | amoobot-job-<job>>     # from amoobot-job-alert@.service (OnFailure=)
+#   bin/scheduled-job-alert.sh failed <job | amoobot-job-<job> | amoobot-<unit>>   # amoobot-job-alert@.service (OnFailure=)
 #   bin/scheduled-job-alert.sh recovered <job>                      # from scheduled-job.sh after a successful run
 #
 # Sends a short plain-text message to TELEGRAM_ADMIN_CHAT_ID: job name, host, systemd result, last success and where
@@ -22,8 +22,12 @@ SYSTEMCTL="${AMOOBOT_SYSTEMCTL:-systemctl}"
 
 die() { printf 'scheduled-job-alert: %s\n' "$*" >&2; exit 1; }
 
-kind="${1:-}"; job="${2:-}"
-job="${job#amoobot-job-}"
+kind="${1:-}"; arg="${2:-}"
+case "$arg" in
+  amoobot-job-*) job="${arg#amoobot-job-}"; unit="$arg" ;;
+  amoobot-*)     job="$arg"; unit="$arg" ;;   # other units, e.g. amoobot-check-jobs (bin/check-scheduled-jobs.sh timer)
+  *)             job="$arg"; unit="amoobot-job-$arg" ;;
+esac
 [[ "$kind" == "failed" || "$kind" == "recovered" ]] || die "usage: $0 failed|recovered <job>"
 [[ "$job" =~ ^[a-z0-9-]+$ ]] || die "invalid job name"
 [[ "$REPEAT_MINUTES" =~ ^[0-9]+$ ]] || die "ALERT_REPEAT_MINUTES must be a number"
@@ -43,14 +47,14 @@ if [[ -e "$STATE_DIR/$job.last-success" ]]; then
 fi
 
 if [[ "$kind" == "failed" ]]; then
-  result="$("$SYSTEMCTL" show "amoobot-job-${job}.service" -p Result --value 2>/dev/null || true)"
+  result="$("$SYSTEMCTL" show "${unit}.service" -p Result --value 2>/dev/null || true)"
   text="⚠️ Amoobot scheduled job FAILED: ${job}
 host: ${host}
 time: ${now}
 result: ${result:-unknown}
 last success: ${last_success}
 
-journalctl -u amoobot-job-${job} -n 50
+journalctl -u ${unit} -n 50
 ${LOG_DIR}/${job}.log"
 else
   text="✅ Amoobot scheduled job recovered: ${job}

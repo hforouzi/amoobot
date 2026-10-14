@@ -116,6 +116,13 @@ EOF
   check "recovery notice sent" php -r '$t = json_decode(file($argv[1])[2], true)["post"]["text"]; exit(str_contains($t, "recovered: sync") ? 0 : 1);' "$WORK/capture.jsonl"
   check "recovery clears the alerted marker" test ! -e "$WORK/state/sync.alerted"
 
+  # The hourly freshness check (amoobot-check-jobs.service) uses the same OnFailure alert with its own unit name.
+  printf '#!/usr/bin/env bash\necho "$*" >> "%s/systemctl.args"\necho exit-code\n' "$WORK" > "$WORK/systemctl-log"; chmod +x "$WORK/systemctl-log"
+  AMOOBOT_SYSTEMCTL="$WORK/systemctl-log" bash "$ALERT" failed amoobot-check-jobs > /dev/null 2>&1; rc=$?
+  check "alert for a non-job unit (amoobot-check-jobs) is sent" test "$rc" -eq 0
+  check "  ...and asks systemd about that unit, not amoobot-job-amoobot-check-jobs" grep -q '^show amoobot-check-jobs.service ' "$WORK/systemctl.args"
+  check "  ...and names it with the right journalctl hint" php -r '$t = json_decode(file($argv[1])[3], true)["post"]["text"]; exit(str_contains($t, "FAILED: amoobot-check-jobs") && str_contains($t, "journalctl -u amoobot-check-jobs -n 50") ? 0 : 1);' "$WORK/capture.jsonl"
+
   printf '<?php return [];\n' > "$WORK/app/.env.local.php"
   bash "$ALERT" failed sync > /dev/null 2>&1; rc=$?
   check "missing Telegram config fails visibly" test "$rc" -ne 0
@@ -180,7 +187,7 @@ if have systemd-analyze; then
   eval "$(sed -n '/^SCHEDULED_JOBS=(/,/^)/p' "$ROOT/deploy.sh")"
   eval "$(sed -n '/^parse_job()/,/^}/p; /^render_job_service()/,/^}/p; /^render_job_timer()/,/^}/p' "$ROOT/deploy.sh")"
   # shellcheck disable=SC2034 # read by the render functions eval'd above
-  APP_DIR=/var/www/amoobot WEB_USER=www-data ROOT_LIB_DIR=/usr/local/lib/amoobot
+  APP_DIR=/var/www/amoobot WEB_USER=www-data ROOT_LIB_DIR=/usr/local/lib/amoobot MONITOR_ENV_FILE=/etc/amoobot/monitor.env
   units="$WORK/units"; mkdir -p "$units"
   for entry in "${SCHEDULED_JOBS[@]}"; do
     parse_job "$entry"

@@ -680,6 +680,106 @@ else
   skip "real nginx checks for group 5 (no runnable nginx binary)"
 fi
 
+echo "== alerting without Telegram: dead-man's switch and hourly check (group 6)"
+# A fake curl: records its arguments and the config it gets on stdin; exit code from FAKE_CURL_RC.
+mkdir -p "$WORK/curlbin"
+printf '#!/usr/bin/env bash\necho "$*" >> "%s/curl.args"\ncat >> "%s/curl.cfg"\nexit "${FAKE_CURL_RC:-0}"\n' "$WORK" "$WORK" > "$WORK/curlbin/curl"
+chmod +x "$WORK/curlbin/curl"
+PING_URL="https://hc-ping.com/test-$RANDOM$RANDOM/amoobot-{job}"
+ping_case() {  # ping_case <env url> <file url> <curl rc> -> output; curl.args / curl.cfg left for checks
+  rm -f "$WORK/curl.args" "$WORK/curl.cfg"
+  [[ -n "$2" ]] && printf 'AMOOBOT_MONITOR_PING_URL=%s\n' "$2" > "$WORK/monitor.env" || rm -f "$WORK/monitor.env"
+  PATH="$WORK/curlbin:$PATH" AMOOBOT_MONITOR_PING_URL="$1" AMOOBOT_MONITOR_FILE="$WORK/monitor.env" FAKE_CURL_RC="$3" \
+    bash -c 'source "$1"; monitor_ping sync; echo "rc=$?"' _ "$ROOT/bin/lib/monitor-ping.sh" 2>&1
+}
+out="$(ping_case "" "" 0)"
+check "no MONITOR_PING_URL -> no ping at all" bash -c '[[ "$1" == "rc=0" && ! -e "$2" ]]' _ "$out" "$WORK/curl.args"
+out="$(ping_case "$PING_URL" "" 0)"
+check "ping goes to the URL with {job} replaced" grep -qxF "url = \"${PING_URL//\{job\}/sync}\"" "$WORK/curl.cfg"
+check "the URL is never on curl's command line" bash -c '[[ "$(cat "$1")" == "-K -" ]]' _ "$WORK/curl.args"
+check "ping has a short timeout" grep -qx 'max-time = 10' "$WORK/curl.cfg"
+out="$(ping_case "" "$PING_URL" 0)"
+check "URL read from the root-owned monitor.env when not in the environment" grep -qF "url = \"${PING_URL//\{job\}/sync}\"" "$WORK/curl.cfg"
+out="$(ping_case "$PING_URL" "" 7)"
+check "failed ping is ignored (rc 0, reported)" bash -c 'grep -q "failed (ignored)" <<< "$1" && grep -q "^rc=0$" <<< "$1"' _ "$out"
+
+if have flock; then
+  export AMOOBOT_JOBS_LOG_DIR="$WORK/jlog" AMOOBOT_JOBS_STATE_DIR="$WORK/jstate" AMOOBOT_JOBS_LOCK_DIR="$WORK/jlock"
+  JOB="$ROOT/bin/scheduled-job.sh"
+  rm -f "$WORK/curl.args" "$WORK/curl.cfg"
+  PATH="$WORK/curlbin:$PATH" AMOOBOT_MONITOR_PING_URL="$PING_URL" bash "$JOB" orders grp -- true > /dev/null 2>&1
+  check "successful job pings its own check" grep -qF "url = \"${PING_URL//\{job\}/orders}\"" "$WORK/curl.cfg" 2> /dev/null
+  rm -f "$WORK/curl.args" "$WORK/curl.cfg"
+  PATH="$WORK/curlbin:$PATH" AMOOBOT_MONITOR_PING_URL="$PING_URL" bash "$JOB" sync grp -- false > /dev/null 2>&1
+  check "failed job does not ping (the monitor alerts when pings stop)" test ! -e "$WORK/curl.args"
+  ( exec 9> "$WORK/jlock/grp.lock"; flock 9; sleep 3 ) &
+  sleep 0.5
+  PATH="$WORK/curlbin:$PATH" AMOOBOT_MONITOR_PING_URL="$PING_URL" AMOOBOT_JOBS_LOCK_WAIT=1 bash "$JOB" sync grp -- true > /dev/null 2>&1
+  check "skipped job (lock busy) does not ping" test ! -e "$WORK/curl.args"
+  wait
+  unset AMOOBOT_JOBS_LOG_DIR AMOOBOT_JOBS_STATE_DIR AMOOBOT_JOBS_LOCK_DIR
+else
+  skip "job ping tests (flock not installed)"
+fi
+if have php && have gzip; then
+  for label in nightly manual; do
+    rm -f "$WORK/curl.args" "$WORK/curl.cfg"
+    PATH="$WORK/curlbin:$WORK/fakebin:$PATH" DATABASE_URL='mysql://u:p@127.0.0.1:3306/amoobot' BACKUP_DIR="$WORK/backups" \
+      BACKUP_LABEL="$label" AMOOBOT_MONITOR_PING_URL="$PING_URL" bash "$ROOT/bin/backup-database.sh" > /dev/null 2>&1
+    if [[ "$label" == nightly ]]; then
+      check "nightly backup pings the 'backup' check" grep -qF "url = \"${PING_URL//\{job\}/backup}\"" "$WORK/curl.cfg" 2> /dev/null
+    else
+      check "manual backup does not ping" test ! -e "$WORK/curl.args"
+    fi
+  done
+else
+  skip "backup ping tests (needs php and gzip)"
+fi
+
+set_globals
+CHECK_JOBS_UNIT=amoobot-check-jobs MONITOR_ENV_FILE=/etc/amoobot/monitor.env JOBS_PAUSED=1 MAINTENANCE_ON=0
+load_fn render_check_service render_check_timer paused_jobs_warning on_exit
+eval "$(sed -n '/^parse_job()/,/^}/p; /^render_job_service()/,/^}/p' "$ROOT/deploy.sh")"
+JOB_NAME=sync JOB_GROUP=lifecycle JOB_COMMAND="app:automation:run --only=sync" JOB_TIMEOUT=1500
+check "job units read MONITOR_PING_URL from the root-only EnvironmentFile" grep -qx 'EnvironmentFile=-/etc/amoobot/monitor.env' <<< "$(render_job_service)"
+CHECK_SVC="$(render_check_service)"; CHECK_TMR="$(render_check_timer)"
+check "check unit runs the root-owned amoobot-check-jobs as root" bash -c \
+  'grep -qx "ExecStart=/usr/local/sbin/amoobot-check-jobs" <<< "$1" && ! grep -q "^User=" <<< "$1"' _ "$CHECK_SVC"
+check "check unit failure triggers the alert unit" grep -qx 'OnFailure=amoobot-job-alert@%N.service' <<< "$CHECK_SVC"
+check "check timer: first run 1 h after start, then hourly" bash -c 'grep -qx "OnActiveSec=1h" <<< "$1" && grep -qx "OnUnitActiveSec=1h" <<< "$1"' _ "$CHECK_TMR"
+check "check timer is not an amoobot-job-* unit (not deleted as a removed job)" not grep -q 'amoobot-job-' <<< "$CHECK_JOBS_UNIT"
+if have systemd-analyze; then
+  mkdir -p "$WORK/cunits"; printf '%s\n' "$CHECK_SVC" > "$WORK/cunits/amoobot-check-jobs.service"; printf '%s\n' "$CHECK_TMR" > "$WORK/cunits/amoobot-check-jobs.timer"
+  v="$(cd "$WORK/cunits" && systemd-analyze verify --man=no ./amoobot-check-jobs.timer ./amoobot-check-jobs.service 2>&1 | grep amoobot-check-jobs \
+      | grep -vE 'is not executable|No such file or directory|Failed to prepare filename|unit file .* does not exist|amoobot-job-alert@' || true)"
+  check "systemd-analyze verify: check units have no errors" test -z "$v"; [[ -n "$v" ]] && echo "$v"
+else
+  skip "check unit validation (systemd-analyze not installed)"
+fi
+out="$( (on_exit 1) 2>&1 )"
+check "a deploy that leaves jobs paused prints a prominent warning" grep -q '^!!! SCHEDULED JOBS ARE PAUSED' <<< "$out"
+check "  ...with a one-line resume command" grep -qxF "      systemctl start 'amoobot-job-*.timer' amoobot-check-jobs.timer" <<< "$out"
+check "  ...and the preferred fix (re-run the deploy)" grep -q 'sudo amoobot-deploy --app-only' <<< "$out"
+
+if can_dry_run; then
+  { cat "$WORK/prod.env"; echo "MONITOR_PING_URL=https://hc-ping.com/a b"; } > "$WORK/badmon.env"
+  dry_run "$WORK/badmon.env"
+  check "invalid MONITOR_PING_URL stops the preflight (value not printed)" bash -c '[[ $1 -ne 0 ]] && grep -q "MONITOR_PING_URL must be" <<< "$2" && ! grep -q "hc-ping.com/a b" <<< "$2"' _ "$RC" "$OUT"
+  { cat "$WORK/prod.env"; echo "MONITOR_PING_URL=$PING_URL"; } > "$WORK/goodmon.env"
+  dry_run "$WORK/goodmon.env"
+  check "valid MONITOR_PING_URL: accepted, never printed" bash -c '[[ $1 -eq 0 ]] && ! grep -qF "$3" <<< "$2" && ! grep -qF "${3%%/amoobot-*}" <<< "$2"' _ "$RC" "$OUT" "$PING_URL"
+  check "monitor.env written root-only, content not shown" bash -c \
+    'grep -q "^\[dry-run\] write /etc/amoobot/monitor.env (600 root:root)" <<< "$1" && ! grep -q "AMOOBOT_MONITOR_PING_URL=" <<< "$1"' _ "$OUT"
+  check "MONITOR_PING_URL is not written into the app env" not grep -q 'MONITOR_PING_URL=' <<< "$OUT"
+  OUT="$BASE_OUT"
+  check "dry-run installs and enables the hourly check timer" bash -c \
+    'grep -q "write /etc/systemd/system/amoobot-check-jobs.timer" <<< "$1" && grep -q "systemctl enable --now amoobot-check-jobs.timer" <<< "$1"' _ "$OUT"
+  check "dry-run takes a first nightly backup when none exists" grep -q 'no amoobot_nightly_\*.sql.gz yet: /usr/local/sbin/amoobot-backup nightly' <<< "$OUT"
+  check "monitor-ping.sh is installed into the root lib" grep -q '^\[dry-run\] install bin/lib/monitor-ping.sh from git objects' <<< "$OUT"
+else
+  skip "$DRY_RUN_SKIP"
+fi
+
 echo
 echo "passed: $PASS  failed: $FAIL  skipped: $SKIP"
 (( FAIL == 0 ))

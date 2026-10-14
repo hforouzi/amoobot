@@ -68,3 +68,10 @@ if (( BACKUP_RETENTION_DAYS > 0 )); then
 fi
 
 printf 'Backup written to %s (%s)\n' "$OUT" "$(du -h "$OUT" | cut -f1)"
+
+# Dead-man's switch for the nightly backup (optional MONITOR_PING_URL; "{job}" becomes "backup").
+if [[ "$BACKUP_LABEL" == nightly ]]; then
+  # shellcheck source=bin/lib/monitor-ping.sh
+  source "$SCRIPT_DIR/lib/monitor-ping.sh"
+  monitor_ping backup
+fi

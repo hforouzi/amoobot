@@ -283,7 +283,8 @@ curl -fsS https://DOMAIN/healthz
 - [ ] `systemctl list-timers certbot.timer` فعال است (`sudo certbot renew --dry-run` موفق است)
 - [ ] مانیتورینگ uptime روی `https://DOMAIN/healthz`
 - [ ] `systemctl list-timers 'amoobot-job-*'` شش timer نشان می‌دهد و ستون LAST یک ساعت بعد از deploy برای همه پر است
-- [ ] `sudo amoobot-check-jobs` دو ساعت بعد از deploy (و بعد از اولین بکاپ شبانه) کد خروج `0` می‌دهد و به مانیتورینگ وصل شده است
+- [ ] `sudo amoobot-check-jobs` دو ساعت بعد از deploy کد خروج `0` می‌دهد و `systemctl list-timers amoobot-check-jobs.timer` فعال است
+- [ ] `MONITOR_PING_URL` تنظیم شده و در سرویس مانیتورینگ برای هر کار (و `backup`) ping تازه دیده می‌شود (بخش ۸، «هشدار بدون تلگرام»)
 - [ ] Toggleهای اتوماسیون در پنل ادمین بررسی شده‌اند (به‌خصوص «تعلیق خودکار»؛ پیش‌فرض خاموش)
 - [ ] `automation.batch_limit` بیشتر از تعداد کل سرویس‌هاست ([automation.md](automation.md))
 - [ ] هشدار آزمایشی رسیده است: `sudo -u www-data env APP_DIR=/var/www/amoobot /usr/local/lib/amoobot/scheduled-job-alert.sh failed test` (بعد `... recovered test`)
@@ -401,8 +402,28 @@ checker یک timer غیرفعال را `INACTIVE` گزارش می‌کند و `r
   (`ALERT_REPEAT_MINUTES`) فرستاده می‌شود و بعد از اولین اجرای موفق، پیام «recovered» می‌آید.
 - اگر قفل گروه بیش از ۲ دقیقه آزاد نشود (کار دیگری یا deploy در حال اجراست)، اجرا رد می‌شود (`SKIPPED` در لاگ، unit موفق).
   اگر این وضعیت تکرار شود، بررسی تازگی (بخش بعد) آن را نشان می‌دهد.
-- هنگام deploy، timerها از قبل از checkout متوقف می‌شوند و deploy صبر می‌کند تا کار در حال اجرا تمام شود. اگر deploy شکست
-  بخورد، کارها **متوقف می‌مانند** (پیام `scheduled jobs are PAUSED`) تا یک deploy موفق انجام شود.
+- هنگام deploy، timerها (و `amoobot-check-jobs.timer`) از قبل از checkout متوقف می‌شوند و deploy صبر می‌کند تا کار در حال اجرا تمام شود.
+  اگر deploy شکست بخورد، کارها **متوقف می‌مانند** و یک هشدار برجسته (`!!! SCHEDULED JOBS ARE PAUSED`) با دستور یک‌خطی ادامه چاپ می‌شود:
+  ترجیحاً مشکل را رفع و `sudo amoobot-deploy --app-only` را اجرا کنید؛ یا اگر کد و schema با هم می‌خوانند، با root:
+  `systemctl start 'amoobot-job-*.timer' amoobot-check-jobs.timer`
+
+### هشدار بدون تلگرام
+
+هشدار تلگرام به خود بات و سرور وابسته است؛ اگر سرور، شبکه یا توکن مشکل داشته باشد هیچ پیامی نمی‌رسد. دو لایه‌ی مستقل:
+
+1. **`amoobot-check-jobs.timer` (root):** هر ساعت (اولین بار یک ساعت بعد از راه‌اندازی یا پایان deploy) `amoobot-check-jobs` را اجرا می‌کند.
+   هر مشکلی (`STALE`، `NEVER`، `FAILED`، `INACTIVE`، بکاپ قدیمی) کد خروج `2` است، پس unit در وضعیت **failed** می‌ماند
+   (`systemctl --failed` و هر مانیتورینگی که unitهای failed را می‌بیند) و `amoobot-job-alert@` هم هشدار تلگرام می‌فرستد.
+   اولین deploy اگر هنوز بکاپ `nightly` نباشد، همان لحظه یکی می‌گیرد تا این بررسی تا شب اول هشدار «backup NEVER» ندهد.
+2. **Dead-man's switch با `MONITOR_PING_URL` (اختیاری، در `/etc/amoobot/.env.prod.local`):** هر اجرای **موفق** هر کار و بکاپ شبانه یک
+   درخواست به این آدرس می‌فرستد (`curl` با timeout ۱۰ ثانیه؛ شکست ping نادیده گرفته می‌شود و کار را خراب نمی‌کند). سرویس بیرونی
+   (healthchecks.io، Uptime Kuma «push»، Cronitor و…) وقتی pingها **قطع شوند** هشدار می‌دهد؛ یعنی وقتی سرور خاموش است، کارها شکست
+   می‌خورند یا رد می‌شوند، یا timerها متوقف مانده‌اند. `{job}` در URL با نام کار جایگزین می‌شود (`broadcasts`، `orders`، `sync`،
+   `expiry`، `suspend`، `notifications`، `backup`) تا هر کار check جدا داشته باشد، مثلاً `https://hc-ping.com/<ping-key>/amoobot-{job}`.
+   بدون `{job}` همه یک check مشترک دارند و فقط توقف کامل دیده می‌شود. در سرویس مانیتورینگ برای هر check «period» را برابر
+   فاصله‌ی اجرای کار (جدول بالا؛ بکاپ ۱ روز) و «grace» را حداقل timeout آن (و برای بکاپ چند ساعت) بگذارید.
+   URL مثل رمز است (هر کس داشته باشد می‌تواند ping جعلی بفرستد): فقط در `/etc/amoobot/monitor.env` (مالک root، `600`) نوشته می‌شود،
+   systemd آن را برای unitها می‌خواند، هیچ‌وقت چاپ نمی‌شود و روی خط فرمان `curl` نمی‌آید.
 
 ---
 
@@ -421,5 +442,6 @@ checker یک timer غیرفعال را `INACTIVE` گزارش می‌کند و `r
 | `up-to-date exit 2` | دیتابیس migrationهایی دارد که کد deploy‌شده ندارد (rollback به نسخه‌ی قدیمی‌تر از schema). نسخه‌ی جدیدتر را دوباره deploy کنید یا بکاپ `pre-deploy` مناسب را بازگردانی کنید (دستورها در خروجی deploy) |
 | `Refusing to deploy <کامیت>` | کامیت مقصد یکی از فایل‌های عملیاتی را ندارد یا قدیمی‌تر از ساختار `/usr/local/lib/amoobot` است. چیزی تغییر نکرده؛ کامیت جدیدتری انتخاب کنید |
 | هشدار «scheduled job FAILED» | `journalctl -u amoobot-job-<job> -n 50` و `/var/log/amoobot/<job>.log`. نتیجه‌ی `timeout` یعنی کار از `TimeoutStartSec` بیشتر طول کشیده (معمولاً پنل کند یا در دسترس نیست) |
-| کاری هیچ‌وقت اجرا نمی‌شود | `systemctl list-timers 'amoobot-job-*'`. اگر deploy قبلی شکست خورده باشد، timerها متوقف مانده‌اند. یک deploy موفق اجرا کنید |
+| کاری هیچ‌وقت اجرا نمی‌شود | `systemctl list-timers 'amoobot-*'`. اگر deploy قبلی شکست خورده باشد، timerها متوقف مانده‌اند (هشدار `SCHEDULED JOBS ARE PAUSED`). یک deploy موفق اجرا کنید |
+| `amoobot-check-jobs.service` failed | `journalctl -u amoobot-check-jobs -n 30` جدول وضعیت را نشان می‌دهد؛ همان مشکل را با `sudo amoobot-check-jobs` بررسی کنید. بعد از رفع: `sudo systemctl reset-failed amoobot-check-jobs` |
 | هشدار نمی‌رسد | `systemctl status 'amoobot-job-alert@*'`: معمولاً `TELEGRAM_ADMIN_CHAT_ID` اشتباه است، یا بات در آن چت پیام نفرستاده/عضو نیست |

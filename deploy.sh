@@ -39,7 +39,11 @@ STATE_DIR="/var/lib/amoobot"
 ROOT_LIB_DIR="/usr/local/lib/amoobot"
 ROOT_SBIN_DIR="/usr/local/sbin"
 ROOT_OPS_FILES=(deploy.sh bin/backup-database.sh bin/restore-database.sh bin/scheduled-job.sh
-  bin/scheduled-job-alert.sh bin/check-scheduled-jobs.sh bin/lib/database-url.sh)
+  bin/scheduled-job-alert.sh bin/check-scheduled-jobs.sh bin/lib/database-url.sh bin/lib/monitor-ping.sh)
+# Optional MONITOR_PING_URL for a dead-man's-switch monitor (root:root 600; systemd hands it to the job units).
+MONITOR_ENV_FILE="/etc/amoobot/monitor.env"
+# Root-owned timer that runs bin/check-scheduled-jobs.sh; a problem makes it a failed unit (and sends an alert).
+CHECK_JOBS_UNIT="amoobot-check-jobs"
 ROOT_WRAPPERS=(deploy backup restore check-jobs)
 # DATABASE_URL for the root-run backup/restore scripts (root:root 600); they never load the app's .env.local.php.
 DB_URL_FILE="/etc/amoobot/database.env"
@@ -71,7 +75,7 @@ JOBS_MANIFEST="${STATE_DIR}/scheduled-jobs.conf"
 # Keys used only by this script; never written into the application's env.
 DEPLOY_ONLY_KEYS=" DOMAIN LETSENCRYPT_EMAIL REPO_URL APP_DIR PHP_VERSION DEPLOY_USER DEPLOY_REF DEPLOY_SSH_PUBLIC_KEY "
 DEPLOY_ONLY_KEYS+="SSH_PERMIT_ROOT_LOGIN DB_NAME DB_USER DB_PASSWORD BACKUP_DIR BACKUP_RETENTION_DAYS BACKUP_CRON "
-DEPLOY_ONLY_KEYS+="ADMIN_ALLOW_IPS "
+DEPLOY_ONLY_KEYS+="ADMIN_ALLOW_IPS MONITOR_PING_URL "
 # Application keys that may also come from the process environment instead of the env file.
 APP_KEYS="APP_SECRET APP_DEFAULT_LOCALE APP_SHARE_DIR DEFAULT_URI DATABASE_URL MESSENGER_TRANSPORT_DSN
  TELEGRAM_BOT_TOKEN TELEGRAM_WEBHOOK_SECRET TELEGRAM_WEBHOOK_SECRET_TOKEN TELEGRAM_ADMIN_CHAT_ID TELEGRAM_PROXY
@@ -108,7 +112,7 @@ JOB_LOCK_FDS=()
 MAINTENANCE_ON=0
 on_exit() {
   if (( $1 != 0 && JOBS_PAUSED )); then
-    printf 'NOTE: scheduled jobs are PAUSED (amoobot-job-*.timer stopped) until a deploy completes successfully.\n' >&2
+    paused_jobs_warning
   fi
   if (( $1 != 0 && MAINTENANCE_ON )); then
     maintenance_instructions
@@ -204,7 +208,8 @@ pause_scheduled_jobs() {
     log "[dry-run] pause scheduled jobs: stop amoobot-job-*.timer, wait for running jobs (locks in ${JOBS_LOCK_DIR})"
     return 0
   fi
-  mapfile -t timers < <(systemctl list-unit-files 'amoobot-job-*.timer' --no-legend 2>/dev/null | awk '{print $1}')
+  # The freshness check is paused too: it would report the stopped job timers as INACTIVE in the middle of a deploy.
+  mapfile -t timers < <(systemctl list-unit-files 'amoobot-job-*.timer' "${CHECK_JOBS_UNIT}.timer" --no-legend 2>/dev/null | awk '{print $1}')
   (( ${#timers[@]} )) || return 0
   systemctl stop "${timers[@]}"
   JOBS_PAUSED=1
@@ -235,6 +240,8 @@ User=${WEB_USER}
 Group=${WEB_USER}
 WorkingDirectory=${APP_DIR}
 Environment=APP_DIR=${APP_DIR}
+# Optional MONITOR_PING_URL, read by systemd (as root) from a root-only file.
+EnvironmentFile=-${MONITOR_ENV_FILE}
 ExecStart=/bin/bash ${ROOT_LIB_DIR}/scheduled-job.sh ${JOB_NAME} ${JOB_GROUP} -- /usr/bin/php ${APP_DIR}/bin/console ${JOB_COMMAND} --env=prod --no-interaction
 TimeoutStartSec=${JOB_TIMEOUT}
 Nice=10
@@ -587,6 +594,53 @@ reload_ssh() {
   fi
 }
 
+# The freshness check (bin/check-scheduled-jobs.sh) as a root-owned timer: any problem (STALE, NEVER, FAILED, INACTIVE,
+# old backup) is exit 2 -> a failed unit -> OnFailure alert, visible in "systemctl --failed" even if Telegram is down.
+render_check_service() {
+  cat <<EOF
+# Managed by amoobot deploy.sh: hourly freshness check of the scheduled jobs and the nightly backup.
+[Unit]
+Description=Amoobot: check that every scheduled job and the nightly backup ran recently
+OnFailure=amoobot-job-alert@%N.service
+
+[Service]
+Type=oneshot
+ExecStart=${ROOT_SBIN_DIR}/amoobot-check-jobs
+TimeoutStartSec=120
+NoNewPrivileges=yes
+PrivateTmp=yes
+EOF
+}
+
+# First run 1 h after the timer starts (boot or the end of a deploy), so every job (longest interval 30 min) had a chance.
+render_check_timer() {
+  cat <<EOF
+# Managed by amoobot deploy.sh
+[Unit]
+Description=Amoobot: hourly scheduled-job freshness check
+
+[Timer]
+OnActiveSec=1h
+OnUnitActiveSec=1h
+AccuracySec=1min
+Unit=${CHECK_JOBS_UNIT}.service
+
+[Install]
+WantedBy=timers.target
+EOF
+}
+
+paused_jobs_warning() {
+  cat >&2 <<EOF
+
+!!! SCHEDULED JOBS ARE PAUSED: amoobot-job-*.timer and ${CHECK_JOBS_UNIT}.timer are stopped.
+!!! Nothing runs until they are resumed: no broadcasts, order expiry, usage sync, expiry, suspension or notifications.
+    Preferred - fix the cause and re-run:  sudo amoobot-deploy --app-only
+    Resume as they are (only if the deployed code and the schema match), as root:
+      systemctl start 'amoobot-job-*.timer' ${CHECK_JOBS_UNIT}.timer
+EOF
+}
+
 # load_env_file PATH: KEY=VALUE lines only (no shell code is executed). The process environment wins.
 load_env_file() {
   local file="$1" line key value n=0 seen=" "
@@ -691,6 +745,7 @@ BACKUP_RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-$DEFAULT_BACKUP_RETENTION_DAYS}"
 BACKUP_CRON="${BACKUP_CRON:-$DEFAULT_BACKUP_CRON}"
 SSH_PERMIT_ROOT_LOGIN="${SSH_PERMIT_ROOT_LOGIN:-prohibit-password}"
 ADMIN_ALLOW_IPS="${ADMIN_ALLOW_IPS:-}"
+MONITOR_PING_URL="${MONITOR_PING_URL:-}"
 LETSENCRYPT_EMAIL="${LETSENCRYPT_EMAIL:-admin@${DOMAIN}}"
 
 # APP_ENV / APP_DEBUG are enforced: anything other than prod / 0 is a hard error, never silently accepted.
@@ -735,6 +790,12 @@ fi
 valid_dir_path "$APP_DIR" 'var/www|srv' || die "APP_DIR must be /var/www/<name> or /srv/<name> (A-Z a-z 0-9 . _ -; got '${APP_DIR}')."
 valid_dir_path "$BACKUP_DIR" 'var/backups|srv' \
   || die "BACKUP_DIR must be /var/backups/<name> or /srv/<name> (A-Z a-z 0-9 . _ -; got '${BACKUP_DIR}')."
+# Optional dead-man's-switch URL ("{job}" = job name). No quotes, spaces, "$" or "\": it goes into a systemd EnvironmentFile.
+monitor_url_re='^https://[A-Za-z0-9.-]+(:[0-9]+)?(/[A-Za-z0-9._~/?&=%+,:@!*{}-]*)?$'
+if [[ -n "$MONITOR_PING_URL" ]]; then
+  [[ "$MONITOR_PING_URL" =~ $monitor_url_re ]] \
+    || die "MONITOR_PING_URL must be an https:// URL without spaces, quotes, \$ or backslashes (value not shown)."
+fi
 # Optional: only these addresses/networks may reach /admin (comma or space separated). Empty = no IP restriction.
 ADMIN_ALLOW_LIST=()
 read -ra admin_ips <<< "${ADMIN_ALLOW_IPS//,/ }"
@@ -1410,6 +1471,15 @@ SHELL=/bin/bash
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ${BACKUP_CRON} root ${ROOT_SBIN_DIR}/amoobot-backup nightly >> /var/log/amoobot-backup.log 2>&1
 EOF
+# A first nightly dump right away: the hourly freshness check (step 16) would otherwise report "backup NEVER" until
+# the first night, and a first backup is worth having anyway.
+if (( DRY_RUN )); then
+  log "[dry-run] if ${BACKUP_DIR} has no ${DB_NAME}_nightly_*.sql.gz yet: ${ROOT_SBIN_DIR}/amoobot-backup nightly"
+elif ! compgen -G "${BACKUP_DIR}/${DB_NAME}_nightly_*.sql.gz" > /dev/null; then
+  log "No nightly backup yet: taking the first one now."
+  "${ROOT_SBIN_DIR}/amoobot-backup" nightly >> /var/log/amoobot-backup.log 2>&1 \
+    || die "The first nightly backup failed; see /var/log/amoobot-backup.log."
+fi
 
 ########################################
 # SCHEDULED JOBS
@@ -1479,6 +1549,24 @@ for entry in "${SCHEDULED_JOBS[@]}"; do
 done
 write_file "$JOBS_MANIFEST" 644 root:root --show-diff <<< "$manifest"
 
+# Optional dead-man's switch: each successful job and the nightly backup ping MONITOR_PING_URL. Root-only file
+# (anyone with the URL can fake check-ins); systemd reads it for the units, so www-data never needs to.
+render_monitor_env() {
+  if [[ -n "$MONITOR_PING_URL" ]]; then
+    printf '# Managed by amoobot deploy.sh from MONITOR_PING_URL\nAMOOBOT_MONITOR_PING_URL=%s\n' "$MONITOR_PING_URL"
+  else
+    printf '# Managed by amoobot deploy.sh: MONITOR_PING_URL not set (no pings)\n'
+  fi
+}
+# Not --show-diff: the URL is a credential. systemd re-reads EnvironmentFile on every run, no restart needed.
+write_file "$MONITOR_ENV_FILE" 600 root:root < <(render_monitor_env)
+
+# Hourly freshness check as a root-owned timer; its failure is a failed unit + alert.
+write_file "/etc/systemd/system/${CHECK_JOBS_UNIT}.service" 644 root:root --show-diff < <(render_check_service)
+(( FILE_CHANGED )) && units_changed=1
+write_file "/etc/systemd/system/${CHECK_JOBS_UNIT}.timer" 644 root:root --show-diff < <(render_check_timer)
+(( FILE_CHANGED )) && units_changed=1 && changed_timers+=("${CHECK_JOBS_UNIT}.timer")
+
 # Jobs removed from SCHEDULED_JOBS: stop and delete their units.
 for timer_file in /etc/systemd/system/amoobot-job-*.timer; do
   [[ -e "$timer_file" ]] || continue
@@ -1502,9 +1590,11 @@ for entry in "${SCHEDULED_JOBS[@]}"; do
   parse_job "$entry"
   run systemctl enable --now "amoobot-job-${JOB_NAME}.timer"
 done
+run systemctl enable --now "${CHECK_JOBS_UNIT}.timer"
 (( ${#changed_timers[@]} )) && run systemctl restart "${changed_timers[@]}"
 JOBS_PAUSED=0
-log "Scheduled jobs active. Status: systemctl list-timers 'amoobot-job-*'   Check: sudo amoobot-check-jobs"
+log "Scheduled jobs active. Status: systemctl list-timers 'amoobot-*'   Check: sudo amoobot-check-jobs (also hourly: ${CHECK_JOBS_UNIT}.timer)"
+[[ -n "$MONITOR_PING_URL" ]] && log "Dead-man's switch: successful jobs and the nightly backup ping MONITOR_PING_URL (value not shown)."
 
 ########################################
 # WEBHOOK
@@ -1537,7 +1627,8 @@ if (( ! DRY_RUN )); then
     parse_job "$entry"
     systemctl is-active --quiet "amoobot-job-${JOB_NAME}.timer" || die "Timer amoobot-job-${JOB_NAME}.timer is not active."
   done
-  log "All ${#SCHEDULED_JOBS[@]} scheduled job timers are active."
+  systemctl is-active --quiet "${CHECK_JOBS_UNIT}.timer" || die "Timer ${CHECK_JOBS_UNIT}.timer is not active."
+  log "All ${#SCHEDULED_JOBS[@]} scheduled job timers and the hourly ${CHECK_JOBS_UNIT}.timer are active."
 
   for i in 1 2 3 4 5; do
     if curl -fsS --max-time 10 --resolve "${DOMAIN}:443:127.0.0.1" "https://${DOMAIN}/healthz" > /dev/null; then

@@ -9,7 +9,8 @@
 # - Full output is appended to LOG_DIR/<name>.log (rotated by /etc/logrotate.d/amoobot-jobs); one summary line goes
 #   to the journal.
 # - The exit code is the command's, so a failing job is a failed systemd unit (OnFailure= sends the Telegram alert).
-# - On success STATE_DIR/<name>.last-success is touched; if a failure alert was sent earlier, a recovery notice follows.
+# - On success STATE_DIR/<name>.last-success is touched; if a failure alert was sent earlier, a recovery notice follows,
+#   and the optional MONITOR_PING_URL is pinged (bin/lib/monitor-ping.sh).
 
 set -uo pipefail
 
@@ -21,6 +22,8 @@ LOCK_WAIT="${AMOOBOT_JOBS_LOCK_WAIT:-120}"
 ALERT_SCRIPT="${AMOOBOT_JOBS_ALERT_SCRIPT:-$SCRIPT_DIR/scheduled-job-alert.sh}"
 
 die() { printf 'scheduled-job: %s\n' "$*" >&2; exit 2; }
+# shellcheck source=bin/lib/monitor-ping.sh
+source "$SCRIPT_DIR/lib/monitor-ping.sh" || die "cannot load $SCRIPT_DIR/lib/monitor-ping.sh"
 ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 
 (( $# >= 4 )) && [[ "$3" == "--" ]] || die "usage: $0 <name> <lock-group> -- <command...>"
@@ -51,6 +54,8 @@ if (( rc == 0 )); then
   if [[ -e "$STATE_DIR/$name.alerted" ]]; then
     bash "$ALERT_SCRIPT" recovered "$name" || printf '[%s] recovery notice could not be sent\n' "$name"
   fi
+  # Dead-man's switch (optional MONITOR_PING_URL): only successful runs ping, so failures AND skips go quiet.
+  monitor_ping "$name"
 fi
 
 printf '[%s] rc=%s duration=%ss (output: %s)\n' "$name" "$rc" "$duration" "$log"
