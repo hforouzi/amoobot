@@ -91,7 +91,7 @@ EOF
   CAPTURE="$WORK/capture.jsonl" php -S "127.0.0.1:$PORT" "$WORK/router.php" > /dev/null 2>&1 &
   SERVER_PID=$!
   sleep 1
-  printf '#!/usr/bin/env bash\necho exit-code\n' > "$WORK/systemctl-stub"
+  printf '#!/usr/bin/env bash\necho exit-code\n' > "$WORK/systemctl-stub"; chmod +x "$WORK/systemctl-stub"
   export APP_DIR="$WORK/app" AMOOBOT_TELEGRAM_API="http://127.0.0.1:$PORT" AMOOBOT_SYSTEMCTL="$WORK/systemctl-stub"
 
   # Catch the token on any process command line while the alert runs.
@@ -128,28 +128,41 @@ echo "== check script (bin/check-scheduled-jobs.sh)"
 if [[ -e "$ROOT/bin/check-scheduled-jobs.sh" ]]; then
   CHECK="$ROOT/bin/check-scheduled-jobs.sh"
   rm -rf "$WORK/state"; mkdir -p "$WORK/state"
-  printf '# comment\nfresh 600 *:0/2\nstale 600 *:0/2\nnever 600 *:0/2\n' > "$WORK/manifest"
-  touch "$WORK/state/fresh.last-success"
+  printf '# comment\n\nfresh 600 *:0/2\nstale 600 *:0/2\nnever 600 *:0/2\nbroken 600 *:0/2\n' > "$WORK/manifest"
+  touch "$WORK/state/fresh.last-success" "$WORK/state/broken.last-success"
+  printf '2026-01-01T00:00:00Z rc=1 duration=3s\n' > "$WORK/state/broken.last-run"
   touch -d '20 minutes ago' "$WORK/state/stale.last-success"
-  printf '#!/usr/bin/env bash\ncase "$1 $2" in\n  "is-active --quiet") exit 0 ;;\n  "is-failed --quiet") [[ "$3" == amoobot-job-fresh.service ]] && exit 0; exit 1 ;;\nesac\nexit 0\n' > "$WORK/systemctl-ok"
-  export AMOOBOT_JOBS_MANIFEST="$WORK/manifest" AMOOBOT_SYSTEMCTL="$WORK/systemctl-ok"
+  printf '#!/usr/bin/env bash\ncase "$1 $2" in\n  "is-active --quiet") exit 0 ;;\n  "is-failed --quiet") [[ "$3" == amoobot-job-broken.service ]] && exit 0; exit 1 ;;\nesac\nexit 0\n' > "$WORK/systemctl-ok"; chmod +x "$WORK/systemctl-ok"
+  export AMOOBOT_JOBS_MANIFEST="$WORK/manifest" AMOOBOT_SYSTEMCTL="$WORK/systemctl-ok" AMOOBOT_BACKUP_DIR="$WORK/no-backups-here"
   out="$(bash "$CHECK" 2>&1)"; rc=$?
   check "problems -> exit code 2" test "$rc" -eq 2
   check "fresh job reported OK" grep -qE '^OK +fresh' <<< "$out"
   check "stale job reported STALE" grep -qE '^STALE +stale' <<< "$out"
-  check "job that never succeeded reported" grep -qE '^NEVER +never' <<< "$out"
-  check "failed unit reported even when the stamp is fresh" grep -q 'fresh.*unit failed' <<< "$out"
+  check "job that never succeeded reported NEVER" grep -qE '^NEVER +never' <<< "$out"
+  check "failed latest run reported FAILED although an older success is fresh" grep -qE '^FAILED +broken.*unit failed' <<< "$out"
+  check "last run's exit code shown" grep -qE '^FAILED +broken.*last run rc=1' <<< "$out"
+  check "summary line counts problems" grep -q '3 of 4 jobs need attention' <<< "$out"
+
+  # Backups (nightly cron) are checked too when the directory is readable.
+  mkdir -p "$WORK/backups"; touch -d '30 hours ago' "$WORK/backups/amoobot_nightly_old.sql.gz"
+  printf 'fresh 600 *:0/2\n' > "$WORK/manifest"
+  printf '#!/usr/bin/env bash\ncase "$1 $2" in\n  "is-active --quiet") exit 0 ;;\n  "is-failed --quiet") exit 1 ;;\nesac\nexit 0\n' > "$WORK/systemctl-ok"; chmod +x "$WORK/systemctl-ok"
+  out="$(AMOOBOT_BACKUP_DIR="$WORK/backups" bash "$CHECK" 2>&1)"; rc=$?
+  check "backup older than 26h -> STALE, exit 2" bash -c '[[ $1 -eq 2 ]] && grep -qE "^STALE +backup" <<< "$2"' _ "$rc" "$out"
+  touch "$WORK/backups/amoobot_nightly_new.sql.gz"
+  out="$(AMOOBOT_BACKUP_DIR="$WORK/backups" bash "$CHECK" 2>&1)"; rc=$?
+  check "fresh backup -> OK, exit 0" bash -c '[[ $1 -eq 0 ]] && grep -qE "^OK +backup" <<< "$2"' _ "$rc" "$out"
 
   printf 'fresh 600 *:0/2\n' > "$WORK/manifest"
-  printf '#!/usr/bin/env bash\ncase "$1 $2" in\n  "is-active --quiet") exit 0 ;;\n  "is-failed --quiet") exit 1 ;;\nesac\nexit 0\n' > "$WORK/systemctl-ok"
+  printf '#!/usr/bin/env bash\ncase "$1 $2" in\n  "is-active --quiet") exit 0 ;;\n  "is-failed --quiet") exit 1 ;;\nesac\nexit 0\n' > "$WORK/systemctl-ok"; chmod +x "$WORK/systemctl-ok"
   bash "$CHECK" > /dev/null 2>&1; rc=$?
   check "all fresh -> exit code 0" test "$rc" -eq 0
-  printf '#!/usr/bin/env bash\ncase "$1 $2" in\n  "is-active --quiet") exit 3 ;;\n  "is-failed --quiet") exit 1 ;;\nesac\nexit 0\n' > "$WORK/systemctl-ok"
+  printf '#!/usr/bin/env bash\ncase "$1 $2" in\n  "is-active --quiet") exit 3 ;;\n  "is-failed --quiet") exit 1 ;;\nesac\nexit 0\n' > "$WORK/systemctl-ok"; chmod +x "$WORK/systemctl-ok"
   out="$(bash "$CHECK" 2>&1)"; rc=$?
   check "inactive timer -> exit code 2" test "$rc" -eq 2 -a -n "$(grep 'timer not active' <<< "$out")"
   AMOOBOT_JOBS_MANIFEST="$WORK/missing" bash "$CHECK" > /dev/null 2>&1; rc=$?
   check "missing manifest -> exit code 3 (unknown)" test "$rc" -eq 3
-  unset AMOOBOT_JOBS_MANIFEST AMOOBOT_SYSTEMCTL
+  unset AMOOBOT_JOBS_MANIFEST AMOOBOT_SYSTEMCTL AMOOBOT_BACKUP_DIR
 else
   skip "check script not present yet"
 fi

@@ -209,6 +209,7 @@ curl -fsS https://DOMAIN/healthz
 - [ ] `systemctl list-timers certbot.timer` فعال است (`sudo certbot renew --dry-run` موفق است)
 - [ ] مانیتورینگ uptime روی `https://DOMAIN/healthz`
 - [ ] `systemctl list-timers 'amoobot-job-*'` شش timer نشان می‌دهد و ستون LAST یک ساعت بعد از deploy برای همه پر است
+- [ ] `sudo /var/www/amoobot/bin/check-scheduled-jobs.sh` دو ساعت بعد از deploy (و بعد از اولین بکاپ شبانه) کد خروج `0` می‌دهد و به مانیتورینگ وصل شده است
 - [ ] Toggleهای اتوماسیون در پنل ادمین بررسی شده‌اند (به‌خصوص «تعلیق خودکار»؛ پیش‌فرض خاموش)
 - [ ] `automation.batch_limit` بیشتر از تعداد کل سرویس‌هاست ([automation.md](automation.md))
 - [ ] هشدار آزمایشی رسیده است: `sudo -u www-data /var/www/amoobot/bin/scheduled-job-alert.sh failed test` (بعد `... recovered test`)
@@ -241,6 +242,33 @@ journalctl -u amoobot-job-sync -n 20                   # خلاصه‌ی اجر�
 cat /var/lib/amoobot/jobs/sync.last-run                # <زمان> rc=<کد> duration=<ثانیه>
 tail -n 50 /var/log/amoobot/sync.log                   # خروجی کامل دستور
 ```
+
+### بررسی تازگی همه‌ی کارها
+
+```bash
+sudo /var/www/amoobot/bin/check-scheduled-jobs.sh
+```
+
+```text
+STATUS    JOB            LAST-SUCCESS  MAX-AGE   NOTES
+OK        broadcasts     3m ago        16m       schedule *:0/2; last run rc=0
+FAILED    sync           2h0m ago      70m       schedule *:0/15; last run rc=1; unit failed: journalctl -u amoobot-job-sync
+...
+OK        backup         5h12m ago     26h0m     newest amoobot_nightly_20261014T033001Z.sql.gz
+
+CRITICAL: 1 of 7 jobs need attention.
+```
+
+| وضعیت | معنی |
+|---|---|
+| `OK` | آخرین اجرای موفق در محدوده‌ی مجاز است (۳ برابر فاصله‌ی اجرا + timeout) |
+| `STALE` | آخرین موفقیت خیلی قدیمی است (شکست یا رد شدن‌های پشت سر هم) |
+| `NEVER` | هنوز هیچ اجرای موفقی ثبت نشده (عادی در چند دقیقه‌ی اول بعد از اولین deploy) |
+| `INACTIVE` | timer فعال نیست (مثلاً deploy شکست‌خورده کارها را متوقف گذاشته) |
+| `FAILED` | آخرین اجرا شکست خورده، حتی اگر موفقیت قبلی هنوز تازه باشد |
+
+بکاپ شبانه هم بررسی می‌شود (جدیدترین `*_nightly_*.sql.gz` کمتر از ۲۶ ساعت). این بخش فقط با `sudo` اجرا می‌شود، چون پوشه‌ی بکاپ فقط برای root قابل خواندن است.
+کد خروج برای مانیتورینگ (Nagios/Icinga/cron): `0` همه سالم، `2` مشکل، `3` امکان بررسی نیست (هنوز deploy نشده).
 
 ### کار با کارها
 
