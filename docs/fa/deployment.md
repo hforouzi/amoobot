@@ -5,6 +5,12 @@
 > **قانون اصلی:** هیچ رمز، توکن یا پسوردی وارد git نمی‌شود. همه‌ی رمزها فقط در فایل سرور
 > `/etc/amoobot/.env.prod.local` (مالک root، دسترسی `600`) نگهداری می‌شوند.
 
+> **هشدار: رمز را روی خط فرمان ندهید.** `sudo TELEGRAM_BOT_TOKEN=... ./deploy.sh` (یا `export ...` و بعد اجرا) **پشتیبانی نمی‌شود**:
+> مقدار در history شل (`~/.bash_history`)، لاگ sudo (`/var/log/auth.log`) و محیط همه‌ی پروسه‌های فرزند (`/proc/<pid>/environ`،
+> ابزارهای مانیتورینگ و crash report) می‌ماند. sudo هم به‌طور پیش‌فرض این متغیرها را حذف می‌کند (`env_reset`) و کاربر `deploy` اجازه‌ی
+> تنظیم متغیر ندارد. **تنها راه پشتیبانی‌شده** فایل `/etc/amoobot/.env.prod.local` است: آن را با `sudo nano` ویرایش و سپس
+> `sudo amoobot-deploy` را اجرا کنید. اگر رمزی را اشتباهی روی خط فرمان وارد کرده‌اید، آن را لو رفته فرض کنید و طبق بخش ۶ عوض کنید.
+
 ---
 
 ## ۰. فوری: رمزهای لو رفته
@@ -43,10 +49,10 @@
 گزینه‌ها:
 
 ```bash
-sudo ./deploy.sh --dry-run          # فقط نمایش؛ هیچ تغییری نمی‌دهد و رمزها را چاپ نمی‌کند
-sudo ./deploy.sh --app-only         # بدون مراحل 1 تا 6 (برای به‌روزرسانی سریع کد)
-sudo ./deploy.sh --ref v1.4.0       # branch، tag یا commit مشخص (برای Rollback هم)
-sudo ./deploy.sh --env-file /path   # فایل تنظیمات دیگر (پیش‌فرض /etc/amoobot/.env.prod.local)
+sudo amoobot-deploy --dry-run          # فقط نمایش؛ هیچ تغییری نمی‌دهد و رمزها را چاپ نمی‌کند
+sudo amoobot-deploy --app-only         # بدون مراحل 1 تا 6 (برای به‌روزرسانی سریع کد)
+sudo amoobot-deploy --ref v1.4.0       # branch، tag یا commit مشخص (برای Rollback هم)
+sudo amoobot-deploy --env-file /path   # فایل تنظیمات دیگر (پیش‌فرض /etc/amoobot/.env.prod.local)
 ```
 
 ---
@@ -240,7 +246,8 @@ curl -fsS https://DOMAIN/healthz
 
 ## ۶. چرخش رمزها (Rotation)
 
-همه‌ی موارد زیر با ویرایش `/etc/amoobot/.env.prod.local` و سپس `sudo amoobot-deploy --app-only` انجام می‌شوند:
+همه‌ی موارد زیر با ویرایش `/etc/amoobot/.env.prod.local` و سپس `sudo amoobot-deploy --app-only` انجام می‌شوند (مقدار جدید را هیچ‌وقت
+به‌صورت `sudo VAR=...` روی خط فرمان ندهید؛ هشدار بالای همین راهنما):
 
 | رمز | روش | اثر جانبی |
 |---|---|---|

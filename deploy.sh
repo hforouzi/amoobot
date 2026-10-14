@@ -10,8 +10,9 @@
 #   --ref        what to deploy (default: DEPLOY_REF from the env file, else "main"); also used for rollback
 #   --env-file   server-only settings/secrets file (default: /etc/amoobot/.env.prod.local, root-owned, chmod 600)
 #
-# This file contains NO secrets. Every secret comes from the environment or the env file; see .env.prod.example
-# and docs/fa/deployment.md. Secret values are never printed, not even in --dry-run.
+# This file contains NO secrets. Secrets belong ONLY in the root-owned env file (/etc/amoobot/.env.prod.local); see
+# .env.prod.example and docs/fa/deployment.md. Passing them as "sudo VAR=... amoobot-deploy" is not supported: they
+# end up in shell history, sudo logs and the environment of every child process. Secret values are never printed.
 
 set -Eeuo pipefail
 umask 027
@@ -80,7 +81,7 @@ JOBS_MANIFEST="${STATE_DIR}/scheduled-jobs.conf"
 DEPLOY_ONLY_KEYS=" DOMAIN LETSENCRYPT_EMAIL REPO_URL APP_DIR PHP_VERSION DEPLOY_USER DEPLOY_REF DEPLOY_SSH_PUBLIC_KEY "
 DEPLOY_ONLY_KEYS+="SSH_PERMIT_ROOT_LOGIN DB_NAME DB_USER DB_PASSWORD BACKUP_DIR BACKUP_RETENTION_DAYS BACKUP_CRON "
 DEPLOY_ONLY_KEYS+="ADMIN_ALLOW_IPS MONITOR_PING_URL "
-# Application keys that may also come from the process environment instead of the env file.
+# Application keys that may also come from the process environment (for non-secret overrides; secrets: env file only).
 APP_KEYS="APP_SECRET APP_DEFAULT_LOCALE APP_SHARE_DIR DEFAULT_URI DATABASE_URL MESSENGER_TRANSPORT_DSN
  TELEGRAM_BOT_TOKEN TELEGRAM_WEBHOOK_SECRET TELEGRAM_WEBHOOK_SECRET_TOKEN TELEGRAM_ADMIN_CHAT_ID TELEGRAM_PROXY
  PAYMENT_CARD_NUMBER PAYMENT_CARD_HOLDER PAYMENT_DESCRIPTION
@@ -718,7 +719,7 @@ while (( $# )); do
     --app-only) APP_ONLY=1 ;;
     --ref)      [[ -n "${2:-}" ]] || die "--ref needs a value"; CLI_REF="$2"; shift ;;
     --env-file) [[ -n "${2:-}" ]] || die "--env-file needs a value"; ENV_FILE="$2"; shift ;;
-    -h|--help)  sed -n '2,14p' "$0"; exit 0 ;;
+    -h|--help)  sed -n '2,15p' "$0"; exit 0 ;;
     *)          die "Unknown option: $1 (see --help)" ;;
   esac
   shift
@@ -729,7 +730,7 @@ done
 ########################################
 
 if (( ! DRY_RUN )) && [[ "$EUID" -ne 0 ]]; then
-  die "Please run as root (sudo ./deploy.sh). Use --dry-run to preview without root."
+  die "Please run as root (sudo amoobot-deploy, or sudo bash /root/deploy.sh for the first deploy). Use --dry-run to preview without root."
 fi
 
 # Re-run from a private copy: the checkout below may replace this very file while bash is still reading it.
@@ -803,7 +804,7 @@ require_var TELEGRAM_WEBHOOK_SECRET_TOKEN "random header secret (A-Z a-z 0-9 _ -
 require_var TELEGRAM_ADMIN_CHAT_ID "numeric chat id that receives admin alerts"
 [[ -n "${DATABASE_URL:-}" ]] || require_var DB_PASSWORD "password for the local MariaDB user ${DB_USER}"
 if (( ${#MISSING[@]} )); then
-  printf 'Missing required settings (set them in %s or the environment):\n' "$ENV_FILE" >&2
+  printf 'Missing required settings (set them in %s; never pass secrets on the command line):\n' "$ENV_FILE" >&2
   printf '  - %s\n' "${MISSING[@]}" >&2
   die "${#MISSING[@]} required setting(s) missing."
 fi
