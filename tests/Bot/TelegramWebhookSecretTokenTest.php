@@ -54,6 +54,35 @@ final class TelegramWebhookSecretTokenTest extends WebTestCase
         self::assertSame('url', TelegramWebhookController::effectiveSecretToken('', 'url'));
     }
 
+    public function testUnsetHeaderSecretRejectsMissingHeader(): void
+    {
+        unset($_SERVER['TELEGRAM_WEBHOOK_SECRET_TOKEN'], $_ENV['TELEGRAM_WEBHOOK_SECRET_TOKEN']);
+
+        self::assertSame(403, $this->post(self::URL_SECRET, null));
+    }
+
+    public function testEmptyHeaderSecretRejectsEmptyHeader(): void
+    {
+        $_SERVER['TELEGRAM_WEBHOOK_SECRET_TOKEN'] = $_ENV['TELEGRAM_WEBHOOK_SECRET_TOKEN'] = '';
+
+        self::assertSame(403, $this->post(self::URL_SECRET, ''));
+    }
+
+    public function testEmptyHeaderSecretAcceptsMatchingUrlSecretHeader(): void
+    {
+        $_SERVER['TELEGRAM_WEBHOOK_SECRET_TOKEN'] = $_ENV['TELEGRAM_WEBHOOK_SECRET_TOKEN'] = '';
+
+        self::assertSame(200, $this->post(self::URL_SECRET, self::URL_SECRET));
+    }
+
+    public function testEmptyUrlSecretRejectsRequest(): void
+    {
+        $_SERVER['TELEGRAM_WEBHOOK_SECRET'] = $_ENV['TELEGRAM_WEBHOOK_SECRET'] = '';
+        $_SERVER['TELEGRAM_WEBHOOK_SECRET_TOKEN'] = $_ENV['TELEGRAM_WEBHOOK_SECRET_TOKEN'] = '';
+
+        self::assertSame(403, $this->post(self::URL_SECRET, ''));
+    }
+
     private function post(string $urlSecret, ?string $headerToken): int
     {
         $client = self::createClient();
