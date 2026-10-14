@@ -67,6 +67,14 @@ if have flock; then
   check "invalid job name rejected" test "$rc" -eq 2
   bash "$JOB" x grp true > /dev/null 2>&1; rc=$?
   check "missing -- separator rejected" test "$rc" -eq 2
+  # A deploy in progress (or interrupted, e.g. a reboot mid-deploy): the job does not run at all.
+  printf 'started=x\n' > "$WORK/deploy-marker"; rm -f "$WORK/state/marker-job.last-success" "$WORK/ran"
+  out="$(AMOOBOT_DEPLOY_MARKER="$WORK/deploy-marker" bash "$JOB" marker-job grp -- touch "$WORK/ran" 2>&1)"; rc=$?
+  check "deploy marker present: job skipped (exit 0), command not run, no success stamp" bash -c \
+    '[[ $1 -eq 0 && ! -e "$3/ran" && ! -e "$3/state/marker-job.last-success" ]] && grep -q "skipped: a deploy is in progress or was interrupted" <<< "$2"' _ "$rc" "$out" "$WORK"
+  rm -f "$WORK/deploy-marker"
+  AMOOBOT_DEPLOY_MARKER="$WORK/deploy-marker" bash "$JOB" marker-job grp -- touch "$WORK/ran" > /dev/null 2>&1
+  check "marker gone: the job runs again" test -e "$WORK/ran"
   unset AMOOBOT_JOBS_ALERT_SCRIPT
 else
   skip "wrapper tests (flock not installed)"
@@ -174,6 +182,18 @@ if [[ -e "$ROOT/bin/check-scheduled-jobs.sh" ]]; then
   printf '#!/usr/bin/env bash\ncase "$1 $2" in\n  "is-active --quiet") exit 3 ;;\n  "is-failed --quiet") exit 1 ;;\nesac\nexit 0\n' > "$WORK/systemctl-ok"; chmod +x "$WORK/systemctl-ok"
   out="$(bash "$CHECK" 2>&1)"; rc=$?
   check "inactive timer -> exit code 2" test "$rc" -eq 2 -a -n "$(grep 'timer not active' <<< "$out")"
+  # Deploy marker: young = paused on purpose (not a problem); older than 30 min = failed/interrupted deploy.
+  printf '#!/usr/bin/env bash\ncase "$1 $2" in\n  "is-active --quiet") exit 3 ;;\n  "is-failed --quiet") exit 1 ;;\nesac\nexit 0\n' > "$WORK/systemctl-ok"; chmod +x "$WORK/systemctl-ok"
+  printf 'started=x\n' > "$WORK/deploy-marker"; touch -d '10 minutes ago' "$WORK/deploy-marker"
+  out="$(AMOOBOT_DEPLOY_MARKER="$WORK/deploy-marker" bash "$CHECK" 2>&1)"; rc=$?
+  check "deploy running < 30 min: stopped timers are PAUSED, exit 0" bash -c '[[ $1 -eq 0 ]] && grep -qE "^PAUSED +fresh.*deploy in progress" <<< "$2" && grep -qE "^PAUSED +deploy" <<< "$2"' _ "$rc" "$out"
+  mkdir -p "$WORK/curlbin8"; printf '#!/usr/bin/env bash\ncat >> "%s/curl8.cfg"\n' "$WORK" > "$WORK/curlbin8/curl"; chmod +x "$WORK/curlbin8/curl"
+  touch -d '31 minutes ago' "$WORK/deploy-marker"; rm -f "$WORK/curl8.cfg"
+  out="$(PATH="$WORK/curlbin8:$PATH" AMOOBOT_MONITOR_PING_URL='https://hc-ping.com/k/amoobot-{job}' AMOOBOT_DEPLOY_MARKER="$WORK/deploy-marker" bash "$CHECK" 2>&1)"; rc=$?
+  check "deploy marker older than 30 min: DEPLOY problem, exit 2 (failed unit -> alert)" bash -c \
+    '[[ $1 -eq 2 ]] && grep -qE "^DEPLOY +deploy +started 31m ago.*re-run sudo amoobot-deploy --app-only" <<< "$2" && grep -qE "^INACTIVE +fresh" <<< "$2"' _ "$rc" "$out"
+  check "  ...and a MONITOR_PING_URL /fail ping for {job}=deploy" grep -qxF 'url = "https://hc-ping.com/k/amoobot-deploy/fail"' "$WORK/curl8.cfg"
+  rm -f "$WORK/deploy-marker"
   AMOOBOT_JOBS_MANIFEST="$WORK/missing" bash "$CHECK" > /dev/null 2>&1; rc=$?
   check "missing manifest -> exit code 3 (unknown)" test "$rc" -eq 3
   unset AMOOBOT_JOBS_MANIFEST AMOOBOT_SYSTEMCTL AMOOBOT_BACKUP_DIR

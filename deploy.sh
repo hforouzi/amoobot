@@ -92,6 +92,12 @@ JOBS_LOG_DIR="/var/log/amoobot"
 JOBS_STATE_DIR="${STATE_DIR}/jobs"
 JOBS_LOCK_DIR="/run/amoobot"
 JOBS_MANIFEST="${STATE_DIR}/scheduled-jobs.conf"
+# Exists from "pause" to "resume" (root-owned, survives a reboot). bin/scheduled-job.sh does not run a job while it exists;
+# bin/check-scheduled-jobs.sh reports a marker older than 30 min as a failed/interrupted deploy (failed unit + alert).
+DEPLOY_MARKER="${STATE_DIR}/deploy-in-progress"
+# Transient timer armed when the jobs are paused: after 45 min it runs the check (which then fails -> alert) unless the
+# deploy finished and cancelled it. It never resumes anything by itself.
+DEPLOY_WATCHDOG_UNIT="amoobot-deploy-watchdog"
 
 # Keys used only by this script; never written into the application's env.
 DEPLOY_ONLY_KEYS=" DOMAIN LETSENCRYPT_EMAIL REPO_URL APP_DIR PHP_VERSION DEPLOY_USER DEPLOY_REF DEPLOY_SSH_PUBLIC_KEY "
@@ -129,10 +135,11 @@ on_error() {
 trap 'on_error $? $LINENO' ERR
 
 JOBS_PAUSED=0
+DEPLOY_MARKER_SET=0
 JOB_LOCK_FDS=()
 MAINTENANCE_ON=0
 on_exit() {
-  if (( $1 != 0 && JOBS_PAUSED )); then
+  if (( $1 != 0 && (JOBS_PAUSED || DEPLOY_MARKER_SET) )); then
     paused_jobs_warning
   fi
   if (( $1 != 0 && MAINTENANCE_ON )); then
@@ -291,15 +298,21 @@ job_lock_groups() {
 }
 
 # Stop all job timers and take every job lock, so no job runs against half-updated code, cache or schema.
-# Locks are held until resume_scheduled_jobs (or until this script exits).
+# Locks are held until resume_scheduled_jobs (or until this script exits). The hourly check keeps running: it shows the
+# jobs as PAUSED, and as a failed deploy once DEPLOY_MARKER is older than 30 minutes.
 pause_scheduled_jobs() {
   local timers=() group lock fd
   if (( DRY_RUN )); then
-    log "[dry-run] pause scheduled jobs: stop amoobot-job-*.timer, wait for running jobs (locks in ${JOBS_LOCK_DIR})"
+    log "[dry-run] pause scheduled jobs: write ${DEPLOY_MARKER}, arm ${DEPLOY_WATCHDOG_UNIT} (systemd-run --on-active=45min: alert, never resume), stop amoobot-job-*.timer (not ${CHECK_JOBS_UNIT}.timer), wait for running jobs (locks in ${JOBS_LOCK_DIR})"
     return 0
   fi
-  # The freshness check is paused too: it would report the stopped job timers as INACTIVE in the middle of a deploy.
-  mapfile -t timers < <(systemctl list-unit-files 'amoobot-job-*.timer' "${CHECK_JOBS_UNIT}.timer" --no-legend 2>/dev/null | awk '{print $1}')
+  install -d -m 755 -o root -g root "$STATE_DIR"
+  refuse_symlink "$DEPLOY_MARKER"
+  printf 'started=%s target=%s pid=%s\n' "$(date -u +%FT%TZ)" "${TARGET_COMMIT:-$DEPLOY_REF}" "$$" > "$DEPLOY_MARKER"
+  chmod 644 "$DEPLOY_MARKER"
+  DEPLOY_MARKER_SET=1
+  arm_deploy_watchdog
+  mapfile -t timers < <(systemctl list-unit-files 'amoobot-job-*.timer' --no-legend 2>/dev/null | awk '{print $1}')
   (( ${#timers[@]} )) || return 0
   systemctl stop "${timers[@]}"
   JOBS_PAUSED=1
@@ -313,7 +326,44 @@ pause_scheduled_jobs() {
     flock -w 900 "$fd" || die "Scheduled job group '${group}' is still running after 15 minutes; see 'systemctl list-units amoobot-job-*'."
     JOB_LOCK_FDS+=("$fd")
   done
-  log "Paused ${#timers[@]} scheduled job timer(s); running jobs have finished."
+  log "Paused ${#timers[@]} scheduled job timer(s); running jobs have finished. ${CHECK_JOBS_UNIT}.timer keeps running."
+}
+
+# arm_deploy_watchdog  (re)arms the transient 45-minute timer; a failed/interrupted deploy then raises the alert even if
+# nobody watches the terminal (the check fails because DEPLOY_MARKER is older than 30 min -> OnFailure alert unit).
+arm_deploy_watchdog() {
+  command -v systemd-run > /dev/null 2>&1 && [[ -x "${ROOT_SBIN_DIR}/amoobot-check-jobs" ]] || return 0
+  systemctl stop "${DEPLOY_WATCHDOG_UNIT}.timer" "${DEPLOY_WATCHDOG_UNIT}.service" > /dev/null 2>&1 || true
+  systemctl reset-failed "${DEPLOY_WATCHDOG_UNIT}.timer" "${DEPLOY_WATCHDOG_UNIT}.service" > /dev/null 2>&1 || true
+  systemd-run --quiet --unit="$DEPLOY_WATCHDOG_UNIT" --on-active=45min --timer-property=AccuracySec=1min \
+    --description="Amoobot: alert if the deploy started at $(date -u +%FT%TZ) has not finished" \
+    --property=OnFailure="amoobot-job-alert@%N.service" "${ROOT_SBIN_DIR}/amoobot-check-jobs" > /dev/null \
+    || warn "Could not arm ${DEPLOY_WATCHDOG_UNIT} (systemd-run); the hourly ${CHECK_JOBS_UNIT}.timer still reports a stuck deploy."
+}
+
+# resume_scheduled_jobs  removes DEPLOY_MARKER, cancels the watchdog, releases the job locks and (re)starts every timer.
+# The check timer is restarted so its first run is 1 h from now (jobs had no chance to run while paused).
+resume_scheduled_jobs() {
+  local fd entry
+  if (( DRY_RUN )); then
+    log "[dry-run] resume: rm ${DEPLOY_MARKER}, stop ${DEPLOY_WATCHDOG_UNIT}.timer, release the job locks, enable --now every timer"
+  else
+    rm -f "$DEPLOY_MARKER"
+    DEPLOY_MARKER_SET=0
+    systemctl stop "${DEPLOY_WATCHDOG_UNIT}.timer" > /dev/null 2>&1 || true
+  fi
+  for fd in "${JOB_LOCK_FDS[@]}"; do
+    exec {fd}<&-
+  done
+  JOB_LOCK_FDS=()
+  for entry in "${SCHEDULED_JOBS[@]}"; do
+    parse_job "$entry"
+    run systemctl enable --now "amoobot-job-${JOB_NAME}.timer"
+  done
+  run systemctl enable --now "${CHECK_JOBS_UNIT}.timer"
+  run systemctl restart "${CHECK_JOBS_UNIT}.timer"
+  (( ${#changed_timers[@]} )) && run systemctl restart "${changed_timers[@]}"
+  JOBS_PAUSED=0
 }
 
 render_job_service() {
@@ -927,11 +977,12 @@ EOF
 paused_jobs_warning() {
   cat >&2 <<EOF
 
-!!! SCHEDULED JOBS ARE PAUSED: amoobot-job-*.timer and ${CHECK_JOBS_UNIT}.timer are stopped.
-!!! Nothing runs until they are resumed: no broadcasts, order expiry, usage sync, expiry, suspension or notifications.
+!!! SCHEDULED JOBS ARE PAUSED: amoobot-job-*.timer are stopped and ${DEPLOY_MARKER} keeps every job idle
+!!! (also after a reboot). Nothing runs: no broadcasts, order expiry, usage sync, expiry, suspension or notifications.
+!!! ${CHECK_JOBS_UNIT}.timer and the ${DEPLOY_WATCHDOG_UNIT} timer will raise an alert if this is not fixed in 30-45 min.
     Preferred - fix the cause and re-run:  sudo amoobot-deploy --app-only
-    Resume as they are (only if the deployed code and the schema match), as root:
-      systemctl start 'amoobot-job-*.timer' ${CHECK_JOBS_UNIT}.timer
+    Resume as they are (only if the deployed code and the schema match), as root (safe to run twice):
+      rm -f ${DEPLOY_MARKER} && systemctl stop ${DEPLOY_WATCHDOG_UNIT}.timer; systemctl start 'amoobot-job-*.timer' 
 EOF
 }
 
@@ -1997,18 +2048,8 @@ done
 
 (( units_changed )) && run systemctl daemon-reload
 
-# Resume: release the job locks taken before the checkout, then (re)start every timer.
-for fd in "${JOB_LOCK_FDS[@]}"; do
-  exec {fd}<&-
-done
-JOB_LOCK_FDS=()
-for entry in "${SCHEDULED_JOBS[@]}"; do
-  parse_job "$entry"
-  run systemctl enable --now "amoobot-job-${JOB_NAME}.timer"
-done
-run systemctl enable --now "${CHECK_JOBS_UNIT}.timer"
-(( ${#changed_timers[@]} )) && run systemctl restart "${changed_timers[@]}"
-JOBS_PAUSED=0
+# Resume: code, cache and schema match again.
+resume_scheduled_jobs
 log "Scheduled jobs active. Status: systemctl list-timers 'amoobot-*'   Check: sudo amoobot-check-jobs (also hourly: ${CHECK_JOBS_UNIT}.timer)"
 [[ -n "$MONITOR_PING_URL" ]] && log "Dead-man's switch: successful jobs and the nightly backup ping MONITOR_PING_URL (value not shown)."
 

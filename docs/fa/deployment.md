@@ -448,6 +448,8 @@ CRITICAL: 1 of 7 jobs need attention.
 | `NEVER` | هنوز هیچ اجرای موفقی ثبت نشده (عادی در چند دقیقه‌ی اول بعد از اولین deploy) |
 | `INACTIVE` | timer فعال نیست (مثلاً deploy شکست‌خورده کارها را متوقف گذاشته) |
 | `FAILED` | آخرین اجرا شکست خورده، حتی اگر موفقیت قبلی هنوز تازه باشد |
+| `PAUSED` | deployی کمتر از ۳۰ دقیقه پیش شروع شده و کارها عمداً متوقف هستند (مشکل حساب نمی‌شود) |
+| `DEPLOY` | فایل `/var/lib/amoobot/deploy-in-progress` بیش از ۳۰ دقیقه است که مانده: deploy شکست خورده یا قطع شده (یا سرور وسط deploy ریبوت شده) و کارها متوقف مانده‌اند |
 
 بکاپ شبانه هم بررسی می‌شود (جدیدترین `*_nightly_*.sql.gz` کمتر از ۲۶ ساعت). این بخش فقط با `sudo` اجرا می‌شود، چون پوشه‌ی بکاپ فقط برای root قابل خواندن است.
 کد خروج برای مانیتورینگ (Nagios/Icinga/cron): `0` همه سالم، `2` مشکل، `3` امکان بررسی نیست (هنوز deploy نشده).
@@ -484,17 +486,26 @@ checker یک timer غیرفعال را `INACTIVE` گزارش می‌کند و `r
   (`ALERT_REPEAT_MINUTES`) فرستاده می‌شود و بعد از اولین اجرای موفق، پیام «recovered» می‌آید.
 - اگر قفل گروه بیش از ۲ دقیقه آزاد نشود (کار دیگری یا deploy در حال اجراست)، اجرا رد می‌شود (`SKIPPED` در لاگ، unit موفق).
   اگر این وضعیت تکرار شود، بررسی تازگی (بخش بعد) آن را نشان می‌دهد.
-- هنگام deploy، timerها (و `amoobot-check-jobs.timer`) از قبل از checkout متوقف می‌شوند و deploy صبر می‌کند تا کار در حال اجرا تمام شود.
+- هنگام deploy، قبل از checkout فایل `/var/lib/amoobot/deploy-in-progress` (مالک root) نوشته می‌شود، timerهای `amoobot-job-*` متوقف می‌شوند و
+  deploy صبر می‌کند تا کار در حال اجرا تمام شود. تا وقتی این فایل هست `scheduled-job.sh` **هیچ کاری را اجرا نمی‌کند** (`SKIPPED`، unit موفق،
+  بدون ping). `amoobot-check-jobs.timer` **متوقف نمی‌شود**: در ۳۰ دقیقه‌ی اول کارها را `PAUSED` نشان می‌دهد و بعد از آن `DEPLOY` (کد خروج
+  `2`، unit failed، هشدار تلگرام و ping به آدرس `/fail` با `{job}`=`deploy`). علاوه بر آن یک timer موقت
+  `amoobot-deploy-watchdog` (`systemd-run --on-active=45min`) همان بررسی را ۴۵ دقیقه بعد از شروع اجرا می‌کند، پس حتی اگر نشست SSH قطع شود
+  و کسی ترمینال را نبیند هشدار می‌رسد. watchdog خودش هیچ چیزی را ادامه نمی‌دهد. با پایان موفق، فایل حذف و watchdog لغو می‌شود.
   اگر deploy شکست بخورد، کارها **متوقف می‌مانند** و یک هشدار برجسته (`!!! SCHEDULED JOBS ARE PAUSED`) با دستور یک‌خطی ادامه چاپ می‌شود:
-  ترجیحاً مشکل را رفع و `sudo amoobot-deploy --app-only` را اجرا کنید؛ یا اگر کد و schema با هم می‌خوانند، با root:
-  `systemctl start 'amoobot-job-*.timer' amoobot-check-jobs.timer`
+  ترجیحاً مشکل را رفع و `sudo amoobot-deploy --app-only` را اجرا کنید؛ یا اگر کد و schema با هم می‌خوانند، با root (اجرای دوباره بی‌خطر است):
+  `rm -f /var/lib/amoobot/deploy-in-progress && systemctl stop amoobot-deploy-watchdog.timer; systemctl start 'amoobot-job-*.timer'`
+- **ریبوت وسط deploy:** timerها enabled هستند و بعد از بوت شروع می‌شوند، اما چون فایل `deploy-in-progress` (در `/var/lib`، نه `/run`) باقی
+  است هیچ کاری روی schema یا کد نیمه‌کاره اجرا نمی‌شود؛ قفل‌ها و watchdog موقت با ریبوت از بین می‌روند ولی `amoobot-check-jobs.timer` یک ساعت
+  بعد از بوت `DEPLOY` گزارش می‌کند. فایل حالت نگهداری nginx هم می‌ماند، پس Webhook و پرداخت تا اجرای دوباره‌ی
+  `sudo amoobot-deploy --app-only` پاسخ `503` می‌دهند (تلگرام و درگاه‌ها دوباره تلاش می‌کنند).
 
 ### هشدار بدون تلگرام
 
 هشدار تلگرام به خود بات و سرور وابسته است؛ اگر سرور، شبکه یا توکن مشکل داشته باشد هیچ پیامی نمی‌رسد. دو لایه‌ی مستقل:
 
-1. **`amoobot-check-jobs.timer` (root):** هر ساعت (اولین بار یک ساعت بعد از راه‌اندازی یا پایان deploy) `amoobot-check-jobs` را اجرا می‌کند.
-   هر مشکلی (`STALE`، `NEVER`، `FAILED`، `INACTIVE`، بکاپ قدیمی) کد خروج `2` است، پس unit در وضعیت **failed** می‌ماند
+1. **`amoobot-check-jobs.timer` (root):** هر ساعت (اولین بار یک ساعت بعد از راه‌اندازی یا پایان deploy) `amoobot-check-jobs` را اجرا می‌کند؛
+   هنگام deploy هم متوقف نمی‌شود. هر مشکلی (`STALE`، `NEVER`، `FAILED`، `INACTIVE`، `DEPLOY`، بکاپ قدیمی) کد خروج `2` است، پس unit در وضعیت **failed** می‌ماند
    (`systemctl --failed` و هر مانیتورینگی که unitهای failed را می‌بیند) و `amoobot-job-alert@` هم هشدار تلگرام می‌فرستد.
    اولین deploy اگر هنوز بکاپ `nightly` نباشد، همان لحظه یکی می‌گیرد تا این بررسی تا شب اول هشدار «backup NEVER» ندهد.
 2. **Dead-man's switch با `MONITOR_PING_URL` (اختیاری، در `/etc/amoobot/.env.prod.local`):** هر اجرای **موفق** هر کار و بکاپ شبانه یک

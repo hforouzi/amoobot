@@ -76,6 +76,7 @@ set_globals() {
   ROOT_LIB_DIR=/usr/local/lib/amoobot ROOT_SBIN_DIR=/usr/local/sbin DB_URL_FILE=/etc/amoobot/database.env DRY_RUN=1
   REPO_URL=git@github.com:hforouzi/amoobot.git MIRROR_DIR=/var/lib/amoobot/mirror.git STATE_DIR=/var/lib/amoobot
   ALLOWED_SIGNERS_FILE=/etc/amoobot/allowed_signers GIT_ENV_PATH="$PATH" MIRROR_PROTOCOL=ssh HSTS_STATE_FILE="$WORK/hsts-enabled"
+  DEPLOY_MARKER_SET=0 JOBS_PAUSED=0 DEPLOY_MARKER=/var/lib/amoobot/deploy-in-progress DEPLOY_WATCHDOG_UNIT=amoobot-deploy-watchdog
 }
 die() { printf 'DIE: %s\n' "$*" >&2; return 1; }
 log() { printf '%s\n' "$*"; }
@@ -1128,7 +1129,8 @@ else
 fi
 
 set_globals
-CHECK_JOBS_UNIT=amoobot-check-jobs MONITOR_ENV_FILE=/etc/amoobot/monitor.env JOBS_PAUSED=1 MAINTENANCE_ON=0
+CHECK_JOBS_UNIT=amoobot-check-jobs MONITOR_ENV_FILE=/etc/amoobot/monitor.env JOBS_PAUSED=1 MAINTENANCE_ON=0 DEPLOY_MARKER_SET=0
+DEPLOY_MARKER=/var/lib/amoobot/deploy-in-progress DEPLOY_WATCHDOG_UNIT=amoobot-deploy-watchdog
 load_fn render_check_service render_check_timer paused_jobs_warning on_exit
 eval "$(sed -n '/^parse_job()/,/^}/p; /^render_job_service()/,/^}/p' "$ROOT/deploy.sh")"
 JOB_NAME=sync JOB_GROUP=lifecycle JOB_COMMAND="app:automation:run --only=sync" JOB_TIMEOUT=1500
@@ -1149,7 +1151,9 @@ else
 fi
 out="$( (on_exit 1) 2>&1 )"
 check "a deploy that leaves jobs paused prints a prominent warning" grep -q '^!!! SCHEDULED JOBS ARE PAUSED' <<< "$out"
-check "  ...with a one-line resume command" grep -qxF "      systemctl start 'amoobot-job-*.timer' amoobot-check-jobs.timer" <<< "$out"
+check "  ...with a one-line resume command that also clears the deploy marker and the watchdog" \
+  grep -qxF "      rm -f /var/lib/amoobot/deploy-in-progress && systemctl stop amoobot-deploy-watchdog.timer; systemctl start 'amoobot-job-*.timer' " <<< "$out"
+check "  ...and says the hourly check keeps running and will alert" grep -q 'amoobot-check-jobs.timer and the amoobot-deploy-watchdog timer will raise an alert' <<< "$out"
 check "  ...and the preferred fix (re-run the deploy)" grep -q 'sudo amoobot-deploy --app-only' <<< "$out"
 
 if can_dry_run; then
@@ -1170,6 +1174,49 @@ if can_dry_run; then
 else
   skip "$DRY_RUN_SKIP"
 fi
+
+echo "== maintenance: running check, deploy marker, watchdog (group 8, 2nd review)"
+set_globals
+CHECK_JOBS_UNIT=amoobot-check-jobs DEPLOY_WATCHDOG_UNIT=amoobot-deploy-watchdog JOBS_LOCK_DIR="$WORK/m8lock" DEPLOY_REF=main
+eval "$(sed -n '/^SCHEDULED_JOBS=(/,/^)/p; /^job_lock_groups()/,/^}/p' "$ROOT/deploy.sh")"
+load_fn pause_scheduled_jobs arm_deploy_watchdog resume_scheduled_jobs refuse_symlink parse_job
+m8_env() {
+  systemctl() { echo "systemctl $*" >> "$WORK/m8.calls"; [[ "$1" == list-unit-files ]] && printf 'amoobot-job-sync.timer enabled\namoobot-job-orders.timer enabled\n'; return 0; }
+  systemd-run() { echo "systemd-run $*" >> "$WORK/m8.calls"; }
+  sudo() { while (( $# )); do case "$1" in -H|-n) shift ;; -u) shift 2 ;; --) shift; break ;; *) break ;; esac; done; "$@"; }
+  install() { command install "$@" 2> /dev/null || mkdir -p "${@: -1}"; }   # -o root only works as root
+  flock() { return 0; }
+  die() { printf 'DIE: %s\n' "$*"; exit 1; }
+  run() { "$@"; }
+}
+mkdir -p "$WORK/m8sbin"; printf '#!/bin/sh\n' > "$WORK/m8sbin/amoobot-check-jobs"; chmod +x "$WORK/m8sbin/amoobot-check-jobs"
+out="$( (m8_env; DRY_RUN=0 STATE_DIR="$WORK/m8state" DEPLOY_MARKER="$WORK/m8state/deploy-in-progress" ROOT_SBIN_DIR="$WORK/m8sbin" WEB_USER="$(id -un)" TARGET_COMMIT=abc
+         : > "$WORK/m8.calls"; pause_scheduled_jobs; echo "PAUSED=$JOBS_PAUSED MARKER=$DEPLOY_MARKER_SET") 2>&1)"
+check "pause: deploy marker written (root-owned state dir, survives a reboot)" bash -c 'grep -q "^started=.* target=abc pid=" "$1/m8state/deploy-in-progress" && grep -q "MARKER=1" <<< "$2"' _ "$WORK" "$out"
+check "pause: only the job timers are stopped, the hourly check keeps running" bash -c \
+  'grep -q "^systemctl stop amoobot-job-sync.timer amoobot-job-orders.timer$" "$1" && ! grep -q "stop.*amoobot-check-jobs.timer" "$1" && ! grep -q "list-unit-files.*amoobot-check-jobs" "$1"' _ "$WORK/m8.calls"
+check "pause: a 45-minute watchdog is armed that runs the check with the alert as OnFailure" grep -qE \
+  "^systemd-run --quiet --unit=amoobot-deploy-watchdog --on-active=45min --timer-property=AccuracySec=1min --description=.* --property=OnFailure=amoobot-job-alert@%N.service $WORK/m8sbin/amoobot-check-jobs$" "$WORK/m8.calls"
+check "  ...after clearing a watchdog left over from an earlier failed deploy" bash -c \
+  's=$(grep -n "stop amoobot-deploy-watchdog.timer amoobot-deploy-watchdog.service" "$1" | cut -d: -f1); r=$(grep -n "^systemd-run" "$1" | cut -d: -f1); [[ -n $s && -n $r && $s -lt $r ]]' _ "$WORK/m8.calls"
+check "  ...the watchdog never resumes anything: its only command is the read-only check" bash -c \
+  '[[ $(grep "^systemd-run" "$1" | awk "{print \$NF}") == "$2/m8sbin/amoobot-check-jobs" ]]' _ "$WORK/m8.calls" "$WORK"
+out="$( (m8_env; DRY_RUN=0 DEPLOY_MARKER="$WORK/m8state/deploy-in-progress" changed_timers=() DEPLOY_MARKER_SET=1 JOB_LOCK_FDS=()
+         : > "$WORK/m8.calls"; resume_scheduled_jobs; echo "PAUSED=$JOBS_PAUSED MARKER=$DEPLOY_MARKER_SET") 2>&1)"
+check "resume: marker removed and watchdog cancelled before the timers start" bash -c \
+  '[[ ! -e "$1/m8state/deploy-in-progress" ]] && grep -q "MARKER=0" <<< "$2" && w=$(grep -n "stop amoobot-deploy-watchdog.timer" "$3" | cut -d: -f1) && t=$(grep -n "enable --now amoobot-job-" "$3" | head -1 | cut -d: -f1) && [[ $w -lt $t ]]' _ "$WORK" "$out" "$WORK/m8.calls"
+check "resume: every job timer enabled, the check timer restarted (first check 1 h later)" bash -c \
+  '[[ $(grep -c "enable --now amoobot-job-" "$1") -eq 6 ]] && grep -q "^systemctl restart amoobot-check-jobs.timer$" "$1"' _ "$WORK/m8.calls"
+out="$( (m8_env; DRY_RUN=0 DEPLOY_MARKER="$WORK/m8state/deploy-in-progress" changed_timers=() JOB_LOCK_FDS=(); resume_scheduled_jobs; resume_scheduled_jobs; echo OK) 2>&1)"
+check "resume is safe to run twice" grep -qx OK <<< "$out"
+out="$( (JOBS_PAUSED=0 DEPLOY_MARKER_SET=1 MAINTENANCE_ON=0; on_exit 1) 2>&1)"
+check "a failure after the marker was written warns even if no timer existed yet" grep -q 'SCHEDULED JOBS ARE PAUSED' <<< "$out"
+rm -f "$WORK/curl.args" "$WORK/curl.cfg"
+PATH="$WORK/curlbin:$PATH" AMOOBOT_MONITOR_PING_URL="https://hc-ping.com/key/amoobot-{job}" bash -c 'source "$1"; monitor_ping deploy fail' _ "$ROOT/bin/lib/monitor-ping.sh" > /dev/null
+check "monitor_ping NAME fail -> the check's /fail URL" grep -qxF 'url = "https://hc-ping.com/key/amoobot-deploy/fail"' "$WORK/curl.cfg"
+rm -f "$WORK/curl.cfg"
+PATH="$WORK/curlbin:$PATH" AMOOBOT_MONITOR_PING_URL="https://mon.example/push/{job}?token=t" bash -c 'source "$1"; monitor_ping deploy fail' _ "$ROOT/bin/lib/monitor-ping.sh" > /dev/null
+check "  ...inserted before a query string" grep -qxF 'url = "https://mon.example/push/deploy/fail?token=t"' "$WORK/curl.cfg"
 
 echo "== supply chain: pinned GitHub host keys (group 7)"
 check "StrictHostKeyChecking=accept-new is gone (no trust on first use)" not grep -q 'StrictHostKeyChecking=accept-new' "$ROOT/deploy.sh"
