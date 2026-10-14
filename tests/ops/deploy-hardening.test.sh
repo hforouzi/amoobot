@@ -75,7 +75,7 @@ set_globals() {
   APP_DIR=/var/www/amoobot BACKUP_DIR=/var/backups/amoobot BACKUP_RETENTION_DAYS=14 WEB_USER=www-data DEPLOY_USER=deploy
   ROOT_LIB_DIR=/usr/local/lib/amoobot ROOT_SBIN_DIR=/usr/local/sbin DB_URL_FILE=/etc/amoobot/database.env DRY_RUN=1
   REPO_URL=git@github.com:hforouzi/amoobot.git MIRROR_DIR=/var/lib/amoobot/mirror.git STATE_DIR=/var/lib/amoobot
-  ALLOWED_SIGNERS_FILE=/etc/amoobot/allowed_signers GIT_ENV_PATH="$PATH" MIRROR_PROTOCOL=ssh
+  ALLOWED_SIGNERS_FILE=/etc/amoobot/allowed_signers GIT_ENV_PATH="$PATH" MIRROR_PROTOCOL=ssh HSTS_STATE_FILE="$WORK/hsts-enabled"
 }
 die() { printf 'DIE: %s\n' "$*" >&2; return 1; }
 log() { printf '%s\n' "$*"; }
@@ -784,6 +784,21 @@ touch "$CERT_DIR/fullchain.pem"
 HTTPS="$(render_nginx)"
 WEBHOOK_BLOCK="$(block '\/telegram\/webhook\/' "$HTTPS")"
 check "webhook location: access_log off (the URL holds the secret)" grep -q '^        access_log off;$' <<< "$WEBHOOK_BLOCK"
+check "webhook location: its own error_log at crit (upstream errors would log the URL secret)" \
+  grep -qx '        error_log /var/log/nginx/amoobot_webhook_error.log crit;' <<< "$WEBHOOK_BLOCK"
+check "  ...declared before fastcgi_pass, inside the webhook location only" bash -c \
+  '[[ $(grep -c "amoobot_webhook_error.log" <<< "$2") -eq 1 ]] && e=$(grep -n error_log <<< "$1" | cut -d: -f1) && f=$(grep -n fastcgi_pass <<< "$1" | cut -d: -f1) && [[ $e -lt $f ]]' _ "$WEBHOOK_BLOCK" "$HTTPS"
+rm -f "$HSTS_STATE_FILE"
+check "maintenance on, HSTS not yet verified -> no HSTS header in the include" not grep -q Strict-Transport-Security <<< "$(render_maintenance on)"
+touch "$HSTS_STATE_FILE"
+check "maintenance on, HSTS enabled -> the include repeats HSTS (location add_header replaces the server's)" \
+  grep -qx 'add_header Strict-Transport-Security "max-age=31536000" always;' <<< "$(render_maintenance on)"
+check "maintenance off -> no add_header at all (server-level HSTS is inherited)" not grep -q add_header <<< "$(render_maintenance off)"
+rm -f "$HSTS_STATE_FILE"
+load_fn nginx_log_files
+out="$( (run() { echo "$*"; }; refuse_symlink() { :; }; WEB_USER=www-data; nginx_log_files) )"
+check "nginx log files are kept at mode 640" bash -c \
+  '[[ $(grep -cE "(chmod 640|install -m 640 -o www-data -g adm /dev/null) /var/log/nginx/amoobot_(access|error|webhook_error).log" <<< "$1") -eq 3 ]]' _ "$out"
 check "port 80 keeps ACME challenges reachable and redirects the rest" bash -c \
   'sed -n "/^server {/,/^}/p" <<< "$1" | head -20 | grep -q "acme-challenge" && grep -q "return 301 https://\$host\$request_uri;" <<< "$1"' _ "$HTTPS"
 check "no IPv6 on the host -> no [::] listeners" not grep -q 'listen \[::\]' <<< "$HTTPS"
@@ -852,7 +867,14 @@ $plain"
     curl -s -m 5 -o /dev/null "http://127.0.0.1:${NGX_PORT}/payment/callback/zibal?marker=logged"
     sleep 0.5
     check "nginx: webhook URL secret is not in the access log" not grep -qF "$SECRET" "$NGX/logs/amoobot_access.log"
+    check "nginx: webhook URL secret is not in any error log (PHP-FPM down = upstream error)" bash -c \
+      '! grep -rqF "$1" "$2"/logs/*error*.log' _ "$SECRET" "$NGX"
     check "nginx: other requests are still logged" grep -q 'marker=logged' "$NGX/logs/amoobot_access.log"
+    touch "$HSTS_STATE_FILE"; render_maintenance on > "$NGX/conf/maint.conf"; rm -f "$HSTS_STATE_FILE"; ngx_reload
+    hdrs="$(curl -s -m 5 -D - -o /dev/null -X POST "http://127.0.0.1:${NGX_PORT}/telegram/webhook/${SECRET}")"
+    check "nginx: during maintenance the 503 still carries HSTS (once enabled) and Retry-After" bash -c \
+      'grep -q "^HTTP/1.1 503" <<< "$1" && grep -qi "^strict-transport-security: max-age=31536000" <<< "$1" && grep -qi "^retry-after: 120" <<< "$1"' _ "$hdrs"
+    render_maintenance off > "$NGX/conf/maint.conf"; ngx_reload
     codes="$(for _ in $(seq 1 25); do code "http://127.0.0.1:${NGX_PORT}/admin/login"; echo; done | sort | uniq -c | tr '\n' ' ')"
     check "nginx: rapid /admin/login requests get 429 (codes: ${codes})" grep -q ' 429' <<< " $codes"
     ngx_stop

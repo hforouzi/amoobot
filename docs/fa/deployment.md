@@ -226,7 +226,11 @@ sudo amoobot-deploy --app-only --ref v1.6.0
   `https://DOMAIN/healthz` را با گواهی معتبر با موفقیت گرفته باشد (فایل وضعیت `/var/lib/amoobot/hsts-enabled`). بعد از آن مرورگرها یک سال
   فقط با HTTPS وصل می‌شوند؛ اگر دامنه را عوض می‌کنید یا HTTPS را برمی‌دارید این را در نظر بگیرید.
 - **Webhook در access log نیست:** location `^~ /telegram/webhook/` با `access_log off` و مستقیم به PHP-FPM (بدون try_files، تا
-  redirect داخلی به `index.php` دوباره لاگ نشود). رمز URL پس در `/var/log/nginx/amoobot_access.log` نمی‌آید.
+  redirect داخلی به `index.php` دوباره لاگ نشود). رمز URL پس در `/var/log/nginx/amoobot_access.log` نمی‌آید. خطاهای upstream (مثلاً PHP-FPM
+  خاموش یا timeout) در سطح `error` با خط درخواست، یعنی **با رمز URL**، لاگ می‌شوند؛ برای همین این location فایل خطای جداگانه
+  `/var/log/nginx/amoobot_webhook_error.log` فقط با سطح `crit` دارد. فایل‌های لاگ سایت با دسترسی `640` (`www-data:adm`) ساخته یا اصلاح می‌شوند.
+- **HSTS در حالت نگهداری:** `add_header` داخل یک location همه‌ی `add_header`های سطح server را حذف می‌کند، پس فایل حالت نگهداری (وقتی HSTS
+  فعال شده است) هدر `Strict-Transport-Security` را هم تکرار می‌کند.
 - **ورود ادمین:** سیمفونی `login_throttling` (۵ تلاش ناموفق در ۱۵ دقیقه برای هر ایمیل+IP، و ۲۵ برای هر IP) و nginx
   `limit_req` برای `= /admin/login` (۱۰ درخواست در دقیقه برای هر IP، burst ۱۰، پاسخ `429`).
 - **`ADMIN_ALLOW_IPS` (اختیاری):** فهرست IP یا CIDR (IPv4/IPv6، جدا با کاما). اگر پر باشد فقط همین‌ها به `/admin` و `/admin/login` دسترسی دارند

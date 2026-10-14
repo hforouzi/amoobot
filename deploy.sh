@@ -366,6 +366,8 @@ EOF
 render_maintenance() {
   if [[ "$1" == on ]]; then
     printf '# Managed by amoobot deploy.sh: maintenance ON while a deploy updates code, cache and schema.\n'
+    # An add_header in a location replaces ALL server-level add_header lines, so HSTS (once enabled) is repeated here.
+    [[ -e "$HSTS_STATE_FILE" ]] && printf 'add_header Strict-Transport-Security "max-age=31536000" always;\n'
     printf 'add_header Retry-After 120 always;\nreturn 503;\n'
   else
     printf '# Managed by amoobot deploy.sh: maintenance OFF.\n'
@@ -1548,6 +1550,9 @@ app_locations() {
     # 503 + Retry-After while a deploy runs (${NGINX_MAINTENANCE_FILE}); Telegram retries the update.
     location ^~ /telegram/webhook/ {
         access_log off;
+        # Upstream errors (PHP-FPM down, timeouts) are logged at "error" with the request line, i.e. with the URL secret:
+        # only crit and worse here, in a file of its own.
+        error_log /var/log/nginx/amoobot_webhook_error.log crit;
         include ${NGINX_MAINTENANCE_FILE};
         fastcgi_pass unix:/run/php/php${PHP_VERSION}-fpm.sock;
         include fastcgi_params;
@@ -1660,9 +1665,20 @@ EOF
   fi
 }
 
+# nginx_log_files  the site's logs exist with mode 640 (www-data:adm, as Ubuntu's logrotate creates them); nginx itself
+# would create a missing log 0644. /var/log/nginx is root-owned, so these paths are not deploy-controlled.
+nginx_log_files() {
+  local f
+  for f in /var/log/nginx/amoobot_access.log /var/log/nginx/amoobot_error.log /var/log/nginx/amoobot_webhook_error.log; do
+    refuse_symlink "$f"
+    if [[ -e "$f" ]]; then run chmod 640 "$f"; else run install -m 640 -o "$WEB_USER" -g adm /dev/null "$f"; fi
+  done
+}
+
 apply_nginx() {
   # The site includes the maintenance file, so it must exist (normally "off" here) before nginx -t.
   [[ -f "$NGINX_MAINTENANCE_FILE" ]] || render_maintenance off | write_file "$NGINX_MAINTENANCE_FILE" 644 root:root
+  nginx_log_files
   run install -d -m 755 -o root -g root "$ACME_WEBROOT"
   render_nginx | write_file "$NGINX_SITE" 644 root:root --show-diff
   run ln -sf "$NGINX_SITE" /etc/nginx/sites-enabled/amoobot
