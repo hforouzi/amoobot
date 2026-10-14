@@ -26,7 +26,7 @@
 |---|---|
 | 0 | خواندن و اعتبارسنجی تنظیمات. اگر مقدار اجباری نباشد یا `APP_ENV`≠prod یا `APP_DEBUG`≠0 باشد، با پیام واضح متوقف می‌شود |
 | 1–4 | `apt upgrade`، نصب Nginx، MariaDB، Supervisor، ufw، certbot، PHP 8.4 (PPA ondrej) و Composer (با بررسی امضای نصب‌کننده) |
-| 5 | کاربر غیر root به نام `deploy`، SSH فقط با کلید، فایروال فقط 22/80/443، سیاست restart خودکار برای nginx/php-fpm/mariadb/supervisor/cron |
+| 5 | کاربر غیر root به نام `deploy` (با sudo فقط برای `amoobot-*`)، SSH فقط با کلید (فقط اگر ورود `deploy` با کلید تأیید شود)، فایروال فقط 22/80/443، سیاست restart خودکار برای nginx/php-fpm/mariadb/supervisor/cron |
 | 6 | تنظیم `sql_mode = STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION`، ساخت دیتابیس و کاربر (و همگام کردن پسورد) |
 | 7 | گرفتن کد با **deploy key فقط‌خواندنی** و checkout روی ref خواسته‌شده؛ ثبت در `/var/lib/amoobot/releases.log`؛ نصب اسکریپت‌هایی که root اجرا می‌کند از **آبجکت‌های git همان کامیت** در `/usr/local/lib/amoobot` (بخش ۳) |
 | 8 | `composer install --no-dev --optimize-autoloader` |
@@ -66,7 +66,26 @@ openssl rand -hex 24   # برای DB_PASSWORD
 sudo nano /etc/amoobot/.env.prod.local
 ```
 
-مقادیر اجباری: `DOMAIN`، `DB_PASSWORD`، `APP_SECRET`، `TELEGRAM_BOT_TOKEN`، `TELEGRAM_WEBHOOK_SECRET`، `TELEGRAM_WEBHOOK_SECRET_TOKEN`، `TELEGRAM_ADMIN_CHAT_ID`. پیشنهاد می‌شود `DEPLOY_SSH_PUBLIC_KEY` (کلید عمومی خودتان) را هم پر کنید.
+مقادیر اجباری: `DOMAIN`، `DB_PASSWORD`، `APP_SECRET`، `TELEGRAM_BOT_TOKEN`، `TELEGRAM_WEBHOOK_SECRET`، `TELEGRAM_WEBHOOK_SECRET_TOKEN`، `TELEGRAM_ADMIN_CHAT_ID`. `DEPLOY_SSH_PUBLIC_KEY` (یک خط از فایل `.pub` خودتان) را هم پر کنید.
+
+### SSH و جلوگیری از قفل شدن (مرحله‌ی 5)
+
+- `DEPLOY_SSH_PUBLIC_KEY` با `ssh-keygen -l` بررسی می‌شود؛ مقدار نامعتبر (یا چند خط، یا کلید خصوصی) در مرحله‌ی 0 متوقف می‌کند.
+- کلیدهای `/root/.ssh/authorized_keys` **همیشه** به `~deploy/.ssh/authorized_keys` اضافه می‌شوند (فقط کلیدهایی که هنوز نیستند)،
+  حتی اگر `deploy` از قبل کلید داشته باشد. کلیدی که `command="..."` دارد (مثلاً «Please login as ubuntu» در ایمیج‌های ابری) ورود حساب نمی‌شود.
+- `/etc/sudoers.d/amoobot-deploy` (مالک root، `440`، قبل از نصب با `visudo -cf` بررسی می‌شود) به `deploy` فقط اجازه‌ی اجرای بدون پسورد
+  `amoobot-deploy`، `amoobot-backup`، `amoobot-restore` و `amoobot-check-jobs` را می‌دهد، **نه** `ALL`.
+- `PasswordAuthentication no` (و `SSH_PERMIT_ROOT_LOGIN=no` اگر انتخاب شده) فقط وقتی نوشته می‌شود که: کاربر `deploy` shell دارد، حداقل یک
+  کلید معتبر بدون `command=` دارد، مالکیت و دسترسی home، `.ssh` و `authorized_keys` با StrictModes سازگار است، و `sudo -l -U deploy`
+  اجازه‌ی `amoobot-deploy` را نشان می‌دهد. وگرنه deploy با فهرست دلیل‌ها **متوقف می‌شود** (dry-run همین را به‌صورت WARNING نشان می‌دهد).
+  پیش‌فرض `PermitRootLogin prohibit-password` است (root فقط با کلید).
+- فایل `/etc/ssh/sshd_config.d/00-amoobot-hardening.conf` نصب و سپس با `sshd -t` بررسی می‌شود؛ اگر رد شود، **قبل از توقف** نسخه‌ی قبلی
+  برگردانده (یا فایل جدید حذف) می‌شود و ssh دوباره بارگذاری نمی‌شود. در Ubuntu 24.04 اگر `ssh.service` در حال اجرا باشد reload می‌شود؛
+  اگر فقط `ssh.socket` فعال باشد sshd هنوز اجرا نشده و اتصال بعدی تنظیمات جدید را می‌خواند.
+
+> **توجه:** این اسکریپت نمی‌تواند یک ورود واقعی SSH را امتحان کند (کلید خصوصی شما را ندارد). قبل از بستن نشست فعلی حتماً در ترمینال دیگر
+> `ssh deploy@SERVER` و `sudo amoobot-deploy --dry-run` را امتحان کنید. کاربر `deploy` با `amoobot-deploy` می‌تواند هر commitی از مخزن را deploy کند
+> و آن commit با دسترسی root اجرا می‌شود؛ پس کلید `deploy` را مثل کلید root محافظت کنید.
 
 ```bash
 # 2) اسکریپت را به سرور بیاورید و ابتدا dry-run بگیرید
@@ -196,6 +215,7 @@ curl -fsS https://DOMAIN/healthz
 - [ ] `/etc/amoobot/.env.prod.local` با مالک root و دسترسی `600` (`stat -c '%a %U' /etc/amoobot/.env.prod.local` ← `600 root`)
 - [ ] `git grep` در مخزن هیچ رمز واقعی‌ای پیدا نمی‌کند
 - [ ] ورود `ssh deploy@SERVER` با کلید کار می‌کند و ورود با پسورد رد می‌شود
+- [ ] `sudo -l -U deploy` فقط چهار دستور `/usr/local/sbin/amoobot-*` را نشان می‌دهد
 - [ ] `sudo ufw status` فقط 22، 80 و 443 را نشان می‌دهد
 - [ ] deploy key در GitHub **بدون** دسترسی نوشتن است
 

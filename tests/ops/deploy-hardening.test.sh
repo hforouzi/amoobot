@@ -17,6 +17,7 @@ pass() { PASS=$((PASS + 1)); echo "PASS: $*"; }
 fail() { FAIL=$((FAIL + 1)); echo "FAIL: $*"; }
 skip() { SKIP=$((SKIP + 1)); echo "SKIP: $*"; }
 check() { local name="$1"; shift; if "$@"; then pass "$name"; else fail "$name"; fi; }
+not() { ! "$@"; }
 have() { command -v "$1" > /dev/null 2>&1; }
 # deploy.sh validates secrets with {32,256}; MSYS/Git Bash regex caps repetition at 255, so its dry-run cannot pass there.
 can_dry_run() { have openssl && [[ x =~ ^x{1,256}$ ]]; }
@@ -96,7 +97,7 @@ if can_dry_run; then
     check "dry-run installs ${f} from git objects into the root lib" \
       grep -qE "^\[dry-run\] install ${f} from git objects of .* -> /usr/local/lib/amoobot/.* root:root\)$" <<< "$OUT"
   done
-  check "dry-run installs the four root wrappers" test "$(grep -cE '^\[dry-run\] write /usr/local/sbin/amoobot-(deploy|backup|restore|check-jobs) \(755 root:root\)' <<< "$OUT")" -eq 4
+  check "dry-run installs the four root wrappers" test "$(grep -oE '^\[dry-run\] write /usr/local/sbin/amoobot-(deploy|backup|restore|check-jobs) \(755 root:root\)' <<< "$OUT" | sort -u | wc -l)" -eq 4
   check "cron runs the root-owned backup wrapper" grep -qE '^    \+ 30 3 \* \* \* root /usr/local/sbin/amoobot-backup nightly ' <<< "$OUT"
   check "DATABASE_URL goes to a root-owned 600 file" grep -q '^\[dry-run\] write /etc/amoobot/database.env (600 root:root)' <<< "$OUT"
   check "job units run the root-owned wrapper script" grep -q '+ ExecStart=/bin/bash /usr/local/lib/amoobot/scheduled-job.sh sync ' <<< "$OUT"
@@ -136,6 +137,121 @@ if have unshare && unshare -r true 2> /dev/null; then
   check "as root: .env.local.php was not executed" test ! -e "$WORK/app/LOADED"
 else
   skip "fake-root test (unshare -r not available)"
+fi
+
+echo "== SSH lockout protection (step 5)"
+chmod_works() { local f="$WORK/chmod-probe"; : > "$f"; chmod 620 "$f"; [[ "$(stat -c %a "$f")" == 620 ]]; }
+if have ssh-keygen; then
+  set_globals
+  load_fn valid_ssh_public_key merge_authorized_keys usable_key_count ssh_login_problems
+  ssh-keygen -q -t ed25519 -N '' -C test@example -f "$WORK/k1" > /dev/null
+  ssh-keygen -q -t ed25519 -N '' -C root@example -f "$WORK/k2" > /dev/null
+  K1="$(cat "$WORK/k1.pub")"; K2="$(cat "$WORK/k2.pub")"
+  check "a public key line is valid" valid_ssh_public_key "$K1"
+  check "garbage is rejected" not valid_ssh_public_key "ssh-ed25519 not-a-key"
+  check "two key lines are rejected" not valid_ssh_public_key "$K1"$'\n'"$K2"
+  check "a private key is rejected" not valid_ssh_public_key "$(cat "$WORK/k1")"
+
+  # Root's keys are merged even when the deploy user already has keys (the old code copied only into an empty file).
+  printf '# root keys\n%s\n\n%s\n' "$K1" "$K2" > "$WORK/root_keys"
+  printf '%s\n' "$K1" > "$WORK/deploy_keys"
+  merge_authorized_keys "$WORK/root_keys" "$WORK/deploy_keys"
+  check "root's missing key appended to a non-empty file" bash -c '[[ $1 -eq 1 ]] && grep -qxF -- "$2" "$3" && grep -qxF -- "$4" "$3"' _ "$MERGED_KEYS" "$K2" "$WORK/deploy_keys" "$K1"
+  merge_authorized_keys "$WORK/root_keys" "$WORK/deploy_keys"
+  check "merge is idempotent (no duplicates)" bash -c '[[ $1 -eq 0 && $(wc -l < "$2") -eq 2 ]]' _ "$MERGED_KEYS" "$WORK/deploy_keys"
+  merge_authorized_keys "$WORK/missing" "$WORK/deploy_keys"
+  check "missing root file adds nothing" test "$MERGED_KEYS" -eq 0
+  check "old copy-only-when-empty logic is gone" bash -c '! grep -q "cp /root/.ssh/authorized_keys" "$1"' _ "$ROOT/deploy.sh"
+
+  printf 'command="echo Please login as ubuntu",no-pty %s\n' "$K1" > "$WORK/forced_keys"
+  check "a forced-command key does not count as a login" test "$(usable_key_count "$WORK/forced_keys")" -eq 0
+  printf 'from="10.0.0.0/8" %s\n%s\n' "$K1" "$K2" > "$WORK/opt_keys"
+  check "keys with other options count" test "$(usable_key_count "$WORK/opt_keys")" -eq 2
+
+  if have getent && chmod_works; then
+    me="$(id -un)"; H="$WORK/home"; mkdir -p "$H/.ssh"; chmod 755 "$H"; chmod 700 "$H/.ssh"
+    : > "$H/.ssh/authorized_keys"; chmod 600 "$H/.ssh/authorized_keys"
+    check "no key -> login problem reported" bash -c '[[ -n "$1" ]]' _ "$(ssh_login_problems "$me" "$H")"
+    printf '%s\n' "$K1" > "$H/.ssh/authorized_keys"
+    out="$(ssh_login_problems "$me" "$H")"
+    check "valid key, correct modes -> no problem" test -z "$out"
+    chmod 770 "$H/.ssh"
+    check "group-writable ~/.ssh -> problem (StrictModes)" grep -q 'writable by group/others' <<< "$(ssh_login_problems "$me" "$H")"
+    chmod 700 "$H/.ssh"
+    check "a dry run's preview file is what gets counted" test -z "$(: > "$H/.ssh/authorized_keys"; ssh_login_problems "$me" "$H" "$WORK/opt_keys")"
+    check "unknown user -> problem" grep -q 'does not exist' <<< "$(ssh_login_problems no-such-user-amoobot "$H")"
+  else
+    skip "login-problem checks (needs getent and a filesystem honouring chmod)"
+  fi
+else
+  skip "SSH key tests (ssh-keygen not installed)"
+fi
+
+set_globals
+load_fn render_sudoers
+render_sudoers > "$WORK/sudoers"
+check "sudoers grants exactly the four wrappers, no ALL command" bash -c \
+  'grep -q "^deploy ALL=(root) NOPASSWD: AMOOBOT_OPS$" "$1" && ! grep -qE "NOPASSWD: *ALL" "$1" &&
+   [[ $(grep -o "/usr/local/sbin/amoobot-[a-z-]*" "$1" | sort -u | tr "\n" " ") == "/usr/local/sbin/amoobot-backup /usr/local/sbin/amoobot-check-jobs /usr/local/sbin/amoobot-deploy /usr/local/sbin/amoobot-restore " ]]' _ "$WORK/sudoers"
+if have visudo; then
+  check "visudo -cf accepts the rendered sudoers" visudo -cf "$WORK/sudoers"
+else
+  skip "visudo -cf (visudo not installed)"
+fi
+check "sudoers is validated with visudo -cf before install" bash -c \
+  'sed -n "/^install_sudoers() {/,/^}/p" "$1" | grep -q "visudo -cf \"\$tmp\".* || .*die"' _ "$ROOT/deploy.sh"
+
+# install_sshd_dropin with a stub sshd: a rejected config must never stay in place.
+load_fn install_sshd_dropin reload_ssh
+dropin_case() {  # dropin_case <sshd exit code> <previous content or ""> -> final content (or "<absent>"), then rc/changed
+  ( die() { printf 'DIE: %s\n' "$*" >> "$WORK/dropin.err"; echo "rc=1 changed=${SSHD_CHANGED:-}"; exit 1; }
+    sshd() { echo "line 1: Bad configuration option: Nope" >&2; return "$SSHD_RC"; }
+    DRY_RUN=0 SSHD_RC="$1"; f="$WORK/sshd.d/00-amoobot.conf"; rm -rf "$WORK/sshd.d"; mkdir -p "$WORK/sshd.d"
+    [[ -n "$2" ]] && printf '%s\n' "$2" > "$f"
+    : > "$WORK/dropin.err"
+    ( install_sshd_dropin "$f" <<< 'PasswordAuthentication no'; echo "rc=$? changed=${SSHD_CHANGED:-}" ) > "$WORK/dropin.status"
+    if [[ -e "$f" ]]; then cat "$f"; else echo "<absent>"; fi
+    cat "$WORK/dropin.status" )
+}
+out="$(dropin_case 1 "")"
+check "sshd -t fails, no previous file -> new file removed" bash -c '[[ "$1" == $'"'"'<absent>\nrc=1 changed=0'"'"' ]]' _ "$out"
+check "  ...and the error names the restore and sshd's message" grep -q 'restored to its previous state.*Bad configuration option' "$WORK/dropin.err"
+out="$(dropin_case 1 "PasswordAuthentication yes")"
+check "sshd -t fails -> previous file restored before stopping" bash -c '[[ "$1" == $'"'"'PasswordAuthentication yes\nrc=1 changed=0'"'"' ]]' _ "$out"
+out="$(dropin_case 0 "PasswordAuthentication yes")"
+check "sshd -t passes -> new file installed, changed=1" bash -c '[[ "$1" == $'"'"'PasswordAuthentication no\nrc=0 changed=1'"'"' ]]' _ "$out"
+out="$(dropin_case 1 "PasswordAuthentication no")"
+check "unchanged file -> sshd not even tested, changed=0" bash -c '[[ "$1" == $'"'"'PasswordAuthentication no\nrc=0 changed=0'"'"' ]]' _ "$out"
+
+reload_case() {  # reload_case "<active units>" -> systemctl calls + result
+  ( die() { echo "DIE" >&2; exit 1; }
+    systemctl() { echo "systemctl $*" >> "$WORK/systemctl.calls"; [[ "$1" == is-active ]] && [[ " $ACTIVE " == *" $3 "* ]]; }
+    ACTIVE="$1"; : > "$WORK/systemctl.calls"; reload_ssh > /dev/null; echo "rc=$?"; grep -c 'systemctl reload' "$WORK/systemctl.calls" )
+}
+check "running ssh.service is reloaded" test "$(reload_case "ssh.service ssh.socket" | tr '\n' ' ')" = "rc=0 1 "
+check "socket-activated only (Ubuntu 24.04) -> no reload needed" test "$(reload_case "ssh.socket" | tr '\n' ' ')" = "rc=0 0 "
+check "no ssh daemon at all -> stop" grep -q DIE <<< "$(reload_case "" 2>&1)"
+
+if can_dry_run; then
+  OUT="$BASE_OUT"
+  check "default PermitRootLogin is prohibit-password" grep -q '^    + PermitRootLogin prohibit-password$' <<< "$OUT"
+  check "drop-in is tested with sshd -t and restored on failure" grep -q 'check with sshd -t (on failure restore the previous file)' <<< "$OUT"
+  check "dry-run previews the sudoers file" grep -q '^    + deploy ALL=(root) NOPASSWD: AMOOBOT_OPS$' <<< "$OUT"
+  check "no verified key -> a real run would refuse to disable passwords" grep -q 'a real run would stop here. Refusing to disable SSH password login' <<< "$OUT"
+  if have ssh-keygen; then
+    { cat "$WORK/prod.env"; echo "DEPLOY_SSH_PUBLIC_KEY=ssh-ed25519 AAAAnot-a-real-key x"; } > "$WORK/badkey.env"
+    dry_run "$WORK/badkey.env"
+    check "invalid DEPLOY_SSH_PUBLIC_KEY stops the preflight" bash -c '[[ $1 -ne 0 ]] && grep -q "DEPLOY_SSH_PUBLIC_KEY is not one valid SSH public key" <<< "$2"' _ "$RC" "$OUT"
+    { cat "$WORK/prod.env"; echo "DEPLOY_SSH_PUBLIC_KEY=$K1"; } > "$WORK/goodkey.env"
+    dry_run "$WORK/goodkey.env"
+    check "valid DEPLOY_SSH_PUBLIC_KEY would be added" bash -c '[[ $1 -eq 0 ]] && grep -q "\[dry-run\] add DEPLOY_SSH_PUBLIC_KEY" <<< "$2"' _ "$RC" "$OUT"
+    check "  ...and then nothing would be refused" not grep -q 'a real run would stop here' <<< "$OUT"
+    { cat "$WORK/prod.env"; echo "SSH_PERMIT_ROOT_LOGIN=no"; } > "$WORK/noroot.env"
+    dry_run "$WORK/noroot.env"
+    check "PermitRootLogin no without a verified deploy login is refused" grep -q 'Refusing to disable SSH password login (and to set PermitRootLogin no)' <<< "$OUT"
+  fi
+else
+  skip "$DRY_RUN_SKIP"
 fi
 
 echo

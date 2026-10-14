@@ -296,7 +296,7 @@ git_blob() {
 
 # install_root_ops COMMIT  installs ROOT_OPS_FILES from COMMIT's git objects into ROOT_LIB_DIR, plus the wrappers.
 install_root_ops() {
-  local commit="$1" path dest mode tmp name
+  local commit="$1" path dest mode tmp
   run install -d -m 755 -o root -g root "$ROOT_LIB_DIR" "$ROOT_LIB_DIR/lib"
   for path in "${ROOT_OPS_FILES[@]}"; do
     dest="$(root_ops_dest "$path")"
@@ -310,9 +310,140 @@ install_root_ops() {
     write_file "$dest" "$mode" root:root < "$tmp"
     rm -f "$tmp"
   done
+  install_root_wrappers
+}
+
+install_root_wrappers() {
+  local name
+  run install -d -m 755 -o root -g root "$ROOT_SBIN_DIR"
   for name in "${ROOT_WRAPPERS[@]}"; do
     write_file "${ROOT_SBIN_DIR}/amoobot-${name}" 755 root:root --show-diff < <(render_root_wrapper "$name")
   done
+}
+
+# valid_ssh_public_key LINE  ->  0 for exactly one line that ssh-keygen accepts as a public key (private keys are multi-line)
+valid_ssh_public_key() {
+  [[ -n "$1" && "$1" != *$'\n'* && "$1" != *PRIVATE* ]] || return 1
+  ssh-keygen -l -f /dev/stdin <<< "$1" > /dev/null 2>&1
+}
+
+# merge_authorized_keys SRC DEST  appends every key line of SRC that DEST lacks (DEST may already have keys).
+# Sets MERGED_KEYS to the number added.
+merge_authorized_keys() {
+  local src="$1" dest="$2" line
+  MERGED_KEYS=0
+  [[ -r "$src" ]] || return 0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"
+    [[ -z "${line//[[:space:]]/}" || "$line" == \#* ]] && continue
+    grep -qxF -- "$line" "$dest" 2> /dev/null && continue
+    printf '%s\n' "$line" >> "$dest"
+    MERGED_KEYS=$((MERGED_KEYS + 1))
+  done < "$src"
+}
+
+# usable_key_count FILE  ->  key lines that ssh-keygen accepts and that allow a shell (no forced command=)
+usable_key_count() {
+  local line n=0
+  [[ -r "$1" ]] || { echo 0; return 0; }
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"
+    [[ -z "${line//[[:space:]]/}" || "$line" == \#* ]] && continue
+    # A line not starting with the key type has options; command="..." means no shell (cloud images do this for root).
+    [[ ! "$line" =~ ^(ssh-|ecdsa-|sk-) && "$line" =~ (^|,)[[:space:]]*command= ]] && continue
+    valid_ssh_public_key "$line" && n=$((n + 1))
+  done < "$1"
+  echo "$n"
+}
+
+# ssh_login_problems USER HOME [KEYS]  ->  one line per reason why USER could not log in with a key (empty = usable).
+# KEYS (default HOME/.ssh/authorized_keys) is the file whose keys are counted; a dry run passes its preview copy.
+# Mirrors sshd's StrictModes: the home, ~/.ssh and authorized_keys must not be writable by others.
+ssh_login_problems() {
+  local user="$1" home="$2" keys="${3:-$2/.ssh/authorized_keys}" shell uid
+  shell="$(getent passwd "$user" | cut -d: -f7 || true)"
+  uid="$(id -u "$user" 2> /dev/null || true)"
+  [[ -n "$uid" ]] || { echo "user ${user} does not exist"; return 0; }
+  [[ -n "$shell" && "$shell" != */nologin && "$shell" != */false ]] || echo "${user} has no login shell (${shell:-none})"
+  (( $(usable_key_count "$keys") > 0 )) \
+    || echo "${home}/.ssh/authorized_keys has no valid key that allows a shell (set DEPLOY_SSH_PUBLIC_KEY)"
+  local path owner mode
+  for path in "$home" "$home/.ssh" "$home/.ssh/authorized_keys"; do
+    [[ -e "$path" ]] || continue
+    read -r owner mode < <(stat -c '%u %a' "$path")
+    [[ "$owner" == "$uid" || ( "$path" == "$home" && "$owner" == 0 ) ]] || echo "${path} is not owned by ${user}"
+    (( (8#$mode & 8#022) == 0 )) || echo "${path} is writable by group/others (sshd StrictModes rejects the key)"
+  done
+}
+
+render_sudoers() {
+  cat <<EOF
+# Managed by amoobot deploy.sh: ${DEPLOY_USER} may run ONLY these root-owned entry points without a password
+# (installed from the deployed commit, see ${ROOT_LIB_DIR}). Anything else needs root. Arguments are allowed.
+Cmnd_Alias AMOOBOT_OPS = ${ROOT_SBIN_DIR}/amoobot-deploy, ${ROOT_SBIN_DIR}/amoobot-backup, ${ROOT_SBIN_DIR}/amoobot-restore, ${ROOT_SBIN_DIR}/amoobot-check-jobs
+${DEPLOY_USER} ALL=(root) NOPASSWD: AMOOBOT_OPS
+EOF
+}
+
+# install_sudoers PATH  validates the rendered rules with visudo -cf before they are installed (a broken file in
+# /etc/sudoers.d disables sudo for everybody).
+install_sudoers() {
+  local path="$1" tmp
+  tmp="$(mktemp)"
+  render_sudoers > "$tmp"
+  if (( DRY_RUN )); then
+    log "[dry-run] validate with visudo -cf, then install ${path} (440 root:root):"
+    sed 's/^/    + /' "$tmp"
+    rm -f "$tmp"
+    return 0
+  fi
+  visudo -cf "$tmp" > /dev/null || { rm -f "$tmp"; die "visudo rejected the generated sudoers rules; ${path} not changed."; }
+  write_file "$path" 440 root:root < "$tmp"
+  rm -f "$tmp"
+}
+
+# install_sshd_dropin PATH  (content on stdin) installs it, runs sshd -t, and on failure puts the previous file back
+# (or removes the new one) BEFORE stopping, so a bad file never stays in place. Sets SSHD_CHANGED.
+install_sshd_dropin() {
+  local path="$1" tmp backup="" test_out
+  tmp="$(mktemp)"
+  cat > "$tmp"
+  SSHD_CHANGED=0
+  if [[ -f "$path" ]] && cmp -s "$tmp" "$path"; then
+    rm -f "$tmp"
+    (( DRY_RUN )) && log "[dry-run] ${path} unchanged"
+    return 0
+  fi
+  SSHD_CHANGED=1
+  if (( DRY_RUN )); then
+    log "[dry-run] install ${path}, check with sshd -t (on failure restore the previous file), then reload ssh:"
+    sed 's/^/    + /' "$tmp"
+    rm -f "$tmp"
+    return 0
+  fi
+  if [[ -f "$path" ]]; then backup="$(mktemp)"; cp -p "$path" "$backup"; fi
+  install -D -m 644 "$tmp" "$path"
+  (( EUID == 0 )) && chown root:root "$path"
+  rm -f "$tmp"
+  if ! test_out="$(sshd -t 2>&1)"; then
+    if [[ -n "$backup" ]]; then cp -p "$backup" "$path"; rm -f "$backup"; else rm -f "$path"; fi
+    SSHD_CHANGED=0
+    die "sshd -t rejected the new SSH config; ${path} was restored to its previous state and ssh was not reloaded. sshd said: ${test_out}"
+  fi
+  rm -f "$backup"
+}
+
+# reload_ssh: Ubuntu 24.04 starts sshd through ssh.socket. A running ssh.service is reloaded; if only the socket is
+# active, sshd is not running and the next connection starts it with the new config.
+reload_ssh() {
+  if systemctl is-active --quiet ssh.service; then
+    systemctl reload ssh.service
+    log "Reloaded ssh.service."
+  elif systemctl is-active --quiet ssh.socket; then
+    log "ssh.service is not running (socket-activated via ssh.socket): new connections use the new config."
+  else
+    die "Neither ssh.service nor ssh.socket is active; refusing to continue without a working SSH daemon."
+  fi
 }
 
 # load_env_file PATH: KEY=VALUE lines only (no shell code is executed). The process environment wins.
@@ -448,6 +579,15 @@ fi
 [[ "$DB_NAME" =~ ^[A-Za-z0-9_]+$ && "$DB_USER" =~ ^[A-Za-z0-9_]+$ ]] || die "DB_NAME / DB_USER may only contain A-Z a-z 0-9 _."
 [[ "$DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]*$ && "$DEPLOY_USER" != "root" ]] || die "DEPLOY_USER must be a non-root user name."
 [[ "$SSH_PERMIT_ROOT_LOGIN" =~ ^(no|prohibit-password)$ ]] || die "SSH_PERMIT_ROOT_LOGIN must be 'no' or 'prohibit-password'."
+if [[ -n "${DEPLOY_SSH_PUBLIC_KEY:-}" ]]; then
+  if command -v ssh-keygen > /dev/null 2>&1; then
+    valid_ssh_public_key "$DEPLOY_SSH_PUBLIC_KEY" \
+      || die "DEPLOY_SSH_PUBLIC_KEY is not one valid SSH public key line (ssh-keygen -l rejected it). Use the .pub file's content."
+  else
+    (( DRY_RUN )) || die "ssh-keygen is missing; cannot validate DEPLOY_SSH_PUBLIC_KEY."
+    warn "ssh-keygen not installed here: DEPLOY_SSH_PUBLIC_KEY not validated in this dry run."
+  fi
+fi
 [[ "$BACKUP_RETENTION_DAYS" =~ ^[0-9]+$ ]] || die "BACKUP_RETENTION_DAYS must be a number."
 [[ "$TELEGRAM_BOT_TOKEN" =~ ^[0-9]+:[A-Za-z0-9_-]{30,}$ ]] || die "TELEGRAM_BOT_TOKEN does not look like a BotFather token."
 [[ "$TELEGRAM_ADMIN_CHAT_ID" =~ ^-?[0-9]+$ ]] || die "TELEGRAM_ADMIN_CHAT_ID must be numeric."
@@ -582,21 +722,48 @@ DEPLOY_HOME="$(getent passwd "$DEPLOY_USER" | cut -d: -f6 || true)"
 DEPLOY_HOME="${DEPLOY_HOME:-/home/$DEPLOY_USER}"
 run install -d -m 700 -o "$DEPLOY_USER" -g "$DEPLOY_USER" "$DEPLOY_HOME/.ssh"
 auth_keys="$DEPLOY_HOME/.ssh/authorized_keys"
-if [[ -n "${DEPLOY_SSH_PUBLIC_KEY:-}" ]] && ! grep -qxF "$DEPLOY_SSH_PUBLIC_KEY" "$auth_keys" 2>/dev/null; then
-  if (( DRY_RUN )); then log "[dry-run] add DEPLOY_SSH_PUBLIC_KEY to ${auth_keys}"; else printf '%s\n' "$DEPLOY_SSH_PUBLIC_KEY" >> "$auth_keys"; fi
+# A dry run works on a copy, so it reports what would be added without touching the real file.
+keys_target="$auth_keys"
+if (( DRY_RUN )); then
+  keys_target="$(mktemp)"
+  [[ -r "$auth_keys" ]] && cat "$auth_keys" > "$keys_target"
+else
+  touch "$auth_keys"
 fi
-if [[ ! -s "$auth_keys" && -s /root/.ssh/authorized_keys ]]; then
-  log "Copying root's authorized SSH keys to ${DEPLOY_USER}."
-  run cp /root/.ssh/authorized_keys "$auth_keys"
+if [[ -n "${DEPLOY_SSH_PUBLIC_KEY:-}" ]] && ! grep -qxF -- "$DEPLOY_SSH_PUBLIC_KEY" "$keys_target"; then
+  printf '%s\n' "$DEPLOY_SSH_PUBLIC_KEY" >> "$keys_target"
+  log "$( (( DRY_RUN )) && echo '[dry-run] add' || echo 'Added') DEPLOY_SSH_PUBLIC_KEY to ${auth_keys}."
 fi
-[[ -e "$auth_keys" ]] && run chown "$DEPLOY_USER:$DEPLOY_USER" "$auth_keys" && run chmod 600 "$auth_keys"
+# Always merge root's keys (not only into an empty file): whoever administers root keeps access as the deploy user.
+merge_authorized_keys /root/.ssh/authorized_keys "$keys_target"
+(( MERGED_KEYS )) && log "$( (( DRY_RUN )) && echo '[dry-run] add' || echo 'Added') ${MERGED_KEYS} key(s) from /root/.ssh/authorized_keys to ${auth_keys}."
+run chown "$DEPLOY_USER:$DEPLOY_USER" "$auth_keys"
+run chmod 600 "$auth_keys"
 
-# Key-only SSH. Refuse if that would lock everybody out.
-if [[ ! -s "$auth_keys" && ! -s /root/.ssh/authorized_keys ]] && (( ! DRY_RUN )); then
-  die "No SSH public key for ${DEPLOY_USER} or root. Set DEPLOY_SSH_PUBLIC_KEY first; disabling password login now would lock you out."
+# Administration path for the deploy user: passwordless sudo for the root-owned entry points only (not ALL).
+install_root_wrappers
+install_sudoers /etc/sudoers.d/amoobot-deploy
+
+# Key-only SSH (and PermitRootLogin no, if chosen) only once the deploy user verifiably has a key and the sudo path.
+if (( DRY_RUN )) && ! id "$DEPLOY_USER" > /dev/null 2>&1; then
+  # Not created yet (a real run creates it above); judge only the keys it would get.
+  login_problems=()
+  (( $(usable_key_count "$keys_target") > 0 )) \
+    || login_problems=("${auth_keys} would have no valid key that allows a shell (set DEPLOY_SSH_PUBLIC_KEY)")
+else
+  mapfile -t login_problems < <(ssh_login_problems "$DEPLOY_USER" "$DEPLOY_HOME" "$keys_target")
+fi
+if (( ! DRY_RUN )) && ! sudo -n -l -U "$DEPLOY_USER" "${ROOT_SBIN_DIR}/amoobot-deploy" > /dev/null 2>&1; then
+  login_problems+=("sudo -l -U ${DEPLOY_USER} does not allow ${ROOT_SBIN_DIR}/amoobot-deploy")
+fi
+(( DRY_RUN )) && rm -f "$keys_target"
+if (( ${#login_problems[@]} )); then
+  printf '  - %s\n' "${login_problems[@]}" >&2
+  refusal="Refusing to disable SSH password login (and to set PermitRootLogin ${SSH_PERMIT_ROOT_LOGIN}): ${DEPLOY_USER} has no verified key login + sudo path (reasons above). That would risk locking you out. Set DEPLOY_SSH_PUBLIC_KEY (your .pub) and re-run."
+  if (( DRY_RUN )); then warn "a real run would stop here. ${refusal}"; else die "$refusal"; fi
 fi
 # 00- so it is read before cloud-init's 50-cloud-init.conf (first value wins in sshd).
-write_file /etc/ssh/sshd_config.d/00-amoobot-hardening.conf 644 root:root <<EOF
+install_sshd_dropin /etc/ssh/sshd_config.d/00-amoobot-hardening.conf <<EOF
 # Managed by amoobot deploy.sh
 PubkeyAuthentication yes
 PasswordAuthentication no
@@ -604,9 +771,8 @@ KbdInteractiveAuthentication no
 PermitEmptyPasswords no
 PermitRootLogin ${SSH_PERMIT_ROOT_LOGIN}
 EOF
-if (( FILE_CHANGED && ! DRY_RUN )); then
-  sshd -t || die "sshd config test failed; fix /etc/ssh/sshd_config.d before reconnecting."
-  systemctl try-reload-or-restart ssh
+if (( SSHD_CHANGED && ! DRY_RUN )); then
+  reload_ssh
 fi
 if (( ! DRY_RUN )); then
   [[ "$(sshd -T | awk '$1=="passwordauthentication"{print $2}')" == "no" ]] \
