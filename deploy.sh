@@ -33,6 +33,23 @@ REQUIRED_SQL_MODE="STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBS
 WEB_USER="www-data"
 STATE_DIR="/var/lib/amoobot"
 
+# Scheduled jobs, installed as systemd timers in step 16 (intervals and reasons: docs/fa/automation.md).
+#   name | lock group | OnCalendar | timeout (s) | interval (s) | console command
+# Jobs in the same lock group never run concurrently. Only app:automation:run tasks: they honour the admin toggles.
+# Never add app:payments:repair-stuck or other destructive commands here.
+SCHEDULED_JOBS=(
+  "broadcasts|broadcasts|*:0/2|600|120|app:automation:run --only=broadcasts"
+  "orders|orders|*:0/10|300|600|app:automation:run --only=orders"
+  "sync|lifecycle|*:0/15|1500|900|app:automation:run --only=sync"
+  "expiry|lifecycle|*:5/15|600|900|app:automation:run --only=expiry"
+  "suspend|lifecycle|*:8/15|600|900|app:automation:run --only=suspend"
+  "notifications|lifecycle|*:10/30|900|1800|app:automation:run --only=notifications"
+)
+JOBS_LOG_DIR="/var/log/amoobot"
+JOBS_STATE_DIR="${STATE_DIR}/jobs"
+JOBS_LOCK_DIR="/run/amoobot"
+JOBS_MANIFEST="${STATE_DIR}/scheduled-jobs.conf"
+
 # Keys used only by this script; never written into the application's env.
 DEPLOY_ONLY_KEYS=" DOMAIN LETSENCRYPT_EMAIL REPO_URL APP_DIR PHP_VERSION DEPLOY_USER DEPLOY_REF DEPLOY_SSH_PUBLIC_KEY "
 DEPLOY_ONLY_KEYS+="SSH_PERMIT_ROOT_LOGIN DB_NAME DB_USER DB_PASSWORD BACKUP_DIR BACKUP_RETENTION_DAYS BACKUP_CRON "
@@ -66,6 +83,15 @@ on_error() {
   printf '\nERROR: deploy failed in step [%s] at line %s (exit %s). Nothing after this point ran.\n' "$STEP" "$2" "$1" >&2
 }
 trap 'on_error $? $LINENO' ERR
+
+JOBS_PAUSED=0
+JOB_LOCK_FDS=()
+on_exit() {
+  if (( $1 != 0 && JOBS_PAUSED )); then
+    printf 'NOTE: scheduled jobs are PAUSED (amoobot-job-*.timer stopped) until a deploy completes successfully.\n' >&2
+  fi
+}
+trap 'on_exit $?' EXIT
 
 # run CMD...  executes, or prints in --dry-run. Never pass secrets as arguments (they would show up here and in ps).
 run() {
@@ -128,6 +154,81 @@ dotenv_quote() {
 }
 
 is_deploy_only() { [[ "$DEPLOY_ONLY_KEYS" == *" $1 "* ]]; }
+
+# parse_job "<SCHEDULED_JOBS entry>"  ->  JOB_NAME JOB_GROUP JOB_CALENDAR JOB_TIMEOUT JOB_INTERVAL JOB_COMMAND
+parse_job() {
+  IFS='|' read -r JOB_NAME JOB_GROUP JOB_CALENDAR JOB_TIMEOUT JOB_INTERVAL JOB_COMMAND <<< "$1"
+}
+
+job_lock_groups() {
+  local entry
+  for entry in "${SCHEDULED_JOBS[@]}"; do parse_job "$entry"; printf '%s\n' "$JOB_GROUP"; done | sort -u
+}
+
+# Stop all job timers and take every job lock, so no job runs against half-updated code, cache or schema.
+# Locks are held until resume_scheduled_jobs (or until this script exits).
+pause_scheduled_jobs() {
+  local timers=() group lock fd
+  if (( DRY_RUN )); then
+    log "[dry-run] pause scheduled jobs: stop amoobot-job-*.timer, wait for running jobs (locks in ${JOBS_LOCK_DIR})"
+    return 0
+  fi
+  mapfile -t timers < <(systemctl list-unit-files 'amoobot-job-*.timer' --no-legend 2>/dev/null | awk '{print $1}')
+  (( ${#timers[@]} )) || return 0
+  systemctl stop "${timers[@]}"
+  JOBS_PAUSED=1
+  install -d -m 750 -o "$WEB_USER" -g "$WEB_USER" "$JOBS_LOCK_DIR"
+  for group in $(job_lock_groups); do
+    lock="$JOBS_LOCK_DIR/$group.lock"
+    [[ -e "$lock" ]] || install -m 660 -o "$WEB_USER" -g "$WEB_USER" /dev/null "$lock"
+    exec {fd}< "$lock"
+    flock -w 900 "$fd" || die "Scheduled job group '${group}' is still running after 15 minutes; see 'systemctl list-units amoobot-job-*'."
+    JOB_LOCK_FDS+=("$fd")
+  done
+  log "Paused ${#timers[@]} scheduled job timer(s); running jobs have finished."
+}
+
+render_job_service() {
+  cat <<EOF
+# Managed by amoobot deploy.sh - edit SCHEDULED_JOBS in deploy.sh, not this file.
+[Unit]
+Description=Amoobot scheduled job: ${JOB_NAME} (${JOB_COMMAND})
+Documentation=file://${APP_DIR}/docs/fa/automation.md
+After=network-online.target mariadb.service
+Wants=network-online.target
+OnFailure=amoobot-job-alert@%N.service
+
+[Service]
+Type=oneshot
+User=${WEB_USER}
+Group=${WEB_USER}
+WorkingDirectory=${APP_DIR}
+ExecStart=/bin/bash ${APP_DIR}/bin/scheduled-job.sh ${JOB_NAME} ${JOB_GROUP} -- /usr/bin/php ${APP_DIR}/bin/console ${JOB_COMMAND} --env=prod --no-interaction
+TimeoutStartSec=${JOB_TIMEOUT}
+Nice=10
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ProtectHome=yes
+EOF
+}
+
+render_job_timer() {
+  cat <<EOF
+# Managed by amoobot deploy.sh - edit SCHEDULED_JOBS in deploy.sh, not this file.
+[Unit]
+Description=Amoobot schedule for job ${JOB_NAME} (${JOB_CALENDAR})
+
+[Timer]
+OnCalendar=${JOB_CALENDAR}
+Persistent=true
+AccuracySec=15s
+Unit=amoobot-job-${JOB_NAME}.service
+
+[Install]
+WantedBy=timers.target
+EOF
+}
 
 # load_env_file PATH: KEY=VALUE lines only (no shell code is executed). The process environment wins.
 load_env_file() {
@@ -282,6 +383,17 @@ if [[ -n "${DB_PASSWORD:-}" ]]; then
     || die "DB_PASSWORD must be 16+ characters of A-Z a-z 0-9 . _ ~ - (e.g. openssl rand -hex 24)."
 fi
 
+job_names=" "
+for entry in "${SCHEDULED_JOBS[@]}"; do
+  parse_job "$entry"
+  [[ "$JOB_NAME" =~ ^[a-z0-9-]+$ && "$JOB_GROUP" =~ ^[a-z0-9-]+$ && "$job_names" != *" $JOB_NAME "* ]] \
+    || die "SCHEDULED_JOBS: invalid or duplicate job name/group in '${entry}'."
+  [[ "$JOB_TIMEOUT" =~ ^[0-9]+$ && "$JOB_INTERVAL" =~ ^[0-9]+$ && -n "$JOB_CALENDAR" && "$JOB_COMMAND" == app:* ]] \
+    || die "SCHEDULED_JOBS: invalid entry '${entry}'."
+  [[ "$JOB_COMMAND" != *repair-stuck* ]] || die "SCHEDULED_JOBS: app:payments:repair-stuck must never be scheduled."
+  job_names+="$JOB_NAME "
+done
+
 LOCAL_DB=1
 [[ -n "${DATABASE_URL:-}" ]] && LOCAL_DB=0
 
@@ -298,7 +410,7 @@ if (( ! APP_ONLY )); then
 # UPDATE SYSTEM
 ########################################
 
-step "1/17" "Updating system..."
+step "1/18" "Updating system..."
 run apt-get update
 run apt-get upgrade -y
 
@@ -306,7 +418,7 @@ run apt-get upgrade -y
 # INSTALL PACKAGES
 ########################################
 
-step "2/17" "Installing packages..."
+step "2/18" "Installing packages..."
 run apt-get install -y \
   nginx \
   git \
@@ -325,7 +437,7 @@ run apt-get install -y \
 # INSTALL PHP
 ########################################
 
-step "3/17" "Installing PHP ${PHP_VERSION}..."
+step "3/18" "Installing PHP ${PHP_VERSION}..."
 if ! compgen -G "/etc/apt/sources.list.d/ondrej-*php*" > /dev/null; then
   run add-apt-repository ppa:ondrej/php -y
   run apt-get update
@@ -348,7 +460,7 @@ run apt-get install -y \
 # INSTALL COMPOSER
 ########################################
 
-step "4/17" "Installing Composer..."
+step "4/18" "Installing Composer..."
 if command -v composer > /dev/null 2>&1; then
   log "Composer already installed."
 elif (( DRY_RUN )); then
@@ -367,7 +479,7 @@ fi
 # SERVER HARDENING: deploy user, SSH, firewall, restart policies
 ########################################
 
-step "5/17" "Hardening server (deploy user, SSH key-only, firewall 22/80/443, restart policies)..."
+step "5/18" "Hardening server (deploy user, SSH key-only, firewall 22/80/443, restart policies)..."
 
 if ! id "$DEPLOY_USER" > /dev/null 2>&1; then
   run useradd --create-home --shell /bin/bash "$DEPLOY_USER"
@@ -442,7 +554,7 @@ run systemctl enable --now nginx "php${PHP_VERSION}-fpm" mariadb supervisor cron
 # CREATE DATABASE
 ########################################
 
-step "6/17" "Configuring MariaDB and database..."
+step "6/18" "Configuring MariaDB and database..."
 
 if (( LOCAL_DB )); then
   write_file /etc/mysql/mariadb.conf.d/60-amoobot.cnf 644 root:root <<EOF
@@ -476,7 +588,7 @@ fi # APP_ONLY
 # CLONE / UPDATE PROJECT
 ########################################
 
-step "7/17" "Fetching code (${DEPLOY_REF})..."
+step "7/18" "Fetching code (${DEPLOY_REF})..."
 
 id "$DEPLOY_USER" > /dev/null 2>&1 || (( DRY_RUN )) || die "Deploy user ${DEPLOY_USER} does not exist; run once without --app-only."
 DEPLOY_HOME="$(getent passwd "$DEPLOY_USER" | cut -d: -f6 || true)"
@@ -518,6 +630,8 @@ if (( ! DRY_RUN )); then
   PREVIOUS_COMMIT="$(sudo -H -u "$DEPLOY_USER" git -C "$APP_DIR" rev-parse --verify -q HEAD || true)"
 fi
 as "$DEPLOY_USER" git -C "$APP_DIR" fetch --prune --tags origin
+# From here until step 16 the code, cache and schema change: no scheduled job may run meanwhile.
+pause_scheduled_jobs
 if (( DRY_RUN )); then
   log "[dry-run] check out ${DEPLOY_REF} (origin/${DEPLOY_REF}, a tag, or a commit)"
 else
@@ -537,7 +651,7 @@ cd "$APP_DIR" 2>/dev/null || (( DRY_RUN )) || die "Cannot enter ${APP_DIR}."
 # INSTALL DEPENDENCIES
 ########################################
 
-step "8/17" "Installing Composer dependencies (production)..."
+step "8/18" "Installing Composer dependencies (production)..."
 # Scripts run later as the web user (cache:clear / assets:install need var/ and public/bundles).
 as "$DEPLOY_USER" composer install --working-dir="$APP_DIR" --no-dev --optimize-autoloader --no-interaction --no-progress --no-scripts
 
@@ -545,7 +659,7 @@ as "$DEPLOY_USER" composer install --working-dir="$APP_DIR" --no-dev --optimize-
 # ENV FILE
 ########################################
 
-step "9/17" "Writing production env (.env.prod.local -> .env.local.php)..."
+step "9/18" "Writing production env (.env.prod.local -> .env.local.php)..."
 
 if (( LOCAL_DB )); then
   # DB_PASSWORD was validated as URL-safe above, so it needs no encoding.
@@ -577,7 +691,7 @@ run chmod 640 "$APP_DIR/.env.local.php"
 # PERMISSIONS
 ########################################
 
-step "10/17" "Setting permissions..."
+step "10/18" "Setting permissions..."
 
 run install -d -o "$WEB_USER" -g "$WEB_USER" "$APP_DIR/var" "$APP_DIR/var/plugins" "$APP_DIR/var/plugin_uploads" "$APP_DIR/var/log" "$APP_DIR/public/bundles"
 run chown -R "$WEB_USER:$WEB_USER" "$APP_DIR/var" "$APP_DIR/public/bundles"
@@ -590,7 +704,7 @@ run chmod 600 "$APP_DIR/.env.prod.local"
 # CACHE & MIGRATIONS
 ########################################
 
-step "11/17" "Clearing cache, running migrations..."
+step "11/18" "Clearing cache, running migrations..."
 
 # Fresh cache first: a prod container left over from the previous release must not run the new migrations.
 run rm -rf "$APP_DIR/var/cache/prod"
@@ -612,7 +726,7 @@ console lint:container
 # NGINX CONFIG
 ########################################
 
-step "12/17" "Configuring Nginx..."
+step "12/18" "Configuring Nginx..."
 
 CERT_DIR="/etc/letsencrypt/live/${DOMAIN}"
 
@@ -711,7 +825,7 @@ apply_nginx
 # SSL
 ########################################
 
-step "13/17" "Ensuring HTTPS certificate (Let's Encrypt, auto-renewing)..."
+step "13/18" "Ensuring HTTPS certificate (Let's Encrypt, auto-renewing)..."
 
 # certonly: this script owns the nginx config; certbot only obtains/renews the certificate (certbot.timer).
 run certbot certonly --nginx -d "$DOMAIN" --non-interactive --agree-tos -m "$LETSENCRYPT_EMAIL" \
@@ -723,7 +837,7 @@ run systemctl enable --now certbot.timer
 # SUPERVISOR
 ########################################
 
-step "14/17" "Configuring Supervisor..."
+step "14/18" "Configuring Supervisor..."
 
 if (( DRY_RUN )); then
   log "[dry-run] install amoobot-worker (messenger:consume async) only if an 'async' messenger transport is configured"
@@ -758,7 +872,7 @@ fi
 # BACKUPS
 ########################################
 
-step "15/17" "Installing database backup cron (${BACKUP_CRON}, keep ${BACKUP_RETENTION_DAYS} days)..."
+step "15/18" "Installing database backup cron (${BACKUP_CRON}, keep ${BACKUP_RETENTION_DAYS} days)..."
 
 run install -d -m 700 -o root -g root "$BACKUP_DIR"
 write_file /etc/cron.d/amoobot-backup 644 root:root <<EOF
@@ -769,10 +883,104 @@ ${BACKUP_CRON} root APP_DIR=${APP_DIR} BACKUP_DIR=${BACKUP_DIR} BACKUP_RETENTION
 EOF
 
 ########################################
+# SCHEDULED JOBS
+########################################
+
+step "16/18" "Installing scheduled jobs (systemd timers, run as ${WEB_USER})..."
+
+printf '  %-14s %-12s %-10s %-8s %s\n' "JOB" "SCHEDULE" "LOCK" "TIMEOUT" "COMMAND"
+for entry in "${SCHEDULED_JOBS[@]}"; do
+  parse_job "$entry"
+  printf '  %-14s %-12s %-10s %-8s %s\n' "$JOB_NAME" "$JOB_CALENDAR" "$JOB_GROUP" "${JOB_TIMEOUT}s" "$JOB_COMMAND"
+done
+
+run install -d -m 750 -o "$WEB_USER" -g "$WEB_USER" "$JOBS_LOG_DIR"
+run install -d -m 755 -o root -g root "$STATE_DIR"
+run install -d -m 755 -o "$WEB_USER" -g "$WEB_USER" "$JOBS_STATE_DIR"
+units_changed=0
+write_file /etc/tmpfiles.d/amoobot.conf 644 root:root <<EOF
+# Managed by amoobot deploy.sh: lock files of the scheduled jobs (bin/scheduled-job.sh)
+d ${JOBS_LOCK_DIR} 0750 ${WEB_USER} ${WEB_USER} -
+EOF
+(( FILE_CHANGED )) && run systemd-tmpfiles --create /etc/tmpfiles.d/amoobot.conf
+
+write_file /etc/logrotate.d/amoobot-jobs 644 root:root <<EOF
+# Managed by amoobot deploy.sh: output of the scheduled jobs
+${JOBS_LOG_DIR}/*.log {
+    daily
+    rotate 14
+    compress
+    delaycompress
+    missingok
+    notifempty
+    su ${WEB_USER} ${WEB_USER}
+    create 0640 ${WEB_USER} ${WEB_USER}
+}
+EOF
+
+write_file /etc/systemd/system/amoobot-job-alert@.service 644 root:root <<EOF
+# Managed by amoobot deploy.sh: Telegram alert when a scheduled job unit fails (OnFailure=)
+[Unit]
+Description=Amoobot: Telegram alert for failed scheduled job %i
+
+[Service]
+Type=oneshot
+User=${WEB_USER}
+Group=${WEB_USER}
+ExecStart=/bin/bash ${APP_DIR}/bin/scheduled-job-alert.sh failed %i
+TimeoutStartSec=60
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ProtectHome=yes
+EOF
+(( FILE_CHANGED )) && units_changed=1
+
+changed_timers=()
+manifest="# Managed by amoobot deploy.sh: read by bin/check-scheduled-jobs.sh
+# job max_age_seconds (= 3 x interval + timeout) schedule"
+for entry in "${SCHEDULED_JOBS[@]}"; do
+  parse_job "$entry"
+  render_job_service | write_file "/etc/systemd/system/amoobot-job-${JOB_NAME}.service" 644 root:root
+  (( FILE_CHANGED )) && units_changed=1
+  render_job_timer | write_file "/etc/systemd/system/amoobot-job-${JOB_NAME}.timer" 644 root:root
+  (( FILE_CHANGED )) && units_changed=1 && changed_timers+=("amoobot-job-${JOB_NAME}.timer")
+  manifest+=$'\n'"${JOB_NAME} $((3 * JOB_INTERVAL + JOB_TIMEOUT)) ${JOB_CALENDAR}"
+done
+printf '%s\n' "$manifest" | write_file "$JOBS_MANIFEST" 644 root:root
+
+# Jobs removed from SCHEDULED_JOBS: stop and delete their units.
+for timer_file in /etc/systemd/system/amoobot-job-*.timer; do
+  [[ -e "$timer_file" ]] || continue
+  old="${timer_file##*/amoobot-job-}"
+  old="${old%.timer}"
+  [[ "$job_names" == *" $old "* ]] && continue
+  log "Removing job '${old}' (no longer in SCHEDULED_JOBS)."
+  run systemctl disable --now "amoobot-job-${old}.timer"
+  run rm -f "$timer_file" "/etc/systemd/system/amoobot-job-${old}.service"
+  units_changed=1
+done
+
+(( units_changed )) && run systemctl daemon-reload
+
+# Resume: release the job locks taken before the checkout, then (re)start every timer.
+for fd in "${JOB_LOCK_FDS[@]}"; do
+  exec {fd}<&-
+done
+JOB_LOCK_FDS=()
+for entry in "${SCHEDULED_JOBS[@]}"; do
+  parse_job "$entry"
+  run systemctl enable --now "amoobot-job-${JOB_NAME}.timer"
+done
+(( ${#changed_timers[@]} )) && run systemctl restart "${changed_timers[@]}"
+JOBS_PAUSED=0
+log "Scheduled jobs active. Status: systemctl list-timers 'amoobot-job-*'   Check: ${APP_DIR}/bin/check-scheduled-jobs.sh"
+
+########################################
 # WEBHOOK
 ########################################
 
-step "16/17" "Registering Telegram webhook (URL secret + secret_token header)..."
+step "17/18" "Registering Telegram webhook (URL secret + secret_token header)..."
 
 # The command reads the secrets from .env.local.php; nothing secret is passed on the command line.
 console app:telegram:set-webhook "https://${DOMAIN}"
@@ -781,7 +989,7 @@ console app:telegram:set-webhook "https://${DOMAIN}"
 # FINAL CHECKS
 ########################################
 
-step "17/17" "Running final checks..."
+step "18/18" "Running final checks..."
 
 run systemctl restart "php${PHP_VERSION}-fpm"
 run systemctl reload nginx
@@ -793,6 +1001,12 @@ if (( ! DRY_RUN )); then
   grep -qE '^[[:space:]]*Environment[[:space:]]+prod[[:space:]]*$' <<< "$about" || die "Kernel environment is not prod."
   grep -qE '^[[:space:]]*Debug[[:space:]]+false[[:space:]]*$' <<< "$about" || die "Kernel debug is not off."
   log "APP_ENV=prod, APP_DEBUG=0 (plugin testing shortcuts such as demo auto-confirm are therefore disabled)."
+
+  for entry in "${SCHEDULED_JOBS[@]}"; do
+    parse_job "$entry"
+    systemctl is-active --quiet "amoobot-job-${JOB_NAME}.timer" || die "Timer amoobot-job-${JOB_NAME}.timer is not active."
+  done
+  log "All ${#SCHEDULED_JOBS[@]} scheduled job timers are active."
 
   for i in 1 2 3 4 5; do
     if curl -fsS --max-time 10 --resolve "${DOMAIN}:443:127.0.0.1" "https://${DOMAIN}/healthz" > /dev/null; then
