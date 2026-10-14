@@ -1,15 +1,37 @@
 # shellcheck shell=bash
 # Shared by bin/backup-database.sh and bin/restore-database.sh (sourced, not executed).
 #
-# load_database_url APP_DIR   sets DB_USER DB_PASS DB_HOST DB_PORT DB_NAME from DATABASE_URL
-#                             (environment first, else APP_DIR/.env.local.php). Values are never printed.
+# load_database_url APP_DIR   sets DB_USER DB_PASS DB_HOST DB_PORT DB_NAME from DATABASE_URL. Values are never printed.
+#                             Source, in order: the environment; AMOOBOT_DB_URL_FILE (default /etc/amoobot/database.env,
+#                             written by deploy.sh, root-owned); APP_DIR/.env.local.php, but only when NOT running as
+#                             root: that file is PHP owned by the deploy user, so root never loads it.
 # write_db_options_file       writes a 0600 [client] option file and sets DB_OPTS_FILE (caller removes it).
 
 load_database_url() {
-  local app_dir="$1" line key value
-  if [[ -z "${DATABASE_URL:-}" ]]; then
+  local app_dir="$1" url_file="${AMOOBOT_DB_URL_FILE:-/etc/amoobot/database.env}" url="${DATABASE_URL:-}" line key value
+  local owner mode
+  if [[ -z "$url" && -e "$url_file" ]]; then
+    # Only root (or the current user, for tests) may own it, and nobody else may write it.
+    read -r owner mode < <(stat -c '%u %a' "$url_file")
+    if [[ "$owner" != 0 && "$owner" != "$EUID" ]] || (( (8#$mode & 8#022) != 0 )); then
+      printf 'ERROR: %s must be owned by root and not writable by group/others (uid %s, mode %s).\n' "$url_file" "$owner" "$mode" >&2
+      exit 1
+    fi
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      line="${line%$'\r'}"
+      [[ "$line" == DATABASE_URL=* ]] && url="${line#DATABASE_URL=}"
+    done < "$url_file"
+    [[ -n "$url" ]] || { printf 'ERROR: %s has no DATABASE_URL= line.\n' "$url_file" >&2; exit 1; }
+  fi
+  if [[ -z "$url" ]]; then
+    if (( EUID == 0 )); then
+      printf 'ERROR: DATABASE_URL is not set and %s does not exist. As root, %s/.env.local.php is never loaded (deploy-writable).\n' \
+        "$url_file" "$app_dir" >&2
+      exit 1
+    fi
     [[ -r "$app_dir/.env.local.php" ]] \
       || { printf 'ERROR: DATABASE_URL is not set and %s/.env.local.php is not readable.\n' "$app_dir" >&2; exit 1; }
+    url="$(php -r '$e = require $argv[1]; echo $e["DATABASE_URL"] ?? "";' "$app_dir/.env.local.php")"
   fi
 
   # PHP parses the URL (handles percent-encoding); fields come back base64-encoded, one per line.
@@ -26,12 +48,8 @@ load_database_url() {
       port)   DB_PORT="$value" ;;
       dbname) DB_NAME="$value" ;;
     esac
-  done < <(APP_DIR="$app_dir" php -r '
-    $url = getenv("DATABASE_URL");
-    if (false === $url || "" === $url) {
-        $env = require getenv("APP_DIR")."/.env.local.php";
-        $url = $env["DATABASE_URL"] ?? "";
-    }
+  done < <(AMOOBOT_PARSE_URL="$url" php -r '
+    $url = (string) getenv("AMOOBOT_PARSE_URL");
     // The app reads it via %env(resolve:DATABASE_URL)%, where a literal "%" is written as "%%".
     $parts = parse_url(str_replace("%%", "%", $url));
     if (false === $parts || !isset($parts["scheme"], $parts["path"])) {

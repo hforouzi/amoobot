@@ -180,7 +180,7 @@ if have systemd-analyze; then
   eval "$(sed -n '/^SCHEDULED_JOBS=(/,/^)/p' "$ROOT/deploy.sh")"
   eval "$(sed -n '/^parse_job()/,/^}/p; /^render_job_service()/,/^}/p; /^render_job_timer()/,/^}/p' "$ROOT/deploy.sh")"
   # shellcheck disable=SC2034 # read by the render functions eval'd above
-  APP_DIR=/var/www/amoobot WEB_USER=www-data
+  APP_DIR=/var/www/amoobot WEB_USER=www-data ROOT_LIB_DIR=/usr/local/lib/amoobot
   units="$WORK/units"; mkdir -p "$units"
   for entry in "${SCHEDULED_JOBS[@]}"; do
     parse_job "$entry"
@@ -203,7 +203,8 @@ else
 fi
 
 echo "== deploy.sh --dry-run preview and idempotent writes"
-if have openssl; then
+# deploy.sh validates secrets with {32,256}; MSYS/Git Bash regex caps repetition at 255, so its dry-run cannot pass there.
+if have openssl && [[ x =~ ^x{1,256}$ ]]; then
   rnd() { openssl rand -hex 32; }
   cat > "$WORK/prod.env" <<EOF
 DOMAIN=bot.example.test
@@ -219,7 +220,7 @@ EOF
   jobs_part="$(sed -n '/^\[16\/18\]/,/^\[17\/18\]/p' <<< "$out")"
   check "dry-run exits 0" test "$rc" -eq 0
   check "dry-run lists the job table" grep -qE '^  sync +\*:0/15 +lifecycle +1500s +app:automation:run --only=sync' <<< "$jobs_part"
-  check "dry-run shows each new service file" grep -q '+ ExecStart=/bin/bash /var/www/amoobot/bin/scheduled-job.sh notifications lifecycle -- ' <<< "$jobs_part"
+  check "dry-run shows each new service file" grep -q '+ ExecStart=/bin/bash /usr/local/lib/amoobot/scheduled-job.sh notifications lifecycle -- ' <<< "$jobs_part"
   check "dry-run shows each new timer file" grep -q '+ OnCalendar=\*:5/15' <<< "$jobs_part"
   check "dry-run shows the alert unit and logrotate" bash -c 'grep -q "amoobot-job-alert@.service" <<< "$1" && grep -q "+     rotate 14" <<< "$1"' _ "$jobs_part"
   check "dry-run shows the manifest" grep -q '+ sync 4200 \*:0/15' <<< "$jobs_part"
@@ -250,7 +251,7 @@ EOF
   check "jobs step never pipes into write_file" \
     bash -c '! sed -n "/^# SCHEDULED JOBS/,/^# WEBHOOK/p" "$1" | grep -q "| *write_file"' _ "$ROOT/deploy.sh"
 else
-  skip "dry-run tests (openssl not installed)"
+  skip "dry-run tests (needs openssl and a regex engine allowing {32,256}: run on Linux/WSL, not Git Bash)"
 fi
 
 echo "== logrotate config"

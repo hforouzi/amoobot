@@ -28,7 +28,7 @@
 | 1–4 | `apt upgrade`، نصب Nginx، MariaDB، Supervisor، ufw، certbot، PHP 8.4 (PPA ondrej) و Composer (با بررسی امضای نصب‌کننده) |
 | 5 | کاربر غیر root به نام `deploy`، SSH فقط با کلید، فایروال فقط 22/80/443، سیاست restart خودکار برای nginx/php-fpm/mariadb/supervisor/cron |
 | 6 | تنظیم `sql_mode = STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION`، ساخت دیتابیس و کاربر (و همگام کردن پسورد) |
-| 7 | گرفتن کد با **deploy key فقط‌خواندنی** و checkout روی ref خواسته‌شده؛ ثبت در `/var/lib/amoobot/releases.log` |
+| 7 | گرفتن کد با **deploy key فقط‌خواندنی** و checkout روی ref خواسته‌شده؛ ثبت در `/var/lib/amoobot/releases.log`؛ نصب اسکریپت‌هایی که root اجرا می‌کند از **آبجکت‌های git همان کامیت** در `/usr/local/lib/amoobot` (بخش ۳) |
 | 8 | `composer install --no-dev --optimize-autoloader` |
 | 9 | ساخت `.env.prod.local` (600) و `.env.local.php` (`composer dump-env prod`) داخل پوشه‌ی برنامه |
 | 10 | دسترسی‌ها: کد متعلق به `deploy`، فقط‌خواندنی برای `www-data`؛ `var/` قابل نوشتن برای `www-data` |
@@ -98,11 +98,25 @@ sudo -u www-data php bin/console app:payment:create-default-gateways --env=prod
 
 ```bash
 ssh deploy@SERVER
-sudo /var/www/amoobot/deploy.sh --app-only            # آخرین DEPLOY_REF (پیش‌فرض main)
-sudo /var/www/amoobot/deploy.sh --app-only --ref v1.5.0
+sudo amoobot-deploy --app-only            # آخرین DEPLOY_REF (پیش‌فرض main)
+sudo amoobot-deploy --app-only --ref v1.5.0
 ```
 
 - اسکریپت قبل از اجرا از روی خودش یک کپی می‌گیرد، پس checkout کد جدید وسط کار مشکلی ایجاد نمی‌کند. توجه: در این حالت **نسخه‌ی فعلیِ** `deploy.sh` اجرا می‌شود و نسخه‌ی جدید از اجرای بعدی.
+- **root هیچ فایلی از پوشه‌ی برنامه را اجرا نمی‌کند.** کاربر `deploy` مالک `/var/www/amoobot` است و می‌تواند آن را تغییر دهد، پس
+  `deploy.sh`، اسکریپت‌های بکاپ/بازگردانی، اسکریپت‌های کارهای زمان‌بندی‌شده و `bin/lib/` با `git cat-file blob <کامیت>:<مسیر>`
+  (محتوای commit‌شده، نه فایل روی دیسک) در `/usr/local/lib/amoobot` (مالک root، `755`/`644`) نصب می‌شوند. ورودی‌ها:
+
+  | دستور | کار |
+  |---|---|
+  | `sudo amoobot-deploy [گزینه‌ها]` | همان `deploy.sh` (نسخه‌ی نصب‌شده از آخرین deploy) |
+  | `sudo amoobot-backup [برچسب]` | بکاپ دستی (پیش‌فرض برچسب `manual`) |
+  | `sudo amoobot-restore <فایل> --yes` | بازگردانی (بخش ۵) |
+  | `sudo amoobot-check-jobs` | بررسی تازگی کارها (بخش ۸) |
+
+  هر چهار فایل در `/usr/local/sbin` و مالک root هستند و اسکریپت را با محیط تمیز (`env -i`) اجرا می‌کنند. cron بکاپ، بکاپ قبل از
+  migration و unitهای systemd هم فقط همین مسیرها را اجرا می‌کنند. اسکریپت‌های بکاپ/بازگردانی `DATABASE_URL` را فقط از
+  `/etc/amoobot/database.env` (مالک root، `600`، ساخته‌شده در مرحله‌ی 9) می‌خوانند و هیچ‌وقت `.env.local.php` برنامه را به‌عنوان root بارگذاری نمی‌کنند.
 - اگر migration جدید وجود داشته باشد، قبل از آن خودکار یک بکاپ با برچسب `pre-deploy` در `/var/backups/amoobot` گرفته می‌شود.
 - اگر فایل‌های tracked روی سرور دستی تغییر کرده باشند، اسکریپت متوقف می‌شود (هیچ تغییری روی سرور دور ریخته نمی‌شود).
 - اجرای کامل (بدون `--app-only`) بسته‌های سیستم را هم به‌روز می‌کند؛ هر چند وقت یک‌بار در زمان کم‌ترافیک انجام دهید.
@@ -113,7 +127,7 @@ sudo /var/www/amoobot/deploy.sh --app-only --ref v1.5.0
 
 ```bash
 tail -n 5 /var/lib/amoobot/releases.log        # <زمان> <کامیت قبلی> -> <کامیت جدید> (ref)
-sudo /var/www/amoobot/deploy.sh --app-only --ref <کامیت قبلی>
+sudo amoobot-deploy --app-only --ref <کامیت قبلی>
 ```
 
 **دیتابیس:** migrationها فقط رو به جلو اجرا می‌شوند. اگر نسخه‌ی خراب migration داشته که با کد قدیمی سازگار نیست:
@@ -121,8 +135,8 @@ sudo /var/www/amoobot/deploy.sh --app-only --ref <کامیت قبلی>
 ```bash
 sudo systemctl stop php8.4-fpm 'amoobot-job-*.timer' 'amoobot-job-*.service'
 ls -lt /var/backups/amoobot/*_pre-deploy_*.sql.gz | head -3
-sudo /var/www/amoobot/bin/restore-database.sh /var/backups/amoobot/amoobot_pre-deploy_<زمان>.sql.gz --yes
-sudo /var/www/amoobot/deploy.sh --app-only --ref <کامیت قبلی>   # PHP-FPM و timerها را هم دوباره راه می‌اندازد
+sudo amoobot-restore /var/backups/amoobot/amoobot_pre-deploy_<زمان>.sql.gz --yes
+sudo amoobot-deploy --app-only --ref <کامیت قبلی>   # PHP-FPM و timerها را هم دوباره راه می‌اندازد
 ```
 
 > داده‌هایی که بین بکاپ و بازگردانی ثبت شده‌اند (سفارش‌ها و پرداخت‌ها) از بین می‌روند. قبل از restore، بکاپ `pre-restore` خودکار گرفته می‌شود تا در صورت نیاز دستی بازیابی شوند.
@@ -131,7 +145,8 @@ sudo /var/www/amoobot/deploy.sh --app-only --ref <کامیت قبلی>   # PHP-F
 
 ## ۵. بکاپ و بازگردانی
 
-- cron: `/etc/cron.d/amoobot-backup` (پیش‌فرض هر شب 03:30) ← `bin/backup-database.sh`
+- cron: `/etc/cron.d/amoobot-backup` (پیش‌فرض هر شب 03:30) ← `/usr/local/sbin/amoobot-backup nightly` (نسخه‌ی root‌مالک `bin/backup-database.sh`)
+- `DATABASE_URL` برای بکاپ و بازگردانی: `/etc/amoobot/database.env` (مالک root، `600`)
 - مقصد: `/var/backups/amoobot` (مالک root، `700`)؛ نگهداری `BACKUP_RETENTION_DAYS` روز (پیش‌فرض 14)
 - لاگ: `/var/log/amoobot-backup.log`
 - هر فایل `<db>_<برچسب>_<UTC>.sql.gz` است. برچسب‌ها: `nightly`، `pre-deploy`، `pre-restore`. بکاپ ناقص هیچ‌وقت جایگزین فایل سالم نمی‌شود (هم `gzip -t` و هم بررسی خط `Dump completed`).
@@ -139,11 +154,11 @@ sudo /var/www/amoobot/deploy.sh --app-only --ref <کامیت قبلی>   # PHP-F
 
 ```bash
 # بکاپ دستی
-sudo BACKUP_LABEL=manual /var/www/amoobot/bin/backup-database.sh
+sudo amoobot-backup manual
 
 # بازگردانی (کارهای زمان‌بندی‌شده هم متوقف شوند تا وسط restore چیزی ننویسند)
 sudo systemctl stop php8.4-fpm 'amoobot-job-*.timer' 'amoobot-job-*.service'
-sudo /var/www/amoobot/bin/restore-database.sh /var/backups/amoobot/<فایل>.sql.gz --yes
+sudo amoobot-restore /var/backups/amoobot/<فایل>.sql.gz --yes
 sudo -u www-data php /var/www/amoobot/bin/console doctrine:migrations:status --env=prod
 sudo systemctl start php8.4-fpm 'amoobot-job-*.timer'
 curl -fsS https://DOMAIN/healthz
@@ -159,7 +174,7 @@ curl -fsS https://DOMAIN/healthz
 
 ## ۶. چرخش رمزها (Rotation)
 
-همه‌ی موارد زیر با ویرایش `/etc/amoobot/.env.prod.local` و سپس `sudo deploy.sh --app-only` انجام می‌شوند:
+همه‌ی موارد زیر با ویرایش `/etc/amoobot/.env.prod.local` و سپس `sudo amoobot-deploy --app-only` انجام می‌شوند:
 
 | رمز | روش | اثر جانبی |
 |---|---|---|
@@ -209,10 +224,10 @@ curl -fsS https://DOMAIN/healthz
 - [ ] `systemctl list-timers certbot.timer` فعال است (`sudo certbot renew --dry-run` موفق است)
 - [ ] مانیتورینگ uptime روی `https://DOMAIN/healthz`
 - [ ] `systemctl list-timers 'amoobot-job-*'` شش timer نشان می‌دهد و ستون LAST یک ساعت بعد از deploy برای همه پر است
-- [ ] `sudo /var/www/amoobot/bin/check-scheduled-jobs.sh` دو ساعت بعد از deploy (و بعد از اولین بکاپ شبانه) کد خروج `0` می‌دهد و به مانیتورینگ وصل شده است
+- [ ] `sudo amoobot-check-jobs` دو ساعت بعد از deploy (و بعد از اولین بکاپ شبانه) کد خروج `0` می‌دهد و به مانیتورینگ وصل شده است
 - [ ] Toggleهای اتوماسیون در پنل ادمین بررسی شده‌اند (به‌خصوص «تعلیق خودکار»؛ پیش‌فرض خاموش)
 - [ ] `automation.batch_limit` بیشتر از تعداد کل سرویس‌هاست ([automation.md](automation.md))
-- [ ] هشدار آزمایشی رسیده است: `sudo -u www-data /var/www/amoobot/bin/scheduled-job-alert.sh failed test` (بعد `... recovered test`)
+- [ ] هشدار آزمایشی رسیده است: `sudo -u www-data env APP_DIR=/var/www/amoobot /usr/local/lib/amoobot/scheduled-job-alert.sh failed test` (بعد `... recovered test`)
 
 ---
 
@@ -221,7 +236,7 @@ curl -fsS https://DOMAIN/healthz
 `deploy.sh` در مرحله‌ی 16 برای هر کار یک service از نوع `oneshot` و یک timer نصب می‌کند. فهرست کارها، فاصله‌ها و دلیل هر کدام در
 [automation.md](automation.md) آمده است. منبع اصلی آرایه‌ی `SCHEDULED_JOBS` در `deploy.sh` است. برای تغییر زمان‌بندی همان را
 ویرایش کنید و دوباره deploy کنید: unitها به‌روز می‌شوند و کارهای حذف‌شده غیرفعال و پاک می‌شوند.
-`sudo deploy.sh --dry-run` جدول کارها و متن کامل (یا diff) هر unit را قبل از نصب نشان می‌دهد.
+`sudo amoobot-deploy --dry-run` جدول کارها و متن کامل (یا diff) هر unit را قبل از نصب نشان می‌دهد.
 
 ### فهرست کارها و شواهد انتخاب
 
@@ -251,7 +266,7 @@ client حذف نمی‌شود و تمدید دوباره آن را فعال می
 | چیز | محل |
 |---|---|
 | unitها | `/etc/systemd/system/amoobot-job-<job>.service` و `.timer`، هشدار: `amoobot-job-alert@.service` |
-| اجرای واقعی | `bin/scheduled-job.sh` با کاربر `www-data` (کاربر برنامه) |
+| اجرای واقعی | `/usr/local/lib/amoobot/scheduled-job.sh` (نسخه‌ی root‌مالک `bin/scheduled-job.sh`) با کاربر `www-data` (کاربر برنامه) |
 | خروجی کامل | `/var/log/amoobot/<job>.log` (چرخش روزانه، ۱۴ روز: `/etc/logrotate.d/amoobot-jobs`) |
 | خلاصه‌ی هر اجرا | `journalctl -u amoobot-job-<job>` |
 | آخرین اجرا / آخرین موفقیت | `/var/lib/amoobot/jobs/<job>.last-run` و `<job>.last-success` |
@@ -271,7 +286,7 @@ tail -n 50 /var/log/amoobot/sync.log                   # خروجی کامل د�
 ### بررسی تازگی همه‌ی کارها
 
 ```bash
-sudo /var/www/amoobot/bin/check-scheduled-jobs.sh
+sudo amoobot-check-jobs
 ```
 
 ```text

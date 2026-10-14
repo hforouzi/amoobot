@@ -2,7 +2,8 @@
 #
 # Amoobot server provisioning + deploy for Ubuntu 24.04. Safe to run repeatedly (first deploy and updates).
 #
-#   sudo ./deploy.sh [--dry-run] [--app-only] [--ref <branch|tag|commit>] [--env-file <path>]
+#   sudo amoobot-deploy [--dry-run] [--app-only] [--ref <branch|tag|commit>] [--env-file <path>]
+#   (first deploy: sudo bash /root/deploy.sh ... from a root-owned copy; never run the checkout's deploy.sh as root)
 #
 #   --dry-run    print what would be done; changes nothing (does not need root)
 #   --app-only   skip server provisioning (steps 1-6); only update code, env, DB, cache, proxy, webhook
@@ -32,6 +33,16 @@ DEFAULT_BACKUP_CRON="30 3 * * *"
 REQUIRED_SQL_MODE="STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION"
 WEB_USER="www-data"
 STATE_DIR="/var/lib/amoobot"
+
+# Everything root (or systemd) executes is a root-owned copy taken from the deployed commit's git objects, never a file
+# in the checkout (the deploy user can edit those). Entry points: /usr/local/sbin/amoobot-{deploy,backup,restore,check-jobs}.
+ROOT_LIB_DIR="/usr/local/lib/amoobot"
+ROOT_SBIN_DIR="/usr/local/sbin"
+ROOT_OPS_FILES=(deploy.sh bin/backup-database.sh bin/restore-database.sh bin/scheduled-job.sh
+  bin/scheduled-job-alert.sh bin/check-scheduled-jobs.sh bin/lib/database-url.sh)
+ROOT_WRAPPERS=(deploy backup restore check-jobs)
+# DATABASE_URL for the root-run backup/restore scripts (root:root 600); they never load the app's .env.local.php.
+DB_URL_FILE="/etc/amoobot/database.env"
 
 # Scheduled jobs, installed as systemd timers in step 16 (intervals and reasons: docs/fa/automation.md).
 #   name | lock group | OnCalendar | timeout (s) | interval (s) | console command
@@ -211,7 +222,8 @@ Type=oneshot
 User=${WEB_USER}
 Group=${WEB_USER}
 WorkingDirectory=${APP_DIR}
-ExecStart=/bin/bash ${APP_DIR}/bin/scheduled-job.sh ${JOB_NAME} ${JOB_GROUP} -- /usr/bin/php ${APP_DIR}/bin/console ${JOB_COMMAND} --env=prod --no-interaction
+Environment=APP_DIR=${APP_DIR}
+ExecStart=/bin/bash ${ROOT_LIB_DIR}/scheduled-job.sh ${JOB_NAME} ${JOB_GROUP} -- /usr/bin/php ${APP_DIR}/bin/console ${JOB_COMMAND} --env=prod --no-interaction
 TimeoutStartSec=${JOB_TIMEOUT}
 Nice=10
 NoNewPrivileges=yes
@@ -236,6 +248,71 @@ Unit=amoobot-job-${JOB_NAME}.service
 [Install]
 WantedBy=timers.target
 EOF
+}
+
+# root_ops_dest PATH  ->  where the root-owned copy of a ROOT_OPS_FILES entry is installed
+root_ops_dest() {
+  case "$1" in
+    deploy.sh) printf '%s/deploy.sh' "$ROOT_LIB_DIR" ;;
+    bin/lib/*) printf '%s/lib/%s' "$ROOT_LIB_DIR" "${1#bin/lib/}" ;;
+    bin/*)     printf '%s/%s' "$ROOT_LIB_DIR" "${1#bin/}" ;;
+    *)         die "root_ops_dest: unexpected path $1" ;;
+  esac
+}
+
+# render_root_wrapper NAME  ->  /usr/local/sbin/amoobot-NAME. Each runs a root-owned copy with a fixed, clean environment.
+render_root_wrapper() {
+  local env_common="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin APP_DIR=${APP_DIR} AMOOBOT_DB_URL_FILE=${DB_URL_FILE}"
+  printf '#!/bin/bash\n# Managed by amoobot deploy.sh: root-owned entry point for %s (installed from the deployed commit).\n' "$ROOT_LIB_DIR"
+  case "$1" in
+    deploy) cat <<EOF
+exec /bin/bash ${ROOT_LIB_DIR}/deploy.sh "\$@"
+EOF
+      ;;
+    backup) cat <<EOF
+# amoobot-backup [label]   (default label: manual; the nightly cron uses "nightly", deploy.sh "pre-deploy")
+label="\${1:-manual}"
+[[ \$# -le 1 && "\$label" =~ ^[A-Za-z0-9-]+\$ ]] || { echo "usage: amoobot-backup [label]" >&2; exit 2; }
+exec env -i ${env_common} BACKUP_DIR=${BACKUP_DIR} BACKUP_RETENTION_DAYS=${BACKUP_RETENTION_DAYS} BACKUP_LABEL="\$label" /bin/bash ${ROOT_LIB_DIR}/backup-database.sh
+EOF
+      ;;
+    restore) cat <<EOF
+# amoobot-restore <backup.sql.gz> --yes [--no-safety-backup]
+exec env -i ${env_common} BACKUP_DIR=${BACKUP_DIR} /bin/bash ${ROOT_LIB_DIR}/restore-database.sh "\$@"
+EOF
+      ;;
+    check-jobs) cat <<EOF
+exec env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin AMOOBOT_BACKUP_DIR=${BACKUP_DIR} /bin/bash ${ROOT_LIB_DIR}/check-scheduled-jobs.sh
+EOF
+      ;;
+    *) die "render_root_wrapper: unknown wrapper $1" ;;
+  esac
+}
+
+# git_blob COMMIT PATH  ->  the committed content of PATH (read as the deploy user; replace refs ignored, no filters)
+git_blob() {
+  sudo -H -u "$DEPLOY_USER" env GIT_NO_REPLACE_OBJECTS=1 git -C "$APP_DIR" cat-file blob "$1:$2"
+}
+
+# install_root_ops COMMIT  installs ROOT_OPS_FILES from COMMIT's git objects into ROOT_LIB_DIR, plus the wrappers.
+install_root_ops() {
+  local commit="$1" path dest mode tmp name
+  run install -d -m 755 -o root -g root "$ROOT_LIB_DIR" "$ROOT_LIB_DIR/lib"
+  for path in "${ROOT_OPS_FILES[@]}"; do
+    dest="$(root_ops_dest "$path")"
+    mode=755; [[ "$path" == bin/lib/* ]] && mode=644
+    if (( DRY_RUN )); then
+      log "[dry-run] install ${path} from git objects of ${commit} (not the checkout) -> ${dest} (${mode} root:root)"
+      continue
+    fi
+    tmp="$(mktemp)"
+    git_blob "$commit" "$path" > "$tmp" || { rm -f "$tmp"; die "Cannot read ${path} from commit ${commit}."; }
+    write_file "$dest" "$mode" root:root < "$tmp"
+    rm -f "$tmp"
+  done
+  for name in "${ROOT_WRAPPERS[@]}"; do
+    write_file "${ROOT_SBIN_DIR}/amoobot-${name}" 755 root:root --show-diff < <(render_root_wrapper "$name")
+  done
 }
 
 # load_env_file PATH: KEY=VALUE lines only (no shell code is executed). The process environment wins.
@@ -279,7 +356,7 @@ while (( $# )); do
     --app-only) APP_ONLY=1 ;;
     --ref)      [[ -n "${2:-}" ]] || die "--ref needs a value"; CLI_REF="$2"; shift ;;
     --env-file) [[ -n "${2:-}" ]] || die "--env-file needs a value"; ENV_FILE="$2"; shift ;;
-    -h|--help)  sed -n '2,13p' "$0"; exit 0 ;;
+    -h|--help)  sed -n '2,14p' "$0"; exit 0 ;;
     *)          die "Unknown option: $1 (see --help)" ;;
   esac
   shift
@@ -661,6 +738,8 @@ else
   printf '%s %s -> %s (%s)\n' "$(date -u +%FT%TZ)" "${PREVIOUS_COMMIT:-none}" "$TARGET_COMMIT" "$DEPLOY_REF" >> "$STATE_DIR/releases.log"
   log "Deploying ${TARGET_COMMIT} (previous: ${PREVIOUS_COMMIT:-none}). History: ${STATE_DIR}/releases.log"
 fi
+# Root-run scripts come from the commit's git objects, so an edited file in the checkout never runs as root.
+install_root_ops "${TARGET_COMMIT:-<target commit>}"
 
 cd "$APP_DIR" 2>/dev/null || (( DRY_RUN )) || die "Cannot enter ${APP_DIR}."
 
@@ -698,6 +777,10 @@ render_app_env() {
 }
 
 render_app_env | write_file "$APP_DIR/.env.prod.local" 600 "$DEPLOY_USER:$DEPLOY_USER"
+# The root-run backup/restore scripts read DATABASE_URL only from this root-owned file.
+[[ "$DATABASE_URL" != *$'\n'* ]] || die "DATABASE_URL must be a single line."
+run install -d -m 700 -o root -g root "${DB_URL_FILE%/*}"
+printf 'DATABASE_URL=%s\n' "$DATABASE_URL" | write_file "$DB_URL_FILE" 600 root:root
 # Replaces the old .env.local (which held secrets); now only the non-secret environment switch.
 printf 'APP_ENV=prod\nAPP_DEBUG=0\n' | write_file "$APP_DIR/.env.local" 640 "$DEPLOY_USER:$WEB_USER"
 as "$DEPLOY_USER" composer dump-env prod --working-dir="$APP_DIR" --no-interaction
@@ -730,9 +813,8 @@ console assets:install public
 
 if (( ! DRY_RUN )) && [[ -n "${PREVIOUS_COMMIT:-}" ]] && ! console doctrine:migrations:up-to-date > /dev/null 2>&1; then
   log "Pending migrations: taking a pre-migration backup first..."
-  # The backup script finds the app from its own location and reads DATABASE_URL from .env.local.php.
-  BACKUP_DIR="$BACKUP_DIR" BACKUP_RETENTION_DAYS="$BACKUP_RETENTION_DAYS" BACKUP_LABEL="pre-deploy" \
-    bash "$APP_DIR/bin/backup-database.sh"
+  # Root-owned copy; it reads DATABASE_URL from ${DB_URL_FILE}, never from the checkout.
+  "${ROOT_SBIN_DIR}/amoobot-backup" pre-deploy
 fi
 # No "|| true": a failed migration stops the deploy.
 console doctrine:migrations:migrate --allow-no-migration
@@ -892,11 +974,11 @@ fi
 step "15/18" "Installing database backup cron (${BACKUP_CRON}, keep ${BACKUP_RETENTION_DAYS} days)..."
 
 run install -d -m 700 -o root -g root "$BACKUP_DIR"
-write_file /etc/cron.d/amoobot-backup 644 root:root <<EOF
-# Managed by amoobot deploy.sh: nightly MariaDB dump of ${DB_NAME} with rotation
+write_file /etc/cron.d/amoobot-backup 644 root:root --show-diff <<EOF
+# Managed by amoobot deploy.sh: nightly MariaDB dump of ${DB_NAME} with rotation (root-owned ${ROOT_SBIN_DIR}/amoobot-backup)
 SHELL=/bin/bash
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-${BACKUP_CRON} root APP_DIR=${APP_DIR} BACKUP_DIR=${BACKUP_DIR} BACKUP_RETENTION_DAYS=${BACKUP_RETENTION_DAYS} bash ${APP_DIR}/bin/backup-database.sh >> /var/log/amoobot-backup.log 2>&1
+${BACKUP_CRON} root ${ROOT_SBIN_DIR}/amoobot-backup nightly >> /var/log/amoobot-backup.log 2>&1
 EOF
 
 ########################################
@@ -944,7 +1026,8 @@ Description=Amoobot: Telegram alert for failed scheduled job %i
 Type=oneshot
 User=${WEB_USER}
 Group=${WEB_USER}
-ExecStart=/bin/bash ${APP_DIR}/bin/scheduled-job-alert.sh failed %i
+Environment=APP_DIR=${APP_DIR}
+ExecStart=/bin/bash ${ROOT_LIB_DIR}/scheduled-job-alert.sh failed %i
 TimeoutStartSec=60
 NoNewPrivileges=yes
 PrivateTmp=yes
@@ -991,7 +1074,7 @@ for entry in "${SCHEDULED_JOBS[@]}"; do
 done
 (( ${#changed_timers[@]} )) && run systemctl restart "${changed_timers[@]}"
 JOBS_PAUSED=0
-log "Scheduled jobs active. Status: systemctl list-timers 'amoobot-job-*'   Check: ${APP_DIR}/bin/check-scheduled-jobs.sh"
+log "Scheduled jobs active. Status: systemctl list-timers 'amoobot-job-*'   Check: sudo amoobot-check-jobs"
 
 ########################################
 # WEBHOOK
@@ -1012,7 +1095,8 @@ run systemctl restart "php${PHP_VERSION}-fpm"
 run systemctl reload nginx
 
 if (( ! DRY_RUN )); then
-  env_check="$(php -r '$e = require $argv[1]; echo ($e["APP_ENV"] ?? "?"), " ", ($e["APP_DEBUG"] ?? "?");' "$APP_DIR/.env.local.php")"
+  # As the web user: .env.local.php is PHP owned by the deploy user and must never be executed as root.
+  env_check="$(sudo -H -u "$WEB_USER" php -r '$e = require $argv[1]; echo ($e["APP_ENV"] ?? "?"), " ", ($e["APP_DEBUG"] ?? "?");' "$APP_DIR/.env.local.php")"
   [[ "$env_check" == "prod 0" ]] || die ".env.local.php has APP_ENV/APP_DEBUG = '${env_check}', expected 'prod 0'."
   about="$(sudo -H -u "$WEB_USER" php "$APP_DIR/bin/console" about --env=prod 2>/dev/null)"
   grep -qE '^[[:space:]]*Environment[[:space:]]+prod[[:space:]]*$' <<< "$about" || die "Kernel environment is not prod."

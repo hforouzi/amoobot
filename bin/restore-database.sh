@@ -7,6 +7,7 @@
 # Steps: verify the archive -> take a "pre-restore" safety backup of the current database -> drop all tables
 # and views -> import -> report table and migration counts. Stop PHP-FPM first (see docs/fa/deployment.md) so
 # nobody writes while the restore runs. Same DATABASE_URL / APP_DIR / BACKUP_DIR settings as backup-database.sh.
+# On the server root runs the installed copy: sudo amoobot-restore <backup.sql.gz> --yes
 
 set -Eeuo pipefail
 umask 077
@@ -64,7 +65,8 @@ drop_sql="$(sql -N -B -e "
 } | sql
 
 echo "Importing $(basename "$FILE")..."
-zcat "$FILE" | sql
+# --binary-mode: client commands such as \! (shell) inside the dump are not executed; this runs as root.
+zcat "$FILE" | sql --binary-mode
 
 tables="$(sql -N -B -e 'SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE();')"
 migrations="$(sql -N -B -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'doctrine_migration_versions';")"

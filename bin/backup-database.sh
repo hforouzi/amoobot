@@ -3,8 +3,11 @@
 # Dump the Amoobot MariaDB/MySQL database to BACKUP_DIR/<db>_<label>_<UTC timestamp>.sql.gz and delete dumps
 # older than BACKUP_RETENTION_DAYS. Installed as a nightly cron job by deploy.sh; restore with bin/restore-database.sh.
 #
-#   DATABASE_URL  read from the environment, else from $APP_DIR/.env.local.php (written by deploy.sh)
+#   DATABASE_URL  from the environment, else /etc/amoobot/database.env (root-owned, written by deploy.sh); see
+#                 bin/lib/database-url.sh. As root, $APP_DIR/.env.local.php is never loaded.
 #   APP_DIR                 default: the project this script lives in
+#
+# On the server root runs the installed copy through /usr/local/sbin/amoobot-backup [label], never this checkout.
 #   BACKUP_DIR              default: /var/backups/amoobot
 #   BACKUP_RETENTION_DAYS   default: 14 (0 = keep everything)
 #   BACKUP_LABEL            default: nightly  (deploy.sh uses pre-deploy, restore-database.sh pre-restore)
