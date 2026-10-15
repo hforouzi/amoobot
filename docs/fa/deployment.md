@@ -143,6 +143,14 @@ sudo -u www-data php bin/console app:bot-content:seed --env=prod
 sudo -u www-data php bin/console app:payment:create-default-gateways --env=prod
 ```
 
+**بررسی بعد از deploy (فقط‌خواندنی):** با root `sudo /usr/local/lib/amoobot/post-deploy-check.sh` (نسخه‌ی root‌مالک از آینه؛ نسخه‌ی
+`bin/` در checkout را با root اجرا نکنید). برای هر بررسی یک خط `PASS`/`FAIL`/`SKIP` چاپ می‌کند، هیچ رمزی چاپ نمی‌کند و فقط اگر همه `PASS`
+باشند کد خروج `0` می‌دهد: `APP_ENV`/`APP_DEBUG` واقعی برنامه، `healthz` روی HTTPS، ریدایرکت HTTP، روزهای باقی‌مانده‌ی گواهی، `403` برای
+Webhook بدون هدر و با رمز URL اشتباه، `getWebhookInfo` (URL ماسک‌شده، بدون `last_error_message`، صف کوچک)، کارهای زمان‌بندی‌شده، بکاپ شبانه
+(تازه و `600`)، ufw، `sshd -T`، `sql_mode`، دسترسی‌های `/etc/amoobot`، `nginx -t`، نبود رشته‌ی شبیه رمز در لاگ‌های nginx، خاموش بودن
+حالت نگهداری و نبود فایل `deploy-in-progress`. با کاربر `deploy` (`bin/post-deploy-check.sh`) بررسی‌هایی که root لازم دارند `SKIP`
+می‌شوند و نتیجه `INCOMPLETE` (کد `1`) است. ترتیب کامل اولین استقرار: [first-deploy-checklist.md](first-deploy-checklist.md).
+
 > قبل از بستن نشست SSH فعلی، در یک ترمینال دیگر بررسی کنید که با `ssh deploy@SERVER` (با کلید) وارد می‌شوید.
 > ورود با پسورد از این به بعد غیرفعال است.
 

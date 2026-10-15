@@ -57,6 +57,9 @@ GIT_ENV_PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 ROOT_SBIN_DIR="/usr/local/sbin"
 ROOT_OPS_FILES=(deploy.sh bin/backup-database.sh bin/restore-database.sh bin/scheduled-job.sh
   bin/scheduled-job-alert.sh bin/check-scheduled-jobs.sh bin/lib/database-url.sh bin/lib/monitor-ping.sh)
+# Installed the same way when the target commit has them (operator tools run by root; older commits lack them, so their
+# absence does not block a rollback): sudo /usr/local/lib/amoobot/post-deploy-check.sh
+OPTIONAL_ROOT_OPS_FILES=(bin/post-deploy-check.sh)
 # GitHub's published SSH host keys (from https://api.github.com/meta over HTTPS); git uses StrictHostKeyChecking=yes.
 # In /etc/ssh (root-owned, readable by the deploy user's ssh; /etc/amoobot is root-only).
 GITHUB_KNOWN_HOSTS="/etc/ssh/amoobot_github_known_hosts"
@@ -740,6 +743,22 @@ install_root_ops() {
     git_blob "$commit" "$path" > "$tmp" || { rm -f "$tmp"; die "Cannot read ${path} from commit ${commit}."; }
     write_file "$dest" "$mode" root:root < "$tmp"
     rm -f "$tmp"
+  done
+  for path in "${OPTIONAL_ROOT_OPS_FILES[@]}"; do
+    dest="$(root_ops_dest "$path")"
+    if (( DRY_RUN )); then
+      log "[dry-run] install ${path} (if ${commit} has it) from the root-owned mirror -> ${dest} (755 root:root)"
+      continue
+    fi
+    if mirror_git cat-file -e "${commit}:${path}" 2> /dev/null; then
+      tmp="$(mktemp)"
+      git_blob "$commit" "$path" > "$tmp" || { rm -f "$tmp"; die "Cannot read ${path} from commit ${commit}."; }
+      write_file "$dest" 755 root:root < "$tmp"
+      rm -f "$tmp"
+    else
+      refuse_symlink "$dest"
+      rm -f "$dest"
+    fi
   done
   install_root_wrappers
 }
