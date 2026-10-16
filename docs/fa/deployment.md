@@ -151,6 +151,12 @@ Webhook بدون هدر و با رمز URL اشتباه، `getWebhookInfo` (URL 
 حالت نگهداری و نبود فایل `deploy-in-progress`. با کاربر `deploy` (`bin/post-deploy-check.sh`) بررسی‌هایی که root لازم دارند `SKIP`
 می‌شوند و نتیجه `INCOMPLETE` (کد `1`) است. ترتیب کامل اولین استقرار: [first-deploy-checklist.md](first-deploy-checklist.md).
 
+**تست دود Webhook:** `sudo /usr/local/lib/amoobot/smoke-webhook.sh 999000001` (یک id **جعلی** که مال هیچ کس نیست؛ id ادمین پذیرفته نمی‌شود)
+یک به‌روزرسانی ساختگی `/start` را، دقیقاً مثل تلگرام و با هدر `X-Telegram-Bot-Api-Secret-Token`، به nginx محلی می‌فرستد و کد HTTP و ثبت آن در
+`bot_message_log` را گزارش می‌کند. رمز URL و توکن هدر از فایل root‌مالک خوانده می‌شوند و چاپ نمی‌شوند و روی خط فرمان `curl` نمی‌آیند
+(`--dry-run` فقط payload و URL ماسک‌شده را نشان می‌دهد). این فقط مسیر nginx ← PHP-FPM ← Symfony ← کنترلر Webhook را ثابت می‌کند: برنامه برای
+id جعلی یک حساب بات می‌سازد و پاسخ بات به آن چت در تلگرام تحویل نمی‌شود (طبیعی است). **تست نهایی** ارسال واقعی `/start` از حساب تلگرام ادمین است.
+
 > قبل از بستن نشست SSH فعلی، در یک ترمینال دیگر بررسی کنید که با `ssh deploy@SERVER` (با کلید) وارد می‌شوید.
 > ورود با پسورد از این به بعد غیرفعال است.
 

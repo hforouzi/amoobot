@@ -184,9 +184,58 @@ else
 fi
 chmod 700 "$WORK"
 
+echo "== smoke-webhook: one synthetic /start through nginx -> PHP-FPM -> Symfony"
+run_smoke() {  # run_smoke ARGS... -> OUT, RC
+  : > "$WORK/argv"; : > "$WORK/curl.cfg"
+  OUT="$(PATH="$SB:$PATH" APP_DIR="$WORK/app" AMOOBOT_ETC_DIR="$ETC" AMOOBOT_SMOKE_LOG_WAIT=1 bash "$WORK/lib/smoke-webhook.sh" "$@" 2>&1)"; RC=$?
+}
+good_env; chmod 700 "$WORK"; export SMOKE_CODE=200 LOGGED_ROWS=1
+run_smoke 999000001
+check "accepted and logged -> exit 0, RESULT OK" bash -c '[[ $1 -eq 0 ]] && grep -q "HTTP status: 200" <<< "$2" && grep -q "logged by the app (bot_message_log, incoming): yes" <<< "$2" && grep -q "^RESULT: OK" <<< "$2"' _ "$RC" "$OUT"
+check "  ...one POST with the header token and a /start from the fake id" bash -c \
+  '[[ $(grep -c "^url = " "$1") -eq 1 ]] && grep -qF "header = \"X-Telegram-Bot-Api-Secret-Token: $2\"" "$1" && grep -q "\\\\\"text\\\\\":\\\\\"/start\\\\\"" "$1" && grep -q "\\\\\"id\\\\\":999000001" "$1"' _ "$WORK/curl.cfg" "$TOKEN_HDR"
+check "  ...to the local nginx (resolve DOMAIN:443:127.0.0.1)" grep -qx 'resolve = "bot.example.test:443:127.0.0.1"' "$WORK/curl.cfg"
+check "  ...secret and token only in curl's stdin config: not in the output, not on a command line" no_secret_anywhere
+check "  ...the output says the real /start from the admin's account is the final test" grep -q "Final test: send /start from the admin's own Telegram account" <<< "$OUT"
+export LOGGED_ROWS=0; run_smoke 999000001
+check "200 but nothing logged -> FAILED" bash -c '[[ $1 -eq 1 ]] && grep -q "logged by the app (bot_message_log, incoming): no" <<< "$2" && grep -q "^RESULT: FAILED" <<< "$2"' _ "$RC" "$OUT"
+export LOGGED_ROWS=1
+for c in 403 404 503 502; do
+  export SMOKE_CODE=$c; run_smoke 999000001
+  check "HTTP ${c} -> FAILED with a hint" bash -c '[[ $1 -eq 1 ]] && grep -q "HTTP status: $3" <<< "$2" && grep -q "^RESULT: FAILED - " <<< "$2"' _ "$RC" "$OUT" "$c"
+  no_secret_anywhere || fail "  (HTTP ${c}: a secret leaked)"
+done
+export SMOKE_CODE=200
+run_smoke 999000001 --dry-run
+check "--dry-run: nothing sent, masked URL and payload shown" bash -c \
+  '[[ $1 -eq 0 ]] && [[ ! -s "$3" ]] && grep -q "telegram/webhook/\*\*\*" <<< "$2" && grep -q "DRY RUN: nothing sent" <<< "$2"' _ "$RC" "$OUT" "$WORK/curl.cfg"
+check "  ...and no secret printed" no_secret_anywhere
+sed 's/^TELEGRAM_ADMIN_CHAT_ID=.*/TELEGRAM_ADMIN_CHAT_ID=1001234567/' "$ETC/.env.prod.local" > "$ETC/admin.env"; chmod 600 "$ETC/admin.env"
+: > "$WORK/curl.cfg"
+OUT="$(PATH="$SB:$PATH" AMOOBOT_ENV_FILE="$ETC/admin.env" AMOOBOT_ETC_DIR="$ETC" bash "$WORK/lib/smoke-webhook.sh" 1001234567 2>&1)"; RC=$?
+check "the admin id is not accepted as the fake id (exit 2, nothing sent)" bash -c \
+  '[[ $1 -eq 2 && ! -s "$3" ]] && grep -q "not TELEGRAM_ADMIN_CHAT_ID" <<< "$2"' _ "$RC" "$OUT" "$WORK/curl.cfg"
+for bad in abc -5 12 '1; id' 0123456; do
+  run_smoke "$bad"
+  check "fake id '$bad' refused (exit 2, nothing sent)" bash -c '[[ $1 -eq 2 && ! -s "$2" ]]' _ "$RC" "$WORK/curl.cfg"
+done
+grep -v '^TELEGRAM_WEBHOOK_SECRET_TOKEN=' "$ETC/.env.prod.local" > "$ETC/notoken.env"; chmod 600 "$ETC/notoken.env"
+: > "$WORK/curl.cfg"; PATH="$SB:$PATH" AMOOBOT_ENV_FILE="$ETC/notoken.env" AMOOBOT_ETC_DIR="$ETC" AMOOBOT_SMOKE_LOG_WAIT=1 bash "$WORK/lib/smoke-webhook.sh" 999000001 > /dev/null 2>&1
+check "without TELEGRAM_WEBHOOK_SECRET_TOKEN the header carries the URL secret (as the app expects)" \
+  grep -qF "header = \"X-Telegram-Bot-Api-Secret-Token: $SECRET\"" "$WORK/curl.cfg"
+chmod 644 "$ETC/.env.prod.local"; run_smoke 999000001
+check "env file not 600 -> refused" bash -c '[[ $1 -eq 2 ]] && grep -q "must be a regular file owned by root with mode 600" <<< "$2"' _ "$RC" "$OUT"
+chmod 600 "$ETC/.env.prod.local"
+if have setpriv; then
+  chmod 755 "$WORK" "$WORK/lib"; chmod 644 "$WORK/lib/smoke-webhook.sh"
+  OUT="$(cd / && setpriv --reuid=65534 --regid=65534 --clear-groups env PATH="$SB:$PATH" AMOOBOT_ETC_DIR="$ETC" bash "$WORK/lib/smoke-webhook.sh" 999000001 2>&1)"; RC=$?
+  check "not root -> refused (the secrets are root-only)" bash -c '[[ $1 -eq 2 ]] && grep -q "Run as root" <<< "$2"' _ "$RC" "$OUT"
+  chmod 700 "$WORK"
+fi
+
 echo "== deploy.sh installs the operator tools from the mirror"
-check "post-deploy-check.sh is an optional root-ops file (installed when the commit has it)" \
-  grep -q '^OPTIONAL_ROOT_OPS_FILES=(bin/post-deploy-check.sh' "$ROOT/deploy.sh"
+check "post-deploy-check.sh and smoke-webhook.sh are optional root-ops files (installed when the commit has them)" \
+  grep -q '^OPTIONAL_ROOT_OPS_FILES=(bin/post-deploy-check.sh bin/smoke-webhook.sh)$' "$ROOT/deploy.sh"
 check "  ...read from the mirror (git_blob), never from the checkout" bash -c \
   'sed -n "/^install_root_ops() {/,/^}/p" "$1" | grep -q "for path in \"\${OPTIONAL_ROOT_OPS_FILES\[@\]}\"" && ! sed -n "/^install_root_ops() {/,/^}/p" "$1" | grep -q "APP_DIR"' _ "$ROOT/deploy.sh"
 

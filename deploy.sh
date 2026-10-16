@@ -58,8 +58,8 @@ ROOT_SBIN_DIR="/usr/local/sbin"
 ROOT_OPS_FILES=(deploy.sh bin/backup-database.sh bin/restore-database.sh bin/scheduled-job.sh
   bin/scheduled-job-alert.sh bin/check-scheduled-jobs.sh bin/lib/database-url.sh bin/lib/monitor-ping.sh)
 # Installed the same way when the target commit has them (operator tools run by root; older commits lack them, so their
-# absence does not block a rollback): sudo /usr/local/lib/amoobot/post-deploy-check.sh
-OPTIONAL_ROOT_OPS_FILES=(bin/post-deploy-check.sh)
+# absence does not block a rollback): sudo /usr/local/lib/amoobot/post-deploy-check.sh, .../smoke-webhook.sh <fake id>
+OPTIONAL_ROOT_OPS_FILES=(bin/post-deploy-check.sh bin/smoke-webhook.sh)
 # GitHub's published SSH host keys (from https://api.github.com/meta over HTTPS); git uses StrictHostKeyChecking=yes.
 # In /etc/ssh (root-owned, readable by the deploy user's ssh; /etc/amoobot is root-only).
 GITHUB_KNOWN_HOSTS="/etc/ssh/amoobot_github_known_hosts"
