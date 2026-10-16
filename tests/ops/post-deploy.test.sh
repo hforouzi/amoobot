@@ -239,6 +239,16 @@ check "post-deploy-check.sh and smoke-webhook.sh are optional root-ops files (in
 check "  ...read from the mirror (git_blob), never from the checkout" bash -c \
   'sed -n "/^install_root_ops() {/,/^}/p" "$1" | grep -q "for path in \"\${OPTIONAL_ROOT_OPS_FILES\[@\]}\"" && ! sed -n "/^install_root_ops() {/,/^}/p" "$1" | grep -q "APP_DIR"' _ "$ROOT/deploy.sh"
 
+echo "== docs/fa/first-deploy-checklist.md"
+DOC="$ROOT/docs/fa/first-deploy-checklist.md"
+check "checklist exists and is linked from deployment.md" bash -c '[[ -s "$1" ]] && grep -q "first-deploy-checklist.md" "$2"' _ "$DOC" "$ROOT/docs/fa/deployment.md"
+check "the admin password is prompted, never given with --password" bash -c 'grep -q "app:admin:create-user" "$1" && ! grep -E "app:admin:create-user.*--password" "$1"' _ "$DOC"
+check "it runs the root-owned copies of the check and the smoke test" bash -c \
+  'grep -q "sudo /usr/local/lib/amoobot/post-deploy-check.sh" "$1" && grep -q "sudo /usr/local/lib/amoobot/smoke-webhook.sh 999000001" "$1" && ! grep -qE "sudo (bash )?(/var/www/amoobot/)?bin/(post-deploy-check|smoke-webhook)" "$1"' _ "$DOC"
+check "dry-run first, second root session, real /start, restore drill on a throwaway DB, go-live gate" bash -c \
+  'for k in "--dry-run" "نشست SSH دوم" "/start" "amoobot_drill" "DROP DATABASE amoobot_drill" "Go-live" "PROVISIONING_FAILED" "NEEDS_REVIEW"; do grep -qF -- "$k" "$1" || { echo "missing: $k"; exit 1; }; done' _ "$DOC"
+check "no real-looking secret in the checklist" not grep -qE '[0-9]{6,}:[A-Za-z0-9_-]{30,}|[0-9a-f]{48,}' "$DOC"
+
 echo
 echo "passed: $PASS  failed: $FAIL  skipped: $SKIP"
 (( FAIL == 0 ))
