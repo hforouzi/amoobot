@@ -18,6 +18,7 @@ use App\Tests\Support\IntegrationTestCase;
 use Doctrine\ORM\Event\OnFlushEventArgs;
 use Doctrine\ORM\Events;
 use PHPUnit\Framework\Attributes\DataProvider;
+use PHPUnit\Framework\Attributes\Group;
 use Symfony\Component\Process\PhpExecutableFinder;
 use Symfony\Component\Process\Process;
 
@@ -138,6 +139,7 @@ final class PaymentSettlementServiceTest extends IntegrationTestCase
         self::assertSame(1, $this->countServicesForOrder($order));
     }
 
+    #[Group('subprocess')]
     public function testConcurrentSettlementsCreateExactlyOneService(): void
     {
         [$order, $payment] = $this->newServiceOrder();
@@ -163,6 +165,7 @@ final class PaymentSettlementServiceTest extends IntegrationTestCase
         self::assertSame(1, $this->countServicesForOrder($order));
     }
 
+    #[Group('subprocess')]
     public function testSettlementWaitsForTheRowLockAndRereadsState(): void
     {
         [$order, $payment] = $this->newServiceOrder();

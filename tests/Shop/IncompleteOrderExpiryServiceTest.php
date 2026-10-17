@@ -10,6 +10,7 @@ use App\Payment\Domain\PaymentStatus;
 use App\Shop\Application\IncompleteOrderExpiryService;
 use App\Shop\Domain\OrderStatus;
 use App\Tests\Support\IntegrationTestCase;
+use PHPUnit\Framework\Attributes\Group;
 use Symfony\Component\Process\PhpExecutableFinder;
 use Symfony\Component\Process\Process;
 
@@ -70,6 +71,7 @@ final class IncompleteOrderExpiryServiceTest extends IntegrationTestCase
         self::assertSame($paymentStatus, $this->row('payment', (int) $payment->getId())['status']);
     }
 
+    #[Group('subprocess')]
     public function testWaitsForARunningSettlementAndThenLeavesTheOrderAlone(): void
     {
         [$order, $payment] = $this->oldOrderWithPayment(PaymentStatus::PENDING);
