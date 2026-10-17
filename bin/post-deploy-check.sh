@@ -122,6 +122,52 @@ check_https() {
   else fail certificate "only ${days} days left (minimum ${MIN_CERT_DAYS}); check certbot.timer / certbot renew"; fi
 }
 
+# 4a. Admin templates compile with the prod kernel's Twig (lint:twig, as the web user, no login): templates/ (with
+#     admin/dashboard.html.twig) and every EasyAdmin template the dashboard extends or includes. A Twig function from a
+#     bundle not enabled in prod (EasyAdmin's html_classes() once) is a compile error here, as it is a 500 on /admin.
+#     EasyAdmin's inspector/ is its web profiler panel (WebProfilerBundle is dev-only), so it is excluded.
+check_admin_templates() {
+  local json result
+  if ! is_root && [[ "$(id -un)" != "$WEB_USER" ]]; then skip admin-templates "needs root (runs bin/console as ${WEB_USER})"; return; fi
+  json="$(as_web php "$APP_DIR/bin/console" lint:twig "$APP_DIR/templates" @EasyAdminBundle --excludes=inspector --format=json --env=prod 2> /dev/null)"
+  result="$(printf '%s' "$json" | php -r '
+    $files = json_decode(stream_get_contents(STDIN), true);
+    if (!is_array($files) || [] === $files) { echo "FAIL bin/console lint:twig gave no usable answer"; exit; }
+    $invalid = array_values(array_filter($files, static fn ($f) => !($f["valid"] ?? false)));
+    $dashboard = array_filter($files, static fn ($f) => str_ends_with((string) ($f["file"] ?? ""), "templates/admin/dashboard.html.twig"));
+    if ($invalid) {
+      $first = str_replace($argv[1]."/", "", (string) ($invalid[0]["message"] ?? "invalid"));
+      echo "FAIL ", count($invalid), " of ", count($files), " templates do not compile in prod, first: ", $first;
+    } elseif (!$dashboard) {
+      echo "FAIL admin/dashboard.html.twig was not among the ", count($files), " templates compiled";
+    } else {
+      echo "PASS ", count($files), " templates compile with the prod kernel (admin/dashboard.html.twig, @EasyAdmin)";
+    }
+  ' "$APP_DIR" 2> /dev/null)"
+  case "$result" in
+    PASS*) pass admin-templates "${result#PASS }" ;;
+    FAIL*) fail admin-templates "${result#FAIL }" ;;
+    *) fail admin-templates "bin/console lint:twig gave no usable answer" ;;
+  esac
+}
+
+# 4b. Admin login page through the local nginx: 200 with the login form (PHP-FPM, Symfony and Twig answer, no login).
+#     With ADMIN_ALLOW_IPS nginx denies every other address, the server's own included unless it is listed.
+check_admin_login() {
+  local code
+  [[ -n "$DOMAIN" ]] || { skip admin-login "domain unknown (pass --domain)"; return; }
+  code="$(curl -s -o "$TMP/admin-login" --max-time 10 -w '%{http_code}' --resolve "${DOMAIN}:443:${LOCAL_IP}" "https://${DOMAIN}/admin/login" 2> /dev/null)"
+  if [[ "$code" == 200 ]] && grep -q 'name="password"' "$TMP/admin-login"; then
+    pass admin-login "https://${DOMAIN}/admin/login -> 200 with the login form"
+  elif [[ "$code" == 403 && -r "$NGINX_SITE" ]] \
+       && awk '/location = \/admin\/login/ { on = 1 } on && /deny all;/ { found = 1 } on && /^[[:space:]]*}/ { on = 0 } END { exit !found }' "$NGINX_SITE"; then
+    skip admin-login "nginx ADMIN_ALLOW_IPS denies ${LOCAL_IP} (403): add ${LOCAL_IP} to ADMIN_ALLOW_IPS to run this check"
+  else
+    fail admin-login "https://${DOMAIN}/admin/login answered ${code:-no response}, expected 200 with the login form"
+  fi
+  rm -f "$TMP/admin-login"
+}
+
 # 5. Webhook protection: the real URL secret without the header -> 403; a wrong URL secret -> 403/404
 check_webhook_auth() {
   local secret code wrong
@@ -318,6 +364,8 @@ check_leftovers() {
 
 check_app_env
 check_https
+check_admin_templates
+check_admin_login
 check_webhook_auth
 check_webhook_info
 check_jobs
