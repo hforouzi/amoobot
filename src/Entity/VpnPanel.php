@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Entity;
 
+use App\Provisioning\Domain\SanaeiIntegrationMode;
 use Doctrine\DBAL\Types\Types;
 use Doctrine\ORM\Mapping as ORM;
 
@@ -44,6 +45,21 @@ class VpnPanel
 
     #[ORM\Column]
     private bool $isActive = true;
+
+    /** auto | legacy | modern (SanaeiIntegrationMode): what the admin chose. */
+    #[ORM\Column(length: 32, options: ['default' => 'auto'])]
+    private string $sanaeiIntegrationMode = 'auto';
+
+    /** legacy | modern as last confirmed by a capability probe; null = never confirmed. */
+    #[ORM\Column(length: 16, nullable: true)]
+    private ?string $sanaeiDetectedMode = null;
+
+    #[ORM\Column(nullable: true)]
+    private ?\DateTimeImmutable $sanaeiProbedAt = null;
+
+    /** "ok" or the PanelFailure value of the last probe. */
+    #[ORM\Column(length: 64, nullable: true)]
+    private ?string $sanaeiProbeStatus = null;
 
     #[ORM\Column]
     private \DateTimeImmutable $createdAt;
@@ -264,6 +280,66 @@ class VpnPanel
     public function __toString(): string
     {
         return sprintf('%s (%s)', $this->title ?? 'Panel', $this->type);
+    }
+
+    public function getIntegrationMode(): SanaeiIntegrationMode
+    {
+        return SanaeiIntegrationMode::fromStored($this->sanaeiIntegrationMode);
+    }
+
+    public function setIntegrationMode(SanaeiIntegrationMode|string|null $mode): self
+    {
+        $this->sanaeiIntegrationMode = ($mode instanceof SanaeiIntegrationMode ? $mode : SanaeiIntegrationMode::fromStored($mode))->value;
+
+        return $this;
+    }
+
+    /**
+     * LEGACY or MODERN: the forced mode, else the last detected one, else LEGACY (never probed).
+     */
+    public function getEffectiveIntegrationMode(): SanaeiIntegrationMode
+    {
+        $mode = $this->getIntegrationMode();
+        if (SanaeiIntegrationMode::AUTO !== $mode) {
+            return $mode;
+        }
+
+        return SanaeiIntegrationMode::MODERN->value === $this->sanaeiDetectedMode ? SanaeiIntegrationMode::MODERN : SanaeiIntegrationMode::LEGACY;
+    }
+
+    public function isModern(): bool
+    {
+        return SanaeiIntegrationMode::MODERN === $this->getEffectiveIntegrationMode();
+    }
+
+    public function getDetectedIntegrationMode(): ?SanaeiIntegrationMode
+    {
+        return null === $this->sanaeiDetectedMode ? null : SanaeiIntegrationMode::tryFrom($this->sanaeiDetectedMode);
+    }
+
+    public function getProbedAt(): ?\DateTimeImmutable
+    {
+        return $this->sanaeiProbedAt;
+    }
+
+    public function getProbeStatus(): ?string
+    {
+        return $this->sanaeiProbeStatus;
+    }
+
+    /**
+     * Stores a capability probe. A probe that could not decide (panel down, bad token) keeps the previously detected
+     * mode: a temporarily unreachable panel must not silently switch to another API.
+     */
+    public function recordProbe(?SanaeiIntegrationMode $detected, string $status, \DateTimeImmutable $at): self
+    {
+        if (SanaeiIntegrationMode::LEGACY === $detected || SanaeiIntegrationMode::MODERN === $detected) {
+            $this->sanaeiDetectedMode = $detected->value;
+        }
+        $this->sanaeiProbeStatus = mb_substr($status, 0, 64);
+        $this->sanaeiProbedAt = $at;
+
+        return $this;
     }
 
     public function getApiVersion(): string
