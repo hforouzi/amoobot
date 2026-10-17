@@ -207,3 +207,16 @@ sales_settings:
     renewals_enabled: Renewals enabled?
     add_traffic_enabled: Extra traffic purchases enabled?
     disabled_message: Sales disabled message
+
+panel_connection:
+  integration_mode: Connection mode
+  integration_mode_help: '"Auto" uses the connection test to detect whether the panel has the new API (token) or is an old one (username/password). Choose a mode by hand only if you need to.'
+  mode:
+    auto: Auto (recommended)
+    legacy: Legacy (username and password)
+    modern: Modern (API token)
+  guard:
+    no_token: The modern mode needs an API token. Enter the token first.
+    not_confirmed: 'This panel is used by an active plan: the modern mode can be chosen only after a connection test confirmed the new API (last test result - %status%). Run the connection test first, or keep the mode on Auto.'
+    driver_incomplete: The modern API driver does not support every sales operation yet; the modern mode is not allowed for a panel with active plans.
+    mode_kept: The connection mode was not changed.

@@ -14,10 +14,15 @@ use App\Provisioning\Domain\Dto\CreateVpnServiceRequest;
 use App\Provisioning\Domain\Dto\RenewVpnServiceRequest;
 use App\Provisioning\Domain\Dto\VpnUsage;
 use App\Provisioning\Domain\ExistingClientAwareDriverInterface;
+use App\Provisioning\Domain\TrafficLimitDriverInterface;
 use App\Provisioning\Domain\VpnPanelDriverInterface;
 use Symfony\Component\Uid\Uuid;
 
-final class Sanaei3xuiDriver implements VpnPanelDriverInterface, ExistingClientAwareDriverInterface
+/**
+ * Legacy 3x-ui driver: clients managed through the inbound endpoints, cookie login (or bearer for early v3 panels).
+ * Selected for sanaei_3xui panels whose effective integration mode is legacy; Sanaei3xuiModernDriver handles modern.
+ */
+final class Sanaei3xuiDriver implements VpnPanelDriverInterface, ExistingClientAwareDriverInterface, TrafficLimitDriverInterface
 {
     private const BYTES_PER_GB = 1073741824;
 
@@ -30,7 +35,12 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface, ExistingClientA
 
     public function supports(?VpnPanel $panel): bool
     {
-        return $panel instanceof VpnPanel && 'sanaei_3xui' === $panel->getType();
+        return $panel instanceof VpnPanel && 'sanaei_3xui' === $panel->getType() && !$panel->isModern();
+    }
+
+    public function supportsProvisioning(?VpnPanel $panel): bool
+    {
+        return true;
     }
 
     public function createService(CreateVpnServiceRequest $request, ?VpnPanel $panel = null): CreatedVpnService

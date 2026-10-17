@@ -342,6 +342,17 @@ class VpnPanel
         return $this;
     }
 
+    /** auto | legacy | modern, for forms. */
+    public function getIntegrationModeValue(): string
+    {
+        return $this->getIntegrationMode()->value;
+    }
+
+    public function setIntegrationModeValue(?string $mode): self
+    {
+        return $this->setIntegrationMode($mode);
+    }
+
     /**
      * LEGACY or MODERN: the forced mode, else the last detected one, else LEGACY (never probed).
      */

@@ -68,7 +68,7 @@ final class VpnServiceConfigRefreshService
     public function isSanaeiLegacyService(VpnService $service): bool
     {
         $panel = $service->getPanel();
-        if (null === $panel || 'sanaei_3xui' !== strtolower(trim((string) $panel->getType()))) {
+        if (null === $panel || 'sanaei_3xui' !== strtolower(trim((string) $panel->getType())) || $panel->isModern()) {
             return false;
         }
 

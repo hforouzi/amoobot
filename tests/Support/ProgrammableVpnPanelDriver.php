@@ -75,6 +75,11 @@ final class ProgrammableVpnPanelDriver implements VpnPanelDriverInterface, Exist
         return $panel instanceof VpnPanel && self::TYPE === $panel->getType();
     }
 
+    public function supportsProvisioning(?VpnPanel $panel): bool
+    {
+        return true;
+    }
+
     public function createService(CreateVpnServiceRequest $request, ?VpnPanel $panel = null): CreatedVpnService
     {
         ++$this->createCalls;

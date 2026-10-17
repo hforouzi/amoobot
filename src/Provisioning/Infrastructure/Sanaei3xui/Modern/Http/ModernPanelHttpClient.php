@@ -149,6 +149,14 @@ class ModernPanelHttpClient
             throw new PanelApiException(PanelFailure::AUTH_REJECTED, sprintf('%s: HTTP %d, the panel rejected the API token.', $what, $status), $status);
         }
         if (404 === $status) {
+            // A JSON envelope with 404 is the API answering "no such record"; the bare 404 page means no API here.
+            $decoded = json_decode(ltrim($body), true);
+            if (is_array($decoded) && is_bool($decoded['success'] ?? null)) {
+                $msg = is_scalar($decoded['msg'] ?? null) ? SecretRedactor::redact((string) $decoded['msg'], [$token], 300) : null;
+
+                throw new PanelApiException(PanelFailure::PANEL_REJECTED, sprintf('%s: HTTP 404: %s', $what, '' !== (string) $msg ? $msg : 'not found'), $status, $msg);
+            }
+
             throw new PanelApiException(PanelFailure::WRONG_URL, sprintf('%s: HTTP 404, no API at this URL (check the URL and the web base path).', $what), $status);
         }
         if ($status >= 300 && $status < 400) {

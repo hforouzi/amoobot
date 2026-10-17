@@ -4,12 +4,17 @@ declare(strict_types=1);
 
 namespace App\Tests\Support\Fake3xui;
 
+use App\Entity\VpnInbound;
 use App\Entity\VpnPanel;
+use App\Provisioning\Domain\SanaeiIntegrationMode;
 use App\Provisioning\Infrastructure\PanelCredentials;
 use App\Provisioning\Infrastructure\PanelHttpClientFactory;
 use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http\ModernPanelHttpClient;
+use App\Provisioning\Infrastructure\Sanaei3xui\Modern\ModernClientsApi;
+use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Sanaei3xuiModernDriver;
 use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Probe\SanaeiCapabilityProbe;
 use App\Provisioning\Infrastructure\Sanaei3xui\Sanaei3xuiApiClient;
+use App\Provisioning\Infrastructure\Sanaei3xui\Sanaei3xuiRemoteIdParser;
 use App\Shared\Infrastructure\SecretCipher;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
@@ -58,5 +63,20 @@ trait Fake3xuiWiring
         }
 
         return $panel;
+    }
+
+    protected function modernDriver(): Sanaei3xuiModernDriver
+    {
+        return new Sanaei3xuiModernDriver(new ModernClientsApi($this->modernHttp()), new Sanaei3xuiRemoteIdParser());
+    }
+
+    protected function modernPanel(): VpnPanel
+    {
+        return $this->fakePanel()->setIntegrationMode(SanaeiIntegrationMode::MODERN);
+    }
+
+    protected function fakeInbound(VpnPanel $panel, int $remoteId = 1): VpnInbound
+    {
+        return (new VpnInbound())->setPanel($panel)->setRemoteInboundId((string) $remoteId)->setTitle('in-'.$remoteId)->setProtocol('vless')->setFlow('xtls-rprx-vision');
     }
 }

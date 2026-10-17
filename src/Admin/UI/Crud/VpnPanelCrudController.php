@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace App\Admin\UI\Crud;
 
 use App\Entity\VpnPanel;
+use App\Provisioning\Application\ModernModeGuard;
+use App\Provisioning\Domain\SanaeiIntegrationMode;
+use Doctrine\ORM\EntityManagerInterface;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Action;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Actions;
 use EasyCorp\Bundle\EasyAdminBundle\Controller\AbstractCrudController;
@@ -15,9 +18,16 @@ use EasyCorp\Bundle\EasyAdminBundle\Field\DateTimeField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\IdField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\TextField;
 use Symfony\Component\Form\Extension\Core\Type\PasswordType;
+use Symfony\Contracts\Translation\TranslatorInterface;
 
 class VpnPanelCrudController extends AbstractCrudController
 {
+    public function __construct(
+        private readonly ModernModeGuard $modernModeGuard,
+        private readonly TranslatorInterface $translator,
+    ) {
+    }
+
     public static function getEntityFqcn(): string
     {
         return VpnPanel::class;
@@ -60,6 +70,13 @@ class VpnPanelCrudController extends AbstractCrudController
                 ]),
             TextField::new('title'),
             TextField::new('baseUrl'),
+            ChoiceField::new('integrationModeValue', 'panel_connection.integration_mode')
+                ->setChoices([
+                    'panel_connection.mode.auto' => SanaeiIntegrationMode::AUTO->value,
+                    'panel_connection.mode.legacy' => SanaeiIntegrationMode::LEGACY->value,
+                    'panel_connection.mode.modern' => SanaeiIntegrationMode::MODERN->value,
+                ])
+                ->setHelp('panel_connection.integration_mode_help'),
             BooleanField::new('useProxy', 'Use proxy')
                 ->setHelp('Use the PANEL_PROXY_* proxy from .env.local for this panel. If disabled, this panel connects directly.'),
             ChoiceField::new('apiVersion', 'API Version')
@@ -115,6 +132,44 @@ class VpnPanelCrudController extends AbstractCrudController
             DateTimeField::new('createdAt')->setLabel('common.created_at')->hideOnForm(),
             DateTimeField::new('updatedAt')->setLabel('common.updated_at')->hideOnForm(),
         ];
+    }
+
+    public function persistEntity(EntityManagerInterface $entityManager, $entityInstance): void
+    {
+        if ($entityInstance instanceof VpnPanel) {
+            $this->enforceModeGuard($entityInstance, SanaeiIntegrationMode::AUTO->value);
+        }
+        parent::persistEntity($entityManager, $entityInstance);
+    }
+
+    public function updateEntity(EntityManagerInterface $entityManager, $entityInstance): void
+    {
+        if ($entityInstance instanceof VpnPanel) {
+            $original = $entityManager->getUnitOfWork()->getOriginalEntityData($entityInstance);
+            $this->enforceModeGuard($entityInstance, (string) ($original['sanaeiIntegrationMode'] ?? SanaeiIntegrationMode::AUTO->value));
+        }
+        parent::updateEntity($entityManager, $entityInstance);
+    }
+
+    /**
+     * A refused switch to "modern" keeps the previous mode; the rest of the form is saved. Flash messages are
+     * rendered as raw HTML by EasyAdmin, so the text is escaped.
+     */
+    private function enforceModeGuard(VpnPanel $panel, string $previousMode): void
+    {
+        $requested = $panel->getIntegrationMode();
+        if ($requested->value === $previousMode) {
+            return;
+        }
+        $refusal = $this->modernModeGuard->refusal($panel, $requested);
+        if (null === $refusal) {
+            return;
+        }
+        $panel->setIntegrationMode($previousMode);
+        $this->addFlash('danger', htmlspecialchars(
+            $this->translator->trans($refusal['key'], $refusal['params'], 'admin').' '.$this->translator->trans('panel_connection.guard.mode_kept', [], 'admin'),
+            ENT_QUOTES | ENT_SUBSTITUTE,
+        ));
     }
 
     private static function formatJsonConfig(mixed $value): string
