@@ -25,6 +25,7 @@ NGINX_SITE="${AMOOBOT_NGINX_SITE:-/etc/nginx/sites-available/amoobot}"
 NGINX_LOG_DIR="${AMOOBOT_NGINX_LOG_DIR:-/var/log/nginx}"
 MAINTENANCE_FILE="${AMOOBOT_MAINTENANCE_FILE:-/etc/nginx/snippets/amoobot-maintenance.conf}"
 DEPLOY_MARKER="${AMOOBOT_DEPLOY_MARKER:-/var/lib/amoobot/deploy-in-progress}"
+PHP_ETC_DIR="${AMOOBOT_PHP_ETC_DIR:-/etc/php}"
 CHECK_JOBS="${AMOOBOT_CHECK_JOBS:-$SCRIPT_DIR/check-scheduled-jobs.sh}"
 LOCAL_IP="${AMOOBOT_LOCAL_IP:-127.0.0.1}"
 MIN_CERT_DAYS="${AMOOBOT_MIN_CERT_DAYS:-14}"
@@ -262,6 +263,26 @@ check_etc_modes() {
   else fail etc-amoobot "$(IFS=';'; echo "${problems[*]}")"; fi
 }
 
+# 13a. PHP timezone: UTC for the CLI and the FPM SAPI (php-fpmX -i reads the pool's conf.d; pool files can override it)
+check_php_timezone() {
+  local ver cli fpm pool problems=()
+  ver="${AMOOBOT_PHP_VERSION:-$(env_value PHP_VERSION || true)}"; ver="${ver:-8.4}"
+  [[ "$ver" =~ ^[0-9]+\.[0-9]+$ ]] || { fail php-timezone "PHP_VERSION '${ver}' is not like 8.4"; return; }
+  cli="$(php -r 'echo ini_get("date.timezone"), " ", date_default_timezone_get();' 2> /dev/null)"
+  [[ "$cli" == "UTC UTC" ]] || problems+=("CLI '${cli:-unknown}'")
+  if have "php-fpm${ver}"; then
+    fpm="$("php-fpm${ver}" -i 2> /dev/null | awk -F' => ' '$1 == "date.timezone" { print $2; exit }')"
+    [[ "$fpm" == UTC ]] || problems+=("FPM '${fpm:-unknown}'")
+  else
+    problems+=("php-fpm${ver} not found")
+  fi
+  pool="$(grep -rhoE '^[[:space:]]*php(_admin)?_value\[date\.timezone\][[:space:]]*=[[:space:]]*[^[:space:];]+' \
+    "${PHP_ETC_DIR}/${ver}/fpm/pool.d" 2> /dev/null | sed 's/.*=[[:space:]]*//' | grep -vx UTC | sort -u | tr '\n' ' ')"
+  [[ -z "$pool" ]] || problems+=("pool override ${pool% }")
+  if (( ${#problems[@]} == 0 )); then pass php-timezone "UTC for CLI and FPM (PHP ${ver})"
+  else fail php-timezone "not UTC: $(IFS=';'; echo "${problems[*]}")"; fi
+}
+
 # 13. nginx -t
 check_nginx() {
   is_root || { skip nginx-config "needs root (nginx -t reads the private key)"; return; }
@@ -305,6 +326,7 @@ check_ufw
 check_sshd
 check_sql_mode
 check_etc_modes
+check_php_timezone
 check_nginx
 check_log_secrets
 check_leftovers

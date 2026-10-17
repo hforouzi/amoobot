@@ -1296,6 +1296,41 @@ rm -f "$WORK/curl.cfg"
 PATH="$WORK/curlbin:$PATH" AMOOBOT_MONITOR_PING_URL="https://mon.example/push/{job}?token=t" bash -c 'source "$1"; monitor_ping deploy fail' _ "$ROOT/bin/lib/monitor-ping.sh" > /dev/null
 check "  ...inserted before a query string" grep -qxF 'url = "https://mon.example/push/deploy/fail?token=t"' "$WORK/curl.cfg"
 
+echo "== PHP timezone pinned to UTC (FPM + CLI)"
+set_globals
+PHP_VERSION=8.4 PHP_TIMEZONE_INI=99-amoobot-timezone.ini PHP_ETC_DIR=/etc/php
+load_fn php_timezone_ini_paths render_php_timezone_ini install_php_timezone php_timezone_problems
+check "ini paths: the FPM and CLI conf.d of PHP_VERSION" test "$(php_timezone_ini_paths | tr '\n' ' ')" = \
+  "/etc/php/8.4/fpm/conf.d/99-amoobot-timezone.ini /etc/php/8.4/cli/conf.d/99-amoobot-timezone.ini "
+check "ini content: date.timezone = UTC" grep -qx 'date.timezone = UTC' <<< "$(render_php_timezone_ini)"
+out="$( (write_file() { echo "write $1 $2 $3"; cat > /dev/null; }; install_php_timezone) )"
+check "install writes both files 644 root:root" test "$(grep -c '^write /etc/php/8.4/\(fpm\|cli\)/conf.d/99-amoobot-timezone.ini 644 root:root$' <<< "$out")" -eq 2
+TZB="$WORK/tzbin"; mkdir -p "$TZB" "$WORK/tzpool"
+printf '#!/bin/sh\nprintf "%%s" "$CLI_TZ"\n' > "$TZB/php"; printf '#!/bin/sh\nprintf "date.timezone => %%s => %%s\\n" "$FPM_TZ" "$FPM_TZ"\n' > "$TZB/php-fpm8.4"; chmod +x "$TZB/php" "$TZB/php-fpm8.4"
+tz_case() {  # tz_case <cli output> <fpm value> [pool override] -> problems
+  rm -rf "$WORK/tzetc"; mkdir -p "$WORK/tzetc/8.4/fpm/pool.d"; printf '[www]\nuser = www-data\n%s\n' "${3:-}" > "$WORK/tzetc/8.4/fpm/pool.d/www.conf"
+  ( export PATH="$TZB:$PATH" CLI_TZ="$1" FPM_TZ="$2"; PHP_ETC_DIR="$WORK/tzetc"; php_timezone_problems )
+}
+check "CLI and FPM UTC, no pool override -> no problem" test -z "$(tz_case 'UTC UTC' UTC)"
+check "CLI ini unset (default UTC but date.timezone empty) -> problem" grep -q "^CLI: " <<< "$(tz_case ' UTC' UTC)"
+check "CLI Asia/Tehran -> problem" grep -q "^CLI: .*Asia/Tehran" <<< "$(tz_case 'Asia/Tehran Asia/Tehran' UTC)"
+check "FPM Europe/Berlin -> problem" grep -q "^FPM: php-fpm8.4 -i shows date.timezone 'Europe/Berlin'" <<< "$(tz_case 'UTC UTC' Europe/Berlin)"
+check "pool php_admin_value[date.timezone] override -> problem" grep -q "overrides date.timezone with: Asia/Tehran" <<< "$(tz_case 'UTC UTC' UTC 'php_admin_value[date.timezone] = Asia/Tehran')"
+check "pool override set to UTC -> no problem" test -z "$(tz_case 'UTC UTC' UTC 'php_value[date.timezone] = UTC')"
+check "step 18 installs the ini before the FPM restart and dies when the effective value is not UTC" bash -c \
+  'b=$(sed -n "/^step \"18\/18\"/,/^fi$/p" "$1"); i=$(grep -n "^install_php_timezone$" <<< "$b" | cut -d: -f1); r=$(grep -n "systemctl restart \"php\${PHP_VERSION}-fpm\"" <<< "$b" | cut -d: -f1)
+   [[ -n $i && -n $r && $i -lt $r ]] && grep -q "die \"PHP timezone is not UTC everywhere" <<< "$b"' _ "$ROOT/deploy.sh"
+if can_dry_run; then
+  OUT="$BASE_OUT"
+  for sapi in fpm cli; do
+    check "dry-run writes /etc/php/8.4/${sapi}/conf.d/99-amoobot-timezone.ini with date.timezone = UTC" bash -c \
+      'grep -qF "[dry-run] write /etc/php/8.4/$2/conf.d/99-amoobot-timezone.ini (644 root:root)" <<< "$1" && grep -A3 "99-amoobot-timezone.ini (644" <<< "$1" | grep -q "+ date.timezone = UTC"' _ "$OUT" "$sapi"
+  done
+  check "dry-run announces the CLI + FPM timezone verification" grep -qF '[dry-run] verify the effective PHP timezone is UTC: CLI (php -r), FPM (php-fpm8.4 -i and pool.d overrides)' <<< "$OUT"
+else
+  skip "$DRY_RUN_SKIP"
+fi
+
 echo "== supply chain: pinned GitHub host keys (group 7)"
 check "StrictHostKeyChecking=accept-new is gone (no trust on first use)" not grep -q 'StrictHostKeyChecking=accept-new' "$ROOT/deploy.sh"
 REPO_HOST_LINE="$(grep -m1 '^repo_host=' "$ROOT/deploy.sh")"

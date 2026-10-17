@@ -104,7 +104,7 @@ ssh -o PubkeyAuthentication=no deploy@SERVER   # باید رد شود (Permissio
 ssh root@SERVER 'sudo /usr/local/lib/amoobot/post-deploy-check.sh'
 ```
 
-- [ ] `RESULT: OK` (کد خروج `0`)، یعنی همه‌ی ۱۷ خط `PASS` هستند. اولین بار ممکن است `scheduled-jobs` به‌خاطر `NEVER` (کارها هنوز یک‌بار هم
+- [ ] `RESULT: OK` (کد خروج `0`)، یعنی همه‌ی ۱۸ خط `PASS` هستند. اولین بار ممکن است `scheduled-jobs` به‌خاطر `NEVER` (کارها هنوز یک‌بار هم
   اجرا نشده‌اند) `FAIL` باشد: ۳۰ دقیقه صبر کنید و دوباره اجرا کنید. هر `FAIL` دیگر را قبل از ادامه رفع کنید.
 - [ ] نسخه‌ی root‌مالک را اجرا کنید (`/usr/local/lib/amoobot/...`)، **نه** `bin/` داخل `/var/www/amoobot` با root.
 

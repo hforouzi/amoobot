@@ -414,6 +414,41 @@ WantedBy=timers.target
 EOF
 }
 
+# PHP's timezone, pinned for both SAPIs (the app stores wall-clock DATETIMEs and has always run in UTC, PHP's default when
+# no php.ini sets date.timezone). "99-" so it is read after, and wins over, any other conf.d file. The kernel also forces
+# UTC at boot (src/Kernel.php); this keeps php -r, the job scripts and anything outside the kernel on UTC too.
+PHP_TIMEZONE_INI="99-amoobot-timezone.ini"
+PHP_ETC_DIR="/etc/php"
+php_timezone_ini_paths() {
+  printf '%s\n' "${PHP_ETC_DIR}/${PHP_VERSION}/fpm/conf.d/${PHP_TIMEZONE_INI}" "${PHP_ETC_DIR}/${PHP_VERSION}/cli/conf.d/${PHP_TIMEZONE_INI}"
+}
+render_php_timezone_ini() {
+  printf '; Managed by amoobot deploy.sh: the app stores and compares wall-clock DATETIMEs in UTC.\ndate.timezone = UTC\n'
+}
+
+# install_php_timezone  writes the ini for the FPM and CLI SAPIs (idempotent; FPM is restarted in step 18)
+install_php_timezone() {
+  local path
+  while IFS= read -r path; do
+    render_php_timezone_ini | write_file "$path" 644 root:root --show-diff
+  done < <(php_timezone_ini_paths)
+}
+
+# php_timezone_problems  ->  one line per SAPI whose effective timezone is not UTC (empty = both UTC). CLI: php -r (inline
+# code only, no app code). FPM: php-fpmX -i (same SAPI and conf.d as the pool) plus php_value/php_admin_value overrides in
+# the pool files, which -i cannot see.
+php_timezone_problems() {
+  local cli fpm pool
+  cli="$(php -r 'echo ini_get("date.timezone"), " ", date_default_timezone_get();' 2> /dev/null)"
+  [[ "$cli" == "UTC UTC" ]] || echo "CLI: date.timezone / default timezone is '${cli:-unknown}', expected 'UTC UTC'"
+  fpm="$("php-fpm${PHP_VERSION}" -i 2> /dev/null | awk -F' => ' '$1 == "date.timezone" { print $2; exit }')"
+  [[ "$fpm" == UTC ]] || echo "FPM: php-fpm${PHP_VERSION} -i shows date.timezone '${fpm:-unknown}', expected UTC"
+  pool="$(grep -rhoE '^[[:space:]]*php(_admin)?_value\[date\.timezone\][[:space:]]*=[[:space:]]*[^[:space:];]+' \
+    "${PHP_ETC_DIR}/${PHP_VERSION}/fpm/pool.d" 2> /dev/null | sed 's/.*=[[:space:]]*//' | grep -vx UTC | sort -u | tr '\n' ' ')"
+  [[ -z "$pool" ]] || echo "FPM: a pool in ${PHP_ETC_DIR}/${PHP_VERSION}/fpm/pool.d overrides date.timezone with: ${pool}"
+  return 0
+}
+
 # render_maintenance on|off  ->  the include file. Telegram and the payment gateways retry a 503, so updates and
 # callbacks arrive after the deploy instead of hitting half-updated code.
 render_maintenance() {
@@ -2138,8 +2173,17 @@ console app:telegram:set-webhook "https://${DOMAIN}"
 
 step "18/18" "Running final checks..."
 
+# PHP timezone pinned to UTC for FPM and CLI (no behaviour change: it was UTC by PHP's default); FPM restarts just below.
+install_php_timezone
 run systemctl restart "php${PHP_VERSION}-fpm"
 run systemctl reload nginx
+if (( DRY_RUN )); then
+  log "[dry-run] verify the effective PHP timezone is UTC: CLI (php -r), FPM (php-fpm${PHP_VERSION} -i and pool.d overrides)"
+else
+  tz_problems="$(php_timezone_problems)"
+  [[ -z "$tz_problems" ]] || die "PHP timezone is not UTC everywhere: ${tz_problems//$'\n'/; }"
+  log "PHP timezone: UTC for CLI and FPM ($(php_timezone_ini_paths | tr '\n' ' '))."
+fi
 
 if (( ! DRY_RUN )); then
   # As the web user: .env.local.php is PHP owned by the deploy user and must never be executed as root.

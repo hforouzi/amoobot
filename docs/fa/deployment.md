@@ -149,7 +149,7 @@ sudo -u www-data php bin/console app:payment:create-default-gateways --env=prod
 `bin/` در checkout را با root اجرا نکنید). برای هر بررسی یک خط `PASS`/`FAIL`/`SKIP` چاپ می‌کند، هیچ رمزی چاپ نمی‌کند و فقط اگر همه `PASS`
 باشند کد خروج `0` می‌دهد: `APP_ENV`/`APP_DEBUG` واقعی برنامه، `healthz` روی HTTPS، ریدایرکت HTTP، روزهای باقی‌مانده‌ی گواهی، `403` برای
 Webhook بدون هدر و با رمز URL اشتباه، `getWebhookInfo` (URL ماسک‌شده، بدون `last_error_message`، صف کوچک)، کارهای زمان‌بندی‌شده، بکاپ شبانه
-(تازه و `600`)، ufw، `sshd -T`، `sql_mode`، دسترسی‌های `/etc/amoobot`، `nginx -t`، نبود رشته‌ی شبیه رمز در لاگ‌های nginx، خاموش بودن
+(تازه و `600`)، ufw، `sshd -T`، `sql_mode`، دسترسی‌های `/etc/amoobot`، منطقه‌ی زمانی PHP (`UTC` برای CLI و FPM)، `nginx -t`، نبود رشته‌ی شبیه رمز در لاگ‌های nginx، خاموش بودن
 حالت نگهداری و نبود فایل `deploy-in-progress`. با کاربر `deploy` (`bin/post-deploy-check.sh`) بررسی‌هایی که root لازم دارند `SKIP`
 می‌شوند و نتیجه `INCOMPLETE` (کد `1`) است. ترتیب کامل اولین استقرار: [first-deploy-checklist.md](first-deploy-checklist.md).
 
@@ -224,6 +224,10 @@ sudo amoobot-deploy --app-only --ref v1.5.0
   کاربر `deploy` می‌نویسد (فایل موقت و `mv`، پس symlink جایگزین می‌شود نه دنبال)، پوشه‌های `var/` و `public/bundles` را مالک خودشان می‌سازد و
   `chmod` می‌کند و root فقط `chown -h` و `chown -R -h -P` اجرا می‌کند. اگر `~deploy/.ssh`، `authorized_keys`، `var/`، `public/`،
   `public/bundles` یا `.env.local.php` symlink باشد deploy **متوقف می‌شود**.
+- **منطقه‌ی زمانی PHP همیشه `UTC` است.** مرحله‌ی 18 فایل `/etc/php/<نسخه>/{fpm,cli}/conf.d/99-amoobot-timezone.ini` با `date.timezone = UTC`
+  را می‌نویسد و بعد از restart مقدار مؤثر را برای CLI (`php -r`) و FPM (`php-fpm<نسخه> -i` و overrideهای `pool.d`) بررسی می‌کند؛ خود برنامه هم در
+  boot کرنل `UTC` را تنظیم می‌کند. رفتار عوض نمی‌شود: قبلاً هم چون هیچ php.ini مقداری نداشت، پیش‌فرض PHP یعنی `UTC` بود. زمان‌هایی که به کاربر
+  نشان داده می‌شوند (پیام‌های بات، ستون‌های تاریخ پنل ادمین، کد پیگیری سفارش) هم مثل قبل `UTC` هستند، نه ساعت ایران.
 - مقادیری که در فایل‌های root (cron، unitها، nginx، فایل option دیتابیس) نوشته می‌شوند قبل از هر کاری بررسی می‌شوند: `BACKUP_CRON` فقط پنج
   فیلد از `0-9 * / , -` یا `@daily`/`@hourly`/`@weekly`؛ `PHP_VERSION` مثل `8.4`؛ `REPO_URL` فقط `git@...` یا `ssh://...` بدون فاصله، کوتیشن یا
   کاراکتر کنترلی؛ نام کاربر و میزبان دیتابیس بدون کاراکتر کنترلی، `"` یا `\`، و پسورد بدون کاراکتر کنترلی.

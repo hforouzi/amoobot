@@ -10,10 +10,14 @@ use PHPUnit\Framework\TestCase;
 use Symfony\Component\Process\Process;
 
 /**
- * Runs the settlement and expiry test files under libfaketime with the clock starting 2 s and 1 s before a midnight
- * boundary (end of day, end of month, into and out of 29 February), in UTC, Europe/Berlin and Asia/Tehran. Each file
- * takes about a second, so the date changes while its tests run (a start 3 s early would finish before midnight). The app reads the system clock directly (new \DateTimeImmutable() / time()), so faking the process clock
- * is the only way to exercise these instants without changing production code.
+ * Runs the settlement and expiry test files under libfaketime with the clock starting 2 s and 1 s before a UTC midnight
+ * boundary (end of day, end of month, into and out of 29 February). Each file takes about a second, so the date changes
+ * while its tests run (a start 3 s early would finish before midnight). The app reads the system clock directly
+ * (new \DateTimeImmutable() / time()), so faking the process clock is the only way to exercise these instants without
+ * changing production code.
+ *
+ * The app runs in UTC (src/Kernel.php), so the boundaries are UTC midnights; the host php.ini is varied (UTC,
+ * Europe/Berlin, Asia/Tehran via -d date.timezone) to show it changes nothing. libfaketime reads the instants in TZ=UTC.
  *
  * Needs libfaketime (Debian/Ubuntu: apt-get install faketime); skipped when it is missing. CI installs it.
  * Tests that start PHP child processes (#[Group('subprocess')]) are excluded: each child would restart the fake clock
@@ -65,7 +69,7 @@ final class MidnightCrossingTest extends TestCase
                 $root,
                 [
                     'APP_ENV' => 'test',
-                    'TZ' => $timezone,
+                    'TZ' => 'UTC',
                     'FAKETIME' => '@'.$instant,
                     'FAKETIME_DONT_RESET' => '1',
                     'FAKETIME_DONT_FAKE_MONOTONIC' => '1',
@@ -78,7 +82,7 @@ final class MidnightCrossingTest extends TestCase
 
             self::assertTrue(
                 $process->isSuccessful(),
-                sprintf("%s failed with the clock starting at %s %s:\n%s", $file, $instant, $timezone, self::tail($process->getOutput().$process->getErrorOutput()))
+                sprintf("%s failed with the clock starting at %s UTC (host date.timezone %s):\n%s", $file, $instant, $timezone, self::tail($process->getOutput().$process->getErrorOutput()))
             );
         }
     }

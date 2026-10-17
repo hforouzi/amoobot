@@ -68,12 +68,14 @@ case "$1" in
   x509) cat > /dev/null; echo "notAfter=$(date -u -d "+${CERT_DAYS} days" "+%b %e %H:%M:%S %Y GMT")" ;;
 esac'
 stub php '
+if [[ "$*" == *date_default_timezone_get* ]]; then printf "%s" "${PHP_TZ_OUT}"; exit 0; fi
 if [[ "$1" == -r ]]; then exec "'"$REAL_PHP"'" "$@"; fi
 case "$*" in
   *"bin/console about"*) printf "%s\n" "${ABOUT_OUT}" ;;
   *"app:telegram:webhook-info"*) printf "%s\n" "${WEBHOOK_INFO}" ;;
   *) exec "'"$REAL_PHP"'" "$@" ;;
 esac'
+stub php-fpm8.4 '[[ "$1" == -i ]] && printf "date.timezone => %s => %s\n" "${FPM_TZ}" "${FPM_TZ}"'
 stub sudo 'while (( $# )); do case "$1" in -H|-n) shift ;; -u) shift 2 ;; --) shift; break ;; *) break ;; esac; done; exec "$@"'
 stub ufw 'printf "%s\n" "${UFW_OUT}"'
 stub sshd 'printf "%s\n" "${SSHD_OUT}"'
@@ -91,7 +93,8 @@ good_env() {
   WEBHOOK_INFO="$(webhook_info "https://${DOMAIN}/telegram/webhook/${SECRET}" "" 0)"; export WEBHOOK_INFO
   export UFW_OUT=$'Status: active\n\nTo                         Action      From\n--                         ------      ----\n22/tcp                     ALLOW       Anywhere\n80/tcp                     ALLOW       Anywhere\n443/tcp                    ALLOW       Anywhere\n22/tcp (v6)                ALLOW       Anywhere (v6)\n80/tcp (v6)                ALLOW       Anywhere (v6)\n443/tcp (v6)               ALLOW       Anywhere (v6)'
   export SSHD_OUT=$'port 22\npubkeyauthentication yes\npasswordauthentication no\nkbdinteractiveauthentication no\npermitrootlogin without-password'
-  export SQL_MODES="${STRICT}"$'\t'"${STRICT}" NGINX_RC=0 JOBS_RC=0
+  export SQL_MODES="${STRICT}"$'\t'"${STRICT}" NGINX_RC=0 JOBS_RC=0 PHP_TZ_OUT="UTC UTC" FPM_TZ=UTC
+  rm -rf "$WORK/phpetc"; mkdir -p "$WORK/phpetc/8.4/fpm/pool.d"; printf '[www]\nuser = www-data\n' > "$WORK/phpetc/8.4/fpm/pool.d/www.conf"
   rm -rf "$WORK/backups" "$WORK/nginxlog" "$WORK/marker"; mkdir -p "$WORK/backups" "$WORK/nginxlog"
   : > "$WORK/backups/amoobot_nightly_20261014T033000Z.sql.gz"; chmod 600 "$WORK/backups/amoobot_nightly_20261014T033000Z.sql.gz"
   printf '127.0.0.1 - - [14/Oct/2026:10:00:00 +0000] "GET /healthz HTTP/1.1" 200 15\n' > "$WORK/nginxlog/amoobot_access.log"
@@ -106,7 +109,7 @@ run_check() {
   : > "$WORK/argv"; : > "$WORK/curl.cfg"
   OUT="$(PATH="$SB:$PATH" APP_DIR="$WORK/app" AMOOBOT_ETC_DIR="$ETC" BACKUP_DIR="$WORK/backups" AMOOBOT_NGINX_LOG_DIR="$WORK/nginxlog" \
     AMOOBOT_MAINTENANCE_FILE="$WORK/maint.conf" AMOOBOT_DEPLOY_MARKER="$WORK/marker" AMOOBOT_CHECK_JOBS="$WORK/check-jobs" \
-    AMOOBOT_NGINX_SITE="$WORK/none" bash "$WORK/lib/post-deploy-check.sh" "$@" 2>&1)"; RC=$?
+    AMOOBOT_NGINX_SITE="$WORK/none" AMOOBOT_PHP_ETC_DIR="$WORK/phpetc" bash "$WORK/lib/post-deploy-check.sh" "$@" 2>&1)"; RC=$?
 }
 no_secret_anywhere() {
   local s
@@ -123,10 +126,10 @@ echo "== post-deploy-check: all good"
 good_env; run_check
 check "everything in order -> exit 0, RESULT: OK" bash -c '[[ $1 -eq 0 ]] && grep -q "^RESULT: OK$" <<< "$2"' _ "$RC" "$OUT"
 for c in app-env healthz http-redirect certificate webhook-wrong-secret webhook-no-header telegram-webhook scheduled-jobs backup \
-         firewall sshd sql-mode etc-amoobot nginx-config log-secrets maintenance-off deploy-marker; do
+         firewall sshd sql-mode etc-amoobot php-timezone nginx-config log-secrets maintenance-off deploy-marker; do
   check "  check '$c' PASSes" is PASS "$c"
 done
-check "  ...exactly 17 checks, one line each" test "$(grep -cE '^(PASS|FAIL|SKIP) ' <<< "$OUT")" -eq 17
+check "  ...exactly 18 checks, one line each" test "$(grep -cE '^(PASS|FAIL|SKIP) ' <<< "$OUT")" -eq 18
 check "no secret value in the output or on any command line" no_secret_anywhere
 check "the webhook URL with the secret went to curl only through its stdin config" bash -c 'grep -qF -- "/telegram/webhook/$1" "$2"' _ "$SECRET" "$WORK/curl.cfg"
 check "getWebhookInfo URL is shown masked" bash -c 'line=$(grep "telegram-webhook" <<< "$1"); grep -qF "https://bot.example.test/telegram/webhook/***" <<< "$line"' _ "$OUT"
@@ -162,6 +165,10 @@ fail_case sshd "PermitRootLogin yes" 'export SSHD_OUT="${SSHD_OUT/permitrootlogi
 fail_case sql-mode "sql_mode not strict" 'export SQL_MODES="NO_ENGINE_SUBSTITUTION"$'"'"'\t'"'"'"NO_ENGINE_SUBSTITUTION"'
 fail_case etc-amoobot "env file 644" 'chmod 644 "$ETC/database.env"'
 fail_case etc-amoobot "/etc/amoobot 755" 'chmod 755 "$ETC"'
+fail_case php-timezone "CLI timezone Asia/Tehran" 'export PHP_TZ_OUT="Asia/Tehran Asia/Tehran"'
+fail_case php-timezone "CLI ini unset (empty date.timezone)" 'export PHP_TZ_OUT=" UTC"'
+fail_case php-timezone "FPM timezone Europe/Berlin" 'export FPM_TZ=Europe/Berlin'
+fail_case php-timezone "a pool overrides the timezone" 'printf "php_admin_value[date.timezone] = Asia/Tehran\n" >> "$WORK/phpetc/8.4/fpm/pool.d/www.conf"'
 fail_case nginx-config "nginx -t fails" 'export NGINX_RC=1'
 fail_case log-secrets "the URL secret in the access log" 'printf "%s\n" "POST /telegram/webhook/${SECRET} 200" >> "$WORK/nginxlog/amoobot_access.log"'
 fail_case log-secrets "a bot-token-shaped string in the error log" 'printf "%s\n" "upstream: /bot987654321:AAzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz/getMe" >> "$WORK/nginxlog/amoobot_error.log"'
@@ -173,11 +180,11 @@ good_env; chmod 755 "$WORK" "$WORK/lib" "$WORK/stubs"; chmod 644 "$WORK/lib/post
 if have setpriv; then
   OUT="$(cd / && setpriv --reuid=65534 --regid=65534 --clear-groups env PATH="$SB:$PATH" APP_DIR="$WORK/app" AMOOBOT_ETC_DIR="$ETC" \
     AMOOBOT_MAINTENANCE_FILE="$WORK/maint.conf" AMOOBOT_DEPLOY_MARKER="$WORK/marker" AMOOBOT_CHECK_JOBS="$WORK/check-jobs" \
-    bash "$WORK/lib/post-deploy-check.sh" --domain "$DOMAIN" 2>&1)"; RC=$?
+    AMOOBOT_PHP_ETC_DIR="$WORK/phpetc" bash "$WORK/lib/post-deploy-check.sh" --domain "$DOMAIN" 2>&1)"; RC=$?
   check "as a normal user: root-only checks SKIP, exit 1, RESULT INCOMPLETE" bash -c \
     '[[ $1 -eq 1 ]] && grep -q "^RESULT: INCOMPLETE" <<< "$2" && grep -qE "^SKIP +sshd +needs root" <<< "$2" && grep -qE "^SKIP +webhook-no-header" <<< "$2"' _ "$RC" "$OUT"
   check "  ...checks that need no root still run (HTTPS, wrong secret, leftovers)" bash -c \
-    'grep -qE "^PASS +healthz" <<< "$1" && grep -qE "^PASS +webhook-wrong-secret" <<< "$1" && grep -qE "^PASS +deploy-marker" <<< "$1"' _ "$OUT"
+    'grep -qE "^PASS +healthz" <<< "$1" && grep -qE "^PASS +webhook-wrong-secret" <<< "$1" && grep -qE "^PASS +deploy-marker" <<< "$1" && grep -qE "^PASS +php-timezone" <<< "$1"' _ "$OUT"
   check "  ...and nothing from the root-only env file was read" not grep -qF "$SECRET" <<< "$OUT"
 else
   skip "non-root run (setpriv not installed)"
