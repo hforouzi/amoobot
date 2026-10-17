@@ -6,12 +6,10 @@ namespace App\Tests\Provisioning\Sanaei;
 
 use App\Entity\VpnPanel;
 use App\Provisioning\Domain\SanaeiIntegrationMode;
-use App\Provisioning\Infrastructure\PanelHttpClientFactory;
-use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http\ModernPanelHttpClient;
 use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http\PanelFailure;
 use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Probe\SanaeiCapabilityProbe;
-use App\Provisioning\Infrastructure\Sanaei3xui\Sanaei3xuiApiClient;
 use App\Tests\Support\Fake3xui\Fake3xuiPanel;
+use App\Tests\Support\Fake3xui\Fake3xuiWiring;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\HttpClient\Response\MockResponse;
@@ -22,7 +20,7 @@ use Symfony\Component\HttpClient\Response\MockResponse;
  */
 final class CapabilityProbeTest extends TestCase
 {
-    private Fake3xuiPanel $fake;
+    use Fake3xuiWiring;
 
     protected function setUp(): void
     {
@@ -75,7 +73,7 @@ final class CapabilityProbeTest extends TestCase
     public function testWrongLegacyCredentialsAfterAFailedTokenProbeDecideNothing(): void
     {
         $this->fake->mode = 'legacy';
-        $panel = $this->panel(withCredentials: true)->setPassword('wrong-password');
+        $panel = $this->panel(withCredentials: true)->setPlainPassword('wrong-password');
         $report = $this->probe($panel);
 
         self::assertNull($report->detected);
@@ -115,7 +113,7 @@ final class CapabilityProbeTest extends TestCase
         self::assertSame($expected, $report->failure);
         self::assertTrue($report->failure->isUnreachable());
         self::assertFalse($report->legacyProbeAttempted);
-        self::assertCount(1, $this->fake->requests);
+        self::assertNotContains('POST login', $this->fake->requestLines());
     }
 
     /**
@@ -170,7 +168,7 @@ final class CapabilityProbeTest extends TestCase
         self::assertSame('ok', $panel->getProbeStatus());
         self::assertNotNull($panel->getProbedAt());
 
-        $this->fake->script(null, null, Fake3xuiPanel::networkError('Connection timed out after 3000 milliseconds'));
+        $this->fake->script(null, null, Fake3xuiPanel::networkError('Connection timed out after 3000 milliseconds'), 3);
         $probe->probeAndRecord($panel);
 
         self::assertSame(SanaeiIntegrationMode::MODERN, $panel->getDetectedIntegrationMode(), 'a panel that is down for a moment keeps its mode');
@@ -196,23 +194,12 @@ final class CapabilityProbeTest extends TestCase
 
     private function panel(bool $withToken = true, bool $withCredentials = false): VpnPanel
     {
-        $panel = (new VpnPanel())->setType('sanaei_3xui')->setTitle('fake')->setBaseUrl(Fake3xuiPanel::ORIGIN.'/secret/');
-        if ($withToken) {
-            $panel->setApiToken(Fake3xuiPanel::TOKEN);
-        }
-        if ($withCredentials) {
-            $panel->setUsername(Fake3xuiPanel::USERNAME)->setPassword(Fake3xuiPanel::PASSWORD);
-        }
-
-        return $panel;
+        return $this->fakePanel($withToken, $withCredentials);
     }
 
     private function newProbe(): SanaeiCapabilityProbe
     {
-        $factory = new PanelHttpClientFactory();
-        $http = $this->fake->client();
-
-        return new SanaeiCapabilityProbe(new ModernPanelHttpClient($http, $factory), new Sanaei3xuiApiClient($http, $factory));
+        return $this->capabilityProbe();
     }
 
     private function probe(VpnPanel $panel): \App\Provisioning\Infrastructure\Sanaei3xui\Modern\Probe\CapabilityProbeReport

@@ -88,14 +88,14 @@ class VpnPanelCrudController extends AbstractCrudController
             TextField::new('publicHost')
                 ->setHelp('Used as fallback host for generated single links when inbound/external proxy host is missing.'),
             TextField::new('username'),
-            TextField::new('password')
+            TextField::new('plainPassword', 'Password')
                 ->setFormType(PasswordType::class)
                 ->setFormTypeOption('always_empty', true)
                 ->setFormTypeOption('required', false)
                 ->onlyOnForms(),
             TextField::new('passwordConfiguredLabel', 'Password configured')
                 ->hideOnForm(),
-            TextField::new('apiToken', 'API Token')
+            TextField::new('plainApiToken', 'API Token')
                 ->setFormType(PasswordType::class)
                 ->setFormTypeOption('always_empty', true)
                 ->setFormTypeOption('required', false)

@@ -159,6 +159,21 @@ class Plan
         return $this->isActive;
     }
 
+    /**
+     * Shown and sold to customers: active, and its inbound and panel usable (a degraded panel hides its plans).
+     */
+    public function isAvailableForSale(): bool
+    {
+        if (!$this->isActive) {
+            return false;
+        }
+        if (null === $this->inbound) {
+            return true;
+        }
+
+        return $this->inbound->isActive() && $this->inbound->getPanel()->isAvailableForSale();
+    }
+
     public function setIsActive(bool $isActive): self
     {
         $this->isActive = $isActive;

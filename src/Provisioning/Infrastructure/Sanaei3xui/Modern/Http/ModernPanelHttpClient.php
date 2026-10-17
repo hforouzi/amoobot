@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http;
 
 use App\Entity\VpnPanel;
+use App\Provisioning\Infrastructure\PanelCredentials;
 use App\Provisioning\Infrastructure\PanelHttpClientFactory;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
@@ -16,14 +17,38 @@ use Symfony\Contracts\HttpClient\HttpClientInterface;
  *
  * Every answer is the envelope {success, msg, obj}; success:true returns a PanelResponse, everything else throws a
  * PanelApiException naming the failure (PanelFailure). Nothing that leaves this class carries the token.
+ *
+ * Transport rules (provisioning calls run while database row locks are held, so they must fail fast):
+ * - connect/idle timeout 3 s, at most 10 s per request; redirects are never followed;
+ * - retries with backoff only for GET, only for transient failures (refused, timeout, 502/503/504), at most
+ *   MAX_ATTEMPTS and within RETRY_BUDGET_MS; a POST is sent exactly once (a retry could apply it twice);
+ * - HTTPS certificates are verified; a self-signed panel is trusted only through its pinned public key;
+ * - plain http:// only to loopback or private addresses (the bearer token would otherwise travel in clear text);
+ * - the per-panel proxy setting (PANEL_PROXY_*) is honoured.
+ * Each finished call is recorded on the panel (consecutive failures -> degraded); the caller flushes.
  */
 class ModernPanelHttpClient
 {
+    public const CONNECT_TIMEOUT_S = 3;
+    public const MAX_DURATION_S = 10;
+    public const MAX_ATTEMPTS = 3;
+    public const RETRY_BUDGET_MS = 12000;
+    private const RETRY_STATUSES = [502, 503, 504];
+
+    /** @var \Closure(int): void */
+    private readonly \Closure $sleeper;
+
+    /**
+     * @param (\Closure(int): void)|null $sleeper milliseconds to wait before a retry (tests pass a recorder)
+     */
     public function __construct(
         private readonly HttpClientInterface $httpClient,
         private readonly PanelHttpClientFactory $panelHttpClientFactory,
+        private readonly PanelCredentials $credentials,
         private readonly LoggerInterface $logger = new NullLogger(),
+        ?\Closure $sleeper = null,
     ) {
+        $this->sleeper = $sleeper ?? static function (int $ms): void { usleep($ms * 1000); };
     }
 
     /**
@@ -51,13 +76,40 @@ class ModernPanelHttpClient
     {
         $token = $this->token($panel);
         $endpoint = PanelEndpoint::fromPanel($panel);
+        $endpoint->assertTransportAllowed();
         $url = $endpoint->url($path, $query);
-        $options = $this->panelHttpClientFactory->createRequestOptions($panel);
-        $options['headers'] = ['Accept' => 'application/json', 'Authorization' => 'Bearer '.$token];
-        if (null !== $json) {
-            $options['json'] = $json;
-        }
+        $options = $this->options($panel, $endpoint, $token, $json);
 
+        $firstStartedAt = microtime(true);
+        for ($attempt = 1; ; ++$attempt) {
+            try {
+                $response = $this->attempt($panel, $method, $path, $url, $options, $token);
+                $panel->recordCallSuccess();
+
+                return $response;
+            } catch (PanelApiException $e) {
+                $backoffMs = 250 * (2 ** ($attempt - 1));
+                $retry = 'GET' === $method
+                    && $attempt < self::MAX_ATTEMPTS
+                    && self::isTransient($e)
+                    && self::elapsedMs($firstStartedAt) + $backoffMs < self::RETRY_BUDGET_MS;
+                if ($retry) {
+                    ($this->sleeper)($backoffMs);
+
+                    continue;
+                }
+                $this->recordFailure($panel, $e);
+
+                throw $e;
+            }
+        }
+    }
+
+    /**
+     * @param array<string, mixed> $options
+     */
+    private function attempt(VpnPanel $panel, string $method, string $path, string $url, #[\SensitiveParameter] array $options, #[\SensitiveParameter] string $token): PanelResponse
+    {
         $startedAt = microtime(true);
         try {
             $response = $this->httpClient->request($method, $url, $options);
@@ -67,6 +119,9 @@ class ModernPanelHttpClient
         } catch (HttpClientException $e) {
             $failure = self::classifyTransportError($e->getMessage());
             $this->logFailure($panel, $method, $path, $failure, null, $startedAt);
+            if (PanelFailure::TLS_CERTIFICATE === $failure && null !== $panel->getTlsPinSha256()) {
+                throw new PanelApiException($failure, sprintf('%s %s: the panel certificate does not match the pinned public key (was the certificate replaced?).', $method, $path));
+            }
 
             throw new PanelApiException($failure, sprintf('%s %s: %s', $method, $path, SecretRedactor::redact($e->getMessage(), [$token], 300)));
         }
@@ -87,7 +142,7 @@ class ModernPanelHttpClient
     /**
      * @param array<string, list<string>> $headers
      */
-    private function parse(string $method, string $path, int $status, array $headers, string $body, int $latencyMs, string $token): PanelResponse
+    private function parse(string $method, string $path, int $status, #[\SensitiveParameter] array $headers, #[\SensitiveParameter] string $body, int $latencyMs, #[\SensitiveParameter] string $token): PanelResponse
     {
         $what = $method.' '.$path;
         if (401 === $status || 403 === $status) {
@@ -126,9 +181,64 @@ class ModernPanelHttpClient
         return new PanelResponse($decoded['obj'] ?? null, $msg, $status, $latencyMs);
     }
 
+    /**
+     * @param array<mixed>|null $json
+     *
+     * @return array<string, mixed>
+     */
+    private function options(VpnPanel $panel, PanelEndpoint $endpoint, #[\SensitiveParameter] string $token, ?array $json): array
+    {
+        try {
+            $options = $this->panelHttpClientFactory->createRequestOptions($panel);
+        } catch (\RuntimeException $e) {
+            throw new PanelApiException(PanelFailure::NOT_CONFIGURED, SecretRedactor::redact($e->getMessage()));
+        }
+        $options['timeout'] = self::CONNECT_TIMEOUT_S;
+        $options['max_duration'] = self::MAX_DURATION_S;
+        $options['max_redirects'] = 0;
+        $options['headers'] = ['Accept' => 'application/json', 'Authorization' => 'Bearer '.$token];
+        if (null !== $json) {
+            $options['json'] = $json;
+        }
+
+        $pin = $panel->getTlsPinSha256();
+        if (null !== $pin && $endpoint->isHttps()) {
+            // Self-signed panel: no CA chain to verify, the pinned public key is the trust anchor (curl checks it
+            // on every connection, and refuses any other certificate).
+            $options['verify_peer'] = false;
+            $options['verify_host'] = false;
+            $options['peer_fingerprint'] = ['pin-sha256' => [$pin]];
+        } else {
+            $options['verify_peer'] = true;
+            $options['verify_host'] = true;
+        }
+
+        return $options;
+    }
+
+    private static function isTransient(PanelApiException $e): bool
+    {
+        return in_array($e->failure, [PanelFailure::NETWORK_REFUSED, PanelFailure::NETWORK_TIMEOUT, PanelFailure::NETWORK_OTHER], true)
+            || (PanelFailure::HTTP_ERROR === $e->failure && in_array($e->httpStatus, self::RETRY_STATUSES, true));
+    }
+
+    /**
+     * A failure counts towards "degraded" unless it is the panel refusing one request (success:false) or our own
+     * configuration missing.
+     */
+    private function recordFailure(VpnPanel $panel, PanelApiException $e): void
+    {
+        if (PanelFailure::PANEL_REJECTED === $e->failure || PanelFailure::NOT_CONFIGURED === $e->failure) {
+            return;
+        }
+        if ($panel->recordCallFailure(new \DateTimeImmutable())) {
+            $this->logger->warning('sanaei_panel_degraded', ['panel_id' => $panel->getId(), 'failures' => $panel->getConsecutiveFailures(), 'failure' => $e->failure->value]);
+        }
+    }
+
     private function token(VpnPanel $panel): string
     {
-        $token = trim((string) $panel->getApiToken());
+        $token = (string) $this->credentials->apiToken($panel);
         if ('' === $token) {
             throw new PanelApiException(PanelFailure::NOT_CONFIGURED, 'No API token is configured for this panel.');
         }

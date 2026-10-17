@@ -6,6 +6,7 @@ namespace App\Provisioning\Infrastructure\Sanaei3xui\Modern\Probe;
 
 use App\Entity\VpnPanel;
 use App\Provisioning\Domain\SanaeiIntegrationMode;
+use App\Provisioning\Infrastructure\PanelCredentials;
 use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http\ModernPanelHttpClient;
 use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http\PanelApiException;
 use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http\PanelFailure;
@@ -26,13 +27,14 @@ class SanaeiCapabilityProbe
     public function __construct(
         private readonly ModernPanelHttpClient $httpClient,
         private readonly Sanaei3xuiApiClient $legacyApiClient,
+        private readonly PanelCredentials $credentials,
     ) {
     }
 
     public function probe(VpnPanel $panel): CapabilityProbeReport
     {
         $tokenFailure = null;
-        if ('' !== trim((string) $panel->getApiToken())) {
+        if ($panel->isApiTokenConfigured()) {
             try {
                 $response = $this->httpClient->get($panel, self::PROBE_PATH, ['page' => 1, 'pageSize' => 1]);
                 if (is_array($response->obj)) {
@@ -77,7 +79,7 @@ class SanaeiCapabilityProbe
      */
     private function probeLegacy(VpnPanel $panel): true|string|null
     {
-        if ('' === trim((string) $panel->getUsername()) || '' === (string) $panel->getPassword()) {
+        if ('' === trim((string) $panel->getUsername()) || null === $this->credentials->password($panel)) {
             return null;
         }
         // A copy forced to the legacy cookie flow: the stored panel keeps its settings.

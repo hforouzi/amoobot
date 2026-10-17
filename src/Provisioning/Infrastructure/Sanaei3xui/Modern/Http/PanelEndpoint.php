@@ -74,6 +74,35 @@ final readonly class PanelEndpoint
         return 'https' === $this->scheme;
     }
 
+    /**
+     * https:// always; http:// only to "localhost" or a loopback/private/link-local IP literal (a panel on this
+     * server, e.g. http://127.0.0.1:2096/, or on the same private network). Any other http:// URL would send the
+     * full-admin bearer token in clear text over the internet, so it is refused. A host name other than localhost
+     * is refused for http even if it resolves privately today: DNS can change.
+     */
+    public function assertTransportAllowed(): void
+    {
+        if ($this->isHttps() || self::isLocalHost($this->bareHost())) {
+            return;
+        }
+
+        throw new PanelApiException(PanelFailure::NOT_CONFIGURED, sprintf('Refusing http://%s: the API token would travel in clear text. Use https://, or http:// only with 127.0.0.1 / a private IP when the panel runs on this server or the same private network.', $this->host));
+    }
+
+    public static function isLocalHost(string $host): bool
+    {
+        $host = strtolower(trim($host, '[]'));
+        if ('localhost' === $host) {
+            return true;
+        }
+        if (false === filter_var($host, FILTER_VALIDATE_IP)) {
+            return false;
+        }
+
+        // Valid IP that is NOT public: private (10/8, 172.16/12, 192.168/16, fc00::/7) or reserved (127/8, ::1, 169.254/16, fe80::/10).
+        return false === filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE);
+    }
+
     public function effectivePort(): int
     {
         return $this->port ?? ($this->isHttps() ? 443 : 80);

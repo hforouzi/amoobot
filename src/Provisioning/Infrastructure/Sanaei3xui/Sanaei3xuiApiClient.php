@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Provisioning\Infrastructure\Sanaei3xui;
 
 use App\Entity\VpnPanel;
+use App\Provisioning\Infrastructure\PanelCredentials;
 use App\Provisioning\Infrastructure\PanelHttpClientFactory;
 use Symfony\Contracts\HttpClient\Exception\TransportExceptionInterface;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
@@ -17,6 +18,7 @@ final class Sanaei3xuiApiClient
     public function __construct(
         private readonly HttpClientInterface $httpClient,
         private readonly PanelHttpClientFactory $panelHttpClientFactory,
+        private readonly PanelCredentials $credentials,
     ) {
     }
 
@@ -39,7 +41,7 @@ final class Sanaei3xuiApiClient
 
         $baseUrl = $this->normalizeBaseUrl($panel);
         $username = trim((string) $panel->getUsername());
-        $password = (string) $panel->getPassword();
+        $password = (string) $this->credentials->password($panel);
 
         if ('' === $baseUrl || '' === $username || '' === $password) {
             $this->log(sprintf('panel_login_failed panel_id=%s reason="missing_credentials_or_base_url"', $panel->getId() ?? 'null'));
@@ -628,14 +630,7 @@ final class Sanaei3xuiApiClient
 
     private function getApiToken(VpnPanel $panel): string
     {
-        $token = trim((string) ($panel->getApiToken() ?? ''));
-        if ('' !== $token) {
-            return $token;
-        }
-
-        $config = $this->panelConfig($panel);
-
-        return trim((string) ($config['api_token'] ?? ''));
+        return trim((string) $this->credentials->apiToken($panel));
     }
 
     private function buildCookieHeader(VpnPanel $panel): ?string

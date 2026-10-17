@@ -114,9 +114,6 @@ final class Fake3xuiPanel
     {
         $parts = parse_url($url);
         $origin = sprintf('%s://%s%s', $parts['scheme'] ?? '', $parts['host'] ?? '', isset($parts['port']) ? ':'.$parts['port'] : '');
-        if (str_contains((string) ($parts['host'] ?? ''), ':')) {
-            $origin = sprintf('%s://[%s]%s', $parts['scheme'] ?? '', $parts['host'], isset($parts['port']) ? ':'.$parts['port'] : '');
-        }
         $fullPath = (string) ($parts['path'] ?? '/');
         parse_str((string) ($parts['query'] ?? ''), $query);
         $headers = [];

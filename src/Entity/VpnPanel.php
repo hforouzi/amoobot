@@ -28,11 +28,17 @@ class VpnPanel
     #[ORM\Column(length: 255, nullable: true)]
     private ?string $username = null;
 
-    #[ORM\Column(length: 255, nullable: true)]
+    /** Legacy (cookie login) panels only; stored encrypted (SecretCipher), never for modern panels. */
+    #[ORM\Column(type: Types::TEXT, nullable: true)]
     private ?string $password = null;
 
-    #[ORM\Column(type: 'text', nullable: true)]
+    /** Stored encrypted (SecretCipher); read it through PanelCredentials. */
+    #[ORM\Column(type: Types::TEXT, nullable: true)]
     private ?string $apiToken = null;
+
+    /** Typed in a form, encrypted into $password/$apiToken on flush (VpnPanelSecretsListener); never persisted. */
+    private ?string $plainPassword = null;
+    private ?string $plainApiToken = null;
 
     #[ORM\Column(type: Types::JSON, nullable: true)]
     private ?array $config = null;
@@ -60,6 +66,16 @@ class VpnPanel
     /** "ok" or the PanelFailure value of the last probe. */
     #[ORM\Column(length: 64, nullable: true)]
     private ?string $sanaeiProbeStatus = null;
+
+    /** Consecutive failed panel calls (reset by any success). */
+    #[ORM\Column(options: ['default' => 0])]
+    private int $consecutiveFailures = 0;
+
+    /** Set after DEGRADED_AFTER_FAILURES consecutive failures: the panel's plans are hidden from new purchases. */
+    #[ORM\Column(nullable: true)]
+    private ?\DateTimeImmutable $degradedSince = null;
+
+    public const DEGRADED_AFTER_FAILURES = 3;
 
     #[ORM\Column]
     private \DateTimeImmutable $createdAt;
@@ -125,49 +141,81 @@ class VpnPanel
         return $this;
     }
 
-    public function getPassword(): ?string
+    /** As stored: "enc:v1:..." (or plain text from before encryption, until the next flush). */
+    public function getStoredPassword(): ?string
     {
         return $this->password;
     }
 
-    public function setPassword(?string $password): self
+    public function storePassword(?string $stored): self
     {
-        if ('' === trim((string) ($password ?? '')) && null !== $this->password) {
-            return $this;
-        }
+        $this->password = '' === trim((string) $stored) ? null : $stored;
 
-        $this->password = $password;
+        return $this;
+    }
+
+    public function getPlainPassword(): ?string
+    {
+        return $this->plainPassword;
+    }
+
+    /** Form input: empty keeps the stored password (the field is never pre-filled). */
+    public function setPlainPassword(#[\SensitiveParameter] ?string $password): self
+    {
+        $this->plainPassword = '' === (string) $password ? null : $password;
+
+        return $this;
+    }
+
+    public function clearPassword(): self
+    {
+        $this->password = null;
+        $this->plainPassword = null;
 
         return $this;
     }
 
     public function getPasswordConfiguredLabel(): string
     {
-        return $this->maskedConfiguredLabel($this->password);
+        return $this->hasPassword() ? 'yes' : 'no';
     }
 
-    public function getApiToken(): ?string
+    public function hasPassword(): bool
+    {
+        return null !== $this->plainPassword || '' !== trim((string) $this->password);
+    }
+
+    /** As stored: "enc:v1:..." (or plain text / the old config.api_token copy from before encryption). */
+    public function getStoredApiToken(): ?string
     {
         $token = trim((string) ($this->apiToken ?? ''));
         if ('' !== $token) {
             return $token;
         }
-
-        $config = is_array($this->config) ? $this->config : [];
-        $fallback = trim((string) ($config['api_token'] ?? ''));
+        $fallback = trim((string) ($this->getConfigValue('api_token') ?? ''));
 
         return '' === $fallback ? null : $fallback;
     }
 
-    public function setApiToken(?string $apiToken): self
+    /** Stores an already-encrypted token and drops the old plain-text copy in config. */
+    public function storeApiToken(?string $stored): self
     {
-        $token = trim((string) ($apiToken ?? ''));
-        if ('' === $token && null !== $this->getApiToken()) {
-            return $this;
-        }
+        $this->apiToken = '' === trim((string) $stored) ? null : $stored;
+        $this->setConfigValue('api_token', null);
 
-        $this->apiToken = '' === $token ? null : $token;
-        $this->setConfigValue('api_token', $this->apiToken);
+        return $this;
+    }
+
+    public function getPlainApiToken(): ?string
+    {
+        return $this->plainApiToken;
+    }
+
+    /** Form input: empty keeps the stored token (the field is never pre-filled). */
+    public function setPlainApiToken(#[\SensitiveParameter] ?string $apiToken): self
+    {
+        $token = trim((string) $apiToken);
+        $this->plainApiToken = '' === $token ? null : $token;
 
         return $this;
     }
@@ -452,7 +500,71 @@ class VpnPanel
 
     public function isApiTokenConfigured(): bool
     {
-        return '' !== trim((string) ($this->getApiToken() ?? ''));
+        return null !== $this->plainApiToken || null !== $this->getStoredApiToken();
+    }
+
+    /** base64 SHA-256 of the panel certificate's public key, for a self-signed panel (null = normal CA verification). */
+    public function getTlsPinSha256(): ?string
+    {
+        $pin = trim((string) ($this->getConfigValue('tls_pin_sha256') ?? ''));
+
+        return '' === $pin ? null : $pin;
+    }
+
+    public function setTlsPinSha256(?string $pin): self
+    {
+        $pin = trim((string) $pin);
+        if (str_starts_with(strtolower($pin), 'sha256//')) {
+            $pin = substr($pin, 8);
+        }
+        if ('' !== $pin && 1 !== preg_match('#^[A-Za-z0-9+/]{43}=$#', $pin)) {
+            throw new \InvalidArgumentException('The TLS pin must be the base64 SHA-256 of the certificate public key (44 characters ending in "=").');
+        }
+        $this->setConfigValue('tls_pin_sha256', '' === $pin ? null : $pin);
+
+        return $this;
+    }
+
+    public function isDegraded(): bool
+    {
+        return null !== $this->degradedSince;
+    }
+
+    public function getDegradedSince(): ?\DateTimeImmutable
+    {
+        return $this->degradedSince;
+    }
+
+    public function getConsecutiveFailures(): int
+    {
+        return $this->consecutiveFailures;
+    }
+
+    public function recordCallSuccess(): self
+    {
+        $this->consecutiveFailures = 0;
+        $this->degradedSince = null;
+
+        return $this;
+    }
+
+    /** @return bool true when this failure made the panel degraded */
+    public function recordCallFailure(\DateTimeImmutable $at): bool
+    {
+        ++$this->consecutiveFailures;
+        if (null === $this->degradedSince && $this->consecutiveFailures >= self::DEGRADED_AFTER_FAILURES) {
+            $this->degradedSince = $at;
+
+            return true;
+        }
+
+        return false;
+    }
+
+    /** Whether new purchases may use this panel. */
+    public function isAvailableForSale(): bool
+    {
+        return $this->isActive && !$this->isDegraded();
     }
 
     public function getApiTokenConfiguredLabel(): string
@@ -529,19 +641,5 @@ class VpnPanel
     private function normalizeSlashPrefixedPath(string $value): string
     {
         return '/'.ltrim(trim($value), '/');
-    }
-
-    private function maskedConfiguredLabel(?string $value): string
-    {
-        $value = trim((string) ($value ?? ''));
-        if ('' === $value) {
-            return 'no';
-        }
-
-        if (strlen($value) <= 8) {
-            return 'yes';
-        }
-
-        return substr($value, 0, 4).'...'.substr($value, -4);
     }
 }
