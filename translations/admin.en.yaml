@@ -220,3 +220,133 @@ panel_connection:
     not_confirmed: 'This panel is used by an active plan: the modern mode can be chosen only after a connection test confirmed the new API (last test result - %status%). Run the connection test first, or keep the mode on Auto.'
     driver_incomplete: The modern API driver does not support every sales operation yet; the modern mode is not allowed for a panel with active plans.
     mode_kept: The connection mode was not changed.
+  title_new: Add a 3x-ui panel
+  title_edit: Edit panel connection
+  intro: Only the panel URL and an API token are needed. Save, then press "Test connection".
+  back: Back
+  yes: 'Yes'
+  no: 'No'
+  not_set: not set
+  effective: Current mode
+  last_test: Last test
+  never_tested: not tested yet
+  status_ok: success
+  health: Health
+  degraded: 'The panel has been marked degraded since %since% (UTC) after repeated failures; its plans are hidden from new purchases. One successful call (for example a connection test) clears it.'
+  test_button: Test connection
+  edit_button: Edit settings
+  steps:
+    label: Panel setup steps
+    connect: Connect
+    inbounds: Choose inbounds
+    plans: Map plans
+  form:
+    title: Panel name
+    url: Panel URL
+    url_help: 'The URL you open the panel with in a browser, including its secret web base path if any, e.g. https://panel.example.com:2053/secret/ . For a panel on this server: http://127.0.0.1:2053/secret/'
+    token: API token
+    token_help: 'In 3x-ui: Settings → Security → API Token. The token is a full-admin credential; it is stored encrypted and never shown.'
+    token_kept: 'The current token (%mask%) is kept; enter a new one only to replace it.'
+    advanced: Advanced settings
+    use_proxy: Connect through the proxy
+    use_proxy_help: Use the PANEL_PROXY_* proxy configured on the server for this panel.
+    tls_pin: Certificate public-key pin (self-signed certificates only)
+    tls_pin_help: 'For a panel with a self-signed certificate, enter the SHA-256 hash of its public key instead of turning verification off (see docs/fa/panel-connection.md). Leave empty for a valid certificate (e.g. Let''s Encrypt).'
+    subscription_base_url: Subscription base URL
+    subscription_base_url_help: The panel's subscription service URL, used for the customer's subscription link, e.g. https://sub.example.com:2096
+    subscription_path_prefix: Subscription path
+    save: Save
+  validation:
+    url_invalid: The panel URL is not valid; it must start with https:// and contain no password, "?" or "#".
+    url_plain_http: 'http:// is allowed only for a panel on this server or a private network (127.0.0.1 or a private IP); otherwise the token would travel unencrypted over the internet. Use https://.'
+    token_required: Enter the API token.
+    tls_pin: The pin must be the base64 SHA-256 of the public key (44 characters ending in "=").
+  flash:
+    created: Panel saved. Now press "Test connection".
+    saved: Connection settings saved.
+    csrf: The form session expired; please try again.
+  report:
+    title: Connection test result
+    reachable: Panel reachable
+    tls: HTTPS certificate
+    auth: Authentication
+    mode: API type
+    latency: Response time
+    inbounds: Inbounds
+    fix: How to fix
+    ok_modern: Connected, and the panel supports the new API. Now choose the inbounds to sell from.
+    ok_legacy: Connected with username/password (old panel). For the new API, update 3x-ui and create an API token.
+  tls:
+    verified: valid (verified)
+    pinned: self-signed, matches the stored pin
+    plain_local: http on the local network (no TLS)
+    failed: not valid
+    not_checked: not checked
+  failure:
+    network_dns:
+      title: The panel's host name was not found (DNS)
+      explain: The bot server could not resolve the panel's domain to an IP address.
+      fix: Check the domain in the panel URL and that its DNS record points to the panel server's IP.
+    network_refused:
+      title: Connection refused
+      explain: The panel server is up but nothing answers on this port.
+      fix: Check the port in the URL, that the panel is running, and that its firewall allows the bot server's IP.
+    network_timeout:
+      title: The panel did not answer (timeout)
+      explain: No answer within the limits (3 s to connect, 10 s per request).
+      fix: Open the panel server's firewall for the bot server's IP, check the port, or enable the proxy in the advanced settings if the panel is blocked.
+    network_other:
+      title: Network error
+      explain: The connection to the panel failed because of a network error.
+      fix: Check the URL, port, firewall and proxy settings, and the technical detail below.
+    tls_certificate:
+      title: The panel's HTTPS certificate is not valid
+      explain: The certificate is expired, issued for another name, self-signed, or does not match the stored pin.
+      fix: 'Install a valid certificate (e.g. Let''s Encrypt) for the panel''s domain; or, if it is self-signed on purpose, enter its public-key pin in the advanced settings. Verification is never turned off.'
+    auth_rejected:
+      title: The API token was rejected (401/403)
+      explain: The panel considers the token invalid or revoked.
+      fix: 'In 3x-ui go to Settings → Security → API Token, create a new token and enter it under "Edit settings".'
+    wrong_url:
+      title: Wrong panel URL or path
+      explain: No panel API at this URL (HTTP 404, or an HTML page instead of JSON).
+      fix: 'Enter the URL exactly as you open the panel in a browser, with its secret web base path, e.g. https://host:2053/secret/ . Very old panels have no new API: update 3x-ui.'
+    panel_rejected:
+      title: The panel refused the request
+      explain: The panel answered success=false (its message is in the detail below).
+      fix: Read the panel's message; usually the panel's API settings or version need checking.
+    unexpected_response:
+      title: The panel's answer could not be understood
+      explain: The panel returned JSON, but not the documented 3x-ui shape ({success, msg, obj}).
+      fix: Update 3x-ui to the latest version and make sure the URL points to the panel itself, not another service.
+    http_error:
+      title: HTTP error from the panel
+      explain: The panel answered with an HTTP error status (such as 500 or 502) or a redirect.
+      fix: Check the panel's log. For a redirect, enter the final URL (e.g. https instead of http).
+    not_configured:
+      title: Connection settings are incomplete
+      explain: The panel URL, API token or proxy is missing or not allowed.
+      fix: Enter the URL (https://) and the API token under "Edit settings"; if the proxy is enabled, configure the server's PANEL_PROXY_* variables.
+  inbounds:
+    intro: Choose the inbounds that sold services are created on. Inbounds disabled on the panel cannot be chosen.
+    needs_modern: Choosing inbounds here is for panels with the new API; run the connection test first. For old panels use "Sync inbounds".
+    remark: Name
+    protocol: Protocol
+    port: Port
+    flow: Flow capable
+    status: Status
+    enabled: enabled
+    disabled: disabled on the panel
+    none: This panel has no inbounds.
+    save: Save the selection and continue
+    saved: '%count% inbound(s) selected for sale.'
+  plans:
+    intro: For each plan, choose the inbound its services are created on, on this panel.
+    no_inbounds: No inbound of this panel is selected yet; do the "Choose inbounds" step first.
+    plan: Plan
+    current: Current inbound
+    new_inbound: Inbound on this panel
+    unchanged: unchanged
+    inactive: inactive
+    save: Save
+    saved: '%count% plan(s) updated.'

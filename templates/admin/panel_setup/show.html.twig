@@ -1,0 +1,76 @@
+{% extends '@EasyAdmin/page/content.html.twig' %}
+{% trans_default_domain 'admin' %}
+
+{% macro yesno(value) %}
+    {% if value is same as(true) %}<span class="text-success">✔ {{ 'panel_connection.yes'|trans({}, 'admin') }}</span>
+    {% elseif value is same as(false) %}<span class="text-danger">✘ {{ 'panel_connection.no'|trans({}, 'admin') }}</span>
+    {% else %}<span class="text-muted">—</span>{% endif %}
+{% endmacro %}
+
+{% block content_title %}{{ panel.title }}{% endblock %}
+
+{% block main %}
+    <div class="admin-custom-page">
+        {% include 'admin/panel_setup/_steps.html.twig' with {current: 1} %}
+
+        <div class="admin-form-card mb-3">
+            <dl class="row mb-0">
+                <dt class="col-sm-3">{{ 'panel_connection.form.url'|trans }}</dt>
+                <dd class="col-sm-9" dir="ltr">{{ root_url }}</dd>
+                <dt class="col-sm-3">{{ 'panel_connection.form.token'|trans }}</dt>
+                <dd class="col-sm-9" dir="ltr">{{ token_mask ?: ('panel_connection.not_set'|trans) }}</dd>
+                <dt class="col-sm-3">{{ 'panel_connection.integration_mode'|trans }}</dt>
+                <dd class="col-sm-9">
+                    {{ ('panel_connection.mode.' ~ panel.integrationModeValue)|trans }}
+                    — {{ 'panel_connection.effective'|trans }}: <strong>{{ ('panel_connection.mode.' ~ panel.effectiveIntegrationMode.value)|trans }}</strong>
+                </dd>
+                <dt class="col-sm-3">{{ 'panel_connection.last_test'|trans }}</dt>
+                <dd class="col-sm-9">
+                    {% if panel.probedAt %}
+                        {{ panel.probedAt|date('Y-m-d H:i') }} UTC —
+                        {{ panel.probeStatus == 'ok' ? 'panel_connection.status_ok'|trans : ('panel_connection.failure.' ~ panel.probeStatus ~ '.title')|trans }}
+                    {% else %}
+                        {{ 'panel_connection.never_tested'|trans }}
+                    {% endif %}
+                </dd>
+                {% if panel.degraded %}
+                    <dt class="col-sm-3">{{ 'panel_connection.health'|trans }}</dt>
+                    <dd class="col-sm-9 text-danger">{{ 'panel_connection.degraded'|trans({'%since%': panel.degradedSince|date('Y-m-d H:i')}) }}</dd>
+                {% endif %}
+            </dl>
+        </div>
+
+        <form method="post" action="{{ path('admin_panel_setup_test', {id: panel.id}) }}" class="d-inline">
+            <input type="hidden" name="_token" value="{{ csrf_token('panel_test_' ~ panel.id) }}">
+            <button type="submit" class="btn btn-success">{{ 'panel_connection.test_button'|trans }}</button>
+        </form>
+        <a class="btn btn-secondary" href="{{ path('admin_panel_setup_edit', {id: panel.id}) }}">{{ 'panel_connection.edit_button'|trans }}</a>
+        {% if panel.modern %}
+            <a class="btn btn-primary" href="{{ path('admin_panel_setup_inbounds', {id: panel.id}) }}">{{ 'panel_connection.steps.inbounds'|trans }} →</a>
+        {% endif %}
+
+        {% if report %}
+            <div class="admin-form-card mt-3" id="connection-report">
+                <h2 class="h5">{{ 'panel_connection.report.title'|trans }}</h2>
+                <table class="table table-sm mb-2">
+                    <tr><th>{{ 'panel_connection.report.reachable'|trans }}</th><td>{{ _self.yesno(report.reachable) }}</td></tr>
+                    <tr><th>{{ 'panel_connection.report.tls'|trans }}</th><td>{{ ('panel_connection.tls.' ~ report.tls)|trans }}</td></tr>
+                    <tr><th>{{ 'panel_connection.report.auth'|trans }}</th><td>{{ _self.yesno(report.authenticated) }}</td></tr>
+                    <tr><th>{{ 'panel_connection.report.mode'|trans }}</th><td>{{ report.detectedMode ? ('panel_connection.mode.' ~ report.detectedMode.value)|trans : '—' }}</td></tr>
+                    <tr><th>{{ 'panel_connection.report.latency'|trans }}</th><td>{{ report.latencyMs is not null ? report.latencyMs ~ ' ms' : '—' }}</td></tr>
+                    <tr><th>{{ 'panel_connection.report.inbounds'|trans }}</th><td>{{ report.inboundCount ?? '—' }}</td></tr>
+                </table>
+                {% if report.ok %}
+                    <div class="alert alert-success mb-0">{{ ('panel_connection.report.ok_' ~ report.detectedMode.value)|trans }}</div>
+                {% elseif report.failureKey %}
+                    <div class="alert alert-danger mb-0">
+                        <strong>{{ ('panel_connection.failure.' ~ report.failureKey ~ '.title')|trans }}</strong>
+                        <p class="mb-1">{{ ('panel_connection.failure.' ~ report.failureKey ~ '.explain')|trans }}</p>
+                        <p class="mb-1"><strong>{{ 'panel_connection.report.fix'|trans }}:</strong> {{ ('panel_connection.failure.' ~ report.failureKey ~ '.fix')|trans }}</p>
+                        <small class="text-muted" dir="ltr">{{ report.message }}</small>
+                    </div>
+                {% endif %}
+            </div>
+        {% endif %}
+    </div>
+{% endblock %}

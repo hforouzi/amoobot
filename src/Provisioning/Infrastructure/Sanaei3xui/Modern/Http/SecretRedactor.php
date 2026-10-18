@@ -32,7 +32,7 @@ final class SecretRedactor
         return mb_substr(trim($text), 0, $maxLength);
     }
 
-    /** "abcd…wxyz" for long values, "set" for short ones, "" when empty: for showing that a token is configured. */
+    /** "••••wxyz" (last 4 characters of a long value), "••••" for short ones, "" when empty. */
     public static function mask(?string $secret): string
     {
         $secret = trim((string) $secret);
@@ -40,6 +40,6 @@ final class SecretRedactor
             return '';
         }
 
-        return strlen($secret) >= 16 ? substr($secret, 0, 4).'…'.substr($secret, -4) : '••••';
+        return strlen($secret) >= 16 ? '••••'.substr($secret, -4) : '••••';
     }
 }
