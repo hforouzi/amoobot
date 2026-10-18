@@ -43,6 +43,8 @@ TELEGRAM_WEBHOOK_SECRET=$SECRET
 TELEGRAM_WEBHOOK_SECRET_TOKEN='$TOKEN_HDR'
 TELEGRAM_BOT_TOKEN="$BOT_TOKEN"
 TELEGRAM_ADMIN_CHAT_ID=-1001234567
+SSH_HARDENING=yes
+FIREWALL=yes
 EOF
 chmod 600 "$ETC/.env.prod.local"
 printf 'DATABASE_URL=mysql://app:dbpass@127.0.0.1:3306/amoobot\n' > "$ETC/database.env"; chmod 600 "$ETC/database.env"
@@ -121,7 +123,8 @@ run_check() {
   : > "$WORK/argv"; : > "$WORK/curl.cfg"
   OUT="$(PATH="$SB:$PATH" APP_DIR="$WORK/app" AMOOBOT_ETC_DIR="$ETC" BACKUP_DIR="$WORK/backups" AMOOBOT_NGINX_LOG_DIR="$WORK/nginxlog" \
     AMOOBOT_MAINTENANCE_FILE="$WORK/maint.conf" AMOOBOT_DEPLOY_MARKER="$WORK/marker" AMOOBOT_CHECK_JOBS="$WORK/check-jobs" \
-    AMOOBOT_NGINX_SITE="${NGINX_SITE_FILE:-$WORK/none}" AMOOBOT_PHP_ETC_DIR="$WORK/phpetc" bash "$WORK/lib/post-deploy-check.sh" "$@" 2>&1)"; RC=$?
+    AMOOBOT_NGINX_SITE="${NGINX_SITE_FILE:-$WORK/none}" AMOOBOT_PHP_ETC_DIR="$WORK/phpetc" AMOOBOT_SSHD_DROPIN="${SSHD_DROPIN_FILE:-$WORK/no-dropin}" \
+    bash "$WORK/lib/post-deploy-check.sh" "$@" 2>&1)"; RC=$?
 }
 no_secret_anywhere() {
   local s
@@ -203,6 +206,32 @@ printf 'server {\n    server_name %s;\n    location = /admin/login {\n        li
 NGINX_SITE_FILE="$WORK/site" run_check
 check "nginx denies 127.0.0.1 (403 + allowlist) -> admin-login SKIPs with the fix, exit 1 (incomplete)" bash -c \
   '[[ $1 -eq 1 ]] && grep -qE "^SKIP +admin-login +nginx ADMIN_ALLOW_IPS denies 127.0.0.1 \(403\): add 127.0.0.1 to ADMIN_ALLOW_IPS" <<< "$2" && grep -q "^RESULT: INCOMPLETE" <<< "$2"' _ "$RC" "$OUT"
+
+echo "== post-deploy-check: SSH_HARDENING / FIREWALL not set (default no): sshd and ufw are only reported"
+cp -p "$ETC/.env.prod.local" "$WORK/env.hardened"
+grep -vE '^(SSH_HARDENING|FIREWALL)=' "$WORK/env.hardened" > "$ETC/.env.prod.local"; chmod 600 "$ETC/.env.prod.local"
+good_env
+export SSHD_OUT="${SSHD_OUT/passwordauthentication no/passwordauthentication yes}" UFW_OUT="Status: inactive"
+SSHD_OUT="${SSHD_OUT/permitrootlogin without-password/permitrootlogin yes}"; export SSHD_OUT
+run_check
+check "password login on and ufw inactive are not failures when not managed -> RESULT: OK" bash -c '[[ $1 -eq 0 ]] && grep -q "^RESULT: OK$" <<< "$2"' _ "$RC" "$OUT"
+check "  ...sshd is an INFO line with the current settings" bash -c 'grep -qE "^INFO +sshd +not managed \(SSH_HARDENING=no\): passwordauthentication yes, permitrootlogin yes$" <<< "$1"' _ "$OUT"
+check "  ...firewall is an INFO line" bash -c 'grep -qE "^INFO +firewall +not managed \(FIREWALL=no\); ufw inactive$" <<< "$1"' _ "$OUT"
+check "  ...18 checks counted, the 2 INFO lines do not count" bash -c '[[ $(grep -cE "^(PASS|FAIL|SKIP) " <<< "$1") -eq 18 && $(grep -cE "^INFO " <<< "$1") -eq 2 ]]' _ "$OUT"
+check "  ...nothing changed (no ufw or sshd write command)" not grep -qE '^(ufw (allow|deny|enable|delete|reset|default)|sshd [^-]|systemctl)' "$WORK/argv"
+export UFW_OUT=$'Status: active\n\nTo                         Action      From\n--                         ------      ----\n22/tcp                     ALLOW       Anywhere\n2053/tcp                   ALLOW       Anywhere'
+run_check
+check "not managed, but an active ufw blocks 80/443 -> firewall FAILs (the app is unreachable)" bash -c \
+  '[[ $1 -eq 1 ]] && grep -qE "^FAIL +firewall +FIREWALL=no but ufw is active and does not allow 80 443 " <<< "$2"' _ "$RC" "$OUT"
+export UFW_OUT="$UFW_OUT"$'\n80/tcp                     ALLOW       Anywhere\n443                        ALLOW       Anywhere'
+run_check
+check "  ...an active ufw allowing 80 and 443 (other rules kept) -> INFO" bash -c 'grep -qE "^INFO +firewall +not managed \(FIREWALL=no\); ufw active, allows 80 and 443$" <<< "$1"' _ "$OUT"
+printf '# Managed by amoobot deploy.sh\nPasswordAuthentication no\n' > "$WORK/old-dropin"; SSHD_DROPIN_FILE="$WORK/old-dropin"
+run_check
+check "a drop-in left by an earlier SSH_HARDENING=yes run is pointed out (with how to remove it)" bash -c \
+  'grep -E "^INFO +sshd " <<< "$1" | grep -q "still installed (SSH_HARDENING_REVERT=yes removes it)"' _ "$OUT"
+unset SSHD_DROPIN_FILE
+cp -p "$WORK/env.hardened" "$ETC/.env.prod.local"
 
 echo "== post-deploy-check: not root"
 good_env; chmod 755 "$WORK" "$WORK/lib" "$WORK/stubs"; chmod 644 "$WORK/lib/post-deploy-check.sh"; chmod 666 "$WORK/argv" "$WORK/curl.cfg"

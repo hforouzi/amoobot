@@ -106,6 +106,7 @@ DEPLOY_WATCHDOG_UNIT="amoobot-deploy-watchdog"
 DEPLOY_ONLY_KEYS=" DOMAIN LETSENCRYPT_EMAIL REPO_URL APP_DIR PHP_VERSION DEPLOY_USER DEPLOY_REF DEPLOY_SSH_PUBLIC_KEY "
 DEPLOY_ONLY_KEYS+="SSH_PERMIT_ROOT_LOGIN DB_NAME DB_USER DB_PASSWORD BACKUP_DIR BACKUP_RETENTION_DAYS BACKUP_CRON "
 DEPLOY_ONLY_KEYS+="ADMIN_ALLOW_IPS MONITOR_PING_URL REQUIRE_SIGNED_TAG I_HAVE_CONSOLE_ACCESS "
+DEPLOY_ONLY_KEYS+="SSH_HARDENING SSH_HARDENING_REVERT FIREWALL "
 # Application keys that may also come from the process environment (for non-secret overrides; secrets: env file only).
 APP_KEYS="APP_SECRET APP_DEFAULT_LOCALE APP_SHARE_DIR DEFAULT_URI DATABASE_URL MESSENGER_TRANSPORT_DSN
  TELEGRAM_BOT_TOKEN TELEGRAM_WEBHOOK_SECRET TELEGRAM_WEBHOOK_SECRET_TOKEN TELEGRAM_ADMIN_CHAT_ID TELEGRAM_PROXY
@@ -1040,6 +1041,78 @@ reload_ssh() {
   fi
 }
 
+# The sshd drop-in written by SSH_HARDENING=yes (00- so it is read before cloud-init's 50-cloud-init.conf).
+SSHD_DROPIN="/etc/ssh/sshd_config.d/00-amoobot-hardening.conf"
+SSHD_DROPIN_MARKER="# Managed by amoobot deploy.sh"
+
+# skipped WHAT REASON  ->  one line per hardening step that is not done, so nothing is silently left out.
+skipped() { log "  - $1: skipped ($2)"; }
+
+# ssh_dropin_revert  (SSH_HARDENING=no) reports a drop-in left by an earlier SSH_HARDENING=yes run and, only with
+# SSH_HARDENING_REVERT=yes, removes it: sshd -t without it before ssh is reloaded; on failure it is put back and ssh is
+# not reloaded. Only our own file (exact path + marker line) is ever touched.
+ssh_dropin_revert() {
+  local backup out
+  if [[ ! -e "$SSHD_DROPIN" ]]; then
+    log "  - earlier amoobot sshd drop-in: none (${SSHD_DROPIN} absent)"
+    return 0
+  fi
+  if [[ -L "$SSHD_DROPIN" ]] || ! grep -qxF "$SSHD_DROPIN_MARKER" "$SSHD_DROPIN" 2> /dev/null; then
+    warn "${SSHD_DROPIN} exists but is not the file amoobot wrote (no '${SSHD_DROPIN_MARKER}' line, or a symlink): left untouched."
+    return 0
+  fi
+  if [[ "$SSH_HARDENING_REVERT" != yes ]]; then
+    warn "${SSHD_DROPIN} from an earlier deploy is still installed (key-only SSH: $(grep -E '^(PasswordAuthentication|PermitRootLogin) ' "$SSHD_DROPIN" | tr '\n' ' ')). SSH_HARDENING=no does not change it. To remove it (password login and PermitRootLogin then come from the rest of the sshd config), set SSH_HARDENING_REVERT=yes and re-run."
+    return 0
+  fi
+  if (( DRY_RUN )); then
+    log "[dry-run] remove ${SSHD_DROPIN} (SSH_HARDENING_REVERT=yes), check with sshd -t (on failure restore it), then reload ssh"
+    return 0
+  fi
+  backup="$(mktemp)"
+  cp -p "$SSHD_DROPIN" "$backup"
+  rm -f "$SSHD_DROPIN"
+  if ! out="$(sshd -t 2>&1)"; then
+    cp -p "$backup" "$SSHD_DROPIN"
+    rm -f "$backup"
+    die "sshd -t rejected the SSH config without ${SSHD_DROPIN}; the file was restored and ssh was not reloaded. sshd said: ${out}"
+  fi
+  rm -f "$backup"
+  reload_ssh
+  log "Removed ${SSHD_DROPIN} (SSH_HARDENING_REVERT=yes): sshd now uses the rest of its configuration for password login and PermitRootLogin."
+}
+
+# firewall_port_problem  ->  a reason (printed) when FIREWALL=yes would lock SSH out: ufw allows only 22, so SSH must
+# really listen on 22 (ssh.socket on 24.04 decides, not only sshd_config). Nothing printed = OK.
+firewall_port_problem() {
+  local ports
+  ports="$(ssh_listen_ports | tr '\n' ' ')"
+  [[ "$ports" == "22 " ]] \
+    || echo "SSH listens on port(s) ${ports:-unknown }but FIREWALL=yes allows only 22 (check ssh.socket ListenStream / sshd Port). Move SSH to 22 first, or keep FIREWALL=no."
+}
+
+# report_firewall_needs  (FIREWALL=no) changes nothing: prints the ports the app needs and, read-only, warns when an
+# active ufw does not allow them (certbot and HTTPS would fail).
+report_firewall_needs() {
+  local status missing=() port
+  log "  - the app needs inbound TCP 80 (HTTP, Let's Encrypt) and 443 (HTTPS) open, and your SSH port; open them in your firewall yourself."
+  (( DRY_RUN )) && return 0
+  command -v ufw > /dev/null 2>&1 || return 0
+  status="$(ufw status 2> /dev/null)"
+  if ! grep -q '^Status: active' <<< "$status"; then
+    log "  - ufw is not active (left as it is)."
+    return 0
+  fi
+  for port in 80 443; do
+    awk -v p="$port" '$1 == p || $1 == p"/tcp" { found = 1 } END { exit !found }' <<< "$status" || missing+=("$port")
+  done
+  if (( ${#missing[@]} )); then
+    warn "ufw is active and does not allow ${missing[*]}/tcp: certbot and HTTPS will fail. Allow them yourself (e.g. 'ufw allow 80/tcp') or set FIREWALL=yes."
+  else
+    log "  - ufw is active and allows 80 and 443 (rules left as they are)."
+  fi
+}
+
 # The freshness check (bin/check-scheduled-jobs.sh) as a root-owned timer: any problem (STALE, NEVER, FAILED, INACTIVE,
 # old backup) is exit 2 -> a failed unit -> OnFailure alert, visible in "systemctl --failed" even if Telegram is down.
 render_check_service() {
@@ -1283,6 +1356,15 @@ REQUIRE_SIGNED_TAG="${REQUIRE_SIGNED_TAG:-no}"
 [[ "$REQUIRE_SIGNED_TAG" =~ ^(yes|no)$ ]] || die "REQUIRE_SIGNED_TAG must be 'yes' or 'no'."
 I_HAVE_CONSOLE_ACCESS="${I_HAVE_CONSOLE_ACCESS:-no}"
 [[ "$I_HAVE_CONSOLE_ACCESS" =~ ^(yes|no)$ ]] || die "I_HAVE_CONSOLE_ACCESS must be 'yes' or 'no'."
+# Opt-in server hardening (default: leave the server's SSH and firewall exactly as they are).
+SSH_HARDENING="${SSH_HARDENING:-no}"
+[[ "$SSH_HARDENING" =~ ^(yes|no)$ ]] || die "SSH_HARDENING must be 'yes' or 'no' (got '${SSH_HARDENING}')."
+SSH_HARDENING_REVERT="${SSH_HARDENING_REVERT:-no}"
+[[ "$SSH_HARDENING_REVERT" =~ ^(yes|no)$ ]] || die "SSH_HARDENING_REVERT must be 'yes' or 'no' (got '${SSH_HARDENING_REVERT}')."
+[[ "$SSH_HARDENING" == no || "$SSH_HARDENING_REVERT" == no ]] \
+  || die "SSH_HARDENING=yes and SSH_HARDENING_REVERT=yes contradict each other; set one of them to 'no'."
+FIREWALL="${FIREWALL:-no}"
+[[ "$FIREWALL" =~ ^(yes|no)$ ]] || die "FIREWALL must be 'yes' or 'no' (got '${FIREWALL}')."
 if [[ -n "${DEPLOY_SSH_PUBLIC_KEY:-}" ]]; then
   if command -v ssh-keygen > /dev/null 2>&1; then
     valid_ssh_public_key "$DEPLOY_SSH_PUBLIC_KEY" \
@@ -1445,10 +1527,10 @@ else
 fi
 
 ########################################
-# SERVER HARDENING: deploy user, SSH, firewall, restart policies
+# SERVER SETUP: deploy user, opt-in SSH hardening and firewall, restart policies
 ########################################
 
-step "5/18" "Hardening server (deploy user, SSH key-only, firewall 22/80/443, restart policies)..."
+step "5/18" "Server setup (deploy user, SSH hardening: ${SSH_HARDENING}, firewall: ${FIREWALL}, restart policies)..."
 
 if ! id "$DEPLOY_USER" > /dev/null 2>&1; then
   run useradd --create-home --shell /bin/bash "$DEPLOY_USER"
@@ -1463,74 +1545,101 @@ keys_target="$KEYS_PREVIEW"
 install_root_wrappers
 install_sudoers /etc/sudoers.d/amoobot-deploy
 
-# Key-only SSH (and PermitRootLogin no, if chosen) only once the deploy user verifiably has a key and the sudo path.
-if (( DRY_RUN )) && ! id "$DEPLOY_USER" > /dev/null 2>&1; then
-  # Not created yet (a real run creates it above); judge only the keys it would get.
-  login_problems=()
-  (( $(usable_key_count "$keys_target") > 0 )) \
-    || login_problems=("${auth_keys} would have no valid key that allows a shell (set DEPLOY_SSH_PUBLIC_KEY)")
-else
-  mapfile -t login_problems < <(ssh_login_problems "$DEPLOY_USER" "$DEPLOY_HOME" "$keys_target")
-fi
-if (( ! DRY_RUN )) && ! sudo -n -l -U "$DEPLOY_USER" "${ROOT_SBIN_DIR}/amoobot-deploy" > /dev/null 2>&1; then
-  login_problems+=("sudo -l -U ${DEPLOY_USER} does not allow ${ROOT_SBIN_DIR}/amoobot-deploy")
-fi
-if (( DRY_RUN && EUID != 0 )); then
-  log "[dry-run] (not root: sshd -T -C user=${DEPLOY_USER} access check skipped; a real run refuses if sshd would not let ${DEPLOY_USER} in)"
-elif command -v sshd > /dev/null 2>&1 && id "$DEPLOY_USER" > /dev/null 2>&1; then
-  # The current config must already let the deploy user in (AllowUsers/DenyUsers/AllowGroups/DenyGroups, Match blocks,
-  # AuthorizedKeysFile); pubkeyauthentication is checked again with the drop-in in place, before ssh is reloaded.
-  mapfile -t -O "${#login_problems[@]}" login_problems < <(sshd_effective "$DEPLOY_USER" | ssh_access_problems "$DEPLOY_USER" "$DEPLOY_HOME" 0)
-elif (( ! DRY_RUN )); then
-  login_problems+=("sshd is not installed (cannot check what it would allow)")
-fi
-if [[ "$SSH_PERMIT_ROOT_LOGIN" == no ]] && (( ! DRY_RUN )); then
-  mapfile -t -O "${#login_problems[@]}" login_problems < <(other_admin_problems)
-elif [[ "$SSH_PERMIT_ROOT_LOGIN" == no ]]; then
-  log "[dry-run] SSH_PERMIT_ROOT_LOGIN=no: a real run requires another account with a key login and full sudo (sudo -l -U), or I_HAVE_CONSOLE_ACCESS=yes"
-fi
-# The firewall (below) allows only 22: SSH must really listen there (ssh.socket on 24.04 decides, not only sshd_config).
-if (( ! DRY_RUN )); then
-  ssh_ports="$(ssh_listen_ports | tr '\n' ' ')"
-  [[ "$ssh_ports" == "22 " ]] \
-    || login_problems+=("SSH listens on port(s) ${ssh_ports:-unknown }but the firewall only allows 22 (check ssh.socket ListenStream / sshd Port). Move SSH to 22 first.")
-fi
-rm -f "$keys_target"
-if (( ${#login_problems[@]} )); then
-  printf '  - %s\n' "${login_problems[@]}" >&2
-  refusal="Refusing to disable SSH password login (and to set PermitRootLogin ${SSH_PERMIT_ROOT_LOGIN}): ${DEPLOY_USER} has no verified key login + sudo path (reasons above). That would risk locking you out. Fix the reasons above (e.g. set DEPLOY_SSH_PUBLIC_KEY to your .pub) and re-run."
-  if (( DRY_RUN )); then warn "a real run would stop here. ${refusal}"; else die "$refusal"; fi
-fi
-# dropin_login_check  run with the new drop-in in place, before ssh is reloaded: the deploy user's key login must still work.
-dropin_login_check() {
-  sshd_effective "$DEPLOY_USER" | ssh_access_problems "$DEPLOY_USER" "$DEPLOY_HOME" 1
-}
-# 00- so it is read before cloud-init's 50-cloud-init.conf (first value wins in sshd).
-install_sshd_dropin /etc/ssh/sshd_config.d/00-amoobot-hardening.conf dropin_login_check <<EOF
-# Managed by amoobot deploy.sh
+# SSH hardening is opt-in (SSH_HARDENING=yes). With "no" nothing about how anyone logs in changes: no sshd drop-in, password
+# login and PermitRootLogin stay exactly as configured; the deploy user above only gets a key and its sudo rule.
+if [[ "$SSH_HARDENING" == yes ]]; then
+  log "SSH hardening (SSH_HARDENING=yes): key-only login, PermitRootLogin ${SSH_PERMIT_ROOT_LOGIN}, guarded against lockout:"
+  # Key-only SSH (and PermitRootLogin no, if chosen) only once the deploy user verifiably has a key and the sudo path.
+  if (( DRY_RUN )) && ! id "$DEPLOY_USER" > /dev/null 2>&1; then
+    # Not created yet (a real run creates it above); judge only the keys it would get.
+    login_problems=()
+    (( $(usable_key_count "$keys_target") > 0 )) \
+      || login_problems=("${auth_keys} would have no valid key that allows a shell (set DEPLOY_SSH_PUBLIC_KEY)")
+  else
+    mapfile -t login_problems < <(ssh_login_problems "$DEPLOY_USER" "$DEPLOY_HOME" "$keys_target")
+  fi
+  if (( ! DRY_RUN )) && ! sudo -n -l -U "$DEPLOY_USER" "${ROOT_SBIN_DIR}/amoobot-deploy" > /dev/null 2>&1; then
+    login_problems+=("sudo -l -U ${DEPLOY_USER} does not allow ${ROOT_SBIN_DIR}/amoobot-deploy")
+  fi
+  if (( DRY_RUN && EUID != 0 )); then
+    log "[dry-run] (not root: sshd -T -C user=${DEPLOY_USER} access check skipped; a real run refuses if sshd would not let ${DEPLOY_USER} in)"
+  elif command -v sshd > /dev/null 2>&1 && id "$DEPLOY_USER" > /dev/null 2>&1; then
+    # The current config must already let the deploy user in (AllowUsers/DenyUsers/AllowGroups/DenyGroups, Match blocks,
+    # AuthorizedKeysFile); pubkeyauthentication is checked again with the drop-in in place, before ssh is reloaded.
+    mapfile -t -O "${#login_problems[@]}" login_problems < <(sshd_effective "$DEPLOY_USER" | ssh_access_problems "$DEPLOY_USER" "$DEPLOY_HOME" 0)
+  elif (( ! DRY_RUN )); then
+    login_problems+=("sshd is not installed (cannot check what it would allow)")
+  fi
+  if [[ "$SSH_PERMIT_ROOT_LOGIN" == no ]] && (( ! DRY_RUN )); then
+    mapfile -t -O "${#login_problems[@]}" login_problems < <(other_admin_problems)
+  elif [[ "$SSH_PERMIT_ROOT_LOGIN" == no ]]; then
+    log "[dry-run] SSH_PERMIT_ROOT_LOGIN=no: a real run requires another account with a key login and full sudo (sudo -l -U), or I_HAVE_CONSOLE_ACCESS=yes"
+  fi
+  # The firewall (below) allows only 22: SSH must really listen there (ssh.socket on 24.04 decides, not only sshd_config).
+  if (( ! DRY_RUN )); then
+    ssh_ports="$(ssh_listen_ports | tr '\n' ' ')"
+    [[ "$ssh_ports" == "22 " ]] \
+      || login_problems+=("SSH listens on port(s) ${ssh_ports:-unknown }but the firewall only allows 22 (check ssh.socket ListenStream / sshd Port). Move SSH to 22 first.")
+  fi
+  rm -f "$keys_target"
+  if (( ${#login_problems[@]} )); then
+    printf '  - %s\n' "${login_problems[@]}" >&2
+    refusal="Refusing to disable SSH password login (and to set PermitRootLogin ${SSH_PERMIT_ROOT_LOGIN}): ${DEPLOY_USER} has no verified key login + sudo path (reasons above). That would risk locking you out. Fix the reasons above (e.g. set DEPLOY_SSH_PUBLIC_KEY to your .pub) and re-run."
+    if (( DRY_RUN )); then warn "a real run would stop here. ${refusal}"; else die "$refusal"; fi
+  fi
+  # dropin_login_check  run with the new drop-in in place, before ssh is reloaded: the deploy user's key login must still work.
+  dropin_login_check() {
+    sshd_effective "$DEPLOY_USER" | ssh_access_problems "$DEPLOY_USER" "$DEPLOY_HOME" 1
+  }
+  # 00- so it is read before cloud-init's 50-cloud-init.conf (first value wins in sshd): see SSHD_DROPIN.
+  install_sshd_dropin "$SSHD_DROPIN" dropin_login_check <<EOF
+${SSHD_DROPIN_MARKER}
 PubkeyAuthentication yes
 PasswordAuthentication no
 KbdInteractiveAuthentication no
 PermitEmptyPasswords no
 PermitRootLogin ${SSH_PERMIT_ROOT_LOGIN}
 EOF
-if (( SSHD_CHANGED && ! DRY_RUN )); then
-  reload_ssh
-fi
-if (( ! DRY_RUN )); then
-  [[ "$(sshd -T | awk '$1=="passwordauthentication"{print $2}')" == "no" ]] \
-    || die "Password login is still enabled by another sshd config file; check /etc/ssh/sshd_config(.d)."
+  if (( SSHD_CHANGED && ! DRY_RUN )); then
+    reload_ssh
+  fi
+  if (( ! DRY_RUN )); then
+    [[ "$(sshd -T | awk '$1=="passwordauthentication"{print $2}')" == "no" ]] \
+      || die "Password login is still enabled by another sshd config file; check /etc/ssh/sshd_config(.d)."
+  fi
+else
+  rm -f "$keys_target"
+  log "SSH hardening: not managed (SSH_HARDENING=no); sshd settings are left exactly as they are:"
+  skipped "sshd drop-in ${SSHD_DROPIN}" "SSH_HARDENING=no"
+  skipped "disable SSH password login (PasswordAuthentication/KbdInteractiveAuthentication no)" "SSH_HARDENING=no"
+  skipped "set PermitRootLogin" "SSH_HARDENING=no"
+  skipped "ssh reload" "SSH_HARDENING=no"
+  ssh_dropin_revert
 fi
 
-run ufw default deny incoming
-run ufw default allow outgoing
-run ufw allow 22/tcp
-run ufw allow 80/tcp
-run ufw allow 443/tcp
-run ufw --force enable
-if (( ! DRY_RUN )); then
-  extra_rules="$(ufw status | awk 'NR>4 && $1 !~ /^(22|80|443)(\/tcp)?$/ && $1 != "" {print $1}' | sort -u | tr '\n' ' ')"
-  [[ -z "$extra_rules" ]] || warn "ufw also allows: ${extra_rules}- not removed automatically; delete with 'ufw delete allow <rule>' if unused."
+# Firewall management is opt-in (FIREWALL=yes). With "no" ufw is neither enabled nor reset and its rules stay as they are.
+if [[ "$FIREWALL" == yes ]]; then
+  log "Firewall (FIREWALL=yes): ufw default deny incoming, allow 22/80/443, enable:"
+  if (( ! DRY_RUN )); then
+    fw_problem="$(firewall_port_problem)"
+    [[ -z "$fw_problem" ]] || die "Refusing to enable the firewall: ${fw_problem}"
+  fi
+  run ufw default deny incoming
+  run ufw default allow outgoing
+  run ufw allow 22/tcp
+  run ufw allow 80/tcp
+  run ufw allow 443/tcp
+  run ufw --force enable
+  if (( ! DRY_RUN )); then
+    extra_rules="$(ufw status | awk 'NR>4 && $1 !~ /^(22|80|443)(\/tcp)?$/ && $1 != "" {print $1}' | sort -u | tr '\n' ' ')"
+    [[ -z "$extra_rules" ]] || warn "ufw also allows: ${extra_rules}- not removed automatically; delete with 'ufw delete allow <rule>' if unused."
+  fi
+else
+  log "Firewall: not managed (FIREWALL=no); ufw state and rules are left exactly as they are:"
+  skipped "ufw default deny incoming / allow outgoing" "FIREWALL=no"
+  skipped "ufw allow 22/tcp, 80/tcp, 443/tcp" "FIREWALL=no"
+  skipped "ufw enable" "FIREWALL=no"
+  report_firewall_needs
 fi
 
 reload_systemd=0

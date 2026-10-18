@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #
 # Read-only check of a deployed Amoobot server: one PASS / FAIL / SKIP line per check, never a secret value.
+# INFO lines describe what amoobot does not manage (SSH_HARDENING=no / FIREWALL=no) and do not change the result.
 #
 #   sudo /usr/local/lib/amoobot/post-deploy-check.sh [--domain bot.example.com]     # full check (root)
 #   bin/post-deploy-check.sh [--domain ...]                                         # as the deploy user: root-only checks SKIP
@@ -24,6 +25,7 @@ DB_URL_FILE="${AMOOBOT_DB_URL_FILE:-$ETC_DIR/database.env}"
 NGINX_SITE="${AMOOBOT_NGINX_SITE:-/etc/nginx/sites-available/amoobot}"
 NGINX_LOG_DIR="${AMOOBOT_NGINX_LOG_DIR:-/var/log/nginx}"
 MAINTENANCE_FILE="${AMOOBOT_MAINTENANCE_FILE:-/etc/nginx/snippets/amoobot-maintenance.conf}"
+SSHD_DROPIN="${AMOOBOT_SSHD_DROPIN:-/etc/ssh/sshd_config.d/00-amoobot-hardening.conf}"
 DEPLOY_MARKER="${AMOOBOT_DEPLOY_MARKER:-/var/lib/amoobot/deploy-in-progress}"
 PHP_ETC_DIR="${AMOOBOT_PHP_ETC_DIR:-/etc/php}"
 CHECK_JOBS="${AMOOBOT_CHECK_JOBS:-$SCRIPT_DIR/check-scheduled-jobs.sh}"
@@ -46,6 +48,7 @@ PASSED=0 FAILED=0 SKIPPED=0
 pass() { PASSED=$((PASSED + 1)); printf 'PASS  %-22s %s\n' "$1" "${2:-}"; }
 fail() { FAILED=$((FAILED + 1)); printf 'FAIL  %-22s %s\n' "$1" "${2:-}"; }
 skip() { SKIPPED=$((SKIPPED + 1)); printf 'SKIP  %-22s %s\n' "$1" "${2:-}"; }
+info() { printf 'INFO  %-22s %s\n' "$1" "${2:-}"; }
 have() { command -v "$1" > /dev/null 2>&1; }
 is_root() { [[ "$EUID" -eq 0 ]]; }
 TMP="$(mktemp -d)"
@@ -237,10 +240,23 @@ check_backup() {
   else fail backup "$(basename "$newest"): $((age / 3600)) h old (max 26), mode ${mode} (expected 600)"; fi
 }
 
-# 9. Firewall: active, only 22/80/443 allowed
+# 9. Firewall: active, only 22/80/443 allowed (FIREWALL=yes). With FIREWALL=no (default) amoobot does not manage ufw:
+#    INFO with its state, and FAIL only when an active ufw blocks 80/443 (the app would not be reachable).
 check_ufw() {
-  local status rules extra
+  local status rules extra mode missing="" p
   is_root || { skip firewall "needs root (ufw status)"; return; }
+  mode="$(env_value FIREWALL || true)"
+  if [[ "$mode" != yes ]]; then
+    have ufw || { info firewall "not managed (FIREWALL=no); ufw not installed"; return; }
+    status="$(ufw status 2> /dev/null)"
+    grep -q '^Status: active' <<< "$status" || { info firewall "not managed (FIREWALL=no); ufw inactive"; return; }
+    for p in 80 443; do
+      awk -v p="$p" '$1 == p || $1 == p"/tcp" { found = 1 } END { exit !found }' <<< "$status" || missing+="${p} "
+    done
+    if [[ -n "$missing" ]]; then fail firewall "FIREWALL=no but ufw is active and does not allow ${missing}(tcp): open them (ufw allow 80/tcp; ufw allow 443/tcp)"
+    else info firewall "not managed (FIREWALL=no); ufw active, allows 80 and 443"; fi
+    return
+  fi
   have ufw || { fail firewall "ufw not installed"; return; }
   status="$(ufw status 2> /dev/null)"
   grep -q '^Status: active' <<< "$status" || { fail firewall "ufw is not active"; return; }
@@ -250,14 +266,21 @@ check_ufw() {
   else fail firewall "allowed: ${rules:-nothing} (expected exactly 22 80 443; extra: ${extra:-none})"; fi
 }
 
-# 10. sshd effective settings: key-only login, expected PermitRootLogin
+# 10. sshd effective settings: key-only login, expected PermitRootLogin (SSH_HARDENING=yes). With SSH_HARDENING=no
+#     (default) amoobot does not manage sshd: INFO with the current settings, and a note if an earlier drop-in is left.
 check_sshd() {
-  local cfg want got problems=()
+  local cfg want got problems=() mode note=""
   is_root || { skip sshd "needs root (sshd -T)"; return; }
   have sshd || { fail sshd "sshd not installed"; return; }
   cfg="$(sshd -T 2> /dev/null)"
   [[ -n "$cfg" ]] || { fail sshd "sshd -T printed nothing"; return; }
   val() { awk -v k="$1" '$1 == k { print $2; exit }' <<< "$cfg"; }
+  mode="$(env_value SSH_HARDENING || true)"
+  if [[ "$mode" != yes ]]; then
+    [[ -e "$SSHD_DROPIN" ]] && note="; ${SSHD_DROPIN} from an earlier deploy is still installed (SSH_HARDENING_REVERT=yes removes it)"
+    info sshd "not managed (SSH_HARDENING=no): passwordauthentication $(val passwordauthentication), permitrootlogin $(val permitrootlogin)${note}"
+    return
+  fi
   [[ "$(val passwordauthentication)" == no ]] || problems+=("passwordauthentication $(val passwordauthentication)")
   [[ "$(val kbdinteractiveauthentication)" == no ]] || problems+=("kbdinteractiveauthentication $(val kbdinteractiveauthentication)")
   [[ "$(val pubkeyauthentication)" == yes ]] || problems+=("pubkeyauthentication $(val pubkeyauthentication)")

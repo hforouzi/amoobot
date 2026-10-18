@@ -10,7 +10,8 @@
 
 ## ۱. پیش‌نیازها (قبل از ورود به سرور)
 
-- [ ] سرور تازه‌ی Ubuntu 24.04 با ورود root **با کلید SSH**، و SSH روی پورت 22.
+- [ ] سرور تازه‌ی Ubuntu 24.04 با دسترسی root، و پورت‌های TCP 80 و 443 باز. (SSH روی پورت 22 فقط برای `SSH_HARDENING=yes` یا
+  `FIREWALL=yes` لازم است.)
 - [ ] رکورد DNS از نوع A برای دامنه به IP سرور (و AAAA اگر IPv6 دارید). بررسی از لپ‌تاپ:
   ```bash
   dig +short A bot.example.com      # باید IP سرور باشد
@@ -36,6 +37,8 @@ nano /etc/amoobot/.env.prod.local
 
 - [ ] پر شده: `DOMAIN`، `DB_PASSWORD`، `APP_SECRET`، `TELEGRAM_BOT_TOKEN` (توکن **بات تست**)، `TELEGRAM_WEBHOOK_SECRET`،
   `TELEGRAM_WEBHOOK_SECRET_TOKEN`، `TELEGRAM_ADMIN_CHAT_ID`، `DEPLOY_SSH_PUBLIC_KEY`، و در صورت نیاز `REPO_URL`، `DEPLOY_REF`.
+- [ ] سخت‌سازی سرور اختیاری است و پیش‌فرض خاموش: `SSH_HARDENING` (SSH فقط با کلید)، `FIREWALL` (ufw فقط 22/80/443). خالی یا `no` یعنی
+  تنظیمات SSH و فایروال سرور دست نمی‌خورد. فقط اگر واقعاً می‌خواهید `yes` بگذارید (جزئیات: deployment.md بخش ۲).
 - [ ] `stat -c '%a %U' /etc/amoobot/.env.prod.local` ← `600 root`.
 
 ## ۳. اسکریپت را به‌صورت کپی root‌مالک بیاورید
@@ -59,8 +62,12 @@ ssh root@SERVER 'bash /root/deploy.sh --dry-run' 2>&1 | tee /tmp/amoobot-dry-run
 - [ ] `Read <N> settings from /etc/amoobot/.env.prod.local (values not shown).` و خط `Domain: ...` با دامنه، `App dir`، `Ref` و `Deploy user` درست.
 - [ ] `DRY RUN: nothing will be changed.` و در پایان `Amoobot deployment completed (dry run - nothing changed)` (کد خروج `0`).
 - [ ] پیش‌نمایش sudoers فقط با چهار دستور `/usr/local/sbin/amoobot-{deploy,backup,restore,check-jobs}` و توضیح مدل اعتماد.
-- [ ] `PermitRootLogin prohibit-password` (یا `no` اگر عمداً انتخاب کرده‌اید و ادمین دیگری با sudo کامل دارید).
-- [ ] **هیچ** `WARNING: a real run would stop here` (اگر هست، دلیل‌های بالای آن را رفع کنید؛ معمولاً `DEPLOY_SSH_PUBLIC_KEY`).
+- [ ] با پیش‌فرض: خط‌های `skipped (SSH_HARDENING=no)` (drop-in، ورود با پسورد، `PermitRootLogin`، reload) و `skipped (FIREWALL=no)`
+  (سه دستور ufw) و خط `the app needs inbound TCP 80 ... and 443 ...`. یعنی تنظیمات SSH و ufw تغییر نمی‌کنند.
+- [ ] فقط با `SSH_HARDENING=yes`: `PermitRootLogin prohibit-password` (یا `no` اگر عمداً انتخاب کرده‌اید و ادمین دیگری با sudo کامل دارید)،
+  و **هیچ** `WARNING: a real run would stop here` (اگر هست، دلیل‌های بالای آن را رفع کنید؛ معمولاً `DEPLOY_SSH_PUBLIC_KEY`).
+- [ ] اگر خط `00-amoobot-hardening.conf from an earlier deploy is still installed` دیدید: یک deploy قبلی SSH را سخت کرده است. برای برگرداندن
+  ورود با پسورد `SSH_HARDENING_REVERT=yes` بگذارید و دوباره اجرا کنید (با `sshd -t` بررسی می‌شود).
 - [ ] `fetch git@github.com:... AS ROOT into /var/lib/amoobot/mirror.git` و `resolve <ref> in the root-owned mirror ... before pausing anything`.
 - [ ] جدول شش کار زمان‌بندی‌شده و خط cron بکاپ `30 3 * * * root /usr/local/sbin/amoobot-backup nightly`.
 - [ ] هیچ رمزی در خروجی نیست. در نشست root روی سرور (مقادیر چاپ نمی‌شوند، فقط تعداد خط‌های منطبق):
@@ -93,10 +100,10 @@ ssh deploy@SERVER                       # با کلید وارد می‌شود
 sudo amoobot-deploy --dry-run           # بدون پسورد اجرا می‌شود
 sudo -l                                 # فقط چهار دستور amoobot-*
 exit
-ssh -o PubkeyAuthentication=no deploy@SERVER   # باید رد شود (Permission denied (publickey))
+ssh -o PubkeyAuthentication=no deploy@SERVER   # فقط با SSH_HARDENING=yes: باید رد شود (Permission denied (publickey))
 ```
 
-- [ ] هر چهار مورد بالا درست است. حالا می‌توانید نشست دوم root را ببندید.
+- [ ] هر مورد بالا درست است (مورد آخر فقط با `SSH_HARDENING=yes`). حالا می‌توانید نشست دوم root را ببندید.
 
 ## ۷. بررسی بعد از deploy
 
@@ -104,7 +111,8 @@ ssh -o PubkeyAuthentication=no deploy@SERVER   # باید رد شود (Permissio
 ssh root@SERVER 'sudo /usr/local/lib/amoobot/post-deploy-check.sh'
 ```
 
-- [ ] `RESULT: OK` (کد خروج `0`)، یعنی همه‌ی ۱۸ خط `PASS` هستند. اولین بار ممکن است `scheduled-jobs` به‌خاطر `NEVER` (کارها هنوز یک‌بار هم
+- [ ] `RESULT: OK` (کد خروج `0`): با پیش‌فرض ۱۸ خط `PASS` و دو خط `INFO` برای `sshd` و `firewall` (مدیریت‌نشده، در نتیجه شمرده نمی‌شوند)؛
+  با `SSH_HARDENING=yes` و `FIREWALL=yes` همه‌ی ۲۰ خط `PASS` هستند. اولین بار ممکن است `scheduled-jobs` به‌خاطر `NEVER` (کارها هنوز یک‌بار هم
   اجرا نشده‌اند) `FAIL` باشد: ۳۰ دقیقه صبر کنید و دوباره اجرا کنید. هر `FAIL` دیگر را قبل از ادامه رفع کنید.
 - [ ] نسخه‌ی root‌مالک را اجرا کنید (`/usr/local/lib/amoobot/...`)، **نه** `bin/` داخل `/var/www/amoobot` با root.
 

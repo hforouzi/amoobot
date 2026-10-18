@@ -34,7 +34,7 @@
 |---|---|
 | 0 | خواندن و اعتبارسنجی تنظیمات. اگر مقدار اجباری نباشد یا `APP_ENV`≠prod یا `APP_DEBUG`≠0 باشد، با پیام واضح متوقف می‌شود |
 | 1–4 | `apt upgrade`، نصب Nginx، MariaDB، Supervisor، ufw، certbot، PHP 8.4 (PPA ondrej) و Composer (با بررسی امضای نصب‌کننده) |
-| 5 | کاربر غیر root به نام `deploy` (با sudo فقط برای `amoobot-*`)، SSH فقط با کلید (فقط اگر ورود `deploy` با کلید تأیید شود)، فایروال فقط 22/80/443، سیاست restart خودکار برای nginx/php-fpm/mariadb/supervisor/cron |
+| 5 | کاربر غیر root به نام `deploy` (با sudo فقط برای `amoobot-*`) و سیاست restart خودکار برای nginx/php-fpm/mariadb/supervisor/cron. **اختیاری و پیش‌فرض خاموش:** SSH فقط با کلید (`SSH_HARDENING=yes`، فقط اگر ورود `deploy` با کلید تأیید شود) و فایروال فقط 22/80/443 (`FIREWALL=yes`). با مقدار پیش‌فرض `no` تنظیمات SSH و ufw سرور دست نمی‌خورد |
 | 6 | تنظیم `sql_mode = STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION`، ساخت دیتابیس و کاربر (و همگام کردن پسورد) |
 | 7 | root با **deploy key فقط‌خواندنیِ متعلق به root** (`/etc/amoobot/repo_deploy_ed25519`) مخزن را در **آینه‌ی root‌مالک** `/var/lib/amoobot/mirror.git` می‌گیرد، `--ref` را فقط با branchها و tagهای origin در همین آینه resolve می‌کند و اسکریپت‌هایی را که root اجرا می‌کند از همین آینه در `/usr/local/lib/amoobot` نصب می‌کند؛ checkout کاربر `deploy` از یک bundle همان کامیت پر می‌شود؛ ثبت در `/var/lib/amoobot/releases.log` (بخش ۳، «مدل اعتماد») |
 | 8 | `composer install --no-dev --optimize-autoloader` |
@@ -68,7 +68,7 @@ sudo amoobot-deploy --env-file /etc/amoobot/other.env   # فایل تنظیما�
 
 ## ۲. اولین استقرار
 
-**پیش‌نیاز:** سرور تازه‌ی Ubuntu 24.04، دسترسی root با **کلید SSH**، و رکورد DNS از نوع A برای دامنه که به IP سرور اشاره کند (بدون آن گواهی HTTPS صادر نمی‌شود). SSH باید روی پورت 22 باشد.
+**پیش‌نیاز:** سرور تازه‌ی Ubuntu 24.04، دسترسی root، و رکورد DNS از نوع A برای دامنه که به IP سرور اشاره کند (بدون آن گواهی HTTPS صادر نمی‌شود). پورت‌های TCP 80 و 443 باید از اینترنت باز باشند. فقط با `SSH_HARDENING=yes` یا `FIREWALL=yes` لازم است SSH روی پورت 22 باشد.
 
 ```bash
 # 1) روی سرور: فایل تنظیمات را بسازید (رمزها را همین‌جا تولید کنید، نه روی لپ‌تاپ یا چت)
@@ -81,9 +81,27 @@ openssl rand -hex 24   # برای DB_PASSWORD
 sudo nano /etc/amoobot/.env.prod.local
 ```
 
-مقادیر اجباری: `DOMAIN`، `DB_PASSWORD`، `APP_SECRET`، `TELEGRAM_BOT_TOKEN`، `TELEGRAM_WEBHOOK_SECRET`، `TELEGRAM_WEBHOOK_SECRET_TOKEN`، `TELEGRAM_ADMIN_CHAT_ID`. `DEPLOY_SSH_PUBLIC_KEY` (یک خط از فایل `.pub` خودتان) را هم پر کنید.
+مقادیر اجباری: `DOMAIN`، `DB_PASSWORD`، `APP_SECRET`، `TELEGRAM_BOT_TOKEN`، `TELEGRAM_WEBHOOK_SECRET`، `TELEGRAM_WEBHOOK_SECRET_TOKEN`، `TELEGRAM_ADMIN_CHAT_ID`. `DEPLOY_SSH_PUBLIC_KEY` (یک خط از فایل `.pub` خودتان) را هم پر کنید تا
+بتوانید با کاربر `deploy` وارد شوید. `SSH_HARDENING`، `SSH_HARDENING_REVERT` و `FIREWALL` اختیاری‌اند و پیش‌فرض همه `no` است (بخش بعد).
 
-### SSH و جلوگیری از قفل شدن (مرحله‌ی 5)
+### SSH، فایروال و جلوگیری از قفل شدن (مرحله‌ی 5)
+
+**سخت‌سازی SSH و فایروال اختیاری و به‌طور پیش‌فرض خاموش است.** با پیش‌فرض (`SSH_HARDENING=no`، `FIREWALL=no`) اسکریپت هیچ فایلی در
+`/etc/ssh/sshd_config.d/` نمی‌نویسد، ورود با پسورد و `PermitRootLogin` را تغییر نمی‌دهد، ssh را reload نمی‌کند، ufw را فعال یا reset نمی‌کند و
+قانون‌های موجود آن را تغییر نمی‌دهد. برای هر کدام از این کارها در خروجی (و در `--dry-run`) یک خط `skipped (SSH_HARDENING=no)` یا
+`skipped (FIREWALL=no)` چاپ می‌شود و پورت‌هایی که برنامه لازم دارد (TCP 80 و 443، به‌علاوه‌ی پورت SSH خودتان) یادآوری می‌شوند؛ اگر ufw فعال
+باشد و 80/443 را باز نگذاشته باشد هشدار داده می‌شود (فقط خواندن، بدون تغییر). کاربر `deploy`، کلید آن و قانون sudoers همیشه ساخته
+می‌شوند؛ این‌ها روی نحوه‌ی ورود root اثری ندارند.
+
+- **برگرداندن سخت‌سازی قبلی:** اگر یک deploy قبلی (پیش از این تغییر یا با `SSH_HARDENING=yes`) فایل
+  `/etc/ssh/sshd_config.d/00-amoobot-hardening.conf` را نصب کرده باشد، اجرا با `SSH_HARDENING=no` آن را **گزارش** می‌کند ولی حذف نمی‌کند.
+  با `SSH_HARDENING_REVERT=yes` فایل حذف می‌شود: ابتدا `sshd -t` بدون آن اجرا می‌شود و فقط اگر قبول شد ssh reload می‌شود؛ در غیر این صورت
+  فایل دقیقاً برگردانده و deploy متوقف می‌شود. بعد از آن ورود با پسورد و `PermitRootLogin` از بقیه‌ی تنظیمات sshd سرور می‌آیند. فقط فایلی
+  حذف می‌شود که خط `# Managed by amoobot deploy.sh` را داشته باشد.
+- **`FIREWALL=yes`:** `ufw default deny incoming`، فقط 22/80/443 و `ufw --force enable`. اگر SSH روی پورت دیگری گوش دهد، قبل از هر دستور
+  ufw متوقف می‌شود (وگرنه دسترسی SSH قطع می‌شد).
+
+موارد زیر **فقط با `SSH_HARDENING=yes`** انجام می‌شوند (همه‌ی محافظت‌های ضدقفل‌شدن بدون تغییر):
 
 - `DEPLOY_SSH_PUBLIC_KEY` با `ssh-keygen -l` بررسی می‌شود؛ مقدار نامعتبر (یا چند خط، یا کلید خصوصی) در مرحله‌ی 0 متوقف می‌کند.
 - کلیدهای `/root/.ssh/authorized_keys` **همیشه** به `~deploy/.ssh/authorized_keys` اضافه می‌شوند (فقط کلیدهایی که هنوز نیستند)،
@@ -149,7 +167,8 @@ sudo -u www-data php bin/console app:payment:create-default-gateways --env=prod
 `bin/` در checkout را با root اجرا نکنید). برای هر بررسی یک خط `PASS`/`FAIL`/`SKIP` چاپ می‌کند، هیچ رمزی چاپ نمی‌کند و فقط اگر همه `PASS`
 باشند کد خروج `0` می‌دهد: `APP_ENV`/`APP_DEBUG` واقعی برنامه، `healthz` روی HTTPS، ریدایرکت HTTP، روزهای باقی‌مانده‌ی گواهی، `403` برای
 Webhook بدون هدر و با رمز URL اشتباه، `getWebhookInfo` (URL ماسک‌شده، بدون `last_error_message`، صف کوچک)، کارهای زمان‌بندی‌شده، بکاپ شبانه
-(تازه و `600`)، ufw، `sshd -T`، `sql_mode`، دسترسی‌های `/etc/amoobot`، منطقه‌ی زمانی PHP (`UTC` برای CLI و FPM)، `nginx -t`، نبود رشته‌ی شبیه رمز در لاگ‌های nginx، خاموش بودن
+(تازه و `600`)، ufw، `sshd -T` (با `FIREWALL=no` / `SSH_HARDENING=no` فقط یک خط `INFO` با وضعیت فعلی، که در نتیجه شمرده نمی‌شود؛
+و `FAIL` فقط وقتی ufw فعال است و 80/443 را بسته)، `sql_mode`، دسترسی‌های `/etc/amoobot`، منطقه‌ی زمانی PHP (`UTC` برای CLI و FPM)، `nginx -t`، نبود رشته‌ی شبیه رمز در لاگ‌های nginx، خاموش بودن
 حالت نگهداری و نبود فایل `deploy-in-progress`. با کاربر `deploy` (`bin/post-deploy-check.sh`) بررسی‌هایی که root لازم دارند `SKIP`
 می‌شوند و نتیجه `INCOMPLETE` (کد `1`) است. ترتیب کامل اولین استقرار: [first-deploy-checklist.md](first-deploy-checklist.md).
 
@@ -360,9 +379,9 @@ curl -fsS https://DOMAIN/healthz
 - [ ] همه‌ی رمزهای لو رفته‌ی بخش ۰ عوض شده‌اند (توکن بات revoke شده است)
 - [ ] `/etc/amoobot/.env.prod.local` با مالک root و دسترسی `600` (`stat -c '%a %U' /etc/amoobot/.env.prod.local` ← `600 root`)
 - [ ] `git grep` در مخزن هیچ رمز واقعی‌ای پیدا نمی‌کند
-- [ ] ورود `ssh deploy@SERVER` با کلید کار می‌کند و ورود با پسورد رد می‌شود
+- [ ] ورود `ssh deploy@SERVER` با کلید کار می‌کند (و فقط با `SSH_HARDENING=yes`: ورود با پسورد رد می‌شود)
 - [ ] `sudo -l -U deploy` فقط چهار دستور `/usr/local/sbin/amoobot-*` را نشان می‌دهد
-- [ ] `sudo ufw status` فقط 22، 80 و 443 را نشان می‌دهد
+- [ ] فقط با `FIREWALL=yes`: `sudo ufw status` فقط 22، 80 و 443 را نشان می‌دهد؛ با `FIREWALL=no`: پورت‌های 80 و 443 در فایروال خودتان باز هستند
 - [ ] deploy key در GitHub **بدون** دسترسی نوشتن است و فقط کلید root (`/etc/amoobot/repo_deploy_ed25519.pub`) ثبت است
 - [ ] دسترسی نوشتن مخزن GitHub (و branch protection برای `main`) مثل دسترسی root محدود است؛ یا `REQUIRE_SIGNED_TAG=yes` فعال است
 

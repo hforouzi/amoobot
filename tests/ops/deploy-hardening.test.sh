@@ -87,6 +87,8 @@ for f in deploy.sh bin/*.sh bin/lib/*.sh; do
 done
 
 can_dry_run && { make_env "$WORK/prod.env"; dry_run "$WORK/prod.env"; BASE_OUT="$OUT"; BASE_RC="$RC"; }
+# The opt-in hardening (SSH_HARDENING=yes, FIREWALL=yes): the behaviour before hardening became opt-in.
+can_dry_run && { { cat "$WORK/prod.env"; printf 'SSH_HARDENING=yes\nFIREWALL=yes\n'; } > "$WORK/hard.env"; dry_run "$WORK/hard.env"; HARD_OUT="$OUT"; HARD_RC="$RC"; }
 
 echo "== root never runs deploy-writable files"
 set_globals
@@ -339,7 +341,7 @@ check "ssh.socket on 2222 while sshd_config says 22 -> 2222 (would be locked out
 check "no socket activation: sshd -T port(s)" test "$(ports_case 0 '' $'port 22\nport 2200')" = "22 2200 "
 check "step 5: access, second-admin and port checks run before the drop-in is written" bash -c \
   'a=$(grep -n "ssh_access_problems \"\$DEPLOY_USER\" \"\$DEPLOY_HOME\" 0)" "$1" | head -1 | cut -d: -f1); o=$(grep -n "< <(other_admin_problems)" "$1" | cut -d: -f1)
-   p=$(grep -n "ssh_ports=\"\$(ssh_listen_ports" "$1" | cut -d: -f1); d=$(grep -n "^install_sshd_dropin /etc/ssh/sshd_config.d/00-amoobot-hardening.conf dropin_login_check" "$1" | cut -d: -f1)
+   p=$(grep -n "ssh_ports=\"\$(ssh_listen_ports" "$1" | cut -d: -f1); d=$(grep -n "^  install_sshd_dropin \"\$SSHD_DROPIN\" dropin_login_check" "$1" | cut -d: -f1)
    [[ -n $a && -n $o && -n $p && -n $d && $a -lt $d && $o -lt $d && $p -lt $d ]]' _ "$ROOT/deploy.sh"
 verify_dropin_case() {  # verify_dropin_case "<problems printed by the verify function>" -> final file content + rc
   ( die() { printf 'DIE: %s\n' "$*" >> "$WORK/vd.err"; echo "rc=1 changed=${SSHD_CHANGED:-}"; exit 1; }
@@ -354,26 +356,125 @@ check "drop-in that would lock the deploy user out -> previous file restored, ss
 check "drop-in that keeps the deploy login -> installed" test "$(verify_dropin_case '')" = $'PasswordAuthentication no\nrc=0 changed=1'
 
 if can_dry_run; then
-  OUT="$BASE_OUT"
+  OUT="$HARD_OUT"
+  check "SSH_HARDENING=yes: dry run exits 0" test "$HARD_RC" -eq 0
   check "default PermitRootLogin is prohibit-password" grep -q '^    + PermitRootLogin prohibit-password$' <<< "$OUT"
   check "drop-in is tested with sshd -t and restored on failure" grep -q 'check with sshd -t (on failure restore the previous file)' <<< "$OUT"
   check "dry-run previews the sudoers file" grep -q '^    + deploy ALL=(root) NOPASSWD: AMOOBOT_OPS$' <<< "$OUT"
   check "no verified key -> a real run would refuse to disable passwords" grep -q 'a real run would stop here. Refusing to disable SSH password login' <<< "$OUT"
   if have ssh-keygen; then
-    { cat "$WORK/prod.env"; echo "DEPLOY_SSH_PUBLIC_KEY=ssh-ed25519 AAAAnot-a-real-key x"; } > "$WORK/badkey.env"
+    { cat "$WORK/hard.env"; echo "DEPLOY_SSH_PUBLIC_KEY=ssh-ed25519 AAAAnot-a-real-key x"; } > "$WORK/badkey.env"
     dry_run "$WORK/badkey.env"
     check "invalid DEPLOY_SSH_PUBLIC_KEY stops the preflight" bash -c '[[ $1 -ne 0 ]] && grep -q "DEPLOY_SSH_PUBLIC_KEY is not one valid SSH public key" <<< "$2"' _ "$RC" "$OUT"
-    { cat "$WORK/prod.env"; echo "DEPLOY_SSH_PUBLIC_KEY=$K1"; } > "$WORK/goodkey.env"
+    { cat "$WORK/hard.env"; echo "DEPLOY_SSH_PUBLIC_KEY=$K1"; } > "$WORK/goodkey.env"
     dry_run "$WORK/goodkey.env"
     check "valid DEPLOY_SSH_PUBLIC_KEY would be added" bash -c '[[ $1 -eq 0 ]] && grep -q "\[dry-run\] add DEPLOY_SSH_PUBLIC_KEY" <<< "$2"' _ "$RC" "$OUT"
     check "  ...and then nothing would be refused" not grep -q 'a real run would stop here' <<< "$OUT"
-    { cat "$WORK/prod.env"; echo "SSH_PERMIT_ROOT_LOGIN=no"; } > "$WORK/noroot.env"
+    { cat "$WORK/hard.env"; echo "SSH_PERMIT_ROOT_LOGIN=no"; } > "$WORK/noroot.env"
     dry_run "$WORK/noroot.env"
     check "PermitRootLogin no without a verified deploy login is refused" grep -q 'Refusing to disable SSH password login (and to set PermitRootLogin no)' <<< "$OUT"
   fi
 else
   skip "$DRY_RUN_SKIP"
 fi
+
+echo "== SSH hardening and firewall are opt-in (default: sshd and ufw untouched)"
+if can_dry_run; then
+  OUT="$BASE_OUT"
+  check "defaults: dry run exits 0" test "$BASE_RC" -eq 0
+  check "  ...no sshd drop-in would be written" not grep -qE '00-amoobot-hardening\.conf, check with sshd -t|^    \+ (PasswordAuthentication|PermitRootLogin|KbdInteractiveAuthentication) ' <<< "$OUT"
+  check "  ...no lockout refusal (nothing about logins changes)" not grep -q 'Refusing to disable SSH password login' <<< "$OUT"
+  check "  ...no ufw command at all" not grep -qE '^\[dry-run\] ufw ' <<< "$OUT"
+  for line in "sshd drop-in /etc/ssh/sshd_config.d/00-amoobot-hardening.conf: skipped (SSH_HARDENING=no)" \
+              "disable SSH password login (PasswordAuthentication/KbdInteractiveAuthentication no): skipped (SSH_HARDENING=no)" \
+              "set PermitRootLogin: skipped (SSH_HARDENING=no)" "ssh reload: skipped (SSH_HARDENING=no)" \
+              "ufw default deny incoming / allow outgoing: skipped (FIREWALL=no)" "ufw allow 22/tcp, 80/tcp, 443/tcp: skipped (FIREWALL=no)" \
+              "ufw enable: skipped (FIREWALL=no)"; do
+    check "  ...says: ${line}" grep -qxF "  - ${line}" <<< "$OUT"
+  done
+  check "  ...prints the ports the app needs (80 and 443)" grep -q "the app needs inbound TCP 80 (HTTP, Let's Encrypt) and 443 (HTTPS) open" <<< "$OUT"
+  check "  ...reports whether an earlier amoobot drop-in exists" grep -qE '^  - earlier amoobot sshd drop-in: none|sshd_config.d/00-amoobot-hardening.conf from an earlier deploy' <<< "$OUT"
+  check "  ...the step title names both switches" grep -q 'Server setup (deploy user, SSH hardening: no, firewall: no' <<< "$OUT"
+  check "  ...the deploy user and its sudoers rule are still set up" grep -q '^    + deploy ALL=(root) NOPASSWD: AMOOBOT_OPS$' <<< "$OUT"
+  check "  ...no secret printed" no_secret_printed "$WORK/prod.env"
+  OUT="$HARD_OUT"
+  check "SSH_HARDENING=yes FIREWALL=yes: the old ufw steps run" bash -c \
+    '[[ $(grep -cE "^\[dry-run\] ufw (default deny incoming|default allow outgoing|allow 22/tcp|allow 80/tcp|allow 443/tcp|--force enable)$" <<< "$1") -eq 6 ]]' _ "$OUT"
+  check "  ...and nothing is reported as skipped" not grep -q 'skipped (SSH_HARDENING=no)\|skipped (FIREWALL=no)' <<< "$OUT"
+  { cat "$WORK/prod.env"; echo "FIREWALL=yes"; } > "$WORK/fwonly.env"; dry_run "$WORK/fwonly.env"
+  check "FIREWALL=yes alone: ufw managed, SSH still untouched" bash -c \
+    'grep -q "^\[dry-run\] ufw --force enable$" <<< "$1" && grep -qxF "  - set PermitRootLogin: skipped (SSH_HARDENING=no)" <<< "$1"' _ "$OUT"
+  for bad in "SSH_HARDENING=true" "FIREWALL=on" "SSH_HARDENING_REVERT=1"; do
+    { cat "$WORK/prod.env"; echo "$bad"; } > "$WORK/badflag.env"; dry_run "$WORK/badflag.env"
+    check "${bad} is refused (yes/no only)" bash -c '[[ $1 -ne 0 ]] && grep -q "must be '"'"'yes'"'"' or '"'"'no'"'"'" <<< "$2"' _ "$RC" "$OUT"
+  done
+  { cat "$WORK/prod.env"; printf 'SSH_HARDENING=yes\nSSH_HARDENING_REVERT=yes\n'; } > "$WORK/contra.env"; dry_run "$WORK/contra.env"
+  check "SSH_HARDENING=yes with SSH_HARDENING_REVERT=yes is refused" bash -c '[[ $1 -ne 0 ]] && grep -q "contradict each other" <<< "$2"' _ "$RC" "$OUT"
+else
+  skip "$DRY_RUN_SKIP"
+fi
+check "the only sshd drop-in install and the ufw commands are inside the opt-in blocks" bash -c '
+  yes_block=$(sed -n "/^if \[\[ \"\$SSH_HARDENING\" == yes \]\]; then$/,/^else$/p" "$1")
+  code() { grep -vE "^ *(log|warn|skipped) "; }   # commands only, not the text the lines print
+  no_block=$(sed -n "/^if \[\[ \"\$SSH_HARDENING\" == yes \]\]; then$/,/^fi$/p" "$1" | sed -n "/^else$/,/^fi$/p" | code)
+  fw_no=$(sed -n "/^if \[\[ \"\$FIREWALL\" == yes \]\]; then$/,/^fi$/p" "$1" | sed -n "/^else$/,/^fi$/p" | code)
+  [[ $(grep -c "install_sshd_dropin \"" "$1") -eq 1 ]] && grep -q "install_sshd_dropin \"\$SSHD_DROPIN\"" <<< "$yes_block" &&
+  ! grep -qE "install_sshd_dropin|reload_ssh|sshd_config" <<< "$no_block" && ! grep -qE "run ufw|ufw (allow|default|enable|reset|--force)" <<< "$fw_no" &&
+  [[ $(grep -cE "^ *run ufw " "$1") -eq 6 ]]' _ "$ROOT/deploy.sh"
+check "report_firewall_needs only reads ufw (ufw status)" bash -c \
+  '[[ "$(sed -n "/^report_firewall_needs() {/,/^}/p" "$1" | grep -vE "^ *(log|warn) " | grep -oE "ufw [a-z-]+" | sort -u)" == "ufw status" ]]' _ "$ROOT/deploy.sh"
+
+set_globals
+load_fn ssh_dropin_revert firewall_port_problem report_firewall_needs
+revert_case() {  # revert_case <REVERT yes|no> <file content or "" for none> <sshd -t rc> [DRY_RUN] -> file, then log
+  ( warn() { printf 'WARN: %s\n' "$*"; }
+    die() { printf 'DIE: %s\n' "$*"; exit 1; }
+    sshd() { [[ "$1" == -t ]] && { echo "line 3: Bad configuration option" >&2; return "$SSHD_RC"; }; }
+    reload_ssh() { echo "RELOADED"; }
+    SSHD_DROPIN="$WORK/rv/00-amoobot-hardening.conf" SSHD_DROPIN_MARKER="# Managed by amoobot deploy.sh"
+    SSH_HARDENING_REVERT="$1" SSHD_RC="$3" DRY_RUN="${4:-0}"
+    rm -rf "$WORK/rv"; mkdir -p "$WORK/rv"; [[ -n "$2" ]] && printf '%s\n' "$2" > "$SSHD_DROPIN"
+    ( ssh_dropin_revert ) > "$WORK/rv.log" 2>&1; echo "rc=$?"
+    if [[ -e "$SSHD_DROPIN" ]]; then echo "file: present"; else echo "file: absent"; fi
+    cat "$WORK/rv.log" )
+}
+OURS=$'# Managed by amoobot deploy.sh\nPasswordAuthentication no\nPermitRootLogin prohibit-password'
+out="$(revert_case no '' 0)"
+check "no earlier drop-in -> reported as none" bash -c 'grep -q "^rc=0$" <<< "$1" && grep -q "earlier amoobot sshd drop-in: none" <<< "$1"' _ "$out"
+out="$(revert_case no "$OURS" 0)"
+check "earlier drop-in, SSH_HARDENING_REVERT=no -> reported, left in place, ssh not reloaded" bash -c \
+  'grep -q "file: present" <<< "$1" && grep -q "WARN: .*still installed .*PasswordAuthentication no PermitRootLogin prohibit-password.*SSH_HARDENING_REVERT=yes" <<< "$1" && ! grep -q RELOADED <<< "$1"' _ "$out"
+out="$(revert_case yes "$OURS" 0)"
+check "SSH_HARDENING_REVERT=yes, sshd -t OK -> removed, then ssh reloaded" bash -c \
+  'grep -q "^rc=0$" <<< "$1" && grep -q "file: absent" <<< "$1" && grep -q "^RELOADED$" <<< "$1" && grep -q "^Removed .*00-amoobot-hardening.conf" <<< "$1"' _ "$out"
+out="$(revert_case yes "$OURS" 1)"
+check "SSH_HARDENING_REVERT=yes, sshd -t fails -> file restored, ssh NOT reloaded, deploy stops" bash -c \
+  'grep -q "^rc=1$" <<< "$1" && grep -q "file: present" <<< "$1" && ! grep -q RELOADED <<< "$1" && grep -q "DIE: sshd -t rejected .*restored.*Bad configuration option" <<< "$1"' _ "$out"
+check "  ...the restored file is byte-identical" bash -c '[[ "$(cat "$1")" == "$2" ]]' _ "$WORK/rv/00-amoobot-hardening.conf" "$OURS"
+out="$(revert_case yes "$OURS" 0 1)"
+check "SSH_HARDENING_REVERT=yes in a dry run -> only announced" bash -c \
+  'grep -q "file: present" <<< "$1" && grep -q "\[dry-run\] remove .*check with sshd -t (on failure restore it), then reload ssh" <<< "$1" && ! grep -q RELOADED <<< "$1"' _ "$out"
+out="$(revert_case yes $'PasswordAuthentication no\n# written by someone else' 0)"
+check "a file without our marker is never removed" bash -c 'grep -q "file: present" <<< "$1" && grep -q "WARN: .*not the file amoobot wrote" <<< "$1"' _ "$out"
+
+port_case() { ( ssh_listen_ports() { printf '%s\n' $PORTS; }; PORTS="$1"; firewall_port_problem ) }
+check "FIREWALL=yes with SSH on 22 -> no problem" test -z "$(port_case 22)"
+check "FIREWALL=yes with SSH on 2222 -> refused (would be locked out)" grep -q "SSH listens on port(s) 2222 but FIREWALL=yes allows only 22" <<< "$(port_case 2222)"
+check "FIREWALL=yes is refused before any ufw command in a real run" bash -c \
+  'b=$(sed -n "/^if \[\[ \"\$FIREWALL\" == yes \]\]; then$/,/^else$/p" "$1"); p=$(grep -n "firewall_port_problem" <<< "$b" | head -1 | cut -d: -f1); u=$(grep -n "run ufw" <<< "$b" | head -1 | cut -d: -f1); [[ -n $p && -n $u && $p -lt $u ]]' _ "$ROOT/deploy.sh"
+fw_case() {  # fw_case "<ufw status output>" -> log + every ufw call
+  ( ufw() { echo "UFW $*" >> "$WORK/ufw.calls"; [[ "$1" == status ]] && printf '%s\n' "$UFW_STATUS"; }
+    warn() { printf 'WARN: %s\n' "$*"; }
+    DRY_RUN=0 UFW_STATUS="$1"; : > "$WORK/ufw.calls"; report_firewall_needs; cat "$WORK/ufw.calls" )
+}
+out="$(fw_case 'Status: inactive')"
+check "FIREWALL=no, ufw inactive -> reported, left inactive (only 'ufw status' called)" bash -c \
+  'grep -q "ufw is not active (left as it is)" <<< "$1" && [[ $(grep -c "^UFW " <<< "$1") -eq 1 ]] && grep -q "^UFW status$" <<< "$1"' _ "$out"
+out="$(fw_case $'Status: active\n\nTo Action From\n-- ------ ----\n22/tcp ALLOW Anywhere')"
+check "FIREWALL=no, active ufw without 80/443 -> warned, rules unchanged" bash -c \
+  'grep -q "WARN: ufw is active and does not allow 80 443/tcp" <<< "$1" && ! grep -qE "^UFW (allow|deny|enable|reset|default|delete)" <<< "$1"' _ "$out"
+out="$(fw_case $'Status: active\n\nTo Action From\n-- ------ ----\n22/tcp ALLOW Anywhere\n80/tcp ALLOW Anywhere\n443 ALLOW Anywhere')"
+check "FIREWALL=no, active ufw allowing 80 and 443 -> fine" grep -q "ufw is active and allows 80 and 443" <<< "$out"
 
 echo "== root never follows deploy- or www-data-owned symlinks (group 2, 2nd review)"
 set_globals
