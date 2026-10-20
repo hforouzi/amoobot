@@ -14,6 +14,12 @@ interface VpnPanelDriverInterface
 {
     public function supports(?VpnPanel $panel): bool;
 
+    /**
+     * Whether this driver implements every operation needed to sell and manage accounts on the panel (create, renew,
+     * suspend, delete, reset, usage). A driver that cannot must not be selected for a panel that has active plans.
+     */
+    public function supportsProvisioning(?VpnPanel $panel): bool;
+
     public function createService(CreateVpnServiceRequest $request, ?VpnPanel $panel = null): CreatedVpnService;
 
     public function suspendService(string $remoteId, ?VpnPanel $panel = null): void;

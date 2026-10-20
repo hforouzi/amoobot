@@ -1,6 +1,7 @@
 # راهنمای استقرار Production (Runbook)
 
 > اولین استقرار روی سرور تازه؟ قدم‌به‌قدم: [first-deploy-checklist.md](first-deploy-checklist.md).
+> اتصال پنل 3x-ui (آدرس + API Token، گواهی self-signed، عیب‌یابی): [panel-connection.md](panel-connection.md).
 
 این راهنما برای سرور **Ubuntu 24.04** و اسکریپت [`deploy.sh`](../../deploy.sh) است. همان اسکریپت هم برای اولین نصب و هم برای هر به‌روزرسانی اجرا می‌شود و اجرای دوباره‌ی آن بی‌خطر است (idempotent).
 
@@ -367,6 +368,7 @@ curl -fsS https://DOMAIN/healthz
 | `APP_SECRET` | `openssl rand -hex 32` | نشست‌ها و remember-me ادمین‌ها باطل می‌شود |
 | `DB_PASSWORD` | `openssl rand -hex 24` (فقط `A-Z a-z 0-9 . _ ~ -`) | اسکریپت در مرحله‌ی 6 پسورد کاربر MariaDB را هم عوض می‌کند. **بدون `--app-only` اجرا کنید** |
 | کلیدهای درگاه پرداخت | در پنل ادمین ← درگاه‌ها | مستقل از deploy |
+| API Token پنل 3x-ui | در 3x-ui: Settings → Security → API Token؛ در بات: پنل ← «ویرایش تنظیمات» ← «تست اتصال»؛ سپس توکن قبلی را در پنل باطل کنید ([panel-connection.md](panel-connection.md) بخش ۶) | مستقل از deploy. بعد از چرخش `APP_SECRET` هم باید توکن‌ها دوباره وارد شوند (رمزنگاری‌شده با کلید مشتق از آن) |
 | deploy key گیت (root) | `sudo rm /etc/amoobot/repo_deploy_ed25519*`، اجرای deploy و ثبت کلید جدید در GitHub (کلید قبلی را حذف کنید) | deploy تا ثبت کلید، قبل از متوقف کردن چیزی، متوقف می‌شود |
 
 بعد از هر چرخش: `curl -fsS https://DOMAIN/healthz` و یک پیام آزمایشی به بات.
@@ -584,4 +586,5 @@ checker یک timer غیرفعال را `INACTIVE` گزارش می‌کند و `r
 | هشدار «scheduled job FAILED» | `journalctl -u amoobot-job-<job> -n 50` و `/var/log/amoobot/<job>.log`. نتیجه‌ی `timeout` یعنی کار از `TimeoutStartSec` بیشتر طول کشیده (معمولاً پنل کند یا در دسترس نیست) |
 | کاری هیچ‌وقت اجرا نمی‌شود | `systemctl list-timers 'amoobot-*'`. اگر deploy قبلی شکست خورده باشد، timerها متوقف مانده‌اند (هشدار `SCHEDULED JOBS ARE PAUSED`). یک deploy موفق اجرا کنید |
 | `amoobot-check-jobs.service` failed | `journalctl -u amoobot-check-jobs -n 30` جدول وضعیت را نشان می‌دهد؛ همان مشکل را با `sudo amoobot-check-jobs` بررسی کنید. بعد از رفع: `sudo systemctl reset-failed amoobot-check-jobs` |
+| پنل VPN خطا می‌دهد یا پلن‌هایش در بات دیده نمی‌شوند | پنل ادمین ← پنل ← «تست اتصال»، یا `sudo -u www-data php bin/console app:panel:doctor <id> --env=prod`؛ هر خطا با توضیح و راه حل ([panel-connection.md](panel-connection.md) بخش ۸). پنلی که ۳ بار پشت‌سرهم خطا بدهد «ناپایدار» می‌شود و پلن‌هایش تا اولین تماس موفق پنهان می‌مانند |
 | هشدار نمی‌رسد | `systemctl status 'amoobot-job-alert@*'`: معمولاً `TELEGRAM_ADMIN_CHAT_ID` اشتباه است، یا بات در آن چت پیام نفرستاده/عضو نیست |

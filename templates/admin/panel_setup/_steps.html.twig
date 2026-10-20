@@ -1,0 +1,18 @@
+{% trans_default_domain 'admin' %}
+{# current: 1 connect, 2 inbounds, 3 plans #}
+<nav class="panel-setup-steps mb-3" aria-label="{{ 'panel_connection.steps.label'|trans }}">
+    <ol class="list-inline mb-0">
+        {% for step in [
+            {n: 1, key: 'panel_connection.steps.connect', route: panel and panel.id ? path('admin_panel_setup_show', {id: panel.id}) : null},
+            {n: 2, key: 'panel_connection.steps.inbounds', route: panel and panel.id ? path('admin_panel_setup_inbounds', {id: panel.id}) : null},
+            {n: 3, key: 'panel_connection.steps.plans', route: panel and panel.id ? path('admin_panel_setup_plans', {id: panel.id}) : null},
+        ] %}
+            <li class="list-inline-item">
+                {% if step.route and step.n != current %}<a href="{{ step.route }}">{% endif %}
+                <span class="badge {{ step.n == current ? 'bg-primary' : 'bg-secondary' }}">{{ step.n }}</span>
+                {{ step.key|trans }}
+                {% if step.route and step.n != current %}</a>{% endif %}
+            </li>
+        {% endfor %}
+    </ol>
+</nav>

@@ -27,6 +27,8 @@ use Symfony\Component\Routing\Attribute\Route;
 #[Route('/admin')]
 final class VpnPanelInboundActionsController extends AbstractController
 {
+    use EscapesFlashMessages;
+
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
         private readonly VpnAccessLinkGenerator $vpnAccessLinkGenerator,

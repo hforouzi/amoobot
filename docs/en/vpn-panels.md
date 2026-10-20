@@ -1,5 +1,7 @@
 # VPN Panels
 
+> Connecting a panel with an API token (recommended): [panel-connection.md](panel-connection.md). `app:panel:doctor` prints the connection-test report; with `--self-test --yes` it checks the panel end to end.
+
 `VpnPanel` stores connection/auth settings for a remote VPN panel. `VpnInbound` represents a sellable inbound on that panel. `VpnService` links a customer service to a remote client.
 
 ## Sanaei/3x-ui Modes

@@ -1,0 +1,36 @@
+{% extends '@EasyAdmin/page/content.html.twig' %}
+{% trans_default_domain 'admin' %}
+
+{% block content_title %}{{ (is_new ? 'panel_connection.title_new' : 'panel_connection.title_edit')|trans }}{% endblock %}
+
+{% block main %}
+    <div class="admin-custom-page">
+        {% include 'admin/panel_setup/_steps.html.twig' with {current: 1} %}
+        <p class="text-muted">{{ 'panel_connection.intro'|trans }}</p>
+
+        {{ form_start(form, {attr: {class: 'admin-form-card', novalidate: 'novalidate'}}) }}
+            {{ form_row(form.title) }}
+            {{ form_row(form.baseUrl) }}
+            {{ form_row(form.plainApiToken) }}
+            {% if token_mask %}
+                <p class="form-text">{{ 'panel_connection.form.token_kept'|trans({'%mask%': token_mask}) }}</p>
+            {% endif %}
+
+            <details class="mt-3 mb-3" {{ form.useProxy.vars.errors|length or form.tlsPin.vars.errors|length or form.integrationModeValue.vars.errors|length ? 'open' }}>
+                <summary>{{ 'panel_connection.form.advanced'|trans }}</summary>
+                <div class="mt-2">
+                    {{ form_row(form.useProxy) }}
+                    {{ form_row(form.tlsPin) }}
+                    {{ form_row(form.integrationModeValue) }}
+                    {{ form_row(form.subscriptionBaseUrl) }}
+                    {{ form_row(form.subscriptionPathPrefix) }}
+                </div>
+            </details>
+
+            <button type="submit" class="btn btn-primary">{{ 'panel_connection.form.save'|trans }}</button>
+            {% if not is_new %}
+                <a class="btn btn-link" href="{{ path('admin_panel_setup_show', {id: panel.id}) }}">{{ 'panel_connection.back'|trans }}</a>
+            {% endif %}
+        {{ form_end(form) }}
+    </div>
+{% endblock %}

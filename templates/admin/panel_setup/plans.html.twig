@@ -1,0 +1,43 @@
+{% extends '@EasyAdmin/page/content.html.twig' %}
+{% trans_default_domain 'admin' %}
+
+{% block content_title %}{{ panel.title }} — {{ 'panel_connection.steps.plans'|trans }}{% endblock %}
+
+{% block main %}
+    <div class="admin-custom-page">
+        {% include 'admin/panel_setup/_steps.html.twig' with {current: 3} %}
+
+        {% if inbounds is empty %}
+            <div class="alert alert-warning">{{ 'panel_connection.plans.no_inbounds'|trans }}</div>
+        {% else %}
+            <p class="text-muted">{{ 'panel_connection.plans.intro'|trans }}</p>
+            <form method="post">
+                <input type="hidden" name="_token" value="{{ csrf_token('panel_plans_' ~ panel.id) }}">
+                <table class="table table-sm">
+                    <thead><tr>
+                        <th>{{ 'panel_connection.plans.plan'|trans }}</th>
+                        <th>{{ 'panel_connection.plans.current'|trans }}</th>
+                        <th>{{ 'panel_connection.plans.new_inbound'|trans }}</th>
+                    </tr></thead>
+                    <tbody>
+                    {% for plan in plans %}
+                        <tr class="{{ plan.active ? '' : 'text-muted' }}">
+                            <td>{{ plan.title }}{% if not plan.active %} ({{ 'panel_connection.plans.inactive'|trans }}){% endif %}</td>
+                            <td>{% if plan.inbound %}{{ plan.inbound.panel.title }} / {{ plan.inbound.title }}{% else %}—{% endif %}</td>
+                            <td>
+                                <select name="plan[{{ plan.id }}]" class="form-select form-select-sm">
+                                    <option value="">{{ 'panel_connection.plans.unchanged'|trans }}</option>
+                                    {% for inbound in inbounds %}
+                                        <option value="{{ inbound.id }}" {{ plan.inbound and plan.inbound.id == inbound.id ? 'selected' }}>{{ inbound.title }} ({{ inbound.protocol }}:{{ inbound.port }})</option>
+                                    {% endfor %}
+                                </select>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+                <button type="submit" class="btn btn-primary">{{ 'panel_connection.plans.save'|trans }}</button>
+            </form>
+        {% endif %}
+    </div>
+{% endblock %}

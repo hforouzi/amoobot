@@ -1,0 +1,49 @@
+{% extends '@EasyAdmin/page/content.html.twig' %}
+{% trans_default_domain 'admin' %}
+
+{% block content_title %}{{ panel.title }} — {{ 'panel_connection.steps.inbounds'|trans }}{% endblock %}
+
+{% block main %}
+    <div class="admin-custom-page">
+        {% include 'admin/panel_setup/_steps.html.twig' with {current: 2} %}
+
+        {% if error %}
+            <div class="alert alert-danger">
+                <strong>{{ ('panel_connection.failure.' ~ error.failure.value ~ '.title')|trans }}</strong>
+                <p class="mb-1">{{ ('panel_connection.failure.' ~ error.failure.value ~ '.fix')|trans }}</p>
+                <small class="text-muted" dir="ltr">{{ error.message }}</small>
+            </div>
+        {% else %}
+            <p class="text-muted">{{ 'panel_connection.inbounds.intro'|trans }}</p>
+            <form method="post">
+                <input type="hidden" name="_token" value="{{ csrf_token('panel_inbounds_' ~ panel.id) }}">
+                <table class="table table-sm">
+                    <thead><tr>
+                        <th></th>
+                        <th>{{ 'panel_connection.inbounds.remark'|trans }}</th>
+                        <th>{{ 'panel_connection.inbounds.protocol'|trans }}</th>
+                        <th>{{ 'panel_connection.inbounds.port'|trans }}</th>
+                        <th>{{ 'panel_connection.inbounds.flow'|trans }}</th>
+                        <th>{{ 'panel_connection.inbounds.status'|trans }}</th>
+                    </tr></thead>
+                    <tbody>
+                    {% for option in options %}
+                        <tr class="{{ option.enable ? '' : 'text-muted opacity-50' }}">
+                            <td><input type="checkbox" name="inbounds[]" value="{{ option.id }}" id="inbound-{{ option.id }}"
+                                {{ option.id in selected and option.enable ? 'checked' }} {{ option.enable ? '' : 'disabled' }}></td>
+                            <td><label for="inbound-{{ option.id }}">{{ option.remark ?: option.tag }}</label></td>
+                            <td dir="ltr">{{ option.protocol }}</td>
+                            <td dir="ltr">{{ option.port }}</td>
+                            <td>{{ option.tlsFlowCapable ? '✔' : '—' }}</td>
+                            <td>{{ (option.enable ? 'panel_connection.inbounds.enabled' : 'panel_connection.inbounds.disabled')|trans }}</td>
+                        </tr>
+                    {% else %}
+                        <tr><td colspan="6">{{ 'panel_connection.inbounds.none'|trans }}</td></tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+                <button type="submit" class="btn btn-primary">{{ 'panel_connection.inbounds.save'|trans }}</button>
+            </form>
+        {% endif %}
+    </div>
+{% endblock %}

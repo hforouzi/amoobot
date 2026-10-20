@@ -144,7 +144,14 @@ sudo -u www-data php bin/console app:payment:create-default-gateways --env=prod
 
 ## ۱۰. پیکربندی در پنل ادمین
 
-- [ ] **پنل VPN:** پنل را اضافه کنید ← «test connection» موفق ← «sync inbounds» ← inboundهای درست فعال.
+- [ ] **پنل VPN:** پنل‌های VPN ← «افزودن»: نام، آدرس (با مسیر مخفی) و API Token (3x-ui: Settings → Security → API Token) ← «تست اتصال»
+  موفق با نوع API «جدید» ← «انتخاب اینباندها» ← «اتصال پلن‌ها». راهنما، فایروال و گواهی self-signed: [panel-connection.md](panel-connection.md).
+- [ ] **آزمون کامل پنل** (برای هر پنل؛ یک کلاینت موقت `amoobot_selftest_...` ساخته و حذف می‌شود، به کلاینت‌های دیگر دست نمی‌زند):
+  ```bash
+  sudo -u www-data php bin/console app:panel:doctor <panelId> --self-test --yes --env=prod
+  ```
+  همه‌ی خط‌ها `PASS` و `RESULT: OK`. هر `FAIL` را با جدول عیب‌یابی panel-connection.md رفع کنید؛ اگر `CLEANUP FAILED` دیدید، کلاینت
+  `amoobot_selftest_...` را دستی از پنل حذف کنید.
 - [ ] **پلن‌ها:** قیمت، حجم و مدت هر پلن (قیمت‌ها را برای مقایسه در مرحله‌ی ۱۱ یادداشت کنید).
 - [ ] **درگاه‌ها:** برای هر درگاه فعال: `sandbox=false`، کلیدهای production، `callback_base_url=https://bot.example.com`. درگاه‌هایی که
   استفاده نمی‌کنید غیرفعال باشند. پلاگین دمو غیرفعال باشد (`sudo -u www-data php bin/console app:plugin:list --env=prod`).
