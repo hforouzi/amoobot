@@ -588,7 +588,8 @@ Or deploy the release that matches the current schema again.
 EOF
 }
 
-# executed_migrations  ->  versions recorded in doctrine_migration_versions (nothing when the table does not exist yet).
+# executed_migrations  ->  the raw versions recorded in doctrine_migration_versions, one per line (nothing when the table
+# does not exist yet). -r: without it, batch mode (-B) escapes the backslash of DoctrineMigrations\Version... as \\.
 # Root-owned lib and DATABASE_URL from ${DB_URL_FILE}, like database_table_count. Fails when the database cannot be read.
 executed_migrations() {
   (
@@ -601,33 +602,90 @@ executed_migrations() {
     n="$("$client" --defaults-extra-file="$DB_OPTS_FILE" -N -B -e \
       "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'doctrine_migration_versions'" "$DB_NAME")"
     [[ "$n" == 1 ]] || exit 0
-    "$client" --defaults-extra-file="$DB_OPTS_FILE" -N -B -e 'SELECT version FROM doctrine_migration_versions' "$DB_NAME"
+    "$client" --defaults-extra-file="$DB_OPTS_FILE" -N -B -r -e 'SELECT version FROM doctrine_migration_versions' "$DB_NAME"
   )
 }
 
-# target_migrations COMMIT  ->  the migration versions COMMIT contains (migrations/Version*.php, namespace DoctrineMigrations
-# as in config/packages/doctrine_migrations.yaml), read from the root-owned mirror
+# migration_ids  stdin -> the bare migration ids (VersionYYYYMMDDhhmmss), sorted and unique. Both sides of the schema
+# check are reduced to this form: the database stores DoctrineMigrations\Version... (one backslash, or two when read
+# without -r), the commit only has file names. CR and whitespace around a line do not matter.
+migration_ids() {
+  tr -d '\r' | { grep -oE 'Version[0-9]{14}' || true; } | sort -u
+}
+
+# target_migrations COMMIT  ->  the migration ids COMMIT contains (migrations/VersionYYYYMMDDhhmmss.php; other files in
+# migrations/ are not migrations), read from the root-owned mirror. Fails when the mirror cannot list the commit.
 target_migrations() {
-  mirror_git ls-tree --name-only "$1" migrations/ | sed -n 's#^migrations/\(Version[A-Za-z0-9_]*\)\.php$#DoctrineMigrations\\\1#p'
+  local listing
+  listing="$(mirror_git ls-tree --name-only "$1" migrations/)" || return 1
+  tr -d '\r' <<< "$listing" | sed -nE 's#^[[:space:]]*migrations/(Version[0-9]{14})\.php[[:space:]]*$#\1#p' | sort -u
+}
+
+# count_lines TEXT  ->  number of non-empty lines
+count_lines() {
+  [[ -n "$1" ]] || { echo 0; return; }
+  grep -c . <<< "$1"
 }
 
 # check_schema_matches COMMIT  stops BEFORE anything is paused or checked out when the database has executed migrations
-# that COMMIT does not contain (a rollback to a release older than the schema). Step 11's up-to-date
-# --fail-on-unregistered (exit 2) stays as the second line of defence.
+# that COMMIT does not contain (a rollback to a release older than the schema). Both sides are compared as bare ids
+# (migration_ids); an empty or unreadable list on either side stops the deploy instead of passing or refusing silently.
+# Step 11's up-to-date --fail-on-unregistered (exit 2) stays as the second line of defence.
 check_schema_matches() {
-  local commit="$1" executed ahead
+  local commit="$1" executed executed_ids target ahead tables odd
   if [[ ! -r "$DB_URL_FILE" || ! -r "${ROOT_LIB_DIR}/lib/database-url.sh" ]]; then
     log "No ${DB_URL_FILE} yet (first deploy): schema-vs-code check skipped."
     return 0
   fi
   executed="$(executed_migrations)" \
     || die "Cannot read the executed migrations from the database (is MariaDB running?). Nothing was paused or checked out."
-  [[ -n "$executed" ]] || return 0
-  ahead="$(comm -23 <(sort -u <<< "$executed") <(target_migrations "$commit" | sort -u))"
+  executed="$(tr -d '\r' <<< "$executed" | sed '/^[[:space:]]*$/d')"
+  if [[ -z "$executed" ]]; then
+    tables="$(database_table_count)" \
+      || die "Cannot count the tables of the database (is MariaDB running?). Nothing was paused or checked out."
+    [[ "$tables" =~ ^[0-9]+$ ]] || die "Could not count the tables of the database (got '${tables}'). Nothing was paused or checked out."
+    if (( tables == 0 )); then
+      log "Empty database (first install): schema-vs-code check skipped."
+      return 0
+    fi
+    die "The database has ${tables} table(s) but no executed migrations in doctrine_migration_versions: cannot compare its schema with ${commit}. Nothing was paused or checked out."
+  fi
+  odd="$(grep -vE 'Version[0-9]{14}' <<< "$executed" || true)"
+  if [[ -n "$odd" ]]; then
+    printf '  ? %s\n' "${odd//$'\n'/$'\n'  ? }" >&2
+    die "doctrine_migration_versions has $(count_lines "$odd") row(s) without a VersionYYYYMMDDhhmmss id (listed above): cannot compare them with ${commit}. Nothing was paused or checked out."
+  fi
+  executed_ids="$(migration_ids <<< "$executed")"
+  target="$(target_migrations "$commit")" \
+    || die "Cannot list migrations/ of ${commit} in ${MIRROR_DIR}. Nothing was paused or checked out."
+  [[ -n "$target" ]] \
+    || die "${commit} has no migrations/VersionYYYYMMDDhhmmss.php in ${MIRROR_DIR}: refusing to compare the database's $(count_lines "$executed_ids") executed migration(s) with an empty list. Nothing was paused or checked out."
+  log "Schema check: the database has $(count_lines "$executed_ids") executed migration(s), ${commit} contains $(count_lines "$target")."
+  ahead="$(comm -23 <(printf '%s\n' "$executed_ids") <(printf '%s\n' "$target"))"
   [[ -z "$ahead" ]] && return 0
   printf '  - %s\n' "${ahead//$'\n'/$'\n'  - }" >&2
   restore_instructions before-pause
-  die "The database has $(wc -l <<< "$ahead") executed migration(s) that ${commit} does not contain (listed above): that release is older than the schema. Nothing was paused or checked out."
+  die "The database has $(count_lines "$ahead") executed migration(s) that ${commit} does not contain (listed above; the database has $(count_lines "$executed_ids") executed, ${commit} contains $(count_lines "$target")): that release is older than the schema. Nothing was paused or checked out."
+}
+
+# dry_run_schema_counts REF  what check_schema_matches would compare, read from the database and the mirror as they are
+# now (no fetch). Only reports: a dry run never stops on it.
+dry_run_schema_counts() {
+  local executed sha target
+  if [[ ! -r "$DB_URL_FILE" || ! -r "${ROOT_LIB_DIR}/lib/database-url.sh" ]]; then
+    log "[dry-run] schema counts: ${DB_URL_FILE} not readable here (first deploy, or not root)"
+    return 0
+  fi
+  if ! executed="$(executed_migrations 2> /dev/null)"; then
+    log "[dry-run] schema counts: cannot read the executed migrations from the database"
+    return 0
+  fi
+  executed="$(migration_ids <<< "$executed")"
+  if [[ ! -d "$MIRROR_DIR" ]] || ! sha="$(resolve_target_ref "$1" 2> /dev/null)" || ! target="$(target_migrations "$sha" 2> /dev/null)"; then
+    log "[dry-run] schema counts: the database has $(count_lines "$executed") executed migration(s); ${1} cannot be read from ${MIRROR_DIR} before the fetch"
+    return 0
+  fi
+  log "[dry-run] schema counts: the database has $(count_lines "$executed") executed migration(s), ${1} (${sha} in ${MIRROR_DIR}, before the fetch) contains $(count_lines "$target"), $(count_lines "$(comm -23 <(printf '%s\n' "$executed") <(printf '%s\n' "$target"))") of them unknown to it"
 }
 
 # root_ops_dest PATH  ->  where the root-owned copy of a ROOT_OPS_FILES entry is installed
@@ -1720,6 +1778,7 @@ if (( DRY_RUN )); then
   log "[dry-run] fetch ${REPO_URL} AS ROOT into ${MIRROR_DIR} (root:root 700) with ${ROOT_REPO_KEY}: origin's branches and tags only"
   log "[dry-run] resolve ${DEPLOY_REF} in the root-owned mirror (origin/${DEPLOY_REF}, a tag, or a full commit hash contained in one$( [[ "${REQUIRE_SIGNED_TAG:-no}" == yes ]] && echo '; REQUIRE_SIGNED_TAG=yes: only a tag signed by a key in '"${ALLOWED_SIGNERS_FILE}")); refuse it unless it has every root-owned ops file (git cat-file -e) - before pausing anything"
   log "[dry-run] compare the database's executed migrations with ${DEPLOY_REF}'s migrations/ (from the mirror); refuse if the database is ahead - before pausing anything"
+  dry_run_schema_counts "$DEPLOY_REF"
 else
   if [[ ! -f "$ROOT_REPO_KEY" ]]; then
     install -d -m 700 -o root -g root "${ROOT_REPO_KEY%/*}"

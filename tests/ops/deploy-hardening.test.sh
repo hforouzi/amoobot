@@ -906,12 +906,12 @@ fi
 
 if have git && [[ "$EUID" -eq 0 ]]; then
   set_globals
-  load_fn mirror_git target_migrations check_schema_matches restore_instructions
+  load_fn mirror_git migration_ids target_migrations count_lines check_schema_matches restore_instructions
   SR="$WORK/schema-repo"; git init -q "$SR"; git -C "$SR" config user.email t@t; git -C "$SR" config user.name t
   mkdir -p "$SR/migrations"; touch "$SR/migrations/Version20260101000000.php" "$SR/migrations/Version20260201000000.php" "$SR/migrations/README.md"
   git -C "$SR" add -A; git -C "$SR" commit -qm old; OLDC="$(git -C "$SR" rev-parse HEAD)"
-  check "target migrations are read from the commit (mirror), namespaced like Doctrine stores them" test \
-    "$( (MIRROR_DIR="$SR/.git" MIRROR_PROTOCOL=file; target_migrations "$OLDC") | tr '\n' ' ')" = 'DoctrineMigrations\Version20260101000000 DoctrineMigrations\Version20260201000000 '
+  check "target migrations are read from the commit (mirror), as bare ids" test \
+    "$( (MIRROR_DIR="$SR/.git" MIRROR_PROTOCOL=file; target_migrations "$OLDC") | tr '\n' ' ')" = 'Version20260101000000 Version20260201000000 '
   : > "$WORK/db.env"; mkdir -p "$WORK/rlib/lib"; : > "$WORK/rlib/lib/database-url.sh"
   schema_case() {  # schema_case "<executed versions>" [db readable 0|1] -> output
     ( die() { printf 'DIE: %s\n' "$*"; exit 1; }; log() { echo "LOG: $*"; }
@@ -938,6 +938,105 @@ if have git && [[ "$EUID" -eq 0 ]]; then
   check "up-to-date --fail-on-unregistered stays as the second line of defence" grep -q 'console doctrine:migrations:up-to-date --fail-on-unregistered' "$ROOT/deploy.sh"
 else
   skip "schema-vs-code tests (need git and root: Linux container)"
+fi
+
+# Schema-vs-code check against realistic data (the first update of a populated database refused with ALL 30 executed
+# migrations listed, printed as DoctrineMigrations\\Version...). Fixtures: fixtures/migrations.ls-tree is a real
+# `git ls-tree --name-only <commit> migrations/` (32 migrations + .gitignore); fixtures/doctrine_migration_versions.rows is
+# what that server's doctrine_migration_versions held: the first 30, stored with ONE backslash. The fake mariadb client
+# behaves like mariadb 10.11 (checked against the real client): -B escapes that backslash as \\ unless -r is given.
+FIX="$ROOT/tests/ops/fixtures"
+SC="$WORK/schema-real"; mkdir -p "$SC/bin" "$SC/rlib/lib"
+cat > "$SC/bin/mariadb" <<'FAKE'
+#!/usr/bin/env bash
+raw=0 sql=""
+while (( $# )); do case "$1" in -r|--raw) raw=1 ;; -e) sql="$2"; shift ;; esac; shift; done
+case "$sql" in
+  *"table_name = 'doctrine_migration_versions'"*) echo "${FAKE_HAS_TABLE:-1}" ;;
+  *"FROM information_schema.tables"*) echo "${FAKE_TABLES:-0}" ;;
+  "SELECT version FROM doctrine_migration_versions")
+    (( raw )) && cat "$FAKE_ROWS" || sed 's/\\/\\\\/g' "$FAKE_ROWS" ;;
+  *) echo "fake mariadb: unexpected query: $sql" >&2; exit 1 ;;
+esac
+FAKE
+chmod +x "$SC/bin/mariadb"
+cat > "$SC/rlib/lib/database-url.sh" <<'LIB'
+load_database_url() { DB_NAME=amoobot; }
+write_db_options_file() { DB_OPTS_FILE="$(mktemp)"; }
+LIB
+: > "$SC/db.env"
+fqcn() { sed -nE 's#^migrations/(Version[0-9]{14})\.php$#DoctrineMigrations\\\1#p' "$FIX/migrations.ls-tree"; }
+fqcn > "$SC/all.rows"
+{ fqcn; echo 'DoctrineMigrations\Version20261101000000'; } > "$SC/ahead.rows"
+: > "$SC/empty.rows"
+grep -v '^migrations/Version' "$FIX/migrations.ls-tree" > "$SC/nomig.ls-tree"
+sed $'s/$/  \r/' "$FIX/doctrine_migration_versions.rows" > "$SC/crlf.rows"; printf '\r\n  \n' >> "$SC/crlf.rows"
+sed $'s/$/\r/' "$FIX/migrations.ls-tree" > "$SC/crlf.ls-tree"
+{ cat "$FIX/doctrine_migration_versions.rows"; echo 'App\Migrations\Initial'; } > "$SC/odd.rows"
+set_globals
+load_fn database_table_count executed_migrations migration_ids target_migrations count_lines check_schema_matches \
+  restore_instructions dry_run_schema_counts
+# real_case ROWS LS_TREE [has_table] [tables] [ls-tree rc]  ->  check_schema_matches output, then REACHED if it let the deploy on
+real_case() {
+  ( die() { printf 'DIE: %s\n' "$*"; exit 1; }; log() { echo "LOG: $*"; }
+    mirror_git() { [[ "$1 $2 $3" == "ls-tree --name-only C0FFEE" ]] || return 9; cat "$LS"; return "$LS_RC"; }
+    PATH="$SC/bin:$PATH" FAKE_ROWS="$1" LS="$2" FAKE_HAS_TABLE="${3:-1}" FAKE_TABLES="${4:-40}" LS_RC="${5:-0}"
+    export FAKE_ROWS FAKE_HAS_TABLE FAKE_TABLES
+    DB_URL_FILE="$SC/db.env" ROOT_LIB_DIR="$SC/rlib" DEPLOY_REF=release/v1 TARGET_COMMIT=C0FFEE PHP_VERSION=8.4 DB_NAME=amoobot
+    check_schema_matches C0FFEE; echo REACHED ) 2>&1
+}
+check "fixtures: 33 ls-tree entries (32 migrations + .gitignore), 30 executed rows with ONE backslash" bash -c \
+  '[[ $(wc -l < "$1") -eq 33 && $(grep -c "^migrations/Version[0-9]\{14\}\.php$" "$1") -eq 32 && $(wc -l < "$2") -eq 30 ]] && grep -q "^DoctrineMigrations\\\\Version20261013100000$" "$2"' \
+  _ "$FIX/migrations.ls-tree" "$FIX/doctrine_migration_versions.rows"
+check "executed_migrations reads raw (-r): one backslash, exactly as Doctrine stores it" test \
+  "$(PATH="$SC/bin:$PATH" FAKE_ROWS="$FIX/doctrine_migration_versions.rows" DB_URL_FILE="$SC/db.env" ROOT_LIB_DIR="$SC/rlib" executed_migrations)" \
+  = "$(cat "$FIX/doctrine_migration_versions.rows")"
+check "migration_ids: one or two backslashes, CR and blanks -> the same bare ids" test \
+  "$(printf 'DoctrineMigrations\\Version20260505073000\r\n  DoctrineMigrations\\\\Version20260507122000 \n\n' | migration_ids | tr '\n' ' ')" \
+  = 'Version20260505073000 Version20260507122000 '
+check "target_migrations: only migrations/VersionYYYYMMDDhhmmss.php, as bare ids (32 of the 33 entries)" test \
+  "$( (mirror_git() { cat "$FIX/migrations.ls-tree"; }; target_migrations C0FFEE) | grep -c '^Version[0-9]\{14\}$')" = 32
+out="$(real_case "$SC/all.rows" "$FIX/migrations.ls-tree")"
+check "identical sets (32/32) -> deploy continues, counts logged" bash -c \
+  'grep -q REACHED <<< "$1" && grep -q "LOG: Schema check: the database has 32 executed migration(s), C0FFEE contains 32" <<< "$1"' _ "$out"
+out="$(real_case "$FIX/doctrine_migration_versions.rows" "$FIX/migrations.ls-tree")"
+check "the production case: 30 executed, 32 in the commit (2 pending) -> deploy continues" bash -c \
+  'grep -q REACHED <<< "$1" && grep -q "has 30 executed migration(s), C0FFEE contains 32" <<< "$1" && ! grep -q DIE <<< "$1"' _ "$out"
+out="$(real_case "$SC/ahead.rows" "$FIX/migrations.ls-tree")"
+check "database ahead (33 executed, 1 unknown) -> refused, listing ONLY the unknown one, with both counts" bash -c \
+  '! grep -q REACHED <<< "$1" && [[ $(grep -c "^  - " <<< "$1") -eq 1 ]] && grep -q "^  - Version20261101000000$" <<< "$1" &&
+   grep -q "DIE: The database has 1 executed migration(s) that C0FFEE does not contain (listed above; the database has 33 executed, C0FFEE contains 32)" <<< "$1"' _ "$out"
+out="$(real_case "$FIX/doctrine_migration_versions.rows" "$SC/nomig.ls-tree")"
+check "empty migration list in the commit -> loud error, not 'everything is unregistered'" bash -c \
+  '! grep -q REACHED <<< "$1" && grep -q "DIE: C0FFEE has no migrations/VersionYYYYMMDDhhmmss.php in .*: refusing to compare the database.s 30 executed migration(s) with an empty list" <<< "$1" && ! grep -q "^  - " <<< "$1"' _ "$out"
+out="$(real_case "$FIX/doctrine_migration_versions.rows" "$FIX/migrations.ls-tree" 1 40 128)"
+check "mirror cannot list the commit -> loud error" bash -c '! grep -q REACHED <<< "$1" && grep -q "DIE: Cannot list migrations/ of C0FFEE" <<< "$1"' _ "$out"
+out="$(real_case "$SC/empty.rows" "$FIX/migrations.ls-tree" 1 40)"
+check "empty doctrine_migration_versions on a populated database (40 tables) -> loud error, not skipped" bash -c \
+  '! grep -q REACHED <<< "$1" && grep -q "DIE: The database has 40 table(s) but no executed migrations" <<< "$1"' _ "$out"
+out="$(real_case "$SC/empty.rows" "$FIX/migrations.ls-tree" 0 40)"
+check "no doctrine_migration_versions table on a populated database -> loud error, not skipped" bash -c \
+  '! grep -q REACHED <<< "$1" && grep -q "DIE: The database has 40 table(s) but no executed migrations" <<< "$1"' _ "$out"
+out="$(real_case "$SC/empty.rows" "$FIX/migrations.ls-tree" 0 0)"
+check "empty database (first install) -> check skipped with a note" bash -c \
+  'grep -q REACHED <<< "$1" && grep -q "LOG: Empty database (first install)" <<< "$1"' _ "$out"
+out="$(real_case "$SC/crlf.rows" "$SC/crlf.ls-tree")"
+check "CRLF and whitespace noise on both sides -> same result as the clean production case" bash -c \
+  'grep -q REACHED <<< "$1" && grep -q "has 30 executed migration(s), C0FFEE contains 32" <<< "$1"' _ "$out"
+out="$(real_case "$SC/odd.rows" "$FIX/migrations.ls-tree")"
+check "a row without a Version id -> loud error naming it" bash -c \
+  '! grep -q REACHED <<< "$1" && grep -qF "  ? App\Migrations\Initial" <<< "$1" && grep -q "DIE: doctrine_migration_versions has 1 row(s) without" <<< "$1"' _ "$out"
+out="$( (log() { echo "LOG: $*"; }; mirror_git() { cat "$FIX/migrations.ls-tree"; }; resolve_target_ref() { echo C0FFEE; }
+         PATH="$SC/bin:$PATH" FAKE_ROWS="$SC/ahead.rows"; export FAKE_ROWS
+         DB_URL_FILE="$SC/db.env" ROOT_LIB_DIR="$SC/rlib" MIRROR_DIR="$SC"; dry_run_schema_counts release/v1) 2>&1 )"
+check "dry-run prints both counts and the unknown count" grep -q \
+  "LOG: \[dry-run\] schema counts: the database has 33 executed migration(s), release/v1 (C0FFEE in .*) contains 32, 1 of them unknown to it" <<< "$out"
+out="$( (log() { echo "LOG: $*"; }; DB_URL_FILE="$SC/none" ROOT_LIB_DIR="$SC/rlib"; dry_run_schema_counts release/v1; echo REACHED) 2>&1 )"
+check "dry-run without a readable database.env -> says so and goes on" bash -c 'grep -q "schema counts: .* not readable here" <<< "$1" && grep -q REACHED <<< "$1"' _ "$out"
+if can_dry_run; then
+  check "dry-run reports the schema counts step" grep -q "\[dry-run\] schema counts:" <<< "$BASE_OUT"
+else
+  skip "$DRY_RUN_SKIP"
 fi
 check "doctrine/migrations exit codes documented from vendor (0 / 1 pending / 2 unregistered)" \
   grep -q 'vendor/doctrine/migrations 3.9.7 (UpToDateCommand): 0 up to date; 1 migrations pending; 2 executed migrations' "$ROOT/deploy.sh"
