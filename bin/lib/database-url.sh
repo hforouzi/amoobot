@@ -79,6 +79,14 @@ load_database_url() {
 
 write_db_options_file() {
   local v
+  # Values are written into double-quoted option-file lines: a newline, quote or backslash in the user or host (e.g. a
+  # percent-encoded %0A in DATABASE_URL) could add options of its own. The password is escaped below.
+  if [[ "${DB_USER:-}" =~ [[:cntrl:]\"\\] || "${DB_HOST:-}" =~ [[:cntrl:]\"\\] ]]; then
+    printf 'ERROR: the database user or host in DATABASE_URL contains a control character, quote or backslash.\n' >&2
+    exit 1
+  fi
+  [[ "${DB_PORT:-}" =~ ^[0-9]{1,5}$ ]] || { printf 'ERROR: the database port in DATABASE_URL is not a number.\n' >&2; exit 1; }
+  [[ "$DB_PASS" != *[[:cntrl:]]* ]] || { printf 'ERROR: the database password contains a control character.\n' >&2; exit 1; }
   DB_OPTS_FILE="$(mktemp)"
   chmod 600 "$DB_OPTS_FILE"
   # Option-file values are double-quoted; escape backslashes and quotes.

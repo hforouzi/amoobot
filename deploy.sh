@@ -7,8 +7,10 @@
 #
 #   --dry-run    print what would be done; changes nothing (does not need root)
 #   --app-only   skip server provisioning (steps 1-6); only update code, env, DB, cache, proxy, webhook
-#   --ref        what to deploy (default: DEPLOY_REF from the env file, else "main"); also used for rollback
-#   --env-file   server-only settings/secrets file (default: /etc/amoobot/.env.prod.local, root-owned, chmod 600)
+#   --ref        a branch or tag on origin, or a full commit hash contained in one (default: DEPLOY_REF from the env
+#                file, else "main"); resolved in the root-owned mirror; also used for rollback
+#   --env-file   server-only settings/secrets file directly in /etc/amoobot/ (default: /etc/amoobot/.env.prod.local,
+#                root-owned, chmod 600; opened once and checked through the open fd)
 #
 # This file contains NO secrets. Secrets belong ONLY in the root-owned env file (/etc/amoobot/.env.prod.local); see
 # .env.prod.example and docs/fa/deployment.md. Passing them as "sudo VAR=... amoobot-deploy" is not supported: they
@@ -22,6 +24,8 @@ umask 027
 ########################################
 
 DEFAULT_ENV_FILE="/etc/amoobot/.env.prod.local"
+# As root, --env-file must be a file directly in this root-only directory (it is opened once and checked via the fd).
+ENV_FILE_DIR="/etc/amoobot"
 DEFAULT_REPO_URL="git@github.com:hforouzi/amoobot.git"
 DEFAULT_APP_DIR="/var/www/amoobot"
 DEFAULT_PHP_VERSION="8.4"
@@ -35,12 +39,27 @@ REQUIRED_SQL_MODE="STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBS
 WEB_USER="www-data"
 STATE_DIR="/var/lib/amoobot"
 
-# Everything root (or systemd) executes is a root-owned copy taken from the deployed commit's git objects, never a file
-# in the checkout (the deploy user can edit those). Entry points: /usr/local/sbin/amoobot-{deploy,backup,restore,check-jobs}.
+# Everything root (or systemd) executes is a root-owned copy taken from the deployed commit in a ROOT-OWNED mirror of
+# REPO_URL, never from the deploy user's checkout (the deploy user owns that .git and could forge its objects and refs).
+# Entry points: /usr/local/sbin/amoobot-{deploy,backup,restore,check-jobs}.
 ROOT_LIB_DIR="/usr/local/lib/amoobot"
+# Bare mirror fetched as root with a root-owned read-only deploy key; --ref is resolved only against origin's branches and
+# tags in it. The deploy user's checkout is filled from a bundle of the resolved commit and needs no GitHub access.
+MIRROR_DIR="/var/lib/amoobot/mirror.git"
+ROOT_REPO_KEY="/etc/amoobot/repo_deploy_ed25519"
+# Verified SSH host keys for a REPO_URL host other than github.com (root-owned; GitHub's come from its API, see below).
+ROOT_KNOWN_HOSTS="/etc/amoobot/repo_known_hosts"
+# REQUIRE_SIGNED_TAG=yes: only tags signed by a key in this file (git's SSH allowed-signers format) can be deployed.
+ALLOWED_SIGNERS_FILE="/etc/amoobot/allowed_signers"
+# Root-owned, deploy-group-readable directory for the bundle the checkout is fetched from (removed after the fetch).
+BUNDLE_DIR="/run/amoobot-deploy"
+GIT_ENV_PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 ROOT_SBIN_DIR="/usr/local/sbin"
 ROOT_OPS_FILES=(deploy.sh bin/backup-database.sh bin/restore-database.sh bin/scheduled-job.sh
   bin/scheduled-job-alert.sh bin/check-scheduled-jobs.sh bin/lib/database-url.sh bin/lib/monitor-ping.sh)
+# Installed the same way when the target commit has them (operator tools run by root; older commits lack them, so their
+# absence does not block a rollback): sudo /usr/local/lib/amoobot/post-deploy-check.sh, .../smoke-webhook.sh <fake id>
+OPTIONAL_ROOT_OPS_FILES=(bin/post-deploy-check.sh bin/smoke-webhook.sh)
 # GitHub's published SSH host keys (from https://api.github.com/meta over HTTPS); git uses StrictHostKeyChecking=yes.
 # In /etc/ssh (root-owned, readable by the deploy user's ssh; /etc/amoobot is root-only).
 GITHUB_KNOWN_HOSTS="/etc/ssh/amoobot_github_known_hosts"
@@ -76,11 +95,17 @@ JOBS_LOG_DIR="/var/log/amoobot"
 JOBS_STATE_DIR="${STATE_DIR}/jobs"
 JOBS_LOCK_DIR="/run/amoobot"
 JOBS_MANIFEST="${STATE_DIR}/scheduled-jobs.conf"
+# Exists from "pause" to "resume" (root-owned, survives a reboot). bin/scheduled-job.sh does not run a job while it exists;
+# bin/check-scheduled-jobs.sh reports a marker older than 30 min as a failed/interrupted deploy (failed unit + alert).
+DEPLOY_MARKER="${STATE_DIR}/deploy-in-progress"
+# Transient timer armed when the jobs are paused: after 45 min it runs the check (which then fails -> alert) unless the
+# deploy finished and cancelled it. It never resumes anything by itself.
+DEPLOY_WATCHDOG_UNIT="amoobot-deploy-watchdog"
 
 # Keys used only by this script; never written into the application's env.
 DEPLOY_ONLY_KEYS=" DOMAIN LETSENCRYPT_EMAIL REPO_URL APP_DIR PHP_VERSION DEPLOY_USER DEPLOY_REF DEPLOY_SSH_PUBLIC_KEY "
 DEPLOY_ONLY_KEYS+="SSH_PERMIT_ROOT_LOGIN DB_NAME DB_USER DB_PASSWORD BACKUP_DIR BACKUP_RETENTION_DAYS BACKUP_CRON "
-DEPLOY_ONLY_KEYS+="ADMIN_ALLOW_IPS MONITOR_PING_URL "
+DEPLOY_ONLY_KEYS+="ADMIN_ALLOW_IPS MONITOR_PING_URL REQUIRE_SIGNED_TAG I_HAVE_CONSOLE_ACCESS "
 # Application keys that may also come from the process environment (for non-secret overrides; secrets: env file only).
 APP_KEYS="APP_SECRET APP_DEFAULT_LOCALE APP_SHARE_DIR DEFAULT_URI DATABASE_URL MESSENGER_TRANSPORT_DSN
  TELEGRAM_BOT_TOKEN TELEGRAM_WEBHOOK_SECRET TELEGRAM_WEBHOOK_SECRET_TOKEN TELEGRAM_ADMIN_CHAT_ID TELEGRAM_PROXY
@@ -113,10 +138,11 @@ on_error() {
 trap 'on_error $? $LINENO' ERR
 
 JOBS_PAUSED=0
+DEPLOY_MARKER_SET=0
 JOB_LOCK_FDS=()
 MAINTENANCE_ON=0
 on_exit() {
-  if (( $1 != 0 && JOBS_PAUSED )); then
+  if (( $1 != 0 && (JOBS_PAUSED || DEPLOY_MARKER_SET) )); then
     paused_jobs_warning
   fi
   if (( $1 != 0 && MAINTENANCE_ON )); then
@@ -151,6 +177,8 @@ console() {
 FILE_CHANGED=0
 write_file() {
   local path="$1" mode="$2" owner="$3" show_diff="${4:-}" tmp state
+  # Only for root-owned destinations; files in deploy- or www-data-owned directories go through write_user_file.
+  [[ ! -L "$path" ]] || die "${path} is a symbolic link; refusing to write through it."
   tmp="$(mktemp)"
   cat > "$tmp"
   if [[ -f "$path" ]] && cmp -s "$tmp" "$path" 2>/dev/null; then
@@ -171,9 +199,76 @@ write_file() {
     install -D -m "$mode" -o "${owner%%:*}" -g "${owner##*:}" "$tmp" "$path"
   else
     chmod "$mode" "$path"
-    chown "$owner" "$path"
+    chown -h "$owner" "$path"
   fi
   rm -f "$tmp"
+}
+
+# refuse_symlink PATH...  stops when any PATH is a symbolic link. Root never follows a link the deploy user or www-data
+# could have planted (ownership/permission changes would land on whatever it points to).
+refuse_symlink() {
+  local p
+  for p in "$@"; do
+    [[ ! -L "$p" ]] || die "${p} is a symbolic link; refusing to continue (root never follows links in deploy- or www-data-owned paths)."
+  done
+}
+
+# read_as_user USER PATH  ->  PATH's content read with USER's rights (nothing when missing or unreadable)
+read_as_user() {
+  if (( EUID == 0 )); then
+    sudo -n -H -u "$1" -- cat -- "$2" 2> /dev/null || true
+  elif [[ -r "$2" ]]; then
+    cat -- "$2"
+  fi
+}
+
+# write_user_file PATH MODE USER[:GROUP]  content on stdin, written BY USER as a temp file renamed over PATH in the same
+# directory: a symlink planted at PATH is replaced, never followed, and root never writes into USER's directory. A
+# GROUP other than USER's own is set by root with chown -h (never follows a link). Content is never printed.
+write_user_file() {
+  local path="$1" mode="$2" user="${3%%:*}" group="" tmp
+  [[ "$3" == *:* ]] && group="${3#*:}"
+  tmp="$(mktemp)"
+  cat > "$tmp"
+  if (( DRY_RUN )); then
+    printf '[dry-run] write %s (%s %s, written as %s via temp file + rename)\n' "$path" "$mode" "$3" "$user"
+    rm -f "$tmp"
+    return 0
+  fi
+  sudo -H -u "$user" -- /bin/sh -c 'umask 077; t="$(mktemp "$1.XXXXXX")" && cat > "$t" && chmod "$2" "$t" && mv -f "$t" "$1"' \
+    sh "$path" "$mode" < "$tmp" || { rm -f "$tmp"; die "Could not write ${path} as ${user}."; }
+  rm -f "$tmp"
+  if [[ -n "$group" && "$group" != "$user" ]]; then
+    chown -h "${user}:${group}" "$path"
+  fi
+}
+
+# update_deploy_keys AUTH_KEYS  merges DEPLOY_SSH_PUBLIC_KEY and root's keys into the deploy user's authorized_keys,
+# written as the deploy user. Sets KEYS_PREVIEW to a root-owned temp copy of the resulting keys (what step 5 checks).
+update_deploy_keys() {
+  local auth_keys="$1" ssh_dir="${1%/*}"
+  refuse_symlink "$ssh_dir" "$auth_keys"
+  KEYS_PREVIEW="$(mktemp)"
+  read_as_user "$DEPLOY_USER" "$auth_keys" > "$KEYS_PREVIEW"
+  local before
+  before="$(cksum < "$KEYS_PREVIEW")"
+  if [[ -n "${DEPLOY_SSH_PUBLIC_KEY:-}" ]] && ! grep -qxF -- "$DEPLOY_SSH_PUBLIC_KEY" "$KEYS_PREVIEW"; then
+    printf '%s\n' "$DEPLOY_SSH_PUBLIC_KEY" >> "$KEYS_PREVIEW"
+    log "$( (( DRY_RUN )) && echo '[dry-run] add' || echo 'Added') DEPLOY_SSH_PUBLIC_KEY to ${auth_keys}."
+  fi
+  # Always merge root's keys (not only into an empty file): whoever administers root keeps access as the deploy user.
+  merge_authorized_keys /root/.ssh/authorized_keys "$KEYS_PREVIEW"
+  (( MERGED_KEYS )) && log "$( (( DRY_RUN )) && echo '[dry-run] add' || echo 'Added') ${MERGED_KEYS} key(s) from /root/.ssh/authorized_keys to ${auth_keys}."
+  if (( ! DRY_RUN )); then
+    as "$DEPLOY_USER" install -d -m 700 "$ssh_dir"
+    refuse_symlink "$ssh_dir" "$auth_keys"
+    if [[ "$(cksum < "$KEYS_PREVIEW")" != "$before" || ! -e "$auth_keys" ]]; then
+      write_user_file "$auth_keys" 600 "$DEPLOY_USER" < "$KEYS_PREVIEW"
+    else
+      as "$DEPLOY_USER" chmod 600 "$auth_keys"
+    fi
+  fi
+  return 0
 }
 
 # sql_quote VALUE  ->  'value' with \ and ' escaped (for statements fed to mysql on stdin, never on argv)
@@ -206,27 +301,72 @@ job_lock_groups() {
 }
 
 # Stop all job timers and take every job lock, so no job runs against half-updated code, cache or schema.
-# Locks are held until resume_scheduled_jobs (or until this script exits).
+# Locks are held until resume_scheduled_jobs (or until this script exits). The hourly check keeps running: it shows the
+# jobs as PAUSED, and as a failed deploy once DEPLOY_MARKER is older than 30 minutes.
 pause_scheduled_jobs() {
   local timers=() group lock fd
   if (( DRY_RUN )); then
-    log "[dry-run] pause scheduled jobs: stop amoobot-job-*.timer, wait for running jobs (locks in ${JOBS_LOCK_DIR})"
+    log "[dry-run] pause scheduled jobs: write ${DEPLOY_MARKER}, arm ${DEPLOY_WATCHDOG_UNIT} (systemd-run --on-active=45min: alert, never resume), stop amoobot-job-*.timer (not ${CHECK_JOBS_UNIT}.timer), wait for running jobs (locks in ${JOBS_LOCK_DIR})"
     return 0
   fi
-  # The freshness check is paused too: it would report the stopped job timers as INACTIVE in the middle of a deploy.
-  mapfile -t timers < <(systemctl list-unit-files 'amoobot-job-*.timer' "${CHECK_JOBS_UNIT}.timer" --no-legend 2>/dev/null | awk '{print $1}')
+  install -d -m 755 -o root -g root "$STATE_DIR"
+  refuse_symlink "$DEPLOY_MARKER"
+  printf 'started=%s target=%s pid=%s\n' "$(date -u +%FT%TZ)" "${TARGET_COMMIT:-$DEPLOY_REF}" "$$" > "$DEPLOY_MARKER"
+  chmod 644 "$DEPLOY_MARKER"
+  DEPLOY_MARKER_SET=1
+  arm_deploy_watchdog
+  mapfile -t timers < <(systemctl list-unit-files 'amoobot-job-*.timer' --no-legend 2>/dev/null | awk '{print $1}')
   (( ${#timers[@]} )) || return 0
   systemctl stop "${timers[@]}"
   JOBS_PAUSED=1
   install -d -m 750 -o "$WEB_USER" -g "$WEB_USER" "$JOBS_LOCK_DIR"
   for group in $(job_lock_groups); do
     lock="$JOBS_LOCK_DIR/$group.lock"
-    [[ -e "$lock" ]] || install -m 660 -o "$WEB_USER" -g "$WEB_USER" /dev/null "$lock"
+    # /run/amoobot belongs to www-data: create the lock as www-data, never through a link it planted.
+    [[ -e "$lock" || -L "$lock" ]] || sudo -H -u "$WEB_USER" -- /bin/sh -c 'umask 007; : >> "$1"' sh "$lock"
+    refuse_symlink "$lock"
     exec {fd}< "$lock"
     flock -w 900 "$fd" || die "Scheduled job group '${group}' is still running after 15 minutes; see 'systemctl list-units amoobot-job-*'."
     JOB_LOCK_FDS+=("$fd")
   done
-  log "Paused ${#timers[@]} scheduled job timer(s); running jobs have finished."
+  log "Paused ${#timers[@]} scheduled job timer(s); running jobs have finished. ${CHECK_JOBS_UNIT}.timer keeps running."
+}
+
+# arm_deploy_watchdog  (re)arms the transient 45-minute timer; a failed/interrupted deploy then raises the alert even if
+# nobody watches the terminal (the check fails because DEPLOY_MARKER is older than 30 min -> OnFailure alert unit).
+arm_deploy_watchdog() {
+  command -v systemd-run > /dev/null 2>&1 && [[ -x "${ROOT_SBIN_DIR}/amoobot-check-jobs" ]] || return 0
+  systemctl stop "${DEPLOY_WATCHDOG_UNIT}.timer" "${DEPLOY_WATCHDOG_UNIT}.service" > /dev/null 2>&1 || true
+  systemctl reset-failed "${DEPLOY_WATCHDOG_UNIT}.timer" "${DEPLOY_WATCHDOG_UNIT}.service" > /dev/null 2>&1 || true
+  systemd-run --quiet --unit="$DEPLOY_WATCHDOG_UNIT" --on-active=45min --timer-property=AccuracySec=1min \
+    --description="Amoobot: alert if the deploy started at $(date -u +%FT%TZ) has not finished" \
+    --property=OnFailure="amoobot-job-alert@%N.service" "${ROOT_SBIN_DIR}/amoobot-check-jobs" > /dev/null \
+    || warn "Could not arm ${DEPLOY_WATCHDOG_UNIT} (systemd-run); the hourly ${CHECK_JOBS_UNIT}.timer still reports a stuck deploy."
+}
+
+# resume_scheduled_jobs  removes DEPLOY_MARKER, cancels the watchdog, releases the job locks and (re)starts every timer.
+# The check timer is restarted so its first run is 1 h from now (jobs had no chance to run while paused).
+resume_scheduled_jobs() {
+  local fd entry
+  if (( DRY_RUN )); then
+    log "[dry-run] resume: rm ${DEPLOY_MARKER}, stop ${DEPLOY_WATCHDOG_UNIT}.timer, release the job locks, enable --now every timer"
+  else
+    rm -f "$DEPLOY_MARKER"
+    DEPLOY_MARKER_SET=0
+    systemctl stop "${DEPLOY_WATCHDOG_UNIT}.timer" > /dev/null 2>&1 || true
+  fi
+  for fd in "${JOB_LOCK_FDS[@]}"; do
+    exec {fd}<&-
+  done
+  JOB_LOCK_FDS=()
+  for entry in "${SCHEDULED_JOBS[@]}"; do
+    parse_job "$entry"
+    run systemctl enable --now "amoobot-job-${JOB_NAME}.timer"
+  done
+  run systemctl enable --now "${CHECK_JOBS_UNIT}.timer"
+  run systemctl restart "${CHECK_JOBS_UNIT}.timer"
+  (( ${#changed_timers[@]} )) && run systemctl restart "${changed_timers[@]}"
+  JOBS_PAUSED=0
 }
 
 render_job_service() {
@@ -274,11 +414,48 @@ WantedBy=timers.target
 EOF
 }
 
+# PHP's timezone, pinned for both SAPIs (the app stores wall-clock DATETIMEs and has always run in UTC, PHP's default when
+# no php.ini sets date.timezone). "99-" so it is read after, and wins over, any other conf.d file. The kernel also forces
+# UTC at boot (src/Kernel.php); this keeps php -r, the job scripts and anything outside the kernel on UTC too.
+PHP_TIMEZONE_INI="99-amoobot-timezone.ini"
+PHP_ETC_DIR="/etc/php"
+php_timezone_ini_paths() {
+  printf '%s\n' "${PHP_ETC_DIR}/${PHP_VERSION}/fpm/conf.d/${PHP_TIMEZONE_INI}" "${PHP_ETC_DIR}/${PHP_VERSION}/cli/conf.d/${PHP_TIMEZONE_INI}"
+}
+render_php_timezone_ini() {
+  printf '; Managed by amoobot deploy.sh: the app stores and compares wall-clock DATETIMEs in UTC.\ndate.timezone = UTC\n'
+}
+
+# install_php_timezone  writes the ini for the FPM and CLI SAPIs (idempotent; FPM is restarted in step 18)
+install_php_timezone() {
+  local path
+  while IFS= read -r path; do
+    render_php_timezone_ini | write_file "$path" 644 root:root --show-diff
+  done < <(php_timezone_ini_paths)
+}
+
+# php_timezone_problems  ->  one line per SAPI whose effective timezone is not UTC (empty = both UTC). CLI: php -r (inline
+# code only, no app code). FPM: php-fpmX -i (same SAPI and conf.d as the pool) plus php_value/php_admin_value overrides in
+# the pool files, which -i cannot see.
+php_timezone_problems() {
+  local cli fpm pool
+  cli="$(php -r 'echo ini_get("date.timezone"), " ", date_default_timezone_get();' 2> /dev/null)"
+  [[ "$cli" == "UTC UTC" ]] || echo "CLI: date.timezone / default timezone is '${cli:-unknown}', expected 'UTC UTC'"
+  fpm="$("php-fpm${PHP_VERSION}" -i 2> /dev/null | awk -F' => ' '$1 == "date.timezone" { print $2; exit }')"
+  [[ "$fpm" == UTC ]] || echo "FPM: php-fpm${PHP_VERSION} -i shows date.timezone '${fpm:-unknown}', expected UTC"
+  pool="$(grep -rhoE '^[[:space:]]*php(_admin)?_value\[date\.timezone\][[:space:]]*=[[:space:]]*[^[:space:];]+' \
+    "${PHP_ETC_DIR}/${PHP_VERSION}/fpm/pool.d" 2> /dev/null | sed 's/.*=[[:space:]]*//' | grep -vx UTC | sort -u | tr '\n' ' ')"
+  [[ -z "$pool" ]] || echo "FPM: a pool in ${PHP_ETC_DIR}/${PHP_VERSION}/fpm/pool.d overrides date.timezone with: ${pool}"
+  return 0
+}
+
 # render_maintenance on|off  ->  the include file. Telegram and the payment gateways retry a 503, so updates and
 # callbacks arrive after the deploy instead of hitting half-updated code.
 render_maintenance() {
   if [[ "$1" == on ]]; then
     printf '# Managed by amoobot deploy.sh: maintenance ON while a deploy updates code, cache and schema.\n'
+    # An add_header in a location replaces ALL server-level add_header lines, so HSTS (once enabled) is repeated here.
+    [[ -e "$HSTS_STATE_FILE" ]] && printf 'add_header Strict-Transport-Security "max-age=31536000" always;\n'
     printf 'add_header Retry-After 120 always;\nreturn 503;\n'
   else
     printf '# Managed by amoobot deploy.sh: maintenance OFF.\n'
@@ -362,14 +539,15 @@ resolve_deploy_home() {
 verify_target_ops() {
   local commit="$1" path missing=() target_deploy
   for path in "${ROOT_OPS_FILES[@]}" bin/console; do
-    sudo -H -u "$DEPLOY_USER" git -C "$APP_DIR" cat-file -e "${commit}:${path}" 2> /dev/null || missing+=("$path")
+    mirror_git cat-file -e "${commit}:${path}" 2> /dev/null || missing+=("$path")
   done
   (( ${#missing[@]} == 0 )) \
     || die "Refusing to deploy ${commit}: it lacks ${missing[*]}. Nothing was paused or checked out."
   # Into a variable, not "| grep -q": grep exiting early would make git fail with SIGPIPE under pipefail.
   target_deploy="$(git_blob "$commit" deploy.sh)" || die "Cannot read deploy.sh from ${commit}."
   grep -qx 'ROOT_LIB_DIR="/usr/local/lib/amoobot"' <<< "$target_deploy" \
-    || die "Refusing to deploy ${commit}: its deploy.sh predates the root-owned ops layout (${ROOT_LIB_DIR}); it would run checkout files as root again. Nothing was paused or checked out."
+    && grep -qx 'MIRROR_DIR="/var/lib/amoobot/mirror.git"' <<< "$target_deploy" \
+    || die "Refusing to deploy ${commit}: its deploy.sh predates the root-owned mirror (${MIRROR_DIR}); it would install root-run files from the deploy user's checkout again. Nothing was paused or checked out."
 }
 
 # database_table_count  ->  number of tables in the app database (root-owned lib; DATABASE_URL from this script)
@@ -386,21 +564,69 @@ database_table_count() {
   )
 }
 
-# restore_instructions  how to get back to the database state before this deploy
+# restore_instructions [before-pause]  how to get back to a database state that matches a release. "before-pause": the
+# check before the checkout refused the target, nothing was paused and the running release is untouched.
 restore_instructions() {
   # Values are prepared outside the here-doc: quotes inside ${..:+..} in a here-doc break bash's parser.
-  local dump="${PRE_DEPLOY_BACKUP_FILE:-${BACKUP_DIR}/${DB_NAME}_pre-deploy_<time>.sql.gz}" note="" ref
+  local dump="${PRE_DEPLOY_BACKUP_FILE:-${BACKUP_DIR}/${DB_NAME}_pre-deploy_<time>.sql.gz}" note="" ref head
   ref="${PREVIOUS_COMMIT:-<commit that matches the backup>}"
+  head="Scheduled jobs stay PAUSED. To return to the state before this deploy:"
+  if [[ "${1:-}" == before-pause ]]; then
+    ref="${TARGET_COMMIT:-$DEPLOY_REF}"
+    head="Nothing was paused or checked out; the running release is untouched. To deploy ${DEPLOY_REF} anyway, first restore a dump made while a release matching it was deployed (this LOSES newer data):"
+  fi
   [[ -n "${PRE_DEPLOY_BACKUP_FILE:-}" ]] && note="      # taken by this deploy: ${PRE_DEPLOY_BACKUP_FILE}"
   cat >&2 <<EOF
 
-Scheduled jobs stay PAUSED. To return to the state before this deploy:
+${head}
   ls -lt ${BACKUP_DIR}/${DB_NAME}_pre-deploy_*.sql.gz | head -3${note}
-  sudo systemctl stop php${PHP_VERSION}-fpm
+  sudo systemctl stop php${PHP_VERSION}-fpm 'amoobot-job-*.timer' 'amoobot-job-*.service'
   sudo amoobot-restore ${dump} --yes
   sudo amoobot-deploy --app-only --ref ${ref}
 Or deploy the release that matches the current schema again.
 EOF
+}
+
+# executed_migrations  ->  versions recorded in doctrine_migration_versions (nothing when the table does not exist yet).
+# Root-owned lib and DATABASE_URL from ${DB_URL_FILE}, like database_table_count. Fails when the database cannot be read.
+executed_migrations() {
+  (
+    # shellcheck source=bin/lib/database-url.sh
+    source "${ROOT_LIB_DIR}/lib/database-url.sh"
+    load_database_url "$APP_DIR"
+    trap 'rm -f "${DB_OPTS_FILE:-}"' EXIT
+    write_db_options_file
+    client="$(command -v mariadb || command -v mysql)"
+    n="$("$client" --defaults-extra-file="$DB_OPTS_FILE" -N -B -e \
+      "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'doctrine_migration_versions'" "$DB_NAME")"
+    [[ "$n" == 1 ]] || exit 0
+    "$client" --defaults-extra-file="$DB_OPTS_FILE" -N -B -e 'SELECT version FROM doctrine_migration_versions' "$DB_NAME"
+  )
+}
+
+# target_migrations COMMIT  ->  the migration versions COMMIT contains (migrations/Version*.php, namespace DoctrineMigrations
+# as in config/packages/doctrine_migrations.yaml), read from the root-owned mirror
+target_migrations() {
+  mirror_git ls-tree --name-only "$1" migrations/ | sed -n 's#^migrations/\(Version[A-Za-z0-9_]*\)\.php$#DoctrineMigrations\\\1#p'
+}
+
+# check_schema_matches COMMIT  stops BEFORE anything is paused or checked out when the database has executed migrations
+# that COMMIT does not contain (a rollback to a release older than the schema). Step 11's up-to-date
+# --fail-on-unregistered (exit 2) stays as the second line of defence.
+check_schema_matches() {
+  local commit="$1" executed ahead
+  if [[ ! -r "$DB_URL_FILE" || ! -r "${ROOT_LIB_DIR}/lib/database-url.sh" ]]; then
+    log "No ${DB_URL_FILE} yet (first deploy): schema-vs-code check skipped."
+    return 0
+  fi
+  executed="$(executed_migrations)" \
+    || die "Cannot read the executed migrations from the database (is MariaDB running?). Nothing was paused or checked out."
+  [[ -n "$executed" ]] || return 0
+  ahead="$(comm -23 <(sort -u <<< "$executed") <(target_migrations "$commit" | sort -u))"
+  [[ -z "$ahead" ]] && return 0
+  printf '  - %s\n' "${ahead//$'\n'/$'\n'  - }" >&2
+  restore_instructions before-pause
+  die "The database has $(wc -l <<< "$ahead") executed migration(s) that ${commit} does not contain (listed above): that release is older than the schema. Nothing was paused or checked out."
 }
 
 # root_ops_dest PATH  ->  where the root-owned copy of a ROOT_OPS_FILES entry is installed
@@ -419,7 +645,8 @@ render_root_wrapper() {
   printf '#!/bin/bash\n# Managed by amoobot deploy.sh: root-owned entry point for %s (installed from the deployed commit).\n' "$ROOT_LIB_DIR"
   case "$1" in
     deploy) cat <<EOF
-exec /bin/bash ${ROOT_LIB_DIR}/deploy.sh "\$@"
+# Clean environment like the other wrappers: nothing from the caller's environment reaches the root-run script.
+exec env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin HOME=/root LANG=C.UTF-8 /bin/bash ${ROOT_LIB_DIR}/deploy.sh "\$@"
 EOF
       ;;
     backup) cat <<EOF
@@ -442,12 +669,101 @@ EOF
   esac
 }
 
-# git_blob COMMIT PATH  ->  the committed content of PATH (read as the deploy user; replace refs ignored, no filters)
-git_blob() {
-  sudo -H -u "$DEPLOY_USER" env GIT_NO_REPLACE_OBJECTS=1 git -C "$APP_DIR" cat-file blob "$1:$2"
+# mirror_git ARGS...  git on the root-owned mirror with a clean environment: no system/global config, no replace refs,
+# no prompts, only the SSH transport (MIRROR_PROTOCOL, overridable for offline tests). MIRROR_SSH is set in step 7.
+MIRROR_PROTOCOL="ssh"
+mirror_git() {
+  env -i PATH="$GIT_ENV_PATH" HOME=/root GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_NO_REPLACE_OBJECTS=1 \
+    GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND="${MIRROR_SSH:-ssh -F /dev/null -o BatchMode=yes}" \
+    git --git-dir="$MIRROR_DIR" -c protocol.allow=never -c "protocol.${MIRROR_PROTOCOL}.allow=always" -c core.hooksPath=/dev/null "$@"
 }
 
-# install_root_ops COMMIT  installs ROOT_OPS_FILES from COMMIT's git objects into ROOT_LIB_DIR, plus the wrappers.
+# git_blob COMMIT PATH  ->  the committed content of PATH from the root-owned mirror (never the deploy user's checkout)
+git_blob() {
+  mirror_git cat-file blob "$1:$2"
+}
+
+# update_mirror  creates the root-owned bare mirror if needed and fetches origin's branches and tags into it (as root).
+# Sets MIRROR_FETCH_OK=1/0; the caller explains how to register the key when the fetch fails.
+update_mirror() {
+  MIRROR_FETCH_OK=0
+  install -d -m 755 -o root -g root "$STATE_DIR"
+  if [[ ! -f "$MIRROR_DIR/HEAD" ]]; then
+    install -d -m 700 -o root -g root "$MIRROR_DIR"
+    env -i PATH="$GIT_ENV_PATH" HOME=/root GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null git init -q --bare "$MIRROR_DIR"
+  fi
+  chown -R -h root:root "$MIRROR_DIR"
+  chmod 700 "$MIRROR_DIR"
+  # Only origin's branches (as refs/remotes/origin/*) and tags; --prune drops refs deleted upstream.
+  if mirror_git fetch -q --prune --prune-tags --no-write-fetch-head "$REPO_URL" \
+       '+refs/heads/*:refs/remotes/origin/*' '+refs/tags/*:refs/tags/*'; then
+    MIRROR_FETCH_OK=1
+  fi
+}
+
+# resolve_target_ref REF  ->  prints the commit to deploy. Only origin's refs count: a branch (refs/remotes/origin/REF), a
+# tag (refs/tags/REF) or a full 40-hex commit that one of them contains. With REQUIRE_SIGNED_TAG=yes only a tag signed by
+# a key in ALLOWED_SIGNERS_FILE. Returns 1 (message on stderr) when the ref is not acceptable.
+resolve_target_ref() {
+  local ref="$1" sha tag_obj
+  if [[ "${REQUIRE_SIGNED_TAG:-no}" == yes ]]; then
+    tag_obj="$(mirror_git rev-parse --verify -q "refs/tags/${ref}")" \
+      || { echo "REQUIRE_SIGNED_TAG=yes: '${ref}' is not a tag on origin." >&2; return 1; }
+    [[ "$(mirror_git cat-file -t "$tag_obj")" == tag ]] \
+      || { echo "REQUIRE_SIGNED_TAG=yes: '${ref}' is a lightweight tag (no signature)." >&2; return 1; }
+    verify_allowed_signers_file || return 1
+    mirror_git -c gpg.format=ssh -c gpg.ssh.allowedSignersFile="$ALLOWED_SIGNERS_FILE" verify-tag "$tag_obj" > /dev/null 2>&1 \
+      || { echo "REQUIRE_SIGNED_TAG=yes: tag '${ref}' has no valid signature from ${ALLOWED_SIGNERS_FILE}." >&2; return 1; }
+    mirror_git rev-parse --verify -q "${tag_obj}^{commit}"
+    return
+  fi
+  if sha="$(mirror_git rev-parse --verify -q "refs/remotes/origin/${ref}^{commit}")" \
+     || sha="$(mirror_git rev-parse --verify -q "refs/tags/${ref}^{commit}")"; then
+    printf '%s\n' "$sha"
+    return 0
+  fi
+  if [[ "$ref" =~ ^[0-9a-f]{40}$ ]] && sha="$(mirror_git rev-parse --verify -q "${ref}^{commit}")" \
+     && [[ -n "$(mirror_git for-each-ref --count=1 --contains "$sha" refs/remotes/origin refs/tags)" ]]; then
+    printf '%s\n' "$sha"
+    return 0
+  fi
+  echo "Ref '${ref}' is not a branch or tag on origin, nor a full commit hash contained in one." >&2
+  return 1
+}
+
+# verify_allowed_signers_file  the signers file must be a regular root-owned file nobody else can write
+verify_allowed_signers_file() {
+  local owner mode
+  [[ -f "$ALLOWED_SIGNERS_FILE" && ! -L "$ALLOWED_SIGNERS_FILE" ]] \
+    || { echo "REQUIRE_SIGNED_TAG=yes needs ${ALLOWED_SIGNERS_FILE} (git SSH allowed-signers format)." >&2; return 1; }
+  read -r owner mode < <(stat -c '%u %a' "$ALLOWED_SIGNERS_FILE")
+  [[ "$owner" == 0 ]] && (( (8#$mode & 8#022) == 0 )) \
+    || { echo "${ALLOWED_SIGNERS_FILE} must be owned by root and not writable by group/others." >&2; return 1; }
+}
+
+# fill_checkout COMMIT  the deploy user's checkout gets COMMIT from a bundle made from the root-owned mirror (no GitHub
+# access, no git run as root inside the deploy-owned repository).
+fill_checkout() {
+  local commit="$1" bundle="${BUNDLE_DIR}/release.bundle" head
+  install -d -m 750 -o root -g "$DEPLOY_USER" "$BUNDLE_DIR"
+  rm -f "$bundle"
+  mirror_git update-ref refs/amoobot/deploy "$commit"
+  mirror_git bundle create -q "$bundle" refs/amoobot/deploy
+  chown root:"$DEPLOY_USER" "$bundle"
+  chmod 640 "$bundle"
+  if [[ ! -d "$APP_DIR/.git" ]]; then
+    # First deploy: an empty repository; origin records REPO_URL for people, root never fetches through it.
+    sudo -H -u "$DEPLOY_USER" git -C "$APP_DIR" init -q
+    sudo -H -u "$DEPLOY_USER" git -C "$APP_DIR" remote add origin "$REPO_URL"
+  fi
+  sudo -H -u "$DEPLOY_USER" git -C "$APP_DIR" fetch -q --no-tags "$bundle" refs/amoobot/deploy
+  rm -f "$bundle"
+  sudo -H -u "$DEPLOY_USER" git -C "$APP_DIR" checkout -q --detach "$commit"
+  head="$(sudo -H -u "$DEPLOY_USER" git -C "$APP_DIR" rev-parse HEAD)"
+  [[ "$head" == "$commit" ]] || die "The checkout is at ${head}, expected ${commit}."
+}
+
+# install_root_ops COMMIT  installs ROOT_OPS_FILES from COMMIT in the root-owned mirror into ROOT_LIB_DIR, plus wrappers.
 install_root_ops() {
   local commit="$1" path dest mode tmp
   run install -d -m 755 -o root -g root "$ROOT_LIB_DIR" "$ROOT_LIB_DIR/lib"
@@ -455,13 +771,29 @@ install_root_ops() {
     dest="$(root_ops_dest "$path")"
     mode=755; [[ "$path" == bin/lib/* ]] && mode=644
     if (( DRY_RUN )); then
-      log "[dry-run] install ${path} from git objects of ${commit} (not the checkout) -> ${dest} (${mode} root:root)"
+      log "[dry-run] install ${path} from git objects of ${commit} in the root-owned mirror (not the checkout) -> ${dest} (${mode} root:root)"
       continue
     fi
     tmp="$(mktemp)"
     git_blob "$commit" "$path" > "$tmp" || { rm -f "$tmp"; die "Cannot read ${path} from commit ${commit}."; }
     write_file "$dest" "$mode" root:root < "$tmp"
     rm -f "$tmp"
+  done
+  for path in "${OPTIONAL_ROOT_OPS_FILES[@]}"; do
+    dest="$(root_ops_dest "$path")"
+    if (( DRY_RUN )); then
+      log "[dry-run] install ${path} (if ${commit} has it) from the root-owned mirror -> ${dest} (755 root:root)"
+      continue
+    fi
+    if mirror_git cat-file -e "${commit}:${path}" 2> /dev/null; then
+      tmp="$(mktemp)"
+      git_blob "$commit" "$path" > "$tmp" || { rm -f "$tmp"; die "Cannot read ${path} from commit ${commit}."; }
+      write_file "$dest" 755 root:root < "$tmp"
+      rm -f "$tmp"
+    else
+      refuse_symlink "$dest"
+      rm -f "$dest"
+    fi
   done
   install_root_wrappers
 }
@@ -529,10 +861,111 @@ ssh_login_problems() {
   done
 }
 
+# sshd_effective USER  ->  sshd's effective configuration for a key login of USER (Match blocks evaluated for this
+# connection spec; Match Address/Host blocks for other client addresses cannot be evaluated here).
+sshd_effective() {
+  sshd -T -C "user=$1,host=localhost,addr=127.0.0.1" 2> /dev/null
+}
+
+# sshd_values KEY < sshd -T output  ->  every value of KEY (one per line; sshd prints lists on one or several lines)
+sshd_values() {
+  awk -v k="$1" '$1 == k { for (i = 2; i <= NF; i++) print $i }'
+}
+
+# sshd_pattern_match NAME PATTERN  ->  0 when NAME matches an sshd user/group pattern (* and ?; the @host part of
+# user@host is ignored here, see ssh_access_problems)
+sshd_pattern_match() {
+  local name="$1" pat="${2%%@*}"
+  # shellcheck disable=SC2053 # glob match is intended
+  [[ "$name" == $pat ]]
+}
+
+# ssh_access_problems USER HOME CHECK_PUBKEY < sshd -T output  ->  one line per reason sshd would refuse USER's key login
+# (empty = allowed). CHECK_PUBKEY=1 also requires pubkeyauthentication yes (only meaningful once the drop-in is in place).
+ssh_access_problems() {
+  local user="$1" home="$2" check_pubkey="$3" cfg groups g pat tok ok allow_n=0 allowed=0
+  cfg="$(cat)"
+  groups="$(id -nG "$user" 2> /dev/null || true)"
+  [[ -n "$cfg" ]] || { echo "sshd -T -C user=${user},host=localhost,addr=127.0.0.1 printed nothing (run it as root to see why)"; return 0; }
+  if (( check_pubkey )) && [[ "$(sshd_values pubkeyauthentication <<< "$cfg" | tail -1)" != yes ]]; then
+    echo "sshd: pubkeyauthentication is not 'yes' for ${user} (a Match block or another file overrides it)"
+  fi
+  ok=0
+  while read -r tok; do
+    case "$tok" in
+      .ssh/authorized_keys|%h/.ssh/authorized_keys|"${home}/.ssh/authorized_keys") ok=1 ;;
+      /home/%u/.ssh/authorized_keys) [[ "$home" == "/home/${user}" ]] && ok=1 ;;
+    esac
+  done < <(sshd_values authorizedkeysfile <<< "$cfg")
+  (( ok )) || echo "sshd: AuthorizedKeysFile ($(sshd_values authorizedkeysfile <<< "$cfg" | tr '\n' ' ')) does not include .ssh/authorized_keys for ${user}"
+  while read -r pat; do
+    [[ -n "$pat" ]] || continue
+    if sshd_pattern_match "$user" "${pat#!}"; then echo "sshd: DenyUsers ${pat} excludes ${user}"; fi
+  done < <(sshd_values denyusers <<< "$cfg")
+  while read -r pat; do
+    [[ -n "$pat" ]] || continue
+    allow_n=$((allow_n + 1))
+    [[ "$pat" == '!'* ]] && { sshd_pattern_match "$user" "${pat#!}" && { echo "sshd: AllowUsers ${pat} excludes ${user}"; allowed=-1000; }; continue; }
+    sshd_pattern_match "$user" "$pat" && allowed=$((allowed + 1))
+  done < <(sshd_values allowusers <<< "$cfg")
+  (( allow_n == 0 || allowed > 0 )) || echo "sshd: AllowUsers ($(sshd_values allowusers <<< "$cfg" | tr '\n' ' ')) does not include ${user}"
+  while read -r pat; do
+    [[ -n "$pat" ]] || continue
+    for g in $groups; do sshd_pattern_match "$g" "${pat#!}" && echo "sshd: DenyGroups ${pat} excludes ${user} (group ${g})"; done
+  done < <(sshd_values denygroups <<< "$cfg")
+  allow_n=0 allowed=0
+  while read -r pat; do
+    [[ -n "$pat" ]] || continue
+    allow_n=$((allow_n + 1))
+    for g in $groups; do
+      [[ "$pat" == '!'* ]] && { sshd_pattern_match "$g" "${pat#!}" && allowed=-1000; continue; }
+      sshd_pattern_match "$g" "$pat" && allowed=$((allowed + 1))
+    done
+  done < <(sshd_values allowgroups <<< "$cfg")
+  (( allow_n == 0 || allowed > 0 )) || echo "sshd: AllowGroups ($(sshd_values allowgroups <<< "$cfg" | tr '\n' ' ')) does not include a group of ${user} (${groups:-none})"
+  return 0
+}
+
+# other_admin_problems  ->  nothing when an account other than DEPLOY_USER can log in with a key AND has full sudo (sudo
+# -l -U shows "(ALL) ALL" or "(ALL : ALL) ALL", with a usable password unless NOPASSWD), or I_HAVE_CONSOLE_ACCESS=yes.
+# Needed for SSH_PERMIT_ROOT_LOGIN=no: the deploy user can only run the amoobot-* commands.
+other_admin_problems() {
+  local name uid home shell rights pw found=""
+  [[ "${I_HAVE_CONSOLE_ACCESS:-no}" == yes ]] && return 0
+  while IFS=: read -r name _ uid _ _ home shell; do
+    [[ "$uid" =~ ^[0-9]+$ ]] && (( uid >= 1000 && uid != 65534 )) && [[ "$name" != "$DEPLOY_USER" ]] || continue
+    [[ "$shell" != */nologin && "$shell" != */false && -n "$shell" ]] || continue
+    rights="$(sudo -n -l -U "$name" 2> /dev/null || true)"
+    grep -qE '^[[:space:]]*\(ALL( ?: ?ALL)?\)[[:space:]]+(NOPASSWD:[[:space:]]*)?ALL[[:space:]]*$' <<< "$rights" || continue
+    if ! grep -qE '^[[:space:]]*\(ALL( ?: ?ALL)?\)[[:space:]]+NOPASSWD:[[:space:]]*ALL[[:space:]]*$' <<< "$rights"; then
+      pw="$(passwd -S "$name" 2> /dev/null | awk '{print $2}')"
+      [[ "$pw" == P ]] || continue
+    fi
+    [[ -z "$(ssh_login_problems "$name" "$home")" ]] || continue
+    [[ -z "$(sshd_effective "$name" | ssh_access_problems "$name" "$home" 0)" ]] || continue
+    found="$name"; break
+  done < <(getent passwd)
+  [[ -n "$found" ]] && return 0
+  echo "SSH_PERMIT_ROOT_LOGIN=no, but no account other than ${DEPLOY_USER} can log in with a key AND has full sudo (sudo -l -U <user>: '(ALL) ALL'); ${DEPLOY_USER} can only run the amoobot-* commands. Create such an admin, keep 'prohibit-password', or set I_HAVE_CONSOLE_ACCESS=yes if you have a provider console with a root password."
+}
+
+# ssh_listen_ports  ->  the TCP port(s) SSH really listens on: ssh.socket's ListenStream when the socket is active
+# (Ubuntu 24.04 socket activation; sshd_config's Port is then not what listens), else sshd -T's port(s).
+ssh_listen_ports() {
+  if systemctl is-active --quiet ssh.socket 2> /dev/null; then
+    systemctl show ssh.socket -p Listen --value 2> /dev/null | grep -oE '[0-9]+ \(Stream\)' | cut -d' ' -f1 | sort -u
+  else
+    sshd -T 2> /dev/null | awk '$1 == "port" { print $2 }' | sort -u
+  fi
+}
+
 render_sudoers() {
   cat <<EOF
-# Managed by amoobot deploy.sh: ${DEPLOY_USER} may run ONLY these root-owned entry points without a password
-# (installed from the deployed commit, see ${ROOT_LIB_DIR}). Anything else needs root. Arguments are allowed.
+# Managed by amoobot deploy.sh: ${DEPLOY_USER} may run ONLY these root-owned entry points without a password.
+# Trust model: amoobot-deploy can deploy ANY branch, tag or commit that exists on origin (${REPO_URL}), and the deployed
+# commit's ops scripts run as root. So ${DEPLOY_USER} is root-equivalent exactly as far as GitHub WRITE access to that
+# repository reaches: protect GitHub write access (and REQUIRE_SIGNED_TAG's signing keys) like root. Nothing the deploy
+# user can change on this server (its checkout, its .git) is installed or run as root (see ${MIRROR_DIR}).
 Cmnd_Alias AMOOBOT_OPS = ${ROOT_SBIN_DIR}/amoobot-deploy, ${ROOT_SBIN_DIR}/amoobot-backup, ${ROOT_SBIN_DIR}/amoobot-restore, ${ROOT_SBIN_DIR}/amoobot-check-jobs
 ${DEPLOY_USER} ALL=(root) NOPASSWD: AMOOBOT_OPS
 EOF
@@ -555,10 +988,11 @@ install_sudoers() {
   rm -f "$tmp"
 }
 
-# install_sshd_dropin PATH  (content on stdin) installs it, runs sshd -t, and on failure puts the previous file back
-# (or removes the new one) BEFORE stopping, so a bad file never stays in place. Sets SSHD_CHANGED.
+# install_sshd_dropin PATH [VERIFY_FN]  (content on stdin) installs it, runs sshd -t and then VERIFY_FN (prints problems
+# with the new file in place; nothing = OK), and on any failure puts the previous file back (or removes the new one)
+# BEFORE stopping and before ssh is reloaded, so a bad file never stays in place. Sets SSHD_CHANGED.
 install_sshd_dropin() {
-  local path="$1" tmp backup="" test_out
+  local path="$1" verify="${2:-}" tmp backup="" test_out problems=""
   tmp="$(mktemp)"
   cat > "$tmp"
   SSHD_CHANGED=0
@@ -582,6 +1016,13 @@ install_sshd_dropin() {
     if [[ -n "$backup" ]]; then cp -p "$backup" "$path"; rm -f "$backup"; else rm -f "$path"; fi
     SSHD_CHANGED=0
     die "sshd -t rejected the new SSH config; ${path} was restored to its previous state and ssh was not reloaded. sshd said: ${test_out}"
+  fi
+  [[ -n "$verify" ]] && problems="$("$verify")"
+  if [[ -n "$problems" ]]; then
+    if [[ -n "$backup" ]]; then cp -p "$backup" "$path"; rm -f "$backup"; else rm -f "$path"; fi
+    SSHD_CHANGED=0
+    printf '  - %s\n' "$problems" >&2
+    die "With the new SSH config ${DEPLOY_USER:-the deploy user} could not log in (reasons above); ${path} was restored to its previous state and ssh was not reloaded."
   fi
   rm -f "$backup"
 }
@@ -638,11 +1079,12 @@ EOF
 paused_jobs_warning() {
   cat >&2 <<EOF
 
-!!! SCHEDULED JOBS ARE PAUSED: amoobot-job-*.timer and ${CHECK_JOBS_UNIT}.timer are stopped.
-!!! Nothing runs until they are resumed: no broadcasts, order expiry, usage sync, expiry, suspension or notifications.
+!!! SCHEDULED JOBS ARE PAUSED: amoobot-job-*.timer are stopped and ${DEPLOY_MARKER} keeps every job idle
+!!! (also after a reboot). Nothing runs: no broadcasts, order expiry, usage sync, expiry, suspension or notifications.
+!!! ${CHECK_JOBS_UNIT}.timer and the ${DEPLOY_WATCHDOG_UNIT} timer will raise an alert if this is not fixed in 30-45 min.
     Preferred - fix the cause and re-run:  sudo amoobot-deploy --app-only
-    Resume as they are (only if the deployed code and the schema match), as root:
-      systemctl start 'amoobot-job-*.timer' ${CHECK_JOBS_UNIT}.timer
+    Resume as they are (only if the deployed code and the schema match), as root (safe to run twice):
+      rm -f ${DEPLOY_MARKER} && systemctl stop ${DEPLOY_WATCHDOG_UNIT}.timer; systemctl start 'amoobot-job-*.timer' 
 EOF
 }
 
@@ -678,7 +1120,31 @@ refresh_github_known_hosts() {
   rm -f "$tmp"
 }
 
-# load_env_file PATH: KEY=VALUE lines only (no shell code is executed). The process environment wins.
+# open_env_file PATH  opens PATH ONCE on fd 3 and checks the file that was actually opened (via /proc/self/fd/3), so it
+# cannot be swapped between the check and the read. As root: only a regular file directly in ENV_FILE_DIR (root-owned, not
+# group/other-writable), not a link, owned by root with mode 600. Returns 1 when PATH does not exist.
+open_env_file() {
+  local path="$1" info dir_info
+  if (( EUID == 0 )); then
+    [[ "$path" == "${ENV_FILE_DIR}/"* && "${path#"${ENV_FILE_DIR}/"}" =~ ^[A-Za-z0-9._-]+$ && "${path##*/}" != "." && "${path##*/}" != ".." ]] \
+      || die "--env-file must be a file directly in ${ENV_FILE_DIR}/ (got '${path}')."
+    dir_info="$(stat -c '%U %a %F' "$ENV_FILE_DIR" 2> /dev/null || true)"
+    [[ ! -L "$ENV_FILE_DIR" && "$dir_info" =~ ^root\ ([0-7]+)\ directory$ ]] && (( (8#${BASH_REMATCH[1]} & 8#022) == 0 )) \
+      || die "${ENV_FILE_DIR} must be a root-owned directory not writable by group/others (is: ${dir_info:-missing})."
+    [[ ! -L "$path" ]] || die "${path} is a symbolic link; refusing to read settings through it."
+  fi
+  [[ -e "$path" ]] || return 1
+  exec 3< "$path" || die "Cannot open ${path}."
+  info="$(stat -L -c '%a %U %F' /proc/self/fd/3)"
+  [[ "$info" == *" regular file" ]] || die "${path} is not a regular file."
+  if (( EUID == 0 )) && [[ "${info% regular file}" != "600 root" ]]; then
+    die "${path} must be owned by root with mode 600 (is: ${info% regular file}). Fix: chown root:root ${path} && chmod 600 ${path}"
+  fi
+  return 0
+}
+
+# load_env_file NAME: KEY=VALUE lines from fd 3 (opened by open_env_file; NAME is only used in messages). No shell code is
+# executed. The process environment wins.
 load_env_file() {
   local file="$1" line key value n=0 seen=" "
   while IFS= read -r line || [[ -n "$line" ]]; do
@@ -701,7 +1167,8 @@ load_env_file() {
     if [[ -z "${!key+x}" ]]; then
       printf -v "$key" '%s' "$value"
     fi
-  done < "$file"
+  done <&3
+  exec 3<&-
 }
 
 require_var() {
@@ -719,7 +1186,7 @@ while (( $# )); do
     --app-only) APP_ONLY=1 ;;
     --ref)      [[ -n "${2:-}" ]] || die "--ref needs a value"; CLI_REF="$2"; shift ;;
     --env-file) [[ -n "${2:-}" ]] || die "--env-file needs a value"; ENV_FILE="$2"; shift ;;
-    -h|--help)  sed -n '2,15p' "$0"; exit 0 ;;
+    -h|--help)  sed -n '2,17p' "$0"; exit 0 ;;
     *)          die "Unknown option: $1 (see --help)" ;;
   esac
   shift
@@ -757,12 +1224,8 @@ fi
 
 step "0" "Loading settings and secrets..."
 
-if [[ -f "$ENV_FILE" ]]; then
-  if (( ! DRY_RUN )); then
-    perms="$(stat -c '%a %U' "$ENV_FILE")"
-    [[ "$perms" == "600 root" ]] \
-      || die "${ENV_FILE} must be owned by root with mode 600 (is: ${perms}). Fix: chown root:root ${ENV_FILE} && chmod 600 ${ENV_FILE}"
-  fi
+# Checked even for --dry-run as root: a dry run must not read arbitrary root-only files either.
+if open_env_file "$ENV_FILE"; then
   load_env_file "$ENV_FILE"
   log "Read ${#ENV_FILE_KEYS[@]} settings from ${ENV_FILE} (values not shown)."
 else
@@ -811,8 +1274,15 @@ fi
 
 [[ "$DOMAIN" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$ && "$DOMAIN" == *.* ]] || die "DOMAIN is not a valid hostname."
 [[ "$DB_NAME" =~ ^[A-Za-z0-9_]+$ && "$DB_USER" =~ ^[A-Za-z0-9_]+$ ]] || die "DB_NAME / DB_USER may only contain A-Z a-z 0-9 _."
+# A git ref name only: no option (leading "-"), no range ("..") and nothing a shell or git would interpret.
+[[ "$DEPLOY_REF" =~ ^[A-Za-z0-9._/-]+$ && "$DEPLOY_REF" != -* && "$DEPLOY_REF" != *..* ]] \
+  || die "DEPLOY_REF / --ref must match ^[A-Za-z0-9._/-]+\$, not start with '-' and not contain '..' (got '${DEPLOY_REF}')."
 [[ "$DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]*$ && "$DEPLOY_USER" != "root" ]] || die "DEPLOY_USER must be a non-root user name."
 [[ "$SSH_PERMIT_ROOT_LOGIN" =~ ^(no|prohibit-password)$ ]] || die "SSH_PERMIT_ROOT_LOGIN must be 'no' or 'prohibit-password'."
+REQUIRE_SIGNED_TAG="${REQUIRE_SIGNED_TAG:-no}"
+[[ "$REQUIRE_SIGNED_TAG" =~ ^(yes|no)$ ]] || die "REQUIRE_SIGNED_TAG must be 'yes' or 'no'."
+I_HAVE_CONSOLE_ACCESS="${I_HAVE_CONSOLE_ACCESS:-no}"
+[[ "$I_HAVE_CONSOLE_ACCESS" =~ ^(yes|no)$ ]] || die "I_HAVE_CONSOLE_ACCESS must be 'yes' or 'no'."
 if [[ -n "${DEPLOY_SSH_PUBLIC_KEY:-}" ]]; then
   if command -v ssh-keygen > /dev/null 2>&1; then
     valid_ssh_public_key "$DEPLOY_SSH_PUBLIC_KEY" \
@@ -823,6 +1293,16 @@ if [[ -n "${DEPLOY_SSH_PUBLIC_KEY:-}" ]]; then
   fi
 fi
 [[ "$BACKUP_RETENTION_DAYS" =~ ^[0-9]+$ ]] || die "BACKUP_RETENTION_DAYS must be a number."
+# BACKUP_CRON becomes the schedule of a root cron line: five plain fields or @daily/@hourly/@weekly, nothing else.
+backup_cron_re='^(@(daily|hourly|weekly)|([0-9*/,-]+ ){4}[0-9*/,-]+)$'
+[[ "$BACKUP_CRON" =~ $backup_cron_re ]] \
+  || die "BACKUP_CRON must be five cron fields of 0-9 * / , - (e.g. '30 3 * * *') or @daily/@hourly/@weekly (got '${BACKUP_CRON}')."
+# PHP_VERSION ends up in package names, unit paths and the nginx fastcgi socket path.
+[[ "$PHP_VERSION" =~ ^[0-9]+\.[0-9]+$ ]] || die "PHP_VERSION must look like 8.4 (got '${PHP_VERSION}')."
+# REPO_URL is fetched by root over SSH only: git@host:path or ssh://..., no spaces, quotes or control characters.
+repo_url_re='^(git@|ssh://)[^[:space:][:cntrl:]"'"'"'\\]+$'
+[[ "$REPO_URL" =~ $repo_url_re ]] \
+  || die "REPO_URL must be an SSH URL starting with git@ or ssh:// (no spaces, quotes or control characters)."
 # Validated before anything runs: these are used with recursive chown/chmod, rm and in root-owned scripts.
 valid_dir_path "$APP_DIR" 'var/www|srv' || die "APP_DIR must be /var/www/<name> or /srv/<name> (A-Z a-z 0-9 . _ -; got '${APP_DIR}')."
 valid_dir_path "$BACKUP_DIR" 'var/backups|srv' \
@@ -974,25 +1454,10 @@ if ! id "$DEPLOY_USER" > /dev/null 2>&1; then
   run useradd --create-home --shell /bin/bash "$DEPLOY_USER"
 fi
 resolve_deploy_home
-run install -d -m 700 -o "$DEPLOY_USER" -g "$DEPLOY_USER" "$DEPLOY_HOME/.ssh"
 auth_keys="$DEPLOY_HOME/.ssh/authorized_keys"
-# A dry run works on a copy, so it reports what would be added without touching the real file.
-keys_target="$auth_keys"
-if (( DRY_RUN )); then
-  keys_target="$(mktemp)"
-  [[ -r "$auth_keys" ]] && cat "$auth_keys" > "$keys_target"
-else
-  touch "$auth_keys"
-fi
-if [[ -n "${DEPLOY_SSH_PUBLIC_KEY:-}" ]] && ! grep -qxF -- "$DEPLOY_SSH_PUBLIC_KEY" "$keys_target"; then
-  printf '%s\n' "$DEPLOY_SSH_PUBLIC_KEY" >> "$keys_target"
-  log "$( (( DRY_RUN )) && echo '[dry-run] add' || echo 'Added') DEPLOY_SSH_PUBLIC_KEY to ${auth_keys}."
-fi
-# Always merge root's keys (not only into an empty file): whoever administers root keeps access as the deploy user.
-merge_authorized_keys /root/.ssh/authorized_keys "$keys_target"
-(( MERGED_KEYS )) && log "$( (( DRY_RUN )) && echo '[dry-run] add' || echo 'Added') ${MERGED_KEYS} key(s) from /root/.ssh/authorized_keys to ${auth_keys}."
-run chown "$DEPLOY_USER:$DEPLOY_USER" "$auth_keys"
-run chmod 600 "$auth_keys"
+# Read and written as the deploy user (a dry run only reports): a symlink at ~/.ssh or authorized_keys stops the deploy.
+update_deploy_keys "$auth_keys"
+keys_target="$KEYS_PREVIEW"
 
 # Administration path for the deploy user: passwordless sudo for the root-owned entry points only (not ALL).
 install_root_wrappers
@@ -1010,14 +1475,38 @@ fi
 if (( ! DRY_RUN )) && ! sudo -n -l -U "$DEPLOY_USER" "${ROOT_SBIN_DIR}/amoobot-deploy" > /dev/null 2>&1; then
   login_problems+=("sudo -l -U ${DEPLOY_USER} does not allow ${ROOT_SBIN_DIR}/amoobot-deploy")
 fi
-(( DRY_RUN )) && rm -f "$keys_target"
+if (( DRY_RUN && EUID != 0 )); then
+  log "[dry-run] (not root: sshd -T -C user=${DEPLOY_USER} access check skipped; a real run refuses if sshd would not let ${DEPLOY_USER} in)"
+elif command -v sshd > /dev/null 2>&1 && id "$DEPLOY_USER" > /dev/null 2>&1; then
+  # The current config must already let the deploy user in (AllowUsers/DenyUsers/AllowGroups/DenyGroups, Match blocks,
+  # AuthorizedKeysFile); pubkeyauthentication is checked again with the drop-in in place, before ssh is reloaded.
+  mapfile -t -O "${#login_problems[@]}" login_problems < <(sshd_effective "$DEPLOY_USER" | ssh_access_problems "$DEPLOY_USER" "$DEPLOY_HOME" 0)
+elif (( ! DRY_RUN )); then
+  login_problems+=("sshd is not installed (cannot check what it would allow)")
+fi
+if [[ "$SSH_PERMIT_ROOT_LOGIN" == no ]] && (( ! DRY_RUN )); then
+  mapfile -t -O "${#login_problems[@]}" login_problems < <(other_admin_problems)
+elif [[ "$SSH_PERMIT_ROOT_LOGIN" == no ]]; then
+  log "[dry-run] SSH_PERMIT_ROOT_LOGIN=no: a real run requires another account with a key login and full sudo (sudo -l -U), or I_HAVE_CONSOLE_ACCESS=yes"
+fi
+# The firewall (below) allows only 22: SSH must really listen there (ssh.socket on 24.04 decides, not only sshd_config).
+if (( ! DRY_RUN )); then
+  ssh_ports="$(ssh_listen_ports | tr '\n' ' ')"
+  [[ "$ssh_ports" == "22 " ]] \
+    || login_problems+=("SSH listens on port(s) ${ssh_ports:-unknown }but the firewall only allows 22 (check ssh.socket ListenStream / sshd Port). Move SSH to 22 first.")
+fi
+rm -f "$keys_target"
 if (( ${#login_problems[@]} )); then
   printf '  - %s\n' "${login_problems[@]}" >&2
-  refusal="Refusing to disable SSH password login (and to set PermitRootLogin ${SSH_PERMIT_ROOT_LOGIN}): ${DEPLOY_USER} has no verified key login + sudo path (reasons above). That would risk locking you out. Set DEPLOY_SSH_PUBLIC_KEY (your .pub) and re-run."
+  refusal="Refusing to disable SSH password login (and to set PermitRootLogin ${SSH_PERMIT_ROOT_LOGIN}): ${DEPLOY_USER} has no verified key login + sudo path (reasons above). That would risk locking you out. Fix the reasons above (e.g. set DEPLOY_SSH_PUBLIC_KEY to your .pub) and re-run."
   if (( DRY_RUN )); then warn "a real run would stop here. ${refusal}"; else die "$refusal"; fi
 fi
+# dropin_login_check  run with the new drop-in in place, before ssh is reloaded: the deploy user's key login must still work.
+dropin_login_check() {
+  sshd_effective "$DEPLOY_USER" | ssh_access_problems "$DEPLOY_USER" "$DEPLOY_HOME" 1
+}
 # 00- so it is read before cloud-init's 50-cloud-init.conf (first value wins in sshd).
-install_sshd_dropin /etc/ssh/sshd_config.d/00-amoobot-hardening.conf <<EOF
+install_sshd_dropin /etc/ssh/sshd_config.d/00-amoobot-hardening.conf dropin_login_check <<EOF
 # Managed by amoobot deploy.sh
 PubkeyAuthentication yes
 PasswordAuthentication no
@@ -1031,9 +1520,6 @@ fi
 if (( ! DRY_RUN )); then
   [[ "$(sshd -T | awk '$1=="passwordauthentication"{print $2}')" == "no" ]] \
     || die "Password login is still enabled by another sshd config file; check /etc/ssh/sshd_config(.d)."
-  ssh_ports="$(sshd -T | awk '$1=="port"{print $2}' | sort -u | tr '\n' ' ')"
-  [[ "$ssh_ports" == "22 " ]] \
-    || die "sshd listens on port(s) ${ssh_ports}but the firewall only allows 22. Move SSH to 22 first, or you will be locked out."
 fi
 
 run ufw default deny incoming
@@ -1106,82 +1592,84 @@ step "7/18" "Fetching code (${DEPLOY_REF})..."
 
 id "$DEPLOY_USER" > /dev/null 2>&1 || (( DRY_RUN )) || die "Deploy user ${DEPLOY_USER} does not exist; run once without --app-only."
 resolve_deploy_home
-DEPLOY_KEY="$DEPLOY_HOME/.ssh/amoobot_deploy_ed25519"
-# Never accept-new: an unknown host key is refused. For github.com the keys come from GitHub's API over HTTPS.
+# The root-owned mirror is fetched as root with a root-owned read-only key. Never accept-new: an unknown host key is
+# refused. For github.com the keys come from GitHub's API over HTTPS; other hosts need a verified ROOT_KNOWN_HOSTS.
 repo_host="${REPO_URL#ssh://}"; repo_host="${repo_host#*@}"; repo_host="${repo_host%%[:/]*}"
-GIT_SSH="ssh -i ${DEPLOY_KEY} -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes"
-if [[ "$REPO_URL" == git@* || "$REPO_URL" == ssh://* ]] && [[ "$repo_host" == github.com ]]; then
-  GIT_SSH+=" -o UserKnownHostsFile=${GITHUB_KNOWN_HOSTS}"
+if [[ "$repo_host" == github.com ]]; then
+  repo_known_hosts="$GITHUB_KNOWN_HOSTS"
   if (( DRY_RUN )); then
     log "[dry-run] fetch GitHub's SSH host keys from ${GITHUB_META_URL} (HTTPS) -> ${GITHUB_KNOWN_HOSTS}; git uses StrictHostKeyChecking=yes"
   else
     refresh_github_known_hosts
   fi
+else
+  repo_known_hosts="$ROOT_KNOWN_HOSTS"
+  [[ -s "$ROOT_KNOWN_HOSTS" ]] || (( DRY_RUN )) || die "${repo_host} is not github.com: put its verified SSH host key into ${ROOT_KNOWN_HOSTS} (root-owned; compare ssh-keyscan's fingerprint with your git provider's documentation), then re-run."
 fi
-
-if [[ "$REPO_URL" == git@* || "$REPO_URL" == ssh://* ]]; then
-  if [[ ! -f "$DEPLOY_KEY" ]]; then
-    as "$DEPLOY_USER" ssh-keygen -q -t ed25519 -N '' -C "amoobot-deploy@$(hostname)" -f "$DEPLOY_KEY"
+MIRROR_SSH="ssh -F /dev/null -i ${ROOT_REPO_KEY} -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=${repo_known_hosts} -o GlobalKnownHostsFile=/dev/null"
+if (( DRY_RUN )); then
+  log "[dry-run] fetch ${REPO_URL} AS ROOT into ${MIRROR_DIR} (root:root 700) with ${ROOT_REPO_KEY}: origin's branches and tags only"
+  log "[dry-run] resolve ${DEPLOY_REF} in the root-owned mirror (origin/${DEPLOY_REF}, a tag, or a full commit hash contained in one$( [[ "${REQUIRE_SIGNED_TAG:-no}" == yes ]] && echo '; REQUIRE_SIGNED_TAG=yes: only a tag signed by a key in '"${ALLOWED_SIGNERS_FILE}")); refuse it unless it has every root-owned ops file (git cat-file -e) - before pausing anything"
+  log "[dry-run] compare the database's executed migrations with ${DEPLOY_REF}'s migrations/ (from the mirror); refuse if the database is ahead - before pausing anything"
+else
+  if [[ ! -f "$ROOT_REPO_KEY" ]]; then
+    install -d -m 700 -o root -g root "${ROOT_REPO_KEY%/*}"
+    ( umask 077; ssh-keygen -q -t ed25519 -N '' -C "amoobot-root@$(hostname)" -f "$ROOT_REPO_KEY" )
   fi
-  if (( ! DRY_RUN )) && ! sudo -H -u "$DEPLOY_USER" GIT_SSH_COMMAND="$GIT_SSH" git ls-remote --heads "$REPO_URL" > /dev/null 2>&1; then
+  [[ ! -L "$ROOT_REPO_KEY" && "$(stat -c '%U %a' "$ROOT_REPO_KEY")" == "root 600" ]] \
+    || die "${ROOT_REPO_KEY} must be a regular file owned by root with mode 600."
+  update_mirror
+  if (( ! MIRROR_FETCH_OK )); then
     log ""
-    log "The server cannot read ${REPO_URL}. Add this PUBLIC key as a read-only Deploy key"
+    log "The server (as root) cannot read ${REPO_URL}. Add this PUBLIC key as a read-only Deploy key"
     log "(GitHub > repo > Settings > Deploy keys > Add, leave 'Allow write access' UNCHECKED):"
     log ""
-    cat "${DEPLOY_KEY}.pub"
+    cat "${ROOT_REPO_KEY}.pub"
     log ""
-    if [[ "$repo_host" != github.com ]]; then
-      log "${repo_host} is not github.com: its SSH host key is not fetched automatically and unknown keys are refused."
-      log "Get the fingerprint from your git provider's documentation, then add the verified key to ${DEPLOY_HOME}/.ssh/known_hosts"
-      log "(e.g. ssh-keyscan ${repo_host} > /tmp/k; ssh-keygen -lf /tmp/k; compare; append only if it matches)."
-      log ""
-    fi
-    die "Repository not readable with the deploy key. Add the key above, then re-run."
+    die "Repository not readable with ${ROOT_REPO_KEY}. Add the key above, then re-run. Nothing was paused or checked out."
   fi
-else
-  warn "REPO_URL is not an SSH URL; the read-only deploy key is not used."
-fi
-
-run install -d -m 750 -o "$DEPLOY_USER" -g "$WEB_USER" "$APP_DIR"
-if [[ -d "$APP_DIR/.git" ]]; then
-  # Earlier versions of this script left the checkout owned by root/www-data.
-  run chown -R "$DEPLOY_USER:$WEB_USER" "$APP_DIR"
-  [[ -d "$APP_DIR/var" ]] && run chown -R "$WEB_USER:$WEB_USER" "$APP_DIR/var"
-  as "$DEPLOY_USER" git -C "$APP_DIR" remote set-url origin "$REPO_URL"
-else
-  as "$DEPLOY_USER" env GIT_SSH_COMMAND="$GIT_SSH" git clone "$REPO_URL" "$APP_DIR"
-fi
-[[ "$REPO_URL" == git@* || "$REPO_URL" == ssh://* ]] && as "$DEPLOY_USER" git -C "$APP_DIR" config core.sshCommand "$GIT_SSH"
-
-if (( ! DRY_RUN )); then
-  dirty="$(sudo -H -u "$DEPLOY_USER" git -C "$APP_DIR" status --porcelain --untracked-files=no)"
-  [[ -z "$dirty" ]] || die "Tracked files were modified on the server in ${APP_DIR}; inspect with 'git status' and revert before deploying."
-  PREVIOUS_COMMIT="$(sudo -H -u "$DEPLOY_USER" git -C "$APP_DIR" rev-parse --verify -q HEAD || true)"
-fi
-as "$DEPLOY_USER" git -C "$APP_DIR" fetch --prune --tags origin
-if (( DRY_RUN )); then
-  log "[dry-run] resolve ${DEPLOY_REF} (origin/${DEPLOY_REF}, a tag, or a commit); refuse it unless it has every root-owned ops file (git cat-file -e) - before pausing anything"
-else
-  TARGET_COMMIT="$(sudo -H -u "$DEPLOY_USER" git -C "$APP_DIR" rev-parse --verify -q "origin/${DEPLOY_REF}^{commit}" \
-    || sudo -H -u "$DEPLOY_USER" git -C "$APP_DIR" rev-parse --verify -q "${DEPLOY_REF}^{commit}" \
-    || true)"
-  [[ -n "$TARGET_COMMIT" ]] || die "Ref '${DEPLOY_REF}' not found on origin (branch, tag or commit)."
+  TARGET_COMMIT="$(resolve_target_ref "$DEPLOY_REF")" || die "Refusing to deploy '${DEPLOY_REF}' (see above). Nothing was paused or checked out."
   # Checked before the jobs are paused: a refused rollback leaves the running release untouched.
   verify_target_ops "$TARGET_COMMIT"
+  check_schema_matches "$TARGET_COMMIT"
 fi
+
+# APP_DIR's parent is root-owned, so only APP_DIR itself and var/ (in the deploy-owned APP_DIR) need the link check.
+refuse_symlink "$APP_DIR"
+run install -d -m 750 -o "$DEPLOY_USER" -g "$WEB_USER" "$APP_DIR"
+if [[ -d "$APP_DIR/.git" ]]; then
+  # Earlier versions of this script left the checkout owned by root/www-data. -h -P: never follow a link.
+  refuse_symlink "$APP_DIR/var"
+  run chown -R -h -P "$DEPLOY_USER:$WEB_USER" "$APP_DIR"
+  [[ -d "$APP_DIR/var" ]] && run chown -R -h -P "$WEB_USER:$WEB_USER" "$APP_DIR/var"
+fi
+if (( ! DRY_RUN )) && [[ -d "$APP_DIR/.git" ]]; then
+  dirty="$(sudo -H -u "$DEPLOY_USER" git -C "$APP_DIR" status --porcelain --untracked-files=no)"
+  [[ -z "$dirty" ]] || die "Tracked files were modified on the server in ${APP_DIR}; inspect with 'git status' and revert before deploying."
+fi
+# What is deployed comes from root's own record, never from the deploy-owned checkout.
+PREVIOUS_COMMIT=""
+if [[ -r "$STATE_DIR/deployed-commit" ]]; then
+  PREVIOUS_COMMIT="$(head -c 41 "$STATE_DIR/deployed-commit" | tr -d '\n')"
+elif [[ -r "$STATE_DIR/releases.log" ]]; then
+  # Servers deployed before deployed-commit existed: the target of the last recorded release.
+  PREVIOUS_COMMIT="$(tail -n 1 "$STATE_DIR/releases.log" | sed -n 's/^.* -> \([0-9a-f]\{40\}\) .*$/\1/p')"
+fi
+[[ "$PREVIOUS_COMMIT" =~ ^[0-9a-f]{40}$ ]] || PREVIOUS_COMMIT=""
 # From here until step 16 the code, cache and schema change: no scheduled job may run meanwhile.
 pause_scheduled_jobs
 # ...and until the end of step 11 Telegram and the gateways get 503 (they retry) instead of half-updated code.
 set_maintenance on
 if (( DRY_RUN )); then
-  log "[dry-run] check out ${DEPLOY_REF}"
+  log "[dry-run] check out ${DEPLOY_REF} in ${APP_DIR} as ${DEPLOY_USER}, from a bundle of the root-owned mirror (no GitHub access for ${DEPLOY_USER})"
 else
-  sudo -H -u "$DEPLOY_USER" git -C "$APP_DIR" checkout -q --detach "$TARGET_COMMIT"
+  fill_checkout "$TARGET_COMMIT"
   install -d -m 755 "$STATE_DIR"
+  printf '%s\n' "$TARGET_COMMIT" > "$STATE_DIR/deployed-commit"
   printf '%s %s -> %s (%s)\n' "$(date -u +%FT%TZ)" "${PREVIOUS_COMMIT:-none}" "$TARGET_COMMIT" "$DEPLOY_REF" >> "$STATE_DIR/releases.log"
   log "Deploying ${TARGET_COMMIT} (previous: ${PREVIOUS_COMMIT:-none}). History: ${STATE_DIR}/releases.log"
 fi
-# Root-run scripts come from the commit's git objects, so an edited file in the checkout never runs as root.
+# Root-run scripts come from the commit in the root-owned mirror, so nothing the deploy user can edit runs as root.
 install_root_ops "${TARGET_COMMIT:-<target commit>}"
 
 cd "$APP_DIR" 2>/dev/null || (( DRY_RUN )) || die "Cannot enter ${APP_DIR}."
@@ -1219,16 +1707,17 @@ render_app_env() {
   done
 }
 
-render_app_env | write_file "$APP_DIR/.env.prod.local" 600 "$DEPLOY_USER:$DEPLOY_USER"
+render_app_env | write_user_file "$APP_DIR/.env.prod.local" 600 "$DEPLOY_USER"
 # The root-run backup/restore scripts read DATABASE_URL only from this root-owned file.
 [[ "$DATABASE_URL" != *$'\n'* ]] || die "DATABASE_URL must be a single line."
 run install -d -m 700 -o root -g root "${DB_URL_FILE%/*}"
 printf 'DATABASE_URL=%s\n' "$DATABASE_URL" | write_file "$DB_URL_FILE" 600 root:root
 # Replaces the old .env.local (which held secrets); now only the non-secret environment switch.
-printf 'APP_ENV=prod\nAPP_DEBUG=0\n' | write_file "$APP_DIR/.env.local" 640 "$DEPLOY_USER:$WEB_USER"
+printf 'APP_ENV=prod\nAPP_DEBUG=0\n' | write_user_file "$APP_DIR/.env.local" 640 "$DEPLOY_USER:$WEB_USER"
 as "$DEPLOY_USER" composer dump-env prod --working-dir="$APP_DIR" --no-interaction
-run chown "$DEPLOY_USER:$WEB_USER" "$APP_DIR/.env.local.php"
-run chmod 640 "$APP_DIR/.env.local.php"
+refuse_symlink "$APP_DIR/.env.local.php"
+run chown -h "$DEPLOY_USER:$WEB_USER" "$APP_DIR/.env.local.php"
+as "$DEPLOY_USER" chmod 640 "$APP_DIR/.env.local.php"
 
 ########################################
 # PERMISSIONS
@@ -1236,12 +1725,24 @@ run chmod 640 "$APP_DIR/.env.local.php"
 
 step "10/18" "Setting permissions..."
 
-run install -d -o "$WEB_USER" -g "$WEB_USER" "$APP_DIR/var" "$APP_DIR/var/plugins" "$APP_DIR/var/plugin_uploads" "$APP_DIR/var/log" "$APP_DIR/public/bundles"
-run chown -R "$WEB_USER:$WEB_USER" "$APP_DIR/var" "$APP_DIR/public/bundles"
-run chmod -R 775 "$APP_DIR/var"
-# Code: owned by the deploy user, readable (not writable) by PHP-FPM, closed to others.
-run chmod -R g+rX,o-rwx "$APP_DIR"
-run chmod 600 "$APP_DIR/.env.prod.local"
+# set_app_permissions  every directory is created and chmod-ed by its owner; root only runs chown -h / chown -R -h -P,
+# which never follow a symbolic link. A link at var/, public/ or public/bundles stops the deploy.
+set_app_permissions() {
+  refuse_symlink "$APP_DIR/var" "$APP_DIR/public" "$APP_DIR/public/bundles"
+  # Files the checkout just created belong to the deploy user's own group; PHP-FPM reads them through group www-data.
+  run chown -R -h -P "$DEPLOY_USER:$WEB_USER" "$APP_DIR"
+  as "$DEPLOY_USER" mkdir -p "$APP_DIR/var" "$APP_DIR/public/bundles"
+  run chown -h "$WEB_USER:$WEB_USER" "$APP_DIR/var" "$APP_DIR/public/bundles"
+  as "$WEB_USER" mkdir -p "$APP_DIR/var/plugins" "$APP_DIR/var/plugin_uploads" "$APP_DIR/var/log"
+  run chown -R -h -P "$WEB_USER:$WEB_USER" "$APP_DIR/var" "$APP_DIR/public/bundles"
+  # var/ and public/bundles: writable by PHP (www-data and its group), closed to others.
+  as "$WEB_USER" chmod -R ug+rwX,o-rwx "$APP_DIR/var" "$APP_DIR/public/bundles"
+  # Code: owned by the deploy user, readable (not writable) by PHP-FPM, closed to others. find skips links (! -type l).
+  as "$DEPLOY_USER" find "$APP_DIR" \( -path "$APP_DIR/var" -o -path "$APP_DIR/public/bundles" \) -prune \
+    -o -user "$DEPLOY_USER" ! -type l -exec chmod g+rX,o-rwx {} +
+  as "$DEPLOY_USER" chmod 600 "$APP_DIR/.env.prod.local"
+}
+set_app_permissions
 
 ########################################
 # CACHE & MIGRATIONS
@@ -1278,8 +1779,9 @@ if ! console doctrine:migrations:migrate --allow-no-migration; then
   restore_instructions
   die "doctrine:migrations:migrate failed."
 fi
-# Exit 1: migrations still pending. Exit 2: the database has migrations this code does not know (e.g. a rollback to a
-# release older than the schema) - the code and the schema do not match.
+# Second line of defence (check_schema_matches already ran before the checkout). Exit codes verified in
+# vendor/doctrine/migrations 3.9.7 (UpToDateCommand): 0 up to date; 1 migrations pending; 2 executed migrations the code
+# does not know, only with --fail-on-unregistered (2 wins when both apply; without the flag that case returns 0).
 if console doctrine:migrations:up-to-date --fail-on-unregistered; then
   :
 else
@@ -1343,6 +1845,9 @@ app_locations() {
     # 503 + Retry-After while a deploy runs (${NGINX_MAINTENANCE_FILE}); Telegram retries the update.
     location ^~ /telegram/webhook/ {
         access_log off;
+        # Upstream errors (PHP-FPM down, timeouts) are logged at "error" with the request line, i.e. with the URL secret:
+        # only crit and worse here, in a file of its own.
+        error_log /var/log/nginx/amoobot_webhook_error.log crit;
         include ${NGINX_MAINTENANCE_FILE};
         fastcgi_pass unix:/run/php/php${PHP_VERSION}-fpm.sock;
         include fastcgi_params;
@@ -1455,9 +1960,20 @@ EOF
   fi
 }
 
+# nginx_log_files  the site's logs exist with mode 640 (www-data:adm, as Ubuntu's logrotate creates them); nginx itself
+# would create a missing log 0644. /var/log/nginx is root-owned, so these paths are not deploy-controlled.
+nginx_log_files() {
+  local f
+  for f in /var/log/nginx/amoobot_access.log /var/log/nginx/amoobot_error.log /var/log/nginx/amoobot_webhook_error.log; do
+    refuse_symlink "$f"
+    if [[ -e "$f" ]]; then run chmod 640 "$f"; else run install -m 640 -o "$WEB_USER" -g adm /dev/null "$f"; fi
+  done
+}
+
 apply_nginx() {
   # The site includes the maintenance file, so it must exist (normally "off" here) before nginx -t.
   [[ -f "$NGINX_MAINTENANCE_FILE" ]] || render_maintenance off | write_file "$NGINX_MAINTENANCE_FILE" 644 root:root
+  nginx_log_files
   run install -d -m 755 -o root -g root "$ACME_WEBROOT"
   render_nginx | write_file "$NGINX_SITE" 644 root:root --show-diff
   run ln -sf "$NGINX_SITE" /etc/nginx/sites-enabled/amoobot
@@ -1637,18 +2153,8 @@ done
 
 (( units_changed )) && run systemctl daemon-reload
 
-# Resume: release the job locks taken before the checkout, then (re)start every timer.
-for fd in "${JOB_LOCK_FDS[@]}"; do
-  exec {fd}<&-
-done
-JOB_LOCK_FDS=()
-for entry in "${SCHEDULED_JOBS[@]}"; do
-  parse_job "$entry"
-  run systemctl enable --now "amoobot-job-${JOB_NAME}.timer"
-done
-run systemctl enable --now "${CHECK_JOBS_UNIT}.timer"
-(( ${#changed_timers[@]} )) && run systemctl restart "${changed_timers[@]}"
-JOBS_PAUSED=0
+# Resume: code, cache and schema match again.
+resume_scheduled_jobs
 log "Scheduled jobs active. Status: systemctl list-timers 'amoobot-*'   Check: sudo amoobot-check-jobs (also hourly: ${CHECK_JOBS_UNIT}.timer)"
 [[ -n "$MONITOR_PING_URL" ]] && log "Dead-man's switch: successful jobs and the nightly backup ping MONITOR_PING_URL (value not shown)."
 
@@ -1667,8 +2173,17 @@ console app:telegram:set-webhook "https://${DOMAIN}"
 
 step "18/18" "Running final checks..."
 
+# PHP timezone pinned to UTC for FPM and CLI (no behaviour change: it was UTC by PHP's default); FPM restarts just below.
+install_php_timezone
 run systemctl restart "php${PHP_VERSION}-fpm"
 run systemctl reload nginx
+if (( DRY_RUN )); then
+  log "[dry-run] verify the effective PHP timezone is UTC: CLI (php -r), FPM (php-fpm${PHP_VERSION} -i and pool.d overrides)"
+else
+  tz_problems="$(php_timezone_problems)"
+  [[ -z "$tz_problems" ]] || die "PHP timezone is not UTC everywhere: ${tz_problems//$'\n'/; }"
+  log "PHP timezone: UTC for CLI and FPM ($(php_timezone_ini_paths | tr '\n' ' '))."
+fi
 
 if (( ! DRY_RUN )); then
   # As the web user: .env.local.php is PHP owned by the deploy user and must never be executed as root.

@@ -11,6 +11,9 @@
 #   INACTIVE  the timer is not active (e.g. a failed deploy left the jobs paused)
 #   FAILED    the latest run failed (systemd unit in "failed" state), even if an older success is still recent
 # Plus the nightly database backup (newest *_nightly_*.sql.gz younger than 26 h) when the backup dir is readable.
+# Deploys: while /var/lib/amoobot/deploy-in-progress is younger than 30 min the paused jobs are reported as PAUSED (not a
+# problem); older means a deploy failed or was interrupted (or the server rebooted mid-deploy) and the jobs stay paused:
+# a DEPLOY problem (exit 2 -> failed unit -> alert) and a MONITOR_PING_URL /fail ping for "{job}" = deploy.
 #
 # Exit codes (Nagios/Icinga style): 0 all OK, 2 at least one problem, 3 cannot check (no manifest).
 
@@ -21,6 +24,9 @@ STATE_DIR="${AMOOBOT_JOBS_STATE_DIR:-/var/lib/amoobot/jobs}"
 SYSTEMCTL="${AMOOBOT_SYSTEMCTL:-systemctl}"
 BACKUP_DIR="${AMOOBOT_BACKUP_DIR:-/var/backups/amoobot}"
 BACKUP_MAX_AGE="${AMOOBOT_BACKUP_MAX_AGE:-93600}"
+DEPLOY_MARKER="${AMOOBOT_DEPLOY_MARKER:-/var/lib/amoobot/deploy-in-progress}"
+DEPLOY_MAX_AGE="${AMOOBOT_DEPLOY_MAX_AGE:-1800}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 if [[ ! -r "$MANIFEST" ]]; then
   echo "UNKNOWN: ${MANIFEST} not found or not readable (has deploy.sh installed the scheduled jobs?)"
@@ -28,6 +34,11 @@ if [[ ! -r "$MANIFEST" ]]; then
 fi
 
 now="$(date +%s)"
+deploy_state=""
+if [[ -e "$DEPLOY_MARKER" ]]; then
+  deploy_age=$((now - $(stat -c %Y "$DEPLOY_MARKER")))
+  if (( deploy_age > DEPLOY_MAX_AGE )); then deploy_state="stuck"; else deploy_state="running"; fi
+fi
 
 human() {
   local s="$1"
@@ -77,7 +88,11 @@ while read -r job max_age schedule _; do
     status="FAILED"; notes+=("unit failed: journalctl -u amoobot-job-${job}")
   fi
 
-  [[ "$status" == "OK" ]] || problems=$((problems + 1))
+  # A deploy that is still within its time pauses the jobs on purpose; a failed latest run still counts.
+  if [[ "$deploy_state" == running && "$status" =~ ^(STALE|NEVER|INACTIVE)$ ]]; then
+    status="PAUSED"; notes+=("deploy in progress")
+  fi
+  [[ "$status" == "OK" || "$status" == "PAUSED" ]] || problems=$((problems + 1))
   row "$status" "$job" "$last" "$(human "$max_age")" "$(IFS=';'; echo "${notes[*]}" | sed 's/;/; /g')"
 done < "$MANIFEST"
 
@@ -104,6 +119,21 @@ if [[ -d "$BACKUP_DIR" ]]; then
     fi
   else
     row SKIPPED backup - - "${BACKUP_DIR} not readable; run as root to check backups"
+  fi
+fi
+
+if [[ -n "$deploy_state" ]]; then
+  if [[ "$deploy_state" == stuck ]]; then
+    total=$((total + 1)); problems=$((problems + 1))
+    row DEPLOY deploy "started $(human "$deploy_age") ago" "$(human "$DEPLOY_MAX_AGE")" \
+      "a deploy failed or was interrupted: jobs stay paused, webhook/payment may answer 503; re-run sudo amoobot-deploy --app-only"
+    if [[ -r "$SCRIPT_DIR/lib/monitor-ping.sh" ]]; then
+      # shellcheck source=bin/lib/monitor-ping.sh
+      source "$SCRIPT_DIR/lib/monitor-ping.sh"
+      monitor_ping deploy fail > /dev/null
+    fi
+  else
+    row PAUSED deploy "started $(human "$deploy_age") ago" "$(human "$DEPLOY_MAX_AGE")" "deploy in progress (${DEPLOY_MARKER})"
   fi
 fi
 

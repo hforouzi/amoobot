@@ -13,6 +13,7 @@ use App\Provisioning\Application\VpnProvisioningService;
 use App\Shop\Domain\OrderStatus;
 use App\Payment\Domain\PaymentGatewayType;
 use App\Tests\Support\IntegrationTestCase;
+use PHPUnit\Framework\Attributes\Group;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Component\Process\PhpExecutableFinder;
 use Symfony\Component\Process\Process;
@@ -162,6 +163,7 @@ final class ProvisioningIdempotencyTest extends IntegrationTestCase
      * A settlement process is killed after the panel created the client but before the database
      * commit. The next ordinary webhook/callback for the payment must adopt that client.
      */
+    #[Group('subprocess')]
     public function testKilledBetweenCreateServiceAndCommitThenTheNextWebhookAdopts(): void
     {
         $stateFile = sys_get_temp_dir().'/amoobot-test-panel-'.bin2hex(random_bytes(4)).'.json';

@@ -14,6 +14,7 @@ use App\Payment\Domain\PaymentReturnUrl;
 use App\Payment\Domain\PaymentStatus;
 use App\Shop\Domain\OrderStatus;
 use App\Tests\Support\IntegrationTestCase;
+use PHPUnit\Framework\Attributes\Group;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Component\Process\PhpExecutableFinder;
 use Symfony\Component\Process\Process;
@@ -162,6 +163,7 @@ final class LatePaymentAfterCancelTest extends IntegrationTestCase
         }
     }
 
+    #[Group('subprocess')]
     public function testCancelDuringAnInProgressSettlementNeverRewritesIt(): void
     {
         $order = $this->createOrder($this->createUser(self::TELEGRAM_ID), $this->createPlan(150000, $this->createTestInbound()));
@@ -187,6 +189,7 @@ final class LatePaymentAfterCancelTest extends IntegrationTestCase
         self::assertSame(1, $this->countServicesForOrder($order));
     }
 
+    #[Group('subprocess')]
     public function testCancelAndSettlementStartedTogetherEndInAConsistentState(): void
     {
         $php = $this->phpForSubprocesses();
