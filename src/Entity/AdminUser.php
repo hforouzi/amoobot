@@ -7,6 +7,7 @@ namespace App\Entity;
 use Doctrine\DBAL\Types\Types;
 use Doctrine\ORM\Mapping as ORM;
 use Symfony\Bridge\Doctrine\Validator\Constraints\UniqueEntity;
+use Symfony\Component\Security\Core\User\EquatableInterface;
 use Symfony\Component\Security\Core\User\PasswordAuthenticatedUserInterface;
 use Symfony\Component\Security\Core\User\UserInterface;
 
@@ -16,7 +17,7 @@ use Symfony\Component\Security\Core\User\UserInterface;
 #[ORM\UniqueConstraint(name: 'uniq_admin_user_username', columns: ['username'])]
 #[UniqueEntity(fields: ['email'])]
 #[UniqueEntity(fields: ['username'], ignoreNull: true)]
-class AdminUser implements UserInterface, PasswordAuthenticatedUserInterface
+class AdminUser implements UserInterface, PasswordAuthenticatedUserInterface, EquatableInterface
 {
     public const ROLE_SUPER_ADMIN = 'ROLE_SUPER_ADMIN';
     public const ROLE_ADMIN = 'ROLE_ADMIN';
@@ -134,6 +135,31 @@ class AdminUser implements UserInterface, PasswordAuthenticatedUserInterface
         $roles[] = self::ROLE_ADMIN;
 
         return array_values(array_unique($roles));
+    }
+
+    /**
+     * The roles given to this admin, without the ROLE_ADMIN that getRoles() always adds for the /admin access rule.
+     * Permissions (AdminRolePermissions) are decided from these.
+     *
+     * @return list<string>
+     */
+    public function getAssignedRoles(): array
+    {
+        return array_values(array_filter($this->roles, static fn (string $role): bool => in_array($role, self::SUPPORTED_ROLES, true)));
+    }
+
+    /**
+     * Compared on every request with the row reloaded from the database: a deactivated admin, or one whose password,
+     * email or roles changed, is logged out at once (not only at the next login).
+     */
+    public function isEqualTo(UserInterface $user): bool
+    {
+        return $user instanceof self
+            && $user->isActive()
+            && $user->getId() === $this->id
+            && $user->getUserIdentifier() === $this->getUserIdentifier()
+            && $user->getPassword() === $this->password
+            && $user->getAssignedRoles() === $this->getAssignedRoles();
     }
 
     /**

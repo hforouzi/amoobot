@@ -64,6 +64,41 @@ final class MenuStructureTest extends IntegrationTestCase
         self::assertSame($this->commonGroups(), $this->menuFor($this->admin));
     }
 
+    /**
+     * Support: read-only orders, payments, customers and services; no discount codes, catalog, messaging or system.
+     */
+    public function testSupportMenu(): void
+    {
+        $support = $this->createAdmin('menu-support@shop.test', [AdminUser::ROLE_SUPPORT]);
+        $needsAttention = $this->trans('admin.menu.needs_attention').' > ';
+
+        self::assertSame([
+            '' => ['/admin', '/admin/logout'],
+            $this->trans('admin.menu.sales') => [
+                $this->path(OrderCrudController::class),
+                $this->path(PaymentCrudController::class),
+                $needsAttention.$this->path(PaymentNeedsReviewCrudController::class),
+                $needsAttention.$this->path(PaymentProvisioningFailedCrudController::class),
+            ],
+            $this->trans('admin.menu.customers') => [
+                $this->path(UserCrudController::class),
+                $this->path(TelegramAccountCrudController::class),
+                $this->path(VpnServiceCrudController::class),
+            ],
+        ], $this->menuFor($support));
+
+        // Every entry Support sees opens for Support.
+        foreach ($this->menuFor($support) as $entries) {
+            foreach ($entries as $entry) {
+                $target = (string) preg_replace('/^.* > /', '', $entry);
+                if ('/admin/logout' !== $target) {
+                    $this->client->request('GET', $target);
+                    self::assertSame(200, $this->client->getResponse()->getStatusCode(), 'support GET '.$target);
+                }
+            }
+        }
+    }
+
     public function testSuperAdminMenu(): void
     {
         self::assertSame($this->commonGroups() + [

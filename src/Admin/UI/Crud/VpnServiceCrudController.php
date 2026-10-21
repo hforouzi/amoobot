@@ -8,6 +8,7 @@ use App\Admin\UI\Support\AdminStatusBadge;
 use App\Entity\VpnService;
 use App\Provisioning\Application\FinalConfigLinkProvider;
 use App\Provisioning\Domain\VpnServiceStatus;
+use App\Security\AdminPermission;
 use Doctrine\ORM\QueryBuilder;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Action;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Actions;
@@ -45,8 +46,8 @@ class VpnServiceCrudController extends AbstractCrudController
         return $actions
             ->add(Action::INDEX, $regenerateConfig)
             ->add(Action::DETAIL, $regenerateConfig)
-            // Its route lives in VpnPanelInboundActionsController, which is super-admin only.
-            ->setPermission('regenerateConfig', 'ROLE_SUPER_ADMIN');
+            // Its route lives in VpnPanelInboundActionsController (PANELS_MANAGE).
+            ->setPermission('regenerateConfig', AdminPermission::PANELS_MANAGE->value);
     }
 
     public function configureFields(string $pageName): iterable

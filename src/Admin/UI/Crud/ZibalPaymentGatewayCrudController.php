@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Admin\UI\Crud;
 
-use App\Entity\AdminUser;
+use App\Admin\Security\AdminCrudPermissions;
 use App\Entity\PaymentGateway;
 use App\Payment\Domain\PaymentGatewayType;
 use Doctrine\ORM\QueryBuilder;
@@ -22,9 +22,6 @@ use EasyCorp\Bundle\EasyAdminBundle\Field\FormField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\IdField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\TextareaField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\TextField;
-use Symfony\Component\Security\Http\Attribute\IsGranted;
-
-#[IsGranted('ROLE_SUPER_ADMIN')]
 final class ZibalPaymentGatewayCrudController extends AbstractCrudController
 {
     public static function getEntityFqcn(): string
@@ -34,7 +31,7 @@ final class ZibalPaymentGatewayCrudController extends AbstractCrudController
 
     public function configureCrud(Crud $crud): Crud
     {
-        return $crud->setEntityPermission(AdminUser::ROLE_SUPER_ADMIN);
+        return $crud->setEntityPermission(AdminCrudPermissions::view(self::class));
     }
 
     public function configureActions(Actions $actions): Actions

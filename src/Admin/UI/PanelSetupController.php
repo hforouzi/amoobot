@@ -22,7 +22,6 @@ use Symfony\Component\Form\FormError;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Attribute\Route;
-use Symfony\Component\Security\Http\Attribute\IsGranted;
 use Symfony\Contracts\Translation\TranslatorInterface;
 
 /**
@@ -31,7 +30,6 @@ use Symfony\Contracts\Translation\TranslatorInterface;
  * Every state change is a POST with a CSRF token; GET pages change nothing on the bot's side.
  */
 #[Route('/admin/panel-setup')]
-#[IsGranted('ROLE_SUPER_ADMIN')]
 final class PanelSetupController extends AbstractController
 {
     use EscapesFlashMessages;

@@ -34,7 +34,7 @@ use Symfony\Component\Security\Core\Role\RoleHierarchyInterface;
 /**
  * Super-admin pages are closed on the server, not only hidden from the menu: a plain ROLE_ADMIN (or ROLE_SUPPORT)
  * gets 403 on every URL of the gated CRUD controllers (including direct pretty URLs such as autocomplete and
- * batch-delete) and on the gated custom routes, and the denial comes from #[IsGranted('ROLE_SUPER_ADMIN')].
+ * batch-delete) and on the gated custom routes, and the denial comes from a permission ROLE_ADMIN does not have (App\Security\AdminRolePermissions).
  */
 final class SuperAdminGatingTest extends IntegrationTestCase
 {
@@ -147,7 +147,8 @@ final class SuperAdminGatingTest extends IntegrationTestCase
                     $this->client->request($method, $url, $body);
                     self::fail(sprintf('%s %s %s was not denied', $user->getEmail(), $method, $url));
                 } catch (AccessDeniedException $e) {
-                    self::assertSame([AdminUser::ROLE_SUPER_ADMIN], $e->getAttributes(), sprintf('%s %s', $method, $url));
+                    self::assertCount(1, $e->getAttributes(), sprintf('%s %s', $method, $url));
+                    self::assertNotContains(\App\Security\AdminPermission::from((string) $e->getAttributes()[0]), \App\Security\AdminRolePermissions::forRole(AdminUser::ROLE_ADMIN), sprintf('%s %s', $method, $url));
                 }
             }
 

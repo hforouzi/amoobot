@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Admin\UI\Crud;
 
+use App\Admin\Security\AdminCrudPermissions;
 use App\Entity\AdminUser;
 use Doctrine\ORM\EntityManagerInterface;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Crud;
@@ -34,7 +35,7 @@ final class AdminUserCrudController extends AbstractCrudController
         return $crud
             ->setEntityLabelInSingular('Admin user')
             ->setEntityLabelInPlural('کاربران ادمین')
-            ->setEntityPermission(AdminUser::ROLE_SUPER_ADMIN)
+            ->setEntityPermission(AdminCrudPermissions::view(self::class))
             ->setDefaultSort(['id' => 'DESC']);
     }
 

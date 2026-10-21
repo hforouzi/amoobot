@@ -4,10 +4,10 @@ declare(strict_types=1);
 
 namespace App\Admin\UI\Crud;
 
+use App\Admin\Security\AdminCrudPermissions;
 use App\Admin\UI\DashboardController;
 use App\Admin\UI\Support\AdminJsonFormatter;
 use App\Admin\UI\Support\AdminStatusBadge;
-use App\Entity\AdminUser;
 use App\Entity\PaymentGateway;
 use App\Entity\StorePaymentMethod;
 use App\Payment\Application\PaymentGatewayModuleRegistry;
@@ -43,11 +43,8 @@ use Symfony\Component\HttpFoundation\RedirectResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Attribute\Route;
-use Symfony\Component\Security\Http\Attribute\IsGranted;
 use Symfony\Component\Validator\Constraints\NotBlank;
 use Symfony\Component\Validator\Constraints\Positive;
-
-#[IsGranted('ROLE_SUPER_ADMIN')]
 final class PaymentGatewayCrudController extends AbstractCrudController
 {
     public function __construct(
@@ -70,7 +67,7 @@ final class PaymentGatewayCrudController extends AbstractCrudController
         return $crud
             ->setEntityLabelInSingular('admin.payment_gateway')
             ->setEntityLabelInPlural('admin.payment_gateways')
-            ->setEntityPermission(AdminUser::ROLE_SUPER_ADMIN)
+            ->setEntityPermission(AdminCrudPermissions::view(self::class))
             ->setDefaultSort(['sortOrder' => 'ASC', 'id' => 'ASC']);
     }
 

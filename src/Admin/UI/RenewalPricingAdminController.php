@@ -16,7 +16,6 @@ use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Attribute\Route;
-use Symfony\Component\Security\Http\Attribute\IsGranted;
 
 #[Route('/admin')]
 final class RenewalPricingAdminController extends AbstractController
@@ -31,8 +30,6 @@ final class RenewalPricingAdminController extends AbstractController
         private readonly SalesSettingsProvider $salesSettingsProvider,
     ) {
     }
-
-    #[IsGranted('ROLE_SUPER_ADMIN')]
     #[Route('/settings/renewal-pricing', name: 'admin_renewal_pricing_settings', methods: ['GET', 'POST'])]
     public function renewalPricingSettings(Request $request): Response
     {
@@ -147,8 +144,6 @@ final class RenewalPricingAdminController extends AbstractController
             'changes' => $changes,
         ]);
     }
-
-    #[IsGranted('ROLE_SUPER_ADMIN')]
     #[Route('/settings/automation', name: 'admin_automation_settings', methods: ['GET', 'POST'])]
     public function automationSettings(Request $request): Response
     {
