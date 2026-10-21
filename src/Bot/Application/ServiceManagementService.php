@@ -23,6 +23,7 @@ use App\Provisioning\Application\RenewalSettingsProvider;
 use App\Provisioning\Application\ServiceUsageSyncService;
 use App\Provisioning\Application\ServiceConfigDeliveryRefresher;
 use App\Provisioning\Application\TrafficAddonSettingsProvider;
+use App\Provisioning\Application\CustomerAccessGuard;
 use App\Provisioning\Application\FinalConfigLinkProvider;
 use App\Provisioning\Application\VpnConfigLinkSetResult;
 use App\Provisioning\Domain\ServiceActivationDriverInterface;
@@ -72,6 +73,7 @@ class ServiceManagementService
         private readonly StorePaymentMethodResolver $storePaymentMethodResolver,
         private readonly VpnAccessMessageFormatter $vpnAccessMessageFormatter,
         private readonly QrCodeSender $qrCodeSender,
+        private readonly CustomerAccessGuard $accessGuard,
         private readonly string $paymentCardNumber = '',
         private readonly string $paymentCardHolder = '',
         private readonly ?string $paymentDescription = null,
@@ -223,7 +225,15 @@ class ServiceManagementService
             return;
         }
 
-        $subscriptionUrl = trim((string) $service->getSubscriptionUrl());
+        $subscriptionUrl = (string) $this->accessGuard->subscriptionUrl($service);
+        if ('' === $subscriptionUrl && '' !== trim((string) $service->getSubscriptionUrl())) {
+            // Stored but not reachable by a client: the access message says so (contact support) and carries any usable link.
+            $this->acknowledgeCallback($callbackId);
+            $this->sendAccessMessages($chatId, $service, '✅ سرویس شما آماده شد', 'telegram_subscription_withheld');
+            $this->debugLog(sprintf('service_subscription_withheld service_id=%d', $serviceId));
+
+            return;
+        }
         if ('' === $subscriptionUrl) {
             $this->showPopupOrMessage($chatId, $callbackId, 'لینک اشتراک برای این سرویس موجود نیست.', 'missing_subscription_url');
             $configLinkSet = $this->collectConfigLinks($service, 'telegram_subscription_fallback_config');
@@ -269,7 +279,7 @@ class ServiceManagementService
         }
 
         $configLinkSet = $this->collectConfigLinks($service, 'telegram_resend_config');
-        if ([] === $configLinkSet->finalLinks) {
+        if ([] === $this->accessGuard->configLinks($service, $configLinkSet->finalLinks) && null === $this->accessGuard->subscriptionUrl($service)) {
             $this->showPopupOrMessage($chatId, $callbackId, 'اطلاعات اتصال کامل نیست. لطفاً با پشتیبانی تماس بگیرید.', 'missing_config');
 
             return;
@@ -304,10 +314,15 @@ class ServiceManagementService
             return;
         }
 
-        $subscriptionUrl = trim((string) ($service->getSubscriptionUrl() ?? ''));
+        $subscriptionUrl = (string) $this->accessGuard->subscriptionUrl($service);
         if ('' === $subscriptionUrl) {
+            if ('' !== trim((string) ($service->getSubscriptionUrl() ?? ''))) {
+                $this->acknowledgeCallback($callbackId);
+                $this->telegramApiClient->sendMessage($chatId, CustomerAccessGuard::SUPPORT_NOTICE);
+            }
             $configLinkSet = $this->collectConfigLinks($service, 'telegram_qr_fallback_config');
-            if ([] === $configLinkSet->finalLinks) {
+            $qrLinks = $this->accessGuard->configLinks($service, $configLinkSet->finalLinks);
+            if ([] === $qrLinks) {
                 $this->showPopupOrMessage($chatId, $callbackId, 'برای این سرویس هنوز لینک اشتراک یا کانفیگ قابل ساخت QR موجود نیست.', 'missing_subscription_and_config_qr');
 
                 return;
@@ -317,8 +332,8 @@ class ServiceManagementService
             $this->telegramApiClient->sendMessage($chatId, 'لینک اشتراک برای این سرویس موجود نیست. QR کانفیگ‌ها ارسال می‌شود.');
 
             $failedCount = 0;
-            $total = count($configLinkSet->finalLinks);
-            foreach ($configLinkSet->finalLinks as $index => $configLink) {
+            $total = count($qrLinks);
+            foreach ($qrLinks as $index => $configLink) {
                 try {
                     $sent = $this->qrCodeSender->send($chatId, $configLink, sprintf('QR کانفیگ %d از %d', $index + 1, $total), sprintf('service-%d-config-%d', $serviceId, $index + 1));
                 } catch (\Throwable $e) {
@@ -1857,7 +1872,7 @@ class ServiceManagementService
             $remaining,
             $service->getLastUsageSyncedAt()?->format('Y-m-d H:i:s') ?? '-',
             null === $ipLimit ? 'پیشفرض/نامحدود' : (string) $ipLimit,
-            $service->getSubscriptionUrl() ?: '-'
+            $this->accessGuard->subscriptionUrl($service) ?? ('' !== trim((string) $service->getSubscriptionUrl()) ? CustomerAccessGuard::SUPPORT_NOTICE : '-')
         );
     }
 

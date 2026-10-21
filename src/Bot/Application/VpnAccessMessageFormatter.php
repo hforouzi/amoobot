@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Bot\Application;
 
 use App\Entity\VpnService;
+use App\Provisioning\Application\CustomerAccessGuard;
 use App\Provisioning\Application\FinalConfigLinkProvider;
 
 final class VpnAccessMessageFormatter
@@ -13,6 +14,7 @@ final class VpnAccessMessageFormatter
 
     public function __construct(
         private readonly FinalConfigLinkProvider $finalConfigLinkProvider,
+        private readonly CustomerAccessGuard $accessGuard,
     ) {
     }
 
@@ -21,11 +23,12 @@ final class VpnAccessMessageFormatter
      */
     public function formatServiceAccessMessages(VpnService $service, string $headline = '✅ سرویس شما آماده شد', string $sourceFlow = 'telegram_access_message'): array
     {
-        $subscriptionUrl = trim((string) ($service->getSubscriptionUrl() ?? ''));
-        $configLinks = $this->finalConfigLinkProvider->getFinalLinksForService($service, $sourceFlow);
+        $subscriptionUrl = (string) $this->accessGuard->subscriptionUrl($service);
+        $subscriptionWithheld = '' === $subscriptionUrl && '' !== trim((string) ($service->getSubscriptionUrl() ?? ''));
+        $configLinks = $this->accessGuard->configLinks($service, $this->finalConfigLinkProvider->getFinalLinksForService($service, $sourceFlow));
 
         if ('' === $subscriptionUrl && [] === $configLinks) {
-            return ['سرویس ساخته شد، اما لینک دسترسی پیدا نشد. لطفاً با پشتیبانی تماس بگیرید.'];
+            return [$subscriptionWithheld ? CustomerAccessGuard::SUPPORT_NOTICE : 'سرویس ساخته شد، اما لینک دسترسی پیدا نشد. لطفاً با پشتیبانی تماس بگیرید.'];
         }
 
         $header = [
@@ -42,6 +45,9 @@ final class VpnAccessMessageFormatter
             $header[] = '';
             $header[] = 'برای کپی:';
             $header[] = $this->code($subscriptionUrl);
+        } elseif ($subscriptionWithheld) {
+            $header[] = '';
+            $header[] = '⚠️ '.$this->html(CustomerAccessGuard::SUPPORT_NOTICE);
         }
 
         if ([] === $configLinks) {

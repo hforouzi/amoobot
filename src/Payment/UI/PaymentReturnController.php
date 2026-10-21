@@ -13,6 +13,7 @@ use App\Payment\Domain\PaymentGatewayType;
 use App\Payment\Domain\PaymentReturnUrl;
 use App\Payment\Domain\PaymentStatus;
 use App\Payment\Infrastructure\PaymentGatewayRegistry;
+use App\Provisioning\Application\CustomerAccessGuard;
 use App\Shop\Domain\OrderType;
 use Doctrine\ORM\EntityManagerInterface;
 use Psr\Log\LoggerInterface;
@@ -41,6 +42,7 @@ final class PaymentReturnController extends AbstractController
         private readonly PaymentGatewayRegistry $paymentGatewayRegistry,
         private readonly PaymentSettlementService $paymentSettlementService,
         private readonly LoggerInterface $logger,
+        private readonly CustomerAccessGuard $accessGuard,
     ) {
     }
 
@@ -60,8 +62,10 @@ final class PaymentReturnController extends AbstractController
         $order = $payment->getOrder();
         $state = $this->displayState($payment);
         $service = 'paid' === $state ? $this->findServiceForOrder($order) : null;
-        $subscriptionUrl = trim((string) ($service?->getSubscriptionUrl() ?? ''));
-        $configText = trim((string) ($service?->getConfigText() ?? ''));
+        // Only what a client can reach (never the panel's 127.0.0.1 / private address).
+        $subscriptionUrl = null !== $service ? (string) $this->accessGuard->subscriptionUrl($service) : '';
+        $configText = null !== $service ? implode("\n", $this->accessGuard->configLinks($service, array_values(array_filter(array_map('trim', explode("\n", (string) $service->getConfigText())), static fn (string $line): bool => '' !== $line)))) : '';
+        $accessWithheld = null !== $service && (('' === $subscriptionUrl && '' !== trim((string) $service->getSubscriptionUrl())) || ('' === $configText && '' !== trim((string) $service->getConfigText())));
 
         $this->logger->info('Payment return page.', ['payment_id' => $payment->getId(), 'status' => $payment->getStatus(), 'state' => $state]);
 
@@ -72,6 +76,7 @@ final class PaymentReturnController extends AbstractController
             'service' => $service,
             'subscriptionUrl' => '' !== $subscriptionUrl ? $subscriptionUrl : null,
             'configText' => '' !== $configText ? $configText : null,
+            'accessWithheld' => $accessWithheld,
             'redirectEnabled' => 'paid' === $state && '' !== $subscriptionUrl,
             'refreshSeconds' => 'pending' === $state ? self::REFRESH_SECONDS : null,
             'statusText' => $statusText ?? $payment->getCryptoPaymentStatus(),

@@ -73,6 +73,9 @@
             </dl>
         {% endif %}
 
+        {% if accessWithheld|default(false) %}
+            <p class="danger">لینک اشتراک این سرویس فعلاً قابل استفاده نیست. لطفاً با پشتیبانی تماس بگیرید.</p>
+        {% endif %}
         {% if subscriptionUrl %}
             <p>لینک اشتراک شما آماده است.</p>
             <a class="button" href="{{ subscriptionUrl }}">مشاهده لینک اشتراک</a>
@@ -83,7 +86,7 @@
             <p>لینک اشتراک برای این سرویس ثبت نشده است. کانفیگ سرویس:</p>
             <pre>{{ configText }}</pre>
             <p class="muted">اطلاعات سرویس در تلگرام نیز ارسال می‌شود.</p>
-        {% else %}
+        {% elseif not accessWithheld|default(false) %}
             <p>پرداخت تایید شد و سرویس در حال آماده‌سازی است. اطلاعات سرویس در تلگرام ارسال می‌شود.</p>
         {% endif %}
     {% elseif state == 'pending' %}
