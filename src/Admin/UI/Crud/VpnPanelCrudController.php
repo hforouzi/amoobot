@@ -6,6 +6,8 @@ namespace App\Admin\UI\Crud;
 
 use App\Admin\Security\AdminCrudPermissions;
 use App\Admin\UI\Field\JsonField;
+use App\Admin\UI\Support\AdminFormat;
+use App\Admin\UI\Support\PanelHealth;
 use App\Entity\VpnInbound;
 use App\Entity\VpnPanel;
 use App\Provisioning\Domain\SanaeiIntegrationMode;
@@ -19,17 +21,22 @@ use EasyCorp\Bundle\EasyAdminBundle\Controller\AbstractCrudController;
 use EasyCorp\Bundle\EasyAdminBundle\Field\BooleanField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\ChoiceField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\DateTimeField;
+use EasyCorp\Bundle\EasyAdminBundle\Field\FormField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\IdField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\TextField;
 use Symfony\Component\HttpFoundation\Response;
+use Symfony\Contracts\Translation\TranslatorInterface;
 /**
  * VPN panels. A panel's inbounds are listed on its detail page (and on the panel setup page) instead of a menu
  * entry of their own; the inbound list stays reachable from there, filtered on the panel.
  */
 class VpnPanelCrudController extends AbstractCrudController
 {
-    public function __construct(private readonly EntityManagerInterface $entityManager)
-    {
+    public function __construct(
+        private readonly EntityManagerInterface $entityManager,
+        private readonly AdminFormat $format,
+        private readonly TranslatorInterface $translator,
+    ) {
     }
 
     public static function getEntityFqcn(): string
@@ -71,13 +78,13 @@ class VpnPanelCrudController extends AbstractCrudController
             ->setCssClass('btn btn-success')
             ->displayIf(fn (VpnPanel $panel): bool => 'sanaei_3xui' === $panel->getType());
 
-        $syncInbounds = Action::new('syncInbounds', 'همگامسازی اینباندها')
+        $syncInbounds = Action::new('syncInbounds', 'action.sync_inbounds')
             ->linkToRoute('admin_vpn_panel_sync_inbounds', fn (VpnPanel $panel): array => ['id' => $panel->getId()])
             ->setCssClass('btn btn-primary')
             ->displayIf(fn (VpnPanel $panel): bool => 'sanaei_3xui' === $panel->getType() && !$panel->isModern());
 
         // Every panel: its inbounds are not in the menu any more.
-        $viewInbounds = Action::new('viewInbounds', 'مشاهده اینباندها')
+        $viewInbounds = Action::new('viewInbounds', 'action.view_inbounds')
             ->linkToRoute('admin_vpn_panel_view_inbounds', fn (VpnPanel $panel): array => ['id' => $panel->getId()])
             ->setCssClass('btn btn-info');
 
@@ -93,69 +100,64 @@ class VpnPanelCrudController extends AbstractCrudController
             ->add(Action::DETAIL, $viewInbounds);
     }
 
+    /**
+     * List: title, connection state, active switch, last check, host. The URL is shown as its host only (a panel's
+     * path is a secret); the legacy API settings are on the detail page, in their own section, for legacy panels.
+     */
     public function configureFields(string $pageName): iterable
     {
+        $f = $this->format;
         $instance = $this->getContext()?->getEntity()->getInstance();
-        // Modern panels use the API token only: the old credential and API-variant fields are not shown for them.
-        $legacyOnly = !($instance instanceof VpnPanel && $instance->isModern());
+        $legacy = !($instance instanceof VpnPanel && $instance->isModern());
+
         $fields = [
             IdField::new('id')->onlyOnIndex(),
-            ChoiceField::new('type')
-                ->setChoices([
-                    'dummy' => 'dummy',
-                    'sanaei_3xui' => 'sanaei_3xui',
-                ]),
             TextField::new('title'),
-            TextField::new('baseUrl'),
-            ChoiceField::new('integrationModeValue', 'panel_connection.integration_mode')
+            AdminFormat::field('health', function (mixed $v, ?VpnPanel $panel): string {
+                if (null === $panel) {
+                    return '';
+                }
+                $state = PanelHealth::of($panel);
+
+                return sprintf('<span class="badge badge-%s" data-health="%s">%s</span>', PanelHealth::badge($state), $state, AdminFormat::e($this->translator->trans('panel.health.'.$state, [], 'admin')));
+            }),
+            BooleanField::new('isActive'),
+            AdminFormat::field('probedAt', static fn (mixed $v): string => $f->relative($v), 'field.last_check'),
+            AdminFormat::field('host', static fn (mixed $v, ?VpnPanel $panel): string => $f->host($panel?->getBaseUrl())),
+
+            // Detail page.
+            ChoiceField::new('type')->hideOnIndex()->setChoices(['panel.type.dummy' => 'dummy', 'panel.type.sanaei_3xui' => 'sanaei_3xui']),
+            TextField::new('baseUrl')->hideOnIndex(),
+            ChoiceField::new('integrationModeValue', 'panel_connection.integration_mode')->hideOnIndex()
                 ->setChoices([
                     'panel_connection.mode.auto' => SanaeiIntegrationMode::AUTO->value,
                     'panel_connection.mode.legacy' => SanaeiIntegrationMode::LEGACY->value,
                     'panel_connection.mode.modern' => SanaeiIntegrationMode::MODERN->value,
                 ])
                 ->setHelp('panel_connection.integration_mode_help'),
-            BooleanField::new('useProxy', 'Use proxy')
-                ->setHelp('Use the PANEL_PROXY_* proxy from .env.local for this panel. If disabled, this panel connects directly.'),
-            ChoiceField::new('apiVersion', 'API Version')
-                ->setChoices([
-                    'legacy' => 'legacy',
-                    'v3' => 'v3',
-                ])
-                ->setHelp('legacy for old Sanaei panels, v3 for 3x-ui v3+ API'),
-            ChoiceField::new('authMode', 'Auth Mode')
-                ->setChoices([
-                    'cookie' => 'cookie',
-                    'bearer' => 'bearer',
-                ]),
-            ChoiceField::new('clientApiMode', 'Client API Mode')
-                ->setChoices([
-                    'inbound_legacy' => 'inbound_legacy',
-                    'clients' => 'clients',
-                ])
-                ->setHelp('inbound_legacy uses /panel/api/inbounds/addClient. clients uses /panel/api/clients/add for newer 3x-ui v3 panels.'),
-            TextField::new('basePath', 'Base Path')
-                ->setHelp('Optional panel path prefix, e.g. /xui'),
-            TextField::new('subscriptionPathPrefix', 'Subscription Path Prefix')
-                ->setHelp('Used with subscription base URL to build subscription URL.'),
-            TextField::new('subscriptionBaseUrl')
-                ->setHelp('For Sanaei subscriptions, prefer config.subscription_base_url and config.subscription_path_prefix.'),
-            TextField::new('publicHost')
-                ->setHelp('Used as fallback host for generated single links when inbound/external proxy host is missing.'),
-            TextField::new('username'),
-            TextField::new('passwordConfiguredLabel', 'Password configured')
-                ->hideOnForm(),
-            TextField::new('apiTokenConfiguredLabel', 'Token configured')
-                ->hideOnForm(),
-            TextField::new('lastTestResultSummary', 'Last test result')
-                ->hideOnForm(),
-            JsonField::new('config'),
-            BooleanField::new('isActive'),
-            DateTimeField::new('createdAt')->setLabel('common.created_at')->hideOnForm(),
-            DateTimeField::new('updatedAt')->setLabel('common.updated_at')->hideOnForm(),
+            BooleanField::new('useProxy')->hideOnIndex()->setHelp('help.vpn_panel.use_proxy'),
+            TextField::new('apiTokenConfiguredLabel')->hideOnIndex()->hideOnForm()->setTemplatePath(AdminFormat::TEMPLATE)->formatValue(static fn (mixed $v): string => $f->yesNo('yes' === $v)),
+            TextField::new('lastTestResultSummary')->hideOnIndex()->hideOnForm(),
+            FormField::addFieldset('panel.subscription_section')->hideOnIndex(),
+            TextField::new('subscriptionBaseUrl')->hideOnIndex()->setHelp('help.vpn_panel.subscription_base_url'),
+            TextField::new('subscriptionPathPrefix')->hideOnIndex()->setHelp('help.vpn_panel.subscription_path_prefix'),
+            TextField::new('publicHost')->hideOnIndex()->setHelp('help.vpn_panel.public_host'),
+            JsonField::new('config')->hideOnIndex(),
+            DateTimeField::new('createdAt')->hideOnIndex()->hideOnForm(),
+            DateTimeField::new('updatedAt')->hideOnIndex()->hideOnForm(),
         ];
 
-        if (!$legacyOnly) {
-            $fields = array_values(array_filter($fields, static fn (object $field): bool => !in_array($field->getAsDto()->getProperty(), ['apiVersion', 'authMode', 'clientApiMode', 'basePath', 'username', 'passwordConfiguredLabel'], true)));
+        if ($legacy) {
+            array_push(
+                $fields,
+                FormField::addFieldset('panel.legacy_section')->hideOnIndex()->setHelp('panel.legacy_section_help'),
+                ChoiceField::new('apiVersion')->hideOnIndex()->setChoices(['panel.api_version.legacy' => 'legacy', 'panel.api_version.v3' => 'v3'])->setHelp('help.vpn_panel.api_version'),
+                ChoiceField::new('authMode')->hideOnIndex()->setChoices(['panel.auth_mode.cookie' => 'cookie', 'panel.auth_mode.bearer' => 'bearer']),
+                ChoiceField::new('clientApiMode')->hideOnIndex()->setChoices(['panel.client_api_mode.inbound_legacy' => 'inbound_legacy', 'panel.client_api_mode.clients' => 'clients'])->setHelp('help.vpn_panel.client_api_mode'),
+                TextField::new('basePath')->hideOnIndex()->setHelp('help.vpn_panel.base_path'),
+                TextField::new('username')->hideOnIndex(),
+                TextField::new('passwordConfiguredLabel')->hideOnIndex()->hideOnForm()->setTemplatePath(AdminFormat::TEMPLATE)->formatValue(static fn (mixed $v): string => $f->yesNo('yes' === $v)),
+            );
         }
 
         return $fields;
@@ -171,6 +173,11 @@ class VpnPanelCrudController extends AbstractCrudController
 
     public function edit(AdminContext $context): KeyValueStore|Response
     {
+        // The list's active switch (EasyAdmin's PATCH of one boolean field).
+        if ($context->getRequest()->isXmlHttpRequest() && $context->getRequest()->isMethod('PATCH')) {
+            return parent::edit($context);
+        }
+
         return $this->redirectToRoute('admin_panel_setup_edit', ['id' => $context->getEntity()->getPrimaryKeyValue()]);
     }
 }

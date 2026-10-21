@@ -63,7 +63,7 @@ final class PlanPriceSanityTest extends IntegrationTestCase
 
         $content = (string) $client->getResponse()->getContent();
         self::assertSame(200, $client->getResponse()->getStatusCode());
-        self::assertSame(1, substr_count($content, 'check unit'), 'only the Rial-looking plan is flagged');
+        self::assertSame(1, substr_count($content, 'data-unit-warning'), 'only the Rial-looking plan is flagged');
         self::assertStringContainsString('looks too high', $content);
     }
 
@@ -79,6 +79,7 @@ final class PlanPriceSanityTest extends IntegrationTestCase
         $client->followRedirect();
 
         self::assertSame(25_000_000, (int) $this->row('plan', (int) $plan->getId())['price']);
-        self::assertStringContainsString('Plan "Test plan": Price 25,000,000 IRT looks too high', (string) $client->getResponse()->getContent());
+        // The flash (admin's language, Persian by default) names the plan and carries the checker's warning.
+        self::assertStringContainsString('پلن «Test plan»: Price 25,000,000 IRT looks too high', (string) $client->getResponse()->getContent());
     }
 }

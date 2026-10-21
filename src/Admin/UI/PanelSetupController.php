@@ -35,7 +35,7 @@ use Symfony\Contracts\Translation\TranslatorInterface;
 #[Route('/admin/panel-setup')]
 final class PanelSetupController extends AbstractController
 {
-    use EscapesFlashMessages;
+    use TranslatedFlashes;
 
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
@@ -72,7 +72,7 @@ final class PanelSetupController extends AbstractController
                 $this->entityManager->persist($panel);
                 $this->entityManager->flush();
                 $auditLogger->record($isNew ? 'vpn_panel.create' : 'vpn_panel.update', 'VpnPanel', $panel->getId(), ['mode' => $panel->getIntegrationModeValue()]);
-                $this->addFlash('success', $this->trans($isNew ? 'panel_connection.flash.created' : 'panel_connection.flash.saved'));
+                $this->flash('success', $isNew ? 'panel_connection.flash.created' : 'panel_connection.flash.saved');
 
                 return $this->redirectToRoute('admin_panel_setup_show', ['id' => $panel->getId()]);
             }
@@ -97,7 +97,7 @@ final class PanelSetupController extends AbstractController
     public function test(VpnPanel $panel, Request $request): Response
     {
         if (!$this->isCsrfTokenValid('panel_test_'.$panel->getId(), (string) $request->request->get('_token'))) {
-            $this->addFlash('danger', $this->trans('panel_connection.flash.csrf'));
+            $this->flash('danger', 'panel_connection.flash.csrf');
 
             return $this->redirectToRoute('admin_panel_setup_show', ['id' => $panel->getId()]);
         }
@@ -111,7 +111,7 @@ final class PanelSetupController extends AbstractController
     public function inbounds(VpnPanel $panel, Request $request, AdminAuditLogger $auditLogger): Response
     {
         if (!$panel->isModern()) {
-            $this->addFlash('warning', $this->trans('panel_connection.inbounds.needs_modern'));
+            $this->flash('warning', 'panel_connection.inbounds.needs_modern');
 
             return $this->redirectToRoute('admin_panel_setup_show', ['id' => $panel->getId()]);
         }
@@ -130,7 +130,7 @@ final class PanelSetupController extends AbstractController
 
         if ($request->isMethod('POST')) {
             if (!$this->isCsrfTokenValid('panel_inbounds_'.$panel->getId(), (string) $request->request->get('_token'))) {
-                $this->addFlash('danger', $this->trans('panel_connection.flash.csrf'));
+                $this->flash('danger', 'panel_connection.flash.csrf');
 
                 return $this->redirectToRoute('admin_panel_setup_inbounds', ['id' => $panel->getId()]);
             }
@@ -160,7 +160,7 @@ final class PanelSetupController extends AbstractController
             }
             $this->entityManager->flush();
             $auditLogger->record('vpn_panel.inbounds_update', 'VpnPanel', $panel->getId(), ['selected' => $count]);
-            $this->addFlash('success', $this->trans('panel_connection.inbounds.saved', ['%count%' => $count]));
+            $this->flash('success', 'panel_connection.inbounds.saved', ['%count%' => $count]);
 
             return $this->redirectToRoute('admin_panel_setup_plans', ['id' => $panel->getId()]);
         }
@@ -184,7 +184,7 @@ final class PanelSetupController extends AbstractController
 
         if ($request->isMethod('POST')) {
             if (!$this->isCsrfTokenValid('panel_plans_'.$panel->getId(), (string) $request->request->get('_token'))) {
-                $this->addFlash('danger', $this->trans('panel_connection.flash.csrf'));
+                $this->flash('danger', 'panel_connection.flash.csrf');
 
                 return $this->redirectToRoute('admin_panel_setup_plans', ['id' => $panel->getId()]);
             }
@@ -203,7 +203,7 @@ final class PanelSetupController extends AbstractController
             }
             $this->entityManager->flush();
             $auditLogger->record('vpn_panel.plans_update', 'VpnPanel', $panel->getId(), ['changed' => $changed]);
-            $this->addFlash('success', $this->trans('panel_connection.plans.saved', ['%count%' => $changed]));
+            $this->flash('success', 'panel_connection.plans.saved', ['%count%' => $changed]);
 
             return $this->redirectToRoute('admin_panel_setup_plans', ['id' => $panel->getId()]);
         }

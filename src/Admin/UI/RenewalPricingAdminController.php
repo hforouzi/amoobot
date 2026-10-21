@@ -18,6 +18,8 @@ use Symfony\Component\Routing\Attribute\Route;
 #[Route('/admin')]
 final class RenewalPricingAdminController extends AbstractController
 {
+    use TranslatedFlashes;
+
     public function __construct(
         private readonly PlanPriceAdjustmentService $planPriceAdjustmentService,
     ) {
@@ -43,9 +45,9 @@ final class RenewalPricingAdminController extends AbstractController
             $amount = null;
 
             if (!in_array($direction, ['increase', 'decrease'], true) || !in_array($field, ['price', 'pricePerGb', 'pricePerDay', 'all'], true)) {
-                $this->addFlash('danger', 'مقادیر فرم معتبر نیست.');
+                $this->flash('danger', 'flash.bulk_price.invalid');
             } elseif (!is_numeric($value) || (float) $value < 0) {
-                $this->addFlash('danger', 'مقدار باید عدد مثبت باشد.');
+                $this->flash('danger', 'flash.bulk_price.positive');
             } else {
                 if ('amount' === $adjustmentType) {
                     $amount = (int) floor((float) $value);
@@ -58,11 +60,11 @@ final class RenewalPricingAdminController extends AbstractController
 
                 if ('apply' === (string) $request->request->get('mode', 'preview')) {
                     if (!$request->request->has('confirm_apply')) {
-                        $this->addFlash('warning', 'برای اعمال، تایید نهایی را فعال کنید.');
+                        $this->flash('warning', 'flash.bulk_price.confirm');
                     } else {
                         $applied = $this->planPriceAdjustmentService->apply($changes);
                         $auditLogger->record('plan.bulk_price_adjust', 'Plan', null, ['direction' => $direction, 'field' => $field, 'percent' => $percent, 'amount' => $amount, 'applied' => $applied]);
-                        $this->addFlash('success', sprintf('تغییر گروهی قیمت انجام شد. %d تغییر اعمال شد.', $applied));
+                        $this->flash('success', 'flash.bulk_price.applied', ['%count%' => $applied]);
                         $changes = [];
                     }
                 }

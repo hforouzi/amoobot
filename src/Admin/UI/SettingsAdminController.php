@@ -27,6 +27,8 @@ use Symfony\Component\HttpFoundation\Response;
  */
 final class SettingsAdminController extends AbstractController
 {
+    use TranslatedFlashes;
+
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
         private readonly RenewalSettingsProvider $renewalSettingsProvider,
@@ -80,13 +82,13 @@ final class SettingsAdminController extends AbstractController
         $trafficPricePerGb = is_numeric($trafficPriceRaw) ? (int) floor((float) $trafficPriceRaw) : -1;
 
         if ($discountPercent < 0 || $discountPercent > 100) {
-            $this->addFlash('danger', 'درصد تخفیف باید بین ۰ تا ۱۰۰ باشد.');
+            $this->flash('danger', 'flash.settings.discount_range');
         } elseif ('' === $disabledMessage) {
-            $this->addFlash('danger', 'پیام غیرفعال بودن فروش نمی‌تواند خالی باشد.');
+            $this->flash('danger', 'flash.settings.disabled_message_empty');
         } elseif ($trafficMinGb <= 0 || $trafficMaxGb <= 0 || $trafficMaxGb < $trafficMinGb) {
-            $this->addFlash('danger', 'حداقل و حداکثر حجم اضافه معتبر نیست.');
+            $this->flash('danger', 'flash.settings.traffic_range');
         } elseif ($trafficPricePerGb < 0) {
-            $this->addFlash('danger', 'قیمت هر گیگ حجم اضافه معتبر نیست.');
+            $this->flash('danger', 'flash.settings.traffic_price');
         } else {
             $this->upsertSetting('renewal.carry_remaining_traffic', $request->request->has('renewal_carry_remaining_traffic') ? 'true' : 'false', 'boolean');
             $this->upsertSetting('renewal.carry_remaining_days', $request->request->has('renewal_carry_remaining_days') ? 'true' : 'false', 'boolean');
@@ -102,7 +104,7 @@ final class SettingsAdminController extends AbstractController
             $this->upsertSetting(SalesSettingsProvider::DISABLED_MESSAGE, $disabledMessage, 'text');
             $this->entityManager->flush();
             $auditLogger->record('settings.update', 'Setting', null, ['page' => 'renewal_pricing']);
-            $this->addFlash('success', 'تنظیمات تمدید و قیمتگذاری بروزرسانی شد.');
+            $this->flash('success', 'flash.settings.sales_saved');
         }
     }
 
@@ -143,9 +145,9 @@ final class SettingsAdminController extends AbstractController
         $batchLimit = is_numeric($batchLimitRaw) ? (int) $batchLimitRaw : 0;
         $expireHours = is_numeric($expireHoursRaw) ? (int) $expireHoursRaw : 0;
         if ($batchLimit <= 0) {
-            $this->addFlash('danger', 'مقدار batch limit باید بزرگتر از صفر باشد.');
+            $this->flash('danger', 'flash.settings.batch_limit');
         } elseif ($expireHours <= 0) {
-            $this->addFlash('danger', 'زمان انقضای سفارش ناقص باید بزرگتر از صفر باشد.');
+            $this->flash('danger', 'flash.settings.expire_hours');
         } else {
             $this->upsertSetting('automation.sync_usage_enabled', $request->request->has('automation_sync_usage_enabled') ? 'true' : 'false', 'boolean');
             $this->upsertSetting('automation.check_expiry_enabled', $request->request->has('automation_check_expiry_enabled') ? 'true' : 'false', 'boolean');
@@ -157,7 +159,7 @@ final class SettingsAdminController extends AbstractController
             $this->upsertSetting('orders.incomplete_expire_hours', (string) $expireHours, 'number');
             $this->entityManager->flush();
             $auditLogger->record('settings.update', 'Setting', null, ['page' => 'automation']);
-            $this->addFlash('success', 'تنظیمات اتوماسیون بروزرسانی شد.');
+            $this->flash('success', 'flash.settings.automation_saved');
         }
     }
 

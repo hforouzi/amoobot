@@ -33,15 +33,15 @@ final class AdminUserCrudController extends AbstractCrudController
     public function configureCrud(Crud $crud): Crud
     {
         return $crud
-            ->setEntityLabelInSingular('Admin user')
-            ->setEntityLabelInPlural('کاربران ادمین')
+            ->setEntityLabelInSingular('entity.admin_user.singular')
+            ->setEntityLabelInPlural('admin.admin_users')
             ->setEntityPermission(AdminCrudPermissions::view(self::class))
             ->setDefaultSort(['id' => 'DESC']);
     }
 
     public function configureFields(string $pageName): iterable
     {
-        $plainPassword = TextField::new('plainPassword', 'Password')
+        $plainPassword = TextField::new('plainPassword')
             ->setFormType(PasswordType::class)
             ->setFormTypeOptions([
                 'required' => Crud::PAGE_NEW === $pageName,
@@ -55,14 +55,14 @@ final class AdminUserCrudController extends AbstractCrudController
             TextField::new('email'),
             TextField::new('username')->setRequired(false),
             TextField::new('displayName')->setRequired(false),
-            TextField::new('telegramUserId', 'Telegram user id')
+            TextField::new('telegramUserId')
                 ->setRequired(false)
-                ->setHelp('Numeric Telegram id (not the @username). The admin then has the same permissions in the bot; empty = no bot access (except TELEGRAM_ADMIN_CHAT_ID).'),
+                ->setHelp('help.admin_user.telegram_user_id'),
             ChoiceField::new('roles')
                 ->setChoices([
-                    'ROLE_SUPER_ADMIN' => AdminUser::ROLE_SUPER_ADMIN,
-                    'ROLE_ADMIN' => AdminUser::ROLE_ADMIN,
-                    'ROLE_SUPPORT' => AdminUser::ROLE_SUPPORT,
+                    'role.super_admin' => AdminUser::ROLE_SUPER_ADMIN,
+                    'role.admin' => AdminUser::ROLE_ADMIN,
+                    'role.support' => AdminUser::ROLE_SUPPORT,
                 ])
                 ->allowMultipleChoices(),
             BooleanField::new('isActive'),

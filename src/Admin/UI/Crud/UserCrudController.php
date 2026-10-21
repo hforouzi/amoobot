@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Admin\UI\Crud;
 
 use App\Admin\Security\AdminCrudPermissions;
+use App\Admin\UI\Support\AdminFormat;
 use App\Entity\Order;
 use App\Entity\User;
 use App\Entity\VpnService;
@@ -39,9 +40,13 @@ class UserCrudController extends AbstractCrudController
 {
     private const FORMATTED = 'admin/field/formatted.html.twig';
 
+    /** @var array<class-string, array<int, int>> */
+    private array $counts = [];
+
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
         private readonly TranslatorInterface $translator,
+        private readonly AdminFormat $format,
     ) {
     }
 
@@ -69,7 +74,7 @@ class UserCrudController extends AbstractCrudController
     {
         $withoutQuery = new SearchDto($searchDto->getRequest(), $searchDto->getSearchableProperties(), '', $searchDto->getDefaultSort(), $searchDto->getCustomSort(), $searchDto->getAppliedFilters(), $searchDto->getSearchMode());
         $qb = parent::createIndexQueryBuilder($withoutQuery, $entityDto, $fields, $filters)
-            ->leftJoin('entity.telegramAccount', 'customerTelegram');
+            ->leftJoin('entity.telegramAccount', 'customerTelegram')->addSelect('customerTelegram');
 
         $query = $searchDto->getQuery();
         if ('' === $query) {
@@ -98,36 +103,38 @@ class UserCrudController extends AbstractCrudController
         return $qb->andWhere($match);
     }
 
+    /**
+     * List: who (name, mobile), their Telegram account (@username, id, language), services, orders, status, joined.
+     */
     public function configureFields(string $pageName): iterable
     {
         return [
             IdField::new('id')->onlyOnIndex(),
-            TextField::new('name', 'customer.name'),
-            TextField::new('mobile', 'customer.mobile'),
-            Field::new('telegramUsername', 'customer.telegram_username')
-                ->setTemplatePath(self::FORMATTED)
-                ->formatValue(static function (mixed $value, ?User $user): string {
-                    $username = $user?->getTelegramAccount()?->getUsername();
+            TextField::new('name', 'customer.name')->setTemplatePath(self::FORMATTED)->formatValue(static function (mixed $value, ?User $user): string {
+                $name = '' !== (string) $user?->getName() ? self::e((string) $user?->getName()) : AdminFormat::NONE;
+                $mobile = (string) $user?->getMobile();
 
-                    return null === $username || '' === $username ? '' : self::e('@'.$username);
-                })
-                ->setSortable(false)
-                ->hideOnForm(),
-            Field::new('telegramAccountId', 'customer.telegram_id')
+                return '' === $mobile ? $name : sprintf('%s<br><small class="text-muted" dir="ltr">%s</small>', $name, self::e($mobile));
+            }),
+            TextField::new('mobile', 'customer.mobile')->hideOnIndex(),
+            Field::new('telegram', 'customer.telegram_account')
                 ->setTemplatePath(self::FORMATTED)
                 ->formatValue(function (mixed $value, ?User $user): string {
                     $account = $user?->getTelegramAccount();
                     if (null === $account) {
-                        return '';
+                        return AdminFormat::NONE;
                     }
+                    $username = (string) $account->getUsername();
+                    $id = $this->link($this->generateUrl('admin_telegram_account_detail', ['entityId' => $account->getId()]), '<bdi>'.self::e($account->getTelegramId()).'</bdi>', TelegramAccountCrudController::class, 'customer.telegram_account');
+                    $language = (string) $account->getLanguageCode();
 
-                    return $this->link($this->generateUrl('admin_telegram_account_detail', ['entityId' => $account->getId()]), self::e($account->getTelegramId()), TelegramAccountCrudController::class, 'customer.telegram_account');
+                    return sprintf(
+                        '%s<small class="text-muted"> · %s%s</small>',
+                        '' === $username ? '' : '<bdi>'.self::e('@'.$username).'</bdi><br>',
+                        $id,
+                        '' === $language ? '' : ' · <span title="'.self::e($this->translator->trans('customer.language', [], 'admin')).'">'.self::e($language).'</span>',
+                    );
                 })
-                ->setSortable(false)
-                ->hideOnForm(),
-            Field::new('language', 'customer.language')
-                ->setTemplatePath(self::FORMATTED)
-                ->formatValue(static fn (mixed $value, ?User $user): string => self::e((string) $user?->getTelegramAccount()?->getLanguageCode()))
                 ->setSortable(false)
                 ->hideOnForm(),
             Field::new('servicesCount', 'customer.services')
@@ -140,7 +147,7 @@ class UserCrudController extends AbstractCrudController
                 ->formatValue(fn (mixed $value, ?User $user): string => null === $user ? '' : $this->countLink($user, 'orders'))
                 ->setSortable(false)
                 ->hideOnForm(),
-            TextField::new('status', 'customer.status'),
+            TextField::new('status', 'customer.status')->setTemplatePath(self::FORMATTED)->formatValue(fn (mixed $v): string => $this->format->status($v)),
             DateTimeField::new('createdAt', 'customer.joined_at')->hideOnForm(),
             DateTimeField::new('updatedAt', 'common.updated_at')->hideOnForm()->hideOnIndex(),
         ];
@@ -156,14 +163,44 @@ class UserCrudController extends AbstractCrudController
             ? [VpnService::class, 'admin_vpn_service_index', VpnServiceCrudController::class]
             : [Order::class, 'admin_order_index', OrderCrudController::class];
 
-        $qb = $this->entityManager->createQueryBuilder()->select('COUNT(x.id)')->from($entity, 'x')->andWhere('x.user = :user')->setParameter('user', $user);
-        if (VpnService::class === $entity) {
-            $qb->andWhere('x.status != :deleted')->setParameter('deleted', VpnServiceStatus::DELETED);
-        }
-        $count = sprintf('<span data-customer-count="%s">%d</span>', $what, (int) $qb->getQuery()->getSingleScalarResult());
+        $count = sprintf('<span data-customer-count="%s">%d</span>', $what, $this->counts($entity)[(int) $user->getId()] ?? 0);
         $url = $this->generateUrl($route, ['filters' => ['user' => ['comparison' => '=', 'value' => (string) $user->getId()]]]);
 
         return $this->link($url, $count, $controller, 'customer.'.$what);
+    }
+
+    /**
+     * Services (not deleted) or orders per customer, for every customer of this page at once: the customers the list
+     * query loaded (Doctrine's identity map), one GROUP BY query per kind instead of one per row.
+     *
+     * @param class-string $entity
+     *
+     * @return array<int, int>
+     */
+    private function counts(string $entity): array
+    {
+        if (isset($this->counts[$entity])) {
+            return $this->counts[$entity];
+        }
+        $ids = array_map('intval', array_keys($this->entityManager->getUnitOfWork()->getIdentityMap()[User::class] ?? []));
+        $this->counts[$entity] = [];
+        if ([] === $ids) {
+            return [];
+        }
+        $qb = $this->entityManager->createQueryBuilder()
+            ->select('IDENTITY(x.user) AS customer', 'COUNT(x.id) AS total')
+            ->from($entity, 'x')
+            ->andWhere('x.user IN (:customers)')
+            ->setParameter('customers', $ids)
+            ->groupBy('x.user');
+        if (VpnService::class === $entity) {
+            $qb->andWhere('x.status != :deleted')->setParameter('deleted', VpnServiceStatus::DELETED);
+        }
+        foreach ($qb->getQuery()->getArrayResult() as $row) {
+            $this->counts[$entity][(int) $row['customer']] = (int) $row['total'];
+        }
+
+        return $this->counts[$entity];
     }
 
     /**

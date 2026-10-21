@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Admin\UI\Crud;
 
+use App\Admin\UI\TranslatedFlashes;
 use App\Admin\Security\AdminCrudPermissions;
 use App\Entity\PaymentGateway;
 use App\Entity\StorePaymentMethod;
@@ -34,6 +35,8 @@ use Symfony\Component\Routing\Attribute\Route;
  */
 final class StorePaymentMethodCrudController extends AbstractCrudController
 {
+    use TranslatedFlashes;
+
     public const CSRF_PREFIX = 'store-payment-method-';
 
     public function __construct(
@@ -84,7 +87,7 @@ final class StorePaymentMethodCrudController extends AbstractCrudController
                 }
             }
             $this->entityManager->flush();
-            $this->addFlash('success', 'store_methods.updated');
+            $this->flash('success', 'store_methods.updated');
         }
 
         return new RedirectResponse(self::listUrl($this->generateUrl('admin_payment_gateway_index')));
@@ -98,7 +101,7 @@ final class StorePaymentMethodCrudController extends AbstractCrudController
         $method->setIsActive(!$method->isActive())->setUpdatedAt(new \DateTimeImmutable());
         $this->auditLogger->record('store_payment_method.update', 'StorePaymentMethod', (string) $method->getId(), ['changed' => ['isActive']]);
         $this->entityManager->flush();
-        $this->addFlash('success', 'store_methods.updated');
+        $this->flash('success', 'store_methods.updated');
 
         return new RedirectResponse(self::listUrl($this->generateUrl('admin_payment_gateway_index')));
     }

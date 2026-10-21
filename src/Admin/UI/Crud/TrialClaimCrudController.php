@@ -53,16 +53,16 @@ final class TrialClaimCrudController extends AbstractCrudController
     {
         return [
             IdField::new('id')->onlyOnIndex(),
-            AssociationField::new('telegramAccount', 'Telegram user'),
-            AssociationField::new('trialPlan', 'Trial plan'),
-            AssociationField::new('order', 'Order'),
-            AssociationField::new('vpnService', 'VPN service'),
+            AssociationField::new('telegramAccount'),
+            AssociationField::new('trialPlan'),
+            AssociationField::new('order'),
+            AssociationField::new('vpnService'),
             TextField::new('status')
                 ->formatValue(static fn (mixed $value): string => AdminStatusBadge::html($value))
                 ->renderAsHtml(),
-            TextareaField::new('failureReason', 'Failure reason')->hideOnIndex(),
+            TextareaField::new('failureReason')->hideOnIndex(),
             DateTimeField::new('createdAt')->setLabel('common.created_at'),
-            DateTimeField::new('provisionedAt', 'Provisioned at'),
+            DateTimeField::new('provisionedAt'),
         ];
     }
 }

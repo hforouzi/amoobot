@@ -1,24 +1,119 @@
+{# DashboardController::index(): sections from DashboardOverview, each null when the role cannot use it. #}
 {% extends '@EasyAdmin/page/content.html.twig' %}
+{% trans_default_domain 'admin' %}
 
 {% block content_title %}{{ 'admin.dashboard'|trans }}{% endblock %}
 
 {% block main %}
-    {% if admin_user is defined and admin_user %}
-        <p>
-            {{ admin_user.displayName ?: admin_user.userIdentifier }}
-        </p>
-    {% endif %}
+    <div class="admin-dashboard">
+        {% if admin_user is defined and admin_user %}
+            <p class="admin-dashboard-greeting text-muted">{{ 'dashboard.greeting'|trans({'%name%': admin_user.displayName ?: admin_user.userIdentifier}) }}</p>
+        {% endif %}
 
-    {% if payment_cards is not empty %}
-        <section class="admin-dashboard-cards" aria-label="{{ 'admin.payments'|trans({}, 'admin') }}">
-            {% for card in payment_cards %}
-                <a class="admin-dashboard-card{{ card.count > 0 ? ' admin-dashboard-card-attention' }}" href="{{ card.url }}" data-tab="{{ card.key }}">
-                    <span class="admin-dashboard-card-count">{{ card.count }}</span>
-                    <span class="admin-dashboard-card-label">{{ 'admin.payments'|trans({}, 'admin') }}: {{ card.label|trans({}, 'admin') }}</span>
-                </a>
-            {% endfor %}
-        </section>
-    {% endif %}
+        {% if overview.attention is not null %}
+            {% set waiting = overview.attention|reduce((total, card) => total + card.count, 0) %}
+            <section class="admin-dashboard-section admin-dashboard-attention" aria-labelledby="dashboard-attention">
+                <h2 id="dashboard-attention">{{ 'dashboard.attention.title'|trans }}</h2>
+                {% if waiting == 0 %}
+                    <div class="admin-dashboard-empty admin-dashboard-all-clear">
+                        <i class="fa fa-check-circle" aria-hidden="true"></i>
+                        {{ 'dashboard.attention.all_clear'|trans }}
+                    </div>
+                {% else %}
+                    <div class="admin-dashboard-cards admin-dashboard-cards-large">
+                        {% for card in overview.attention %}
+                            <a class="admin-dashboard-card{{ card.count > 0 ? ' admin-dashboard-card-attention' }}" href="{{ path(card.route, card.parameters) }}" data-card="attention" data-tab="{{ card.key }}">
+                                <span class="admin-dashboard-card-count">{{ card.count|number_format }}</span>
+                                <span class="admin-dashboard-card-label">{{ card.label|trans }}</span>
+                            </a>
+                        {% endfor %}
+                    </div>
+                {% endif %}
+            </section>
+        {% endif %}
 
-    <p>{{ 'Use the left menu to manage plans, orders, payments, services and bot logs.'|trans({}, 'messages') }}</p>
+        {% if overview.today is not null %}
+            <section class="admin-dashboard-section" aria-labelledby="dashboard-today">
+                <h2 id="dashboard-today">{{ 'dashboard.today.title'|trans }}</h2>
+                <div class="admin-dashboard-cards">
+                    {% if overview.today.orders is not null %}
+                        <a class="admin-dashboard-card" href="{{ path('admin_order_index') }}" data-card="today" data-tab="orders">
+                            <span class="admin-dashboard-card-count">{{ overview.today.orders|number_format }}</span>
+                            <span class="admin-dashboard-card-label">{{ 'dashboard.today.orders'|trans }}</span>
+                        </a>
+                    {% endif %}
+                    {% if overview.today.payments is not null %}
+                        <a class="admin-dashboard-card" href="{{ path('admin_payment_index', {tab: 'confirmed'}) }}" data-card="today" data-tab="payments">
+                            <span class="admin-dashboard-card-count">{{ overview.today.payments|number_format }}</span>
+                            <span class="admin-dashboard-card-label">{{ 'dashboard.today.payments'|trans }}</span>
+                        </a>
+                        <a class="admin-dashboard-card" href="{{ path('admin_payment_index', {tab: 'confirmed'}) }}" data-card="today" data-tab="revenue">
+                            <span class="admin-dashboard-card-count"><bdi>{{ overview.today.revenue|number_format }}</bdi> <small>{{ ('currency.' ~ constant('App\\Payment\\Domain\\Money\\AmountNormalizer::SHOP_CURRENCY'))|trans }}</small></span>
+                            <span class="admin-dashboard-card-label">{{ 'dashboard.today.revenue'|trans }}</span>
+                        </a>
+                    {% endif %}
+                    {% if overview.today.customers is not null %}
+                        <a class="admin-dashboard-card" href="{{ path('admin_customer_index') }}" data-card="today" data-tab="customers">
+                            <span class="admin-dashboard-card-count">{{ overview.today.customers|number_format }}</span>
+                            <span class="admin-dashboard-card-label">{{ 'dashboard.today.customers'|trans }}</span>
+                        </a>
+                    {% endif %}
+                </div>
+            </section>
+        {% endif %}
+
+        {% if overview.services is not null %}
+            <section class="admin-dashboard-section" aria-labelledby="dashboard-services">
+                <h2 id="dashboard-services">{{ 'dashboard.services.title'|trans }}</h2>
+                <div class="admin-dashboard-cards">
+                    {% for card in overview.services %}
+                        <a class="admin-dashboard-card admin-dashboard-card-{{ card.key }}" href="{{ path(card.route, card.parameters) }}" data-card="services" data-tab="{{ card.key }}">
+                            <span class="admin-dashboard-card-count">{{ card.count|number_format }}</span>
+                            <span class="admin-dashboard-card-label">{{ card.label|trans }}</span>
+                        </a>
+                    {% endfor %}
+                </div>
+            </section>
+        {% endif %}
+
+        {% if overview.panels is not null %}
+            <section class="admin-dashboard-section" aria-labelledby="dashboard-panels">
+                <h2 id="dashboard-panels">{{ 'dashboard.panels.title'|trans }}</h2>
+                {% if overview.panels is empty %}
+                    <div class="admin-dashboard-empty">
+                        {{ 'dashboard.panels.empty'|trans }}
+                        <a class="btn btn-primary btn-sm" href="{{ path('admin_panel_setup_new') }}">{{ 'dashboard.panels.add'|trans }}</a>
+                    </div>
+                {% else %}
+                    <ul class="admin-dashboard-panels">
+                        {% for panel in overview.panels %}
+                            <li data-card="panel" data-panel="{{ panel.id }}">
+                                <a href="{{ path('admin_vpn_panel_detail', {entityId: panel.id}) }}">{{ panel.title }}</a>
+                                <span class="badge badge-{{ panel.badge }}">{{ ('panel.health.' ~ panel.state)|trans }}</span>
+                                {% if not panel.active %}<span class="badge badge-secondary">{{ 'common.disabled'|trans }}</span>{% endif %}
+                                <small class="text-muted">
+                                    {% if panel.checkedAt %}
+                                        {{ 'dashboard.panels.checked'|trans }} <time datetime="{{ panel.checkedAt|date('c') }}"><bdi>{{ panel.checkedAt|date('Y-m-d H:i') }}</bdi></time>
+                                    {% else %}
+                                        {{ 'panel.health.untested'|trans }}
+                                    {% endif %}
+                                </small>
+                            </li>
+                        {% endfor %}
+                    </ul>
+                {% endif %}
+            </section>
+        {% endif %}
+
+        {% if overview.shortcuts is not empty %}
+            <section class="admin-dashboard-section" aria-labelledby="dashboard-shortcuts">
+                <h2 id="dashboard-shortcuts">{{ 'dashboard.shortcuts.title'|trans }}</h2>
+                <div class="admin-dashboard-shortcuts">
+                    {% for shortcut in overview.shortcuts %}
+                        <a class="btn btn-secondary" href="{{ path(shortcut.route) }}" data-shortcut="{{ shortcut.key }}"><i class="{{ shortcut.icon }}" aria-hidden="true"></i> {{ shortcut.label|trans }}</a>
+                    {% endfor %}
+                </div>
+            </section>
+        {% endif %}
+    </div>
 {% endblock %}

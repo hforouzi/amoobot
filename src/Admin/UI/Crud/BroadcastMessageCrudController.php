@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Admin\UI\Crud;
 
+use App\Admin\UI\TranslatedFlashes;
 use App\Admin\UI\Field\JsonField;
 use App\Broadcast\BroadcastSender;
 use App\Entity\AdminUser;
@@ -30,6 +31,8 @@ use Symfony\Component\HttpFoundation\Response;
 
 final class BroadcastMessageCrudController extends AbstractCrudController
 {
+    use TranslatedFlashes;
+
     public function __construct(
         private readonly BroadcastSender $broadcastSender,
         private readonly AdminUrlGeneratorInterface $adminUrlGenerator,
@@ -46,8 +49,8 @@ final class BroadcastMessageCrudController extends AbstractCrudController
     {
         return $crud
             ->setDefaultSort(['id' => 'DESC'])
-            ->setEntityLabelInSingular('ارسال پیام همگانی')
-            ->setEntityLabelInPlural('ارسال پیام همگانی');
+            ->setEntityLabelInSingular('entity.broadcast_message.singular')
+            ->setEntityLabelInPlural('admin.broadcasts');
     }
 
     public function configureActions(Actions $actions): Actions
@@ -88,57 +91,57 @@ final class BroadcastMessageCrudController extends AbstractCrudController
     {
         yield IdField::new('id')->onlyOnIndex();
 
-        yield TextField::new('title', 'عنوان');
+        yield TextField::new('title');
 
-        yield TextareaField::new('body', 'متن پیام');
+        yield TextareaField::new('body');
 
-        yield ChoiceField::new('status', 'وضعیت')
+        yield ChoiceField::new('status')
             ->setChoices([
-                'پیش‌نویس' => BroadcastMessage::STATUS_DRAFT,
-                'زمان‌بندی‌شده' => BroadcastMessage::STATUS_SCHEDULED,
-                'در حال ارسال' => BroadcastMessage::STATUS_SENDING,
-                'ارسال‌شده' => BroadcastMessage::STATUS_SENT,
-                'ناموفق' => BroadcastMessage::STATUS_FAILED,
-                'لغو شده' => BroadcastMessage::STATUS_CANCELLED,
+                'broadcast.status.draft' => BroadcastMessage::STATUS_DRAFT,
+                'broadcast.status.scheduled' => BroadcastMessage::STATUS_SCHEDULED,
+                'broadcast.status.sending' => BroadcastMessage::STATUS_SENDING,
+                'broadcast.status.sent' => BroadcastMessage::STATUS_SENT,
+                'broadcast.status.failed' => BroadcastMessage::STATUS_FAILED,
+                'broadcast.status.cancelled' => BroadcastMessage::STATUS_CANCELLED,
             ])
             ->hideOnForm();
 
-        yield ChoiceField::new('targetType', 'مخاطبان')
+        yield ChoiceField::new('targetType')
             ->setChoices([
-                'همه کاربران' => BroadcastMessage::TARGET_ALL,
-                'کاربران فعال' => BroadcastMessage::TARGET_ACTIVE_USERS,
-                'دارای سرویس فعال' => BroadcastMessage::TARGET_USERS_WITH_ACTIVE_SERVICE,
-                'نزدیک انقضا' => BroadcastMessage::TARGET_USERS_WITH_EXPIRING_SERVICE,
-                'کاربران انتخابی' => BroadcastMessage::TARGET_SELECTED_USERS,
-                'ادمین‌ها' => BroadcastMessage::TARGET_ADMINS,
+                'broadcast.target.all' => BroadcastMessage::TARGET_ALL,
+                'broadcast.target.active_users' => BroadcastMessage::TARGET_ACTIVE_USERS,
+                'broadcast.target.users_with_active_service' => BroadcastMessage::TARGET_USERS_WITH_ACTIVE_SERVICE,
+                'broadcast.target.users_with_expiring_service' => BroadcastMessage::TARGET_USERS_WITH_EXPIRING_SERVICE,
+                'broadcast.target.selected_users' => BroadcastMessage::TARGET_SELECTED_USERS,
+                'broadcast.target.admins' => BroadcastMessage::TARGET_ADMINS,
             ]);
 
-        yield JsonField::new('targetUserIds', 'شناسه کاربران انتخابی');
+        yield JsonField::new('targetUserIds');
 
-        yield ChoiceField::new('parseMode', 'فرمت متن')
+        yield ChoiceField::new('parseMode')
             ->setChoices([
-                'بدون فرمت' => '',
-                'HTML' => 'HTML',
-                'MarkdownV2' => 'MarkdownV2',
+                'bot_text.parse_mode.plain' => '',
+                'bot_text.parse_mode.html' => 'HTML',
+                'bot_text.parse_mode.markdown_v2' => 'MarkdownV2',
             ]);
 
-        yield BooleanField::new('disableWebPagePreview', 'غیرفعال‌کردن پیش‌نمایش لینک');
+        yield BooleanField::new('disableWebPagePreview');
 
-        yield DateTimeField::new('sendAt', 'زمان ارسال');
+        yield DateTimeField::new('sendAt');
 
-        yield JsonField::new('metadata', 'متادیتا');
+        yield JsonField::new('metadata');
 
-        yield IntegerField::new('totalRecipients', 'تعداد گیرندگان')->hideOnForm();
-        yield IntegerField::new('sentCount', 'ارسال‌شده')->hideOnForm();
-        yield IntegerField::new('failedCount', 'ناموفق')->hideOnForm();
-        yield IntegerField::new('skippedCount', 'ردشده')->hideOnForm();
+        yield IntegerField::new('totalRecipients')->hideOnForm();
+        yield IntegerField::new('sentCount')->hideOnForm();
+        yield IntegerField::new('failedCount')->hideOnForm();
+        yield IntegerField::new('skippedCount')->hideOnForm();
 
-        yield AssociationField::new('createdBy', 'ایجادکننده')->hideOnForm();
+        yield AssociationField::new('createdBy')->hideOnForm();
 
-        yield DateTimeField::new('startedAt', 'شروع ارسال')->hideOnForm();
-        yield DateTimeField::new('finishedAt', 'پایان ارسال')->hideOnForm();
-        yield DateTimeField::new('createdAt', 'زمان ایجاد')->hideOnForm();
-        yield DateTimeField::new('updatedAt', 'آخرین بروزرسانی')->hideOnForm();
+        yield DateTimeField::new('startedAt')->hideOnForm();
+        yield DateTimeField::new('finishedAt')->hideOnForm();
+        yield DateTimeField::new('createdAt')->hideOnForm();
+        yield DateTimeField::new('updatedAt')->hideOnForm();
     }
 
     public function persistEntity(EntityManagerInterface $entityManager, mixed $entityInstance): void
@@ -165,7 +168,7 @@ final class BroadcastMessageCrudController extends AbstractCrudController
         }
 
         if (!$entityInstance->isEditable()) {
-            $this->addFlash('warning', 'فقط پیام‌های پیش‌نویس قابل ویرایش هستند.');
+            $this->flash('warning', 'flash.broadcast.only_draft_editable');
 
             return;
         }
@@ -199,10 +202,7 @@ final class BroadcastMessageCrudController extends AbstractCrudController
         $broadcast = $this->requireBroadcast($context);
         $summary = $this->broadcastSender->prepareDeliveries($broadcast);
 
-        $this->addFlash(
-            'success',
-            sprintf('Recipients prepared: %d new, %d duplicate.', $summary->prepared, $summary->duplicates)
-        );
+        $this->flash('success', 'flash.broadcast.recipients_prepared', ['%new%' => $summary->prepared, '%duplicates%' => $summary->duplicates]);
 
         return $this->redirect($this->detailUrl($broadcast));
     }
@@ -212,7 +212,7 @@ final class BroadcastMessageCrudController extends AbstractCrudController
         $broadcast = $this->requireBroadcast($context);
 
         if (BroadcastMessage::STATUS_DRAFT !== $broadcast->getStatus()) {
-            $this->addFlash('danger', 'Only draft broadcasts can be sent now.');
+            $this->flash('danger', 'flash.broadcast.only_draft_sendable');
 
             return $this->redirect($this->detailUrl($broadcast));
         }
@@ -224,12 +224,9 @@ final class BroadcastMessageCrudController extends AbstractCrudController
         $auditLogger->record('broadcast.send', 'BroadcastMessage', $broadcast->getId(), ['target' => $broadcast->getTargetType(), 'sent' => $summary->sent, 'failed' => $summary->failed, 'pending' => $summary->pending]);
 
         if ($summary->pending > 0) {
-            $this->addFlash('warning', 'ارسال در صف قرار گرفت. برای پردازش cron/command اجرا شود.');
+            $this->flash('warning', 'flash.broadcast.queued');
         } else {
-            $this->addFlash(
-                'success',
-                sprintf('Broadcast send batch completed. Sent: %d, failed: %d.', $summary->sent, $summary->failed)
-            );
+            $this->flash('success', 'flash.broadcast.batch_sent', ['%sent%' => $summary->sent, '%failed%' => $summary->failed]);
         }
 
         return $this->redirect($this->detailUrl($broadcast));
@@ -244,7 +241,7 @@ final class BroadcastMessageCrudController extends AbstractCrudController
             BroadcastMessage::STATUS_SCHEDULED,
             BroadcastMessage::STATUS_SENDING,
         ], true)) {
-            $this->addFlash('danger', 'This broadcast cannot be cancelled.');
+            $this->flash('danger', 'flash.broadcast.not_cancellable');
 
             return $this->redirect($this->detailUrl($broadcast));
         }
@@ -256,7 +253,7 @@ final class BroadcastMessageCrudController extends AbstractCrudController
 
         $this->entityManager->flush();
 
-        $this->addFlash('success', 'Broadcast cancelled.');
+        $this->flash('success', 'flash.broadcast.cancelled');
 
         return $this->redirect($this->detailUrl($broadcast));
     }
@@ -266,10 +263,7 @@ final class BroadcastMessageCrudController extends AbstractCrudController
         $broadcast = $this->requireBroadcast($context);
         $summary = $this->broadcastSender->retryFailed($broadcast, 50);
 
-        $this->addFlash(
-            'success',
-            sprintf('Retry batch completed. Sent: %d, failed: %d.', $summary->sent, $summary->failed)
-        );
+        $this->flash('success', 'flash.broadcast.retry_sent', ['%sent%' => $summary->sent, '%failed%' => $summary->failed]);
 
         return $this->redirect($this->detailUrl($broadcast));
     }

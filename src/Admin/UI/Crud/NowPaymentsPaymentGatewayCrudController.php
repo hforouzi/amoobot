@@ -83,56 +83,56 @@ final class NowPaymentsPaymentGatewayCrudController extends AbstractCrudControll
     public function configureFields(string $pageName): iterable
     {
         $apiKeyField = TextField::new('nowPaymentsApiKey')
-            ->setLabel('api_key')
+            
             ->setFormType(PasswordType::class)
             ->setFormTypeOption('always_empty', true)
             ->setFormTypeOption('required', false)
-            ->setHelp('کلید API از داشبورد NOWPayments')
+            ->setHelp('help.now_payments_payment_gateway.now_payments_api_key')
             ->onlyOnForms();
 
         $ipnSecretField = TextField::new('nowPaymentsIpnSecret')
-            ->setLabel('ipn_secret')
+            
             ->setFormType(PasswordType::class)
             ->setFormTypeOption('always_empty', true)
             ->setFormTypeOption('required', false)
-            ->setHelp('IPN Secret برای اعتبارسنجی وبهوک (الزامی؛ بدون آن همه IPNها رد می‌شوند)')
+            ->setHelp('help.now_payments_payment_gateway.now_payments_ipn_secret')
             ->onlyOnForms();
 
         return [
             FormField::addFieldset('fieldset.general'),
             IdField::new('id')->onlyOnIndex(),
-            TextField::new('title')->setHelp('نام نمایشی درگاه'),
-            TextareaField::new('description')->hideOnIndex()->setHelp('توضیحات اختیاری'),
-            BooleanField::new('isActive')->setLabel('فعال'),
+            TextField::new('title')->setHelp('help.now_payments_payment_gateway.title'),
+            TextareaField::new('description')->hideOnIndex()->setHelp('help.now_payments_payment_gateway.description'),
+            BooleanField::new('isActive'),
             FormField::addFieldset('fieldset.credentials'),
             $apiKeyField,
             $ipnSecretField,
-            TextField::new('nowPaymentsApiKeyConfiguredLabel', 'api_key')
+            TextField::new('nowPaymentsApiKeyConfiguredLabel')
                 ->hideOnForm(),
-            TextField::new('nowPaymentsIpnSecretConfiguredLabel', 'ipn_secret')
+            TextField::new('nowPaymentsIpnSecretConfiguredLabel')
                 ->hideOnForm(),
             FormField::addFieldset('fieldset.payment_settings'),
-            TextField::new('nowPaymentsApiBaseUrl')->setLabel('api_base_url')->setHelp('آدرس API NOWPayments. پیشفرض: https://api.nowpayments.io/v1'),
-            BooleanField::new('nowPaymentsSandbox')->setLabel('sandbox')->setHelp('حالت sandbox برای تست'),
-            TextField::new('nowPaymentsCallbackBaseUrl')->setLabel('callback_base_url')->setHelp('آدرس پایه سایت شما، مثال: https://your-domain.com'),
-            ChoiceField::new('nowPaymentsPaymentMode')->setLabel('حالت پرداخت')->setChoices([
-                'صفحه پرداخت / Invoice' => 'invoice',
-                'پرداخت مستقیم کیف پول / Direct Payment' => 'payment',
-            ])->setHelp('حالت invoice پیش‌فرض است و صفحه پرداخت NOWPayments را نمایش می‌دهد.'),
-            TextField::new('nowPaymentsPriceCurrency')->setLabel('price_currency')->setHelp('ارز قیمت (معمولاً usd)'),
-            TextField::new('nowPaymentsPayCurrency')->setLabel('pay_currency')->setHelp('برای USDT TRC20 از usdttrc20 استفاده کنید. اگر TRX می‌خواهید trx بگذارید. در حالت invoice با lock=false می‌تواند خالی باشد.'),
-            BooleanField::new('nowPaymentsLockPayCurrency')->setLabel('lock_pay_currency')->setHelp('در حالت invoice اگر فعال باشد pay_currency روی درگاه قفل می‌شود.'),
-            ChoiceField::new('nowPaymentsAmountUnit')->setLabel('amount_unit')->setChoices([
-                'toman' => 'toman',
-                'rial' => 'rial',
-            ])->setHelp('واحد مبالغ سفارش در سیستم شما. اگر قیمت‌ها را به تومان نگه می‌دارید `toman` را انتخاب کنید.'),
-            IntegerField::new('nowPaymentsTomanPerUsd')->setLabel('toman_per_usd')->setHelp('help.nowpayments_rate')->hideOnIndex(),
-            IntegerField::new('nowPaymentsIrrToUsdRate')->setLabel('irr_to_usd_rate')->setHelp('help.nowpayments_rate')->hideOnIndex(),
-            TextField::new('nowPaymentsMinPriceAmountOverride')->setLabel('min_price_amount_override')->setHelp('حداقل مبلغ دلاری قیمت برای NOWPayments (اختیاری). اگر خالی باشد از min-amount خود NOWPayments استفاده می‌شود.')->hideOnIndex(),
-            IntegerField::new('nowPaymentsMinOrderAmountToman')->setLabel('min_order_amount_toman')->setHelp('حداقل مبلغ سفارش به تومان برای نمایش این روش پرداخت در فروشگاه (اختیاری).')->hideOnIndex(),
-            TextField::new('nowPaymentsSuccessUrl')->setLabel('success_url')->setHelp('آدرس بازگشت پس از پرداخت موفق (اختیاری)')->hideOnIndex(),
-            TextField::new('nowPaymentsCancelUrl')->setLabel('cancel_url')->setHelp('آدرس بازگشت پس از لغو پرداخت (اختیاری)')->hideOnIndex(),
-            TextField::new('nowPaymentsOrderDescription')->setLabel('order_description')->setHelp('توضیحات سفارش ارسالی به NOWPayments')->hideOnIndex(),
+            TextField::new('nowPaymentsApiBaseUrl')->setHelp('help.now_payments_payment_gateway.now_payments_api_base_url'),
+            BooleanField::new('nowPaymentsSandbox')->setHelp('help.now_payments_payment_gateway.now_payments_sandbox'),
+            TextField::new('nowPaymentsCallbackBaseUrl')->setHelp('help.now_payments_payment_gateway.now_payments_callback_base_url'),
+            ChoiceField::new('nowPaymentsPaymentMode')->setChoices([
+                'payment_gateway.nowpayments_mode.invoice' => 'invoice',
+                'payment_gateway.nowpayments_mode.payment' => 'payment',
+            ])->setHelp('help.now_payments_payment_gateway.now_payments_payment_mode'),
+            TextField::new('nowPaymentsPriceCurrency')->setHelp('help.now_payments_payment_gateway.now_payments_price_currency'),
+            TextField::new('nowPaymentsPayCurrency')->setHelp('help.now_payments_payment_gateway.now_payments_pay_currency'),
+            BooleanField::new('nowPaymentsLockPayCurrency')->setHelp('help.now_payments_payment_gateway.now_payments_lock_pay_currency'),
+            ChoiceField::new('nowPaymentsAmountUnit')->setChoices([
+                'payment_gateway.amount_unit.toman' => 'toman',
+                'payment_gateway.amount_unit.rial' => 'rial',
+            ])->setHelp('help.now_payments_payment_gateway.now_payments_amount_unit'),
+            IntegerField::new('nowPaymentsTomanPerUsd')->setHelp('help.nowpayments_rate')->hideOnIndex(),
+            IntegerField::new('nowPaymentsIrrToUsdRate')->setHelp('help.nowpayments_rate')->hideOnIndex(),
+            TextField::new('nowPaymentsMinPriceAmountOverride')->setHelp('help.now_payments_payment_gateway.now_payments_min_price_amount_override')->hideOnIndex(),
+            IntegerField::new('nowPaymentsMinOrderAmountToman')->setHelp('help.now_payments_payment_gateway.now_payments_min_order_amount_toman')->hideOnIndex(),
+            TextField::new('nowPaymentsSuccessUrl')->setHelp('help.now_payments_payment_gateway.now_payments_success_url')->hideOnIndex(),
+            TextField::new('nowPaymentsCancelUrl')->setHelp('help.now_payments_payment_gateway.now_payments_cancel_url')->hideOnIndex(),
+            TextField::new('nowPaymentsOrderDescription')->setHelp('help.now_payments_payment_gateway.now_payments_order_description')->hideOnIndex(),
             FormField::addFieldset('fieldset.metadata'),
             DateTimeField::new('createdAt')->hideOnForm(),
             DateTimeField::new('updatedAt')->hideOnForm(),

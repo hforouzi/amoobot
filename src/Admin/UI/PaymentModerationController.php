@@ -23,6 +23,8 @@ use Symfony\Component\Routing\Attribute\Route;
 #[Route('/admin/payment')]
 class PaymentModerationController extends AbstractController
 {
+    use TranslatedFlashes;
+
     public const CSRF_PREFIX = 'payment_moderation_';
 
     /**
@@ -83,7 +85,7 @@ class PaymentModerationController extends AbstractController
 
     private function invalidToken(Request $request): RedirectResponse
     {
-        $this->addFlash('danger', 'Invalid or expired security token. Please reload the page and try again.');
+        $this->flash('danger', 'flash.csrf_expired');
 
         return $this->redirectBack($request);
     }
@@ -97,14 +99,14 @@ class PaymentModerationController extends AbstractController
 
     private function back(Request $request, SettlementResult $result): RedirectResponse
     {
-        $this->addFlash(match ($result->outcome) {
+        // The outcome in the admin's language; the settlement's own message (it can carry a review reason or a
+        // provisioning error from a gateway or panel) follows as the detail, escaped by flash().
+        $this->flash(match ($result->outcome) {
             SettlementOutcome::CONFIRMED => 'success',
             SettlementOutcome::REJECTED, SettlementOutcome::NEEDS_REVIEW, SettlementOutcome::ORDER_ALREADY_FULFILLED => 'warning',
             SettlementOutcome::ALREADY_PROCESSED => 'info',
             default => 'danger',
-            // EasyAdmin renders flash messages as raw HTML, and these messages can carry text from a
-            // gateway or panel (review reasons, provisioning errors): escape them.
-        }, htmlspecialchars($result->message, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'));
+        }, 'flash.payment.'.$result->outcome->value, ['%detail%' => $result->message]);
 
         return $this->redirectBack($request);
     }

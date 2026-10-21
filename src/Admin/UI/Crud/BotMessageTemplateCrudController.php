@@ -42,18 +42,18 @@ final class BotMessageTemplateCrudController extends AbstractCrudController
 
         return [
             IdField::new('id')->onlyOnIndex(),
-            TextField::new('key')->setLabel('Key')->setFormTypeOption('disabled', $isEdit),
-            ChoiceField::new('locale')->setChoices(['fa' => 'fa', 'en' => 'en'])->setFormTypeOption('disabled', $isEdit),
-            TextField::new('category')->setLabel('Category')->setFormTypeOption('disabled', $isEdit),
-            TextField::new('title')->setLabel('Title'),
-            TextareaField::new('body')->setLabel('Body')->hideOnIndex(),
-            ChoiceField::new('parseMode')->setChoices(['HTML' => 'html', 'Markdown' => 'markdown', 'Plain' => 'plain']),
+            TextField::new('key')->setFormTypeOption('disabled', $isEdit),
+            ChoiceField::new('locale')->setChoices(['locale.fa' => 'fa', 'locale.en' => 'en'])->setFormTypeOption('disabled', $isEdit),
+            TextField::new('category')->setFormTypeOption('disabled', $isEdit),
+            TextField::new('title'),
+            TextareaField::new('body')->hideOnIndex(),
+            ChoiceField::new('parseMode')->setChoices(['bot_text.parse_mode.html' => 'html', 'bot_text.parse_mode.markdown' => 'markdown', 'bot_text.parse_mode.plain' => 'plain']),
             TextareaField::new('variablesJson')
-                ->setLabel('Variables')
+                
                 ->setFormTypeOption('disabled', true)
                 ->hideOnIndex(),
-            BooleanField::new('isActive')->setLabel('Active'),
-            BooleanField::new('isSystem')->setLabel('System')->hideOnForm(),
+            BooleanField::new('isActive'),
+            BooleanField::new('isSystem')->hideOnForm(),
             DateTimeField::new('updatedAt')->setLabel('common.updated_at')->onlyOnIndex(),
         ];
     }

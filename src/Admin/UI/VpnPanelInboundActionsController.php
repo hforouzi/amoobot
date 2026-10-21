@@ -23,7 +23,8 @@ use Symfony\Component\Routing\Attribute\Route;
 #[Route('/admin')]
 final class VpnPanelInboundActionsController extends AbstractController
 {
-    use EscapesFlashMessages;
+    use TranslatedFlashes;
+
 
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
@@ -39,13 +40,13 @@ final class VpnPanelInboundActionsController extends AbstractController
     {
         try {
             $sync = $inboundSyncService->syncPanelInbounds($panel);
-            $this->addFlash('success', sprintf('همگام‌سازی انجام شد: %d اینباند.', $sync->syncedCount));
+            $this->flash('success', 'flash.inbound.synced', ['%count%' => $sync->syncedCount]);
             if ($sync->missingLocalCount > 0) {
-                $this->addFlash('warning', sprintf('%d اینباند محلی در پنل یافت نشد.', $sync->missingLocalCount));
+                $this->flash('warning', 'flash.inbound.missing_locally', ['%count%' => $sync->missingLocalCount]);
             }
-            $this->addFlash('info', 'اینباندها بروزرسانی شدند. اگر External Proxy تغییر کرده، کانفیگ سرویسها را بازسازی کنید.');
+            $this->flash('info', 'flash.inbound.updated_hint');
         } catch (\Throwable $e) {
-            $this->addFlash('danger', $e->getMessage());
+            $this->flash('danger', 'flash.error', ['%error%' => $e->getMessage()]);
         }
 
         return $this->redirectToPanels();
@@ -70,7 +71,7 @@ final class VpnPanelInboundActionsController extends AbstractController
     {
         $panel = $inbound->getPanel();
         if ('sanaei_3xui' !== $panel->getType()) {
-            $this->addFlash('danger', 'تست ساخت کلاینت فقط برای پنل sanaei_3xui فعال است.');
+            $this->flash('danger', 'flash.inbound.test_client_unsupported');
 
             return $this->redirectToInbounds($inbound);
         }
@@ -89,12 +90,9 @@ final class VpnPanelInboundActionsController extends AbstractController
                 meta: ['test' => true],
             ), $panel);
 
-            $this->addFlash('success', sprintf(
-                'کلاینت تستی ساخته شد (username: %s). در صورت نیاز از پنل حذف کنید.',
-                $created->username ?? $username
-            ));
+            $this->flash('success', 'flash.inbound.test_client_created', ['%username%' => $created->username ?? $username]);
         } catch (\Throwable $e) {
-            $this->addFlash('danger', sprintf('ساخت کلاینت تستی ناموفق بود: %s', $e->getMessage()));
+            $this->flash('danger', 'flash.inbound.test_client_failed', ['%error%' => $e->getMessage()]);
         }
 
         return $this->redirectToInbounds($inbound);
@@ -105,9 +103,9 @@ final class VpnPanelInboundActionsController extends AbstractController
     {
         try {
             $inboundSyncService->syncInbound($inbound);
-            $this->addFlash('success', 'همگام‌سازی مجدد اینباند انجام شد.');
+            $this->flash('success', 'flash.inbound.resynced');
         } catch (\Throwable $e) {
-            $this->addFlash('danger', $e->getMessage());
+            $this->flash('danger', 'flash.error', ['%error%' => $e->getMessage()]);
         }
 
         return $this->redirectToInbounds($inbound);
@@ -118,9 +116,9 @@ final class VpnPanelInboundActionsController extends AbstractController
     {
         try {
             $inboundSyncService->syncInbound($inbound);
-            $this->addFlash('success', 'همگام‌سازی متادیتای دسترسی انجام شد.');
+            $this->flash('success', 'flash.inbound.metadata_synced');
         } catch (\Throwable $e) {
-            $this->addFlash('danger', $e->getMessage());
+            $this->flash('danger', 'flash.error', ['%error%' => $e->getMessage()]);
         }
 
         return $this->redirectToInbounds($inbound);
@@ -201,14 +199,9 @@ final class VpnPanelInboundActionsController extends AbstractController
         $this->entityManager->flush();
 
         if ($failed > 0) {
-            $this->addFlash('warning', sprintf(
-                'کانفیگ %d سرویس بروزرسانی شد. %d سرویس با خطا. (externalProxy count: %d)',
-                $updated,
-                $failed,
-                $externalProxyCount
-            ));
+            $this->flash('warning', 'flash.inbound.configs_partially_updated', ['%updated%' => $updated, '%failed%' => $failed, '%proxies%' => $externalProxyCount]);
         } else {
-            $this->addFlash('success', sprintf('کانفیگ %d سرویس بروزرسانی شد.', $updated));
+            $this->flash('success', 'flash.inbound.configs_updated', ['%count%' => $updated]);
         }
 
         return $this->redirectToInbounds($inbound);
@@ -223,7 +216,7 @@ final class VpnPanelInboundActionsController extends AbstractController
         $email = trim((string) ($service->getClientEmail() ?? $service->getUsername() ?? ''));
 
         if ((!$isLegacySanaei && (null === $uuid || '' === $uuid || null === $subId || '' === $subId)) || ($isLegacySanaei && (null === $uuid || '' === $uuid) && '' === $email)) {
-            $this->addFlash('danger', 'سرویس uuid یا subId ندارد. بازسازی امکان‌پذیر نیست.');
+            $this->flash('danger', 'flash.service.no_uuid');
 
             return $this->redirectToServices();
         }
@@ -237,14 +230,14 @@ final class VpnPanelInboundActionsController extends AbstractController
                         $service->getId() ?? 0,
                         (string) ($refresh->reason ?? 'unknown')
                     ));
-                    $this->addFlash('danger', sprintf('بازسازی کانفیگ ناموفق: %s', (string) ($refresh->reason ?? 'unknown')));
+                    $this->flash('danger', 'flash.service.regenerate_failed', ['%error%' => (string) ($refresh->reason ?? 'unknown')]);
 
                     return $this->redirectToServices();
                 }
 
                 $this->entityManager->flush();
                 $this->log(sprintf('admin_regenerate_config_refresh_success service_id=%d', $service->getId() ?? 0));
-                $this->addFlash('success', sprintf('کانفیگ سرویس #%d از پنل بروزرسانی شد. %d لینک.', $service->getId() ?? 0, $refresh->refreshedLinkCount));
+                $this->flash('success', 'flash.service.refreshed_from_panel', ['%id%' => $service->getId() ?? 0, '%count%' => $refresh->refreshedLinkCount]);
 
                 return $this->redirectToServices();
             }
@@ -270,9 +263,9 @@ final class VpnPanelInboundActionsController extends AbstractController
 
             $this->entityManager->flush();
 
-            $this->addFlash('success', sprintf('کانفیگ سرویس #%d بازسازی شد. %d لینک.', $service->getId() ?? 0, count($configLinks)));
+            $this->flash('success', 'flash.service.regenerated', ['%id%' => $service->getId() ?? 0, '%count%' => count($configLinks)]);
         } catch (\Throwable $e) {
-            $this->addFlash('danger', sprintf('بازسازی کانفیگ ناموفق: %s', $e->getMessage()));
+            $this->flash('danger', 'flash.service.regenerate_failed', ['%error%' => $e->getMessage()]);
         }
 
         return $this->redirectToServices();

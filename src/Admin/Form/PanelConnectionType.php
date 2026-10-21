@@ -31,7 +31,7 @@ final class PanelConnectionType extends AbstractType
                 'label' => 'panel_connection.form.url',
                 'help' => 'panel_connection.form.url_help',
                 'constraints' => [new NotBlank(), new Length(max: 255)],
-                'attr' => ['dir' => 'ltr', 'placeholder' => 'https://panel.example.com:2053/secret-path/'],
+                'attr' => ['dir' => 'ltr', 'placeholder' => 'panel_connection.placeholder.url'],
             ])
             ->add('plainApiToken', PasswordType::class, [
                 'label' => 'panel_connection.form.token',
@@ -48,7 +48,7 @@ final class PanelConnectionType extends AbstractType
                 'mapped' => false,
                 'required' => false,
                 'data' => $options['data'] instanceof VpnPanel ? $options['data']->getTlsPinSha256() : null,
-                'attr' => ['dir' => 'ltr', 'placeholder' => 'sha256//…='],
+                'attr' => ['dir' => 'ltr', 'placeholder' => 'panel_connection.placeholder.tls_pin'],
             ])
             ->add('integrationModeValue', ChoiceType::class, [
                 'label' => 'panel_connection.integration_mode',
@@ -60,7 +60,7 @@ final class PanelConnectionType extends AbstractType
                 ],
             ])
             ->add('subscriptionBaseUrl', TextType::class, ['label' => 'panel_connection.form.subscription_base_url', 'help' => 'panel_connection.form.subscription_base_url_help', 'required' => false, 'attr' => ['dir' => 'ltr']])
-            ->add('subscriptionPathPrefix', TextType::class, ['label' => 'panel_connection.form.subscription_path_prefix', 'required' => false, 'attr' => ['dir' => 'ltr', 'placeholder' => '/sub']])
+            ->add('subscriptionPathPrefix', TextType::class, ['label' => 'panel_connection.form.subscription_path_prefix', 'required' => false, 'attr' => ['dir' => 'ltr', 'placeholder' => 'panel_connection.placeholder.sub_path']])
             ->add('publicHost', TextType::class, ['label' => 'panel_connection.form.public_host', 'help' => 'panel_connection.form.public_host_help', 'required' => false, 'attr' => ['dir' => 'ltr']]);
 
         if (true === $options['legacy_credentials']) {
