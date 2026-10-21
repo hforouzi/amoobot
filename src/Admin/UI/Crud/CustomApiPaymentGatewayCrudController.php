@@ -24,11 +24,12 @@ use EasyCorp\Bundle\EasyAdminBundle\Field\FormField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\IdField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\TextareaField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\TextField;
+use Symfony\Component\Translation\TranslatableMessage;
+
 final class CustomApiPaymentGatewayCrudController extends AbstractCrudController
 {
-    private const CONFIG_HELP = <<<'TEXT'
-JSON config example:
-WARNING: Replace placeholder secrets (like CHANGE_ME) before enabling this gateway.
+    /** The example under the config field (help.custom_api_payment_gateway.config shows it as %example%). */
+    private const CONFIG_EXAMPLE = <<<'TEXT'
 {
   "create": {
     "method": "POST",
@@ -153,16 +154,16 @@ TEXT;
             IdField::new('id')->onlyOnIndex(),
             TextField::new('title'),
             TextareaField::new('description')->hideOnIndex(),
-            BooleanField::new('configured')->setLabel('configured')->hideOnForm(),
-            BooleanField::new('isActive')->setLabel('enabled'),
+            BooleanField::new('configured')->hideOnForm(),
+            BooleanField::new('isActive'),
             TextField::new('currency'),
             TextareaField::new('configJson')
-                ->setLabel('config_json')
-                ->setHelp(self::CONFIG_HELP)
+                
+                ->setHelp(new TranslatableMessage('help.custom_api_payment_gateway.config', ['%example%' => self::CONFIG_EXAMPLE], 'admin'))
                 ->hideOnIndex()
                 ->hideOnDetail(),
             // The detail page shows the stored config read-only with secrets masked; the form above edits it.
-            JsonField::new('config', 'config_json'),
+            JsonField::new('config'),
             FormField::addFieldset('fieldset.metadata'),
             DateTimeField::new('createdAt')->hideOnForm(),
             DateTimeField::new('updatedAt')->hideOnForm(),

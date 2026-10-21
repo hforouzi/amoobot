@@ -23,14 +23,14 @@ final class DiscountUsageCrudController extends AbstractCrudController
     {
         return [
             IdField::new('id')->onlyOnIndex(),
-            AssociationField::new('discountCode', 'کد تخفیف'),
-            AssociationField::new('user', 'کاربر'),
-            AssociationField::new('order', 'سفارش')->setRequired(false),
-            IntegerField::new('amountBefore', 'مبلغ قبل'),
-            IntegerField::new('discountAmount', 'مبلغ تخفیف'),
-            IntegerField::new('amountAfter', 'مبلغ بعد'),
-            DateTimeField::new('usedAt', 'زمان استفاده'),
-            JsonField::new('metadata', 'اطلاعات'),
+            AssociationField::new('discountCode'),
+            AssociationField::new('user'),
+            AssociationField::new('order')->setRequired(false),
+            IntegerField::new('amountBefore'),
+            IntegerField::new('discountAmount'),
+            IntegerField::new('amountAfter'),
+            DateTimeField::new('usedAt'),
+            JsonField::new('metadata'),
         ];
     }
 }

@@ -5,3 +5,14 @@ services:
     App\Tests\Support\ProgrammableVpnPanelDriver:
         public: true
         tags: ['app.vpn_driver']
+
+    # Records translation keys a page uses that its locale does not define (TranslationCompletenessTest).
+    App\Tests\Support\MissingTranslationRecorder:
+        decorates: translator
+        arguments: ['@.inner']
+        public: true
+
+    # Counts SQL statements for query-budget tests (AdminDashboardTest).
+    App\Tests\Support\QueryCounter:
+        public: true
+        tags: ['doctrine.middleware']

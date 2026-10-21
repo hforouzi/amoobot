@@ -31,23 +31,23 @@ final class TrialPlanCrudController extends AbstractCrudController
     {
         return [
             IdField::new('id')->onlyOnIndex(),
-            TextField::new('title', 'Title'),
-            TextareaField::new('description', 'Description')->hideOnIndex(),
-            BooleanField::new('isActive', 'Active'),
-            IntegerField::new('sortOrder', 'Sort order'),
-            IntegerField::new('durationDays', 'Duration (days)'),
-            IntegerField::new('trafficGb', 'Traffic (GB)'),
-            IntegerField::new('ipLimit', 'IP limit')
-                ->setHelp('Maximum simultaneous IPs/devices. Empty means panel/default/unlimited.'),
-            AssociationField::new('inbound', 'اینباند / سرور'),
-            IntegerField::new('maxClaimsTotal', 'Max claims total')
-                ->setHelp('Empty means unlimited.')
+            TextField::new('title'),
+            TextareaField::new('description')->hideOnIndex(),
+            BooleanField::new('isActive'),
+            IntegerField::new('sortOrder'),
+            IntegerField::new('durationDays'),
+            IntegerField::new('trafficGb'),
+            IntegerField::new('ipLimit')
+                ->setHelp('help.trial_plan.ip_limit'),
+            AssociationField::new('inbound'),
+            IntegerField::new('maxClaimsTotal')
+                ->setHelp('help.trial_plan.max_claims_total')
                 ->hideOnIndex(),
-            IntegerField::new('maxClaimsPerUser', 'Max claims per user'),
-            IntegerField::new('cooldownHours', 'Cooldown hours')
-                ->setHelp('Optional cooldown between attempts.')
+            IntegerField::new('maxClaimsPerUser'),
+            IntegerField::new('cooldownHours')
+                ->setHelp('help.trial_plan.cooldown_hours')
                 ->hideOnIndex(),
-            AssociationField::new('backingPlan', 'Backing plan')
+            AssociationField::new('backingPlan')
                 ->hideOnForm()
                 ->hideOnIndex(),
             DateTimeField::new('createdAt')->setLabel('common.created_at')->hideOnForm(),

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Admin\UI\Crud;
 
+use App\Admin\UI\TranslatedFlashes;
+use App\Admin\UI\Support\AdminFormat;
 use App\Admin\UI\DashboardController;
 use App\Entity\Plan;
 use App\Shop\Application\PlanPriceSanityChecker;
@@ -20,14 +22,19 @@ use EasyCorp\Bundle\EasyAdminBundle\Field\IntegerField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\TextareaField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\TextField;
 use EasyCorp\Bundle\EasyAdminBundle\Router\AdminUrlGeneratorInterface;
+use Symfony\Contracts\Translation\TranslatorInterface;
 
 class PlanCrudController extends AbstractCrudController
 {
-    private const TOMAN_HELP = 'Toman (تومان). Not Rial, not thousands of Toman.';
+    use TranslatedFlashes;
+
+    private const TOMAN_HELP = 'help.plan.toman';
 
     public function __construct(
         private readonly PlanPriceSanityChecker $priceSanityChecker,
         private readonly AdminUrlGeneratorInterface $adminUrlGenerator,
+        private readonly AdminFormat $format,
+        private readonly TranslatorInterface $translator,
     ) {
     }
 
@@ -70,39 +77,44 @@ class PlanCrudController extends AbstractCrudController
             ->generateUrl();
     }
 
+    /**
+     * List: title, duration, traffic, price (store currency), inbound, active. The price check and the custom-plan
+     * settings are on the detail page.
+     */
     public function configureFields(string $pageName): iterable
     {
+        $f = $this->format;
+        $t = fn (string $key, array $parameters = []): string => AdminFormat::e($this->translator->trans($key, $parameters, 'admin'));
+
         return [
             IdField::new('id')->onlyOnIndex(),
             TextField::new('title'),
             TextareaField::new('description')->hideOnIndex(),
-            IntegerField::new('durationDays'),
-            IntegerField::new('trafficGb'),
-            IntegerField::new('ipLimit')
-                ->setHelp('Maximum simultaneous IPs/devices. Empty means panel/default/unlimited.'),
-            IntegerField::new('price')->setLabel('Price')->setHelp(self::TOMAN_HELP),
-            // Read-only column. EasyAdmin only formats fields bound to a readable property, and a
-            // TextField needs a string one, so it is bound to title and shows the price check instead.
-            TextField::new('title', 'Unit check')
-                ->hideOnForm()
-                ->setMaxLength(1000)
-                ->formatValue(fn (mixed $value, ?Plan $plan): string => $plan instanceof Plan ? $this->unitCheckText($plan) : ''),
-            BooleanField::new('isCustomizable', 'پلن سفارشی')
-                ->setHelp('help.plan_custom_pricing'),
-            IntegerField::new('minTrafficGb', 'حداقل حجم (GB)')->hideOnIndex(),
-            IntegerField::new('maxTrafficGb', 'حداکثر حجم (GB)')->hideOnIndex(),
-            IntegerField::new('pricePerGb', 'قیمت هر گیگ')->hideOnIndex()->setHelp(self::TOMAN_HELP),
-            IntegerField::new('minDurationDays', 'حداقل مدت (روز)')->hideOnIndex(),
-            IntegerField::new('maxDurationDays', 'حداکثر مدت (روز)')->hideOnIndex(),
-            IntegerField::new('pricePerDay', 'قیمت هر روز')->hideOnIndex()->setHelp(self::TOMAN_HELP),
-            BooleanField::new('allowCustomUsername', 'اجازه نام کاربری دلخواه')->hideOnIndex(),
-            BooleanField::new('isUnlimitedDuration', 'مدت نامحدود')
-                ->setHelp('اگر فعال باشد انقضا نامحدود است و در خرید، مدت روز پرسیده نمی‌شود.')
-                ->hideOnIndex(),
-            AssociationField::new('inbound', 'اینباند / سرور'),
+            IntegerField::new('durationDays')->setTemplatePath(AdminFormat::TEMPLATE)->formatValue(static fn (mixed $v, ?Plan $plan): string => true === $plan?->isUnlimitedDuration() ? $t('format.unlimited') : $t('format.days', ['%count%' => (int) $v])),
+            IntegerField::new('trafficGb')->setTemplatePath(AdminFormat::TEMPLATE)->formatValue(static fn (mixed $v): string => '<bdi>'.number_format((int) $v).' GB</bdi>'),
+            IntegerField::new('ipLimit')->hideOnIndex()->setHelp('help.plan.ip_limit'),
+            // The price, flagged when it looks like the wrong unit (PlanPriceSanityChecker).
+            IntegerField::new('price')->setHelp(self::TOMAN_HELP)->setTemplatePath(AdminFormat::TEMPLATE)->formatValue(fn (mixed $v, ?Plan $plan): string => $f->money($v).($plan instanceof Plan ? $this->unitWarningBadge($plan) : '')),
+            AssociationField::new('inbound'),
             BooleanField::new('isActive'),
-            DateTimeField::new('createdAt')->setLabel('common.created_at')->hideOnForm(),
-            DateTimeField::new('updatedAt')->setLabel('common.updated_at')->hideOnForm(),
+
+            // Detail page and form.
+            // EasyAdmin only formats fields bound to a readable property, so the price check is bound to title.
+            TextField::new('title', 'field.unit_check')
+                ->onlyOnDetail()
+                ->setTemplatePath(AdminFormat::TEMPLATE)
+                ->formatValue(fn (mixed $value, ?Plan $plan): string => $plan instanceof Plan ? $this->unitCheckHtml($plan) : ''),
+            BooleanField::new('isCustomizable')->hideOnIndex()->setHelp('help.plan_custom_pricing'),
+            IntegerField::new('minTrafficGb')->hideOnIndex(),
+            IntegerField::new('maxTrafficGb')->hideOnIndex(),
+            IntegerField::new('pricePerGb')->hideOnIndex()->setHelp(self::TOMAN_HELP),
+            IntegerField::new('minDurationDays')->hideOnIndex(),
+            IntegerField::new('maxDurationDays')->hideOnIndex(),
+            IntegerField::new('pricePerDay')->hideOnIndex()->setHelp(self::TOMAN_HELP),
+            BooleanField::new('allowCustomUsername')->hideOnIndex(),
+            BooleanField::new('isUnlimitedDuration')->hideOnIndex()->setHelp('help.plan.is_unlimited_duration'),
+            DateTimeField::new('createdAt')->hideOnForm()->hideOnIndex(),
+            DateTimeField::new('updatedAt')->hideOnForm()->hideOnIndex(),
         ];
     }
 
@@ -125,15 +137,26 @@ class PlanCrudController extends AbstractCrudController
         }
 
         foreach ($this->priceSanityChecker->warnings($plan) as $warning) {
-            // EasyAdmin renders flash messages as raw HTML: escape the admin-entered title.
-            $this->addFlash('warning', sprintf('Plan "%s": %s', htmlspecialchars($plan->getTitle(), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'), $warning));
+            // The checker's own wording as the detail (flash() escapes it and the admin-entered title).
+            $this->flash('warning', 'flash.plan.price_warning', ['%plan%' => $plan->getTitle(), '%warning%' => $warning]);
         }
     }
 
-    private function unitCheckText(Plan $plan): string
+    private function unitWarningBadge(Plan $plan): string
     {
         $warnings = $this->priceSanityChecker->warnings($plan);
 
-        return [] === $warnings ? 'OK' : '⚠ check unit: '.implode(' ', $warnings);
+        return [] === $warnings ? '' : sprintf(' <span class="badge badge-warning" data-unit-warning title="%s">⚠ %s</span>', AdminFormat::e(implode(' ', $warnings)), AdminFormat::e($this->translator->trans('plan.unit_check_warning', [], 'admin')));
+    }
+
+    private function unitCheckHtml(Plan $plan): string
+    {
+        $warnings = $this->priceSanityChecker->warnings($plan);
+        if ([] === $warnings) {
+            return '<span class="badge badge-success">'.AdminFormat::e($this->translator->trans('plan.unit_ok', [], 'admin')).'</span>';
+        }
+
+        // The checker's own wording (it names the field and the expected range).
+        return sprintf('<span class="badge badge-warning">%s</span> <span dir="ltr">%s</span>', AdminFormat::e($this->translator->trans('plan.unit_check_warning', [], 'admin')), AdminFormat::e(implode(' ', $warnings)));
     }
 }

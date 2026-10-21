@@ -43,9 +43,9 @@ class SettingCrudController extends AbstractCrudController
     {
         return [
             IdField::new('id')->onlyOnIndex(),
-            TextField::new('keyName')->setLabel('Key')->hideOnForm(),
-            TextareaField::new('value')->setLabel('Value')->hideOnIndex(),
-            TextField::new('type')->setLabel('Type')->hideOnForm(),
+            TextField::new('keyName')->hideOnForm(),
+            TextareaField::new('value')->hideOnIndex(),
+            TextField::new('type')->hideOnForm(),
             DateTimeField::new('createdAt')->setLabel('common.created_at')->hideOnForm(),
             DateTimeField::new('updatedAt')->setLabel('common.updated_at')->hideOnForm(),
         ];

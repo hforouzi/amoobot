@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Admin\UI\Crud;
 
 use App\Admin\UI\DashboardController;
+use App\Admin\UI\Support\AdminFormat;
 use App\Entity\DiscountCode;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Action;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Actions;
@@ -21,8 +22,10 @@ use EasyCorp\Bundle\EasyAdminBundle\Router\AdminUrlGeneratorInterface;
 
 final class DiscountCodeCrudController extends AbstractCrudController
 {
-    public function __construct(private readonly AdminUrlGeneratorInterface $adminUrlGenerator)
-    {
+    public function __construct(
+        private readonly AdminUrlGeneratorInterface $adminUrlGenerator,
+        private readonly AdminFormat $format,
+    ) {
     }
 
     public static function getEntityFqcn(): string
@@ -47,37 +50,47 @@ final class DiscountCodeCrudController extends AbstractCrudController
         return $actions->add(Crud::PAGE_INDEX, $usages);
     }
 
+    /**
+     * List: code, value, uses, valid until, active. Title, limits, scope and validity start are on the detail page.
+     */
     public function configureFields(string $pageName): iterable
     {
+        $f = $this->format;
+
         return [
             IdField::new('id')->onlyOnIndex(),
-            TextField::new('code', 'کد تخفیف')->setHelp('مثال: YALDA20'),
-            TextField::new('title', 'عنوان')->setRequired(false),
-            ChoiceField::new('type', 'نوع')
+            TextField::new('code')->setHelp('help.discount_code.code')->setTemplatePath(AdminFormat::TEMPLATE)->formatValue(static fn (mixed $v): string => '<code dir="ltr">'.AdminFormat::e((string) $v).'</code>'),
+            TextField::new('title')->setRequired(false)->hideOnIndex(),
+            ChoiceField::new('type')
                 ->setChoices([
-                    'درصدی' => DiscountCode::TYPE_PERCENT,
-                    'مبلغ ثابت' => DiscountCode::TYPE_FIXED,
+                    'discount.type.percent' => DiscountCode::TYPE_PERCENT,
+                    'discount.type.fixed' => DiscountCode::TYPE_FIXED,
                 ])
-                ->setHelp('درصد: 1 تا 100 | ثابت: بیشتر از صفر'),
-            IntegerField::new('value', 'مقدار'),
-            BooleanField::new('isActive', 'فعال'),
-            DateTimeField::new('startsAt', 'شروع')->setRequired(false),
-            DateTimeField::new('endsAt', 'پایان')->setRequired(false),
-            IntegerField::new('maxUses', 'حداکثر استفاده')->setRequired(false),
-            IntegerField::new('usedCount', 'تعداد استفاده شده')->setFormTypeOption('disabled', true),
-            IntegerField::new('maxUsesPerUser', 'حداکثر هر کاربر')->setRequired(false),
-            BooleanField::new('firstPurchaseOnly', 'فقط خرید اول'),
-            ChoiceField::new('appliesTo', 'اعمال روی')
+                ->setHelp('help.discount_code.type')
+                ->hideOnIndex(),
+            IntegerField::new('value')->setTemplatePath(AdminFormat::TEMPLATE)->formatValue(static fn (mixed $v, ?DiscountCode $code): string => DiscountCode::TYPE_PERCENT === $code?->getType() ? '<bdi>'.(int) $v.'%</bdi>' : $f->money(null === $v ? null : (int) $v)),
+            AdminFormat::field('uses', static fn (mixed $v, ?DiscountCode $code): string => null === $code ? '' : sprintf('<bdi>%s / %s</bdi>', number_format($code->getUsedCount()), null === $code->getMaxUses() ? '∞' : number_format($code->getMaxUses())), 'field.used_count')->onlyOnIndex(),
+            DateTimeField::new('endsAt')->setRequired(false)->setTemplatePath(AdminFormat::TEMPLATE)->formatValue(static fn (mixed $v): string => null === $v ? AdminFormat::NONE : $f->expiry($v)),
+            BooleanField::new('isActive'),
+
+            // Detail page and form.
+            DateTimeField::new('startsAt')->setRequired(false)->hideOnIndex(),
+            IntegerField::new('maxUses')->setRequired(false)->hideOnIndex(),
+            IntegerField::new('usedCount')->setFormTypeOption('disabled', true)->hideOnIndex(),
+            IntegerField::new('maxUsesPerUser')->setRequired(false)->hideOnIndex(),
+            BooleanField::new('firstPurchaseOnly')->hideOnIndex(),
+            ChoiceField::new('appliesTo')
                 ->setChoices([
-                    'همه' => DiscountCode::APPLIES_ALL,
-                    'خرید جدید' => 'new_service',
-                    'تمدید' => 'renewal',
-                    'حجم اضافه' => 'add_traffic',
-                ]),
-            AssociationField::new('plan', 'پلن')->setRequired(false),
-            IntegerField::new('minAmount', 'حداقل مبلغ')->setRequired(false),
-            DateTimeField::new('createdAt')->hideOnForm(),
-            DateTimeField::new('updatedAt')->hideOnForm(),
+                    'discount.applies_to.all' => DiscountCode::APPLIES_ALL,
+                    'order.type.new_service' => 'new_service',
+                    'order.type.renewal' => 'renewal',
+                    'order.type.add_traffic' => 'add_traffic',
+                ])
+                ->hideOnIndex(),
+            AssociationField::new('plan')->setRequired(false)->hideOnIndex(),
+            IntegerField::new('minAmount')->setRequired(false)->hideOnIndex(),
+            DateTimeField::new('createdAt')->hideOnForm()->hideOnIndex(),
+            DateTimeField::new('updatedAt')->hideOnForm()->hideOnIndex(),
         ];
     }
 }

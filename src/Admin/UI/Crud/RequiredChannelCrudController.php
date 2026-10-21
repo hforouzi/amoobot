@@ -37,15 +37,15 @@ class RequiredChannelCrudController extends AbstractCrudController
     {
         return [
             IdField::new('id')->onlyOnIndex(),
-            TextField::new('title', 'Title'),
-            TextField::new('chatId', 'Chat ID')
-                ->setHelp('Numeric chat id like -1001234567890 or public username like @my_channel.'),
-            TextField::new('inviteUrl', 'Invite URL')
-                ->setHelp('Used for the Join channel button. Leave empty if unavailable.'),
-            BooleanField::new('isActive', 'Active'),
-            BooleanField::new('requireForPurchase', 'Require for purchase'),
-            BooleanField::new('requireForTrial', 'Require for trial'),
-            IntegerField::new('sortOrder', 'Sort order'),
+            TextField::new('title'),
+            TextField::new('chatId')
+                ->setHelp('help.required_channel.chat_id'),
+            TextField::new('inviteUrl')
+                ->setHelp('help.required_channel.invite_url'),
+            BooleanField::new('isActive'),
+            BooleanField::new('requireForPurchase'),
+            BooleanField::new('requireForTrial'),
+            IntegerField::new('sortOrder'),
             DateTimeField::new('createdAt')->hideOnForm(),
             DateTimeField::new('updatedAt')->hideOnForm(),
         ];

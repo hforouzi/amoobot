@@ -32,22 +32,22 @@ class VpnInboundCrudController extends AbstractCrudController
 
     public function configureActions(Actions $actions): Actions
     {
-        $testCreateClient = Action::new('testCreateClient', 'تست ساخت کلاینت')
+        $testCreateClient = Action::new('testCreateClient', 'action.test_create_client')
             ->linkToRoute('admin_vpn_inbound_test_create_client', fn (VpnInbound $inbound): array => ['id' => $inbound->getId()])
             ->setCssClass('btn btn-success')
             ->displayIf(fn (VpnInbound $inbound): bool => 'sanaei_3xui' === $inbound->getPanel()->getType());
 
-        $resync = Action::new('resyncInbound', 'همگامسازی مجدد')
+        $resync = Action::new('resyncInbound', 'action.resync_inbound')
             ->linkToRoute('admin_vpn_inbound_resync', fn (VpnInbound $inbound): array => ['id' => $inbound->getId()])
             ->setCssClass('btn btn-primary')
             ->displayIf(fn (VpnInbound $inbound): bool => 'sanaei_3xui' === $inbound->getPanel()->getType());
 
-        $syncAccessMetadata = Action::new('syncAccessMetadata', 'همگامسازی متادیتای دسترسی')
+        $syncAccessMetadata = Action::new('syncAccessMetadata', 'action.sync_access_metadata')
             ->linkToRoute('admin_vpn_inbound_sync_access_metadata', fn (VpnInbound $inbound): array => ['id' => $inbound->getId()])
             ->setCssClass('btn btn-warning')
             ->displayIf(fn (VpnInbound $inbound): bool => 'sanaei_3xui' === $inbound->getPanel()->getType());
 
-        $regenerateServiceConfigs = Action::new('regenerateServiceConfigs', '🔄 بازسازی کانفیگ سرویسها')
+        $regenerateServiceConfigs = Action::new('regenerateServiceConfigs', 'action.regenerate_service_configs')
             ->linkToRoute('admin_vpn_inbound_regenerate_service_configs', fn (VpnInbound $inbound): array => ['id' => $inbound->getId()])
             ->setCssClass('btn btn-info')
             ->displayIf(fn (VpnInbound $inbound): bool => 'sanaei_3xui' === $inbound->getPanel()->getType());

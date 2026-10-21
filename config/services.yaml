@@ -84,3 +84,12 @@ services:
     App\Payment\Infrastructure\PaymentGatewayRegistry:
         arguments:
             $drivers: !tagged_iterator 'app.payment_gateway'
+
+    # Admin labels a CRUD does not set: "entity.<name>.singular|plural" and "field.<property>" (admin domain).
+    EasyCorp\Bundle\EasyAdminBundle\Contracts\Translation\EntityTranslationIdGeneratorInterface:
+        alias: App\Admin\UI\Support\AdminTranslationIdGenerator
+
+    # After EasyAdmin's own field configurators (which use __toString() and the locale's digits).
+    App\Admin\UI\Field\AdminValueConfigurator:
+        autoconfigure: false
+        tags: [{ name: 'ea.field_configurator', priority: -10 }]

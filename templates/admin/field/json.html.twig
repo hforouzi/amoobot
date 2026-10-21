@@ -1,6 +1,6 @@
 {# App\Admin\UI\Field\JsonField: formattedValue is HTML built by AdminJsonFormatter (escaped, secrets masked). #}
 {% if field.formattedValue is empty %}
-    <span class="badge badge-secondary">{{ 'label.null'|trans(domain = 'EasyAdminBundle') }}</span>
+    <span class="admin-none">—</span>
 {% else %}
     {{ field.formattedValue|raw }}
 {% endif %}

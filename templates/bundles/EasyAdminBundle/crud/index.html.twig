@@ -1,0 +1,9 @@
+{# Every admin list: the table scrolls inside its own container (with a sticky header row) instead of widening the
+   page, which clipped columns in RTL. #}
+{% extends '@!EasyAdmin/crud/index.html.twig' %}
+
+{% block datagrid %}
+    <div class="admin-table-scroll">
+        {{ parent() }}
+    </div>
+{% endblock %}

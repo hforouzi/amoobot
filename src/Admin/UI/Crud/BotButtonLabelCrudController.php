@@ -41,15 +41,15 @@ final class BotButtonLabelCrudController extends AbstractCrudController
 
         return [
             IdField::new('id')->onlyOnIndex(),
-            TextField::new('key')->setLabel('Key')->setFormTypeOption('disabled', $isEdit),
-            ChoiceField::new('locale')->setChoices(['fa' => 'fa', 'en' => 'en'])->setFormTypeOption('disabled', $isEdit),
-            TextField::new('label')->setLabel('Label'),
+            TextField::new('key')->setFormTypeOption('disabled', $isEdit),
+            ChoiceField::new('locale')->setChoices(['locale.fa' => 'fa', 'locale.en' => 'en'])->setFormTypeOption('disabled', $isEdit),
+            TextField::new('label'),
             ChoiceField::new('buttonType')
-                ->setChoices(['Reply keyboard' => 'reply_keyboard', 'Inline' => 'inline', 'Command' => 'command', 'System' => 'system'])
+                ->setChoices(['bot_text.button_type.reply_keyboard' => 'reply_keyboard', 'bot_text.button_type.inline' => 'inline', 'bot_text.button_type.command' => 'command', 'bot_text.button_type.system' => 'system'])
                 ->setFormTypeOption('disabled', $isEdit),
-            TextField::new('category')->setLabel('Category')->setFormTypeOption('disabled', true),
-            BooleanField::new('isActive')->setLabel('Active'),
-            BooleanField::new('isSystem')->setLabel('System')->hideOnForm(),
+            TextField::new('category')->setFormTypeOption('disabled', true),
+            BooleanField::new('isActive'),
+            BooleanField::new('isSystem')->hideOnForm(),
             DateTimeField::new('updatedAt')->setLabel('common.updated_at')->onlyOnIndex(),
         ];
     }

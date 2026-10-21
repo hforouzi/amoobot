@@ -18,9 +18,12 @@ use App\Admin\UI\Crud\PlanCrudController;
 use App\Admin\UI\Crud\UserCrudController;
 use App\Admin\UI\Crud\VpnPanelCrudController;
 use App\Admin\UI\Crud\VpnServiceCrudController;
-use App\Security\AdminPermission;
-use Doctrine\ORM\EntityManagerInterface;
+use App\Admin\UI\Dashboard\DashboardOverview;
+use App\Entity\AdminUser;
+use App\Security\AdminActor;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Assets;
+use EasyCorp\Bundle\EasyAdminBundle\Config\Crud;
+use EasyCorp\Bundle\EasyAdminBundle\Config\UserMenu;
 use EasyCorp\Bundle\EasyAdminBundle\Attribute\AdminDashboard;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Dashboard;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Locale;
@@ -29,37 +32,51 @@ use EasyCorp\Bundle\EasyAdminBundle\Config\Menu\ControllerMenuItem;
 use EasyCorp\Bundle\EasyAdminBundle\Contracts\Menu\MenuItemInterface;
 use EasyCorp\Bundle\EasyAdminBundle\Controller\AbstractDashboardController;
 use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\Security\Core\User\UserInterface;
 
 #[AdminDashboard(routePath: '/admin', routeName: 'admin')]
 class DashboardController extends AbstractDashboardController
 {
-    /** Dashboard cards: the payment tabs an admin has to act on. */
-    private const PAYMENT_CARDS = ['pending', 'needs_review', 'provisioning_failed'];
-
     public function __construct(
-        private readonly EntityManagerInterface $entityManager,
+        private readonly DashboardOverview $overview,
     ) {
     }
 
+    /**
+     * The overview: what needs attention, today's sales, services, panels and shortcuts, per role (DashboardOverview).
+     */
     public function index(): Response
     {
         $user = $this->getUser();
-        if ($user instanceof \App\Entity\AdminUser && !$user->isActive()) {
+        if ($user instanceof AdminUser && !$user->isActive()) {
             throw $this->createAccessDeniedException('Inactive admin account.');
-        }
-
-        $paymentCards = [];
-        if ($this->isGranted(AdminPermission::PAYMENTS_VIEW->value)) {
-            $counts = PaymentCrudController::countByTab($this->entityManager);
-            foreach (self::PAYMENT_CARDS as $tab) {
-                $paymentCards[] = ['key' => $tab, 'label' => 'payment.tabs.'.$tab, 'count' => $counts[$tab], 'url' => $this->generateUrl('admin_payment_index', ['tab' => $tab])];
-            }
         }
 
         return $this->render('admin/dashboard.html.twig', [
             'admin_user' => $user,
-            'payment_cards' => $paymentCards,
+            'overview' => $user instanceof AdminUser ? $this->overview->for(AdminActor::fromAdminUser($user)) : null,
         ]);
+    }
+
+    /**
+     * The name in the top bar: the display name, else the whole email (never cut to its first letter, admin.css).
+     */
+    public function configureUserMenu(UserInterface $user): UserMenu
+    {
+        $menu = parent::configureUserMenu($user);
+        if ($user instanceof AdminUser) {
+            $menu->setName($user->getDisplayName() ?? $user->getEmail());
+        }
+
+        return $menu;
+    }
+
+    /** Defaults of every admin list and page: one date format everywhere. */
+    public function configureCrud(): Crud
+    {
+        return Crud::new()
+            ->setDateTimeFormat('yyyy-MM-dd HH:mm')
+            ->setDateFormat('yyyy-MM-dd');
     }
 
     public function configureDashboard(): Dashboard
@@ -67,6 +84,8 @@ class DashboardController extends AbstractDashboardController
         return Dashboard::new()
             ->setTitle('Amoobot Admin')
             ->setTranslationDomain('admin')
+            // Labels a CRUD does not set are translation keys too (AdminTranslationIdGenerator).
+            ->useEntityTranslations()
             ->setLocales([
                 Locale::new('fa', 'فارسی'),
                 Locale::new('en', 'English'),
@@ -75,7 +94,7 @@ class DashboardController extends AbstractDashboardController
 
     public function configureAssets(): Assets
     {
-        return Assets::new()->addCssFile('assets/admin/admin.css');
+        return Assets::new()->addCssFile('assets/admin/admin.css')->addJsFile('assets/admin/admin.js');
     }
 
     /**
@@ -131,7 +150,7 @@ class DashboardController extends AbstractDashboardController
         }
 
         yield MenuItem::section();
-        yield MenuItem::linkToLogout('خروج', 'fa fa-sign-out');
+        yield MenuItem::linkToLogout('admin.logout', 'fa fa-sign-out');
     }
 
     /**

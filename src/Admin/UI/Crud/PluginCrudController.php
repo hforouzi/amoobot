@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Admin\UI\Crud;
 
+use App\Admin\UI\TranslatedFlashes;
 use App\Admin\Security\AdminCrudPermissions;
 use App\Admin\UI\DashboardController;
 use App\Admin\UI\Support\AdminJsonFormatter;
@@ -31,6 +32,8 @@ use Symfony\Component\Validator\Constraints\File;
 use Symfony\Component\Validator\Constraints\NotNull;
 final class PluginCrudController extends AbstractCrudController
 {
+    use TranslatedFlashes;
+
     public function __construct(
         private readonly PluginManager $pluginManager,
         private readonly PaymentPluginDoctor $pluginDoctor,
@@ -164,12 +167,12 @@ final class PluginCrudController extends AbstractCrudController
                 $result = $this->pluginManager->installFromZip($file);
                 if ($result->success && null !== $result->plugin) {
                     $auditLogger->record('plugin.install', 'Plugin', $result->plugin->getId(), ['code' => $result->plugin->getCode(), 'version' => $result->plugin->getVersion()]);
-                    $this->addFlash('success', 'Plugin installed successfully.');
+                    $this->flash('success', 'flash.plugin.installed');
 
                     return $this->redirect($this->pluginDetailUrl($result->plugin));
                 }
 
-                $this->addFlash('danger', $result->error ?? 'Plugin installation failed.');
+                $this->flash('danger', 'flash.plugin.install_failed', ['%error%' => $result->error ?? '']);
             }
         }
 
@@ -184,7 +187,7 @@ final class PluginCrudController extends AbstractCrudController
     {
         $this->pluginManager->enable($plugin);
         $auditLogger->record('plugin.enable', 'Plugin', $plugin->getId(), ['code' => $plugin->getCode()]);
-        $this->addFlash('success', 'Plugin enabled.');
+        $this->flash('success', 'flash.plugin.enabled');
 
         return $this->redirect($this->pluginListUrl());
     }
@@ -194,7 +197,7 @@ final class PluginCrudController extends AbstractCrudController
     {
         $this->pluginManager->disable($plugin);
         $auditLogger->record('plugin.disable', 'Plugin', $plugin->getId(), ['code' => $plugin->getCode()]);
-        $this->addFlash('success', 'Plugin disabled.');
+        $this->flash('success', 'flash.plugin.disabled');
 
         return $this->redirect($this->pluginListUrl());
     }

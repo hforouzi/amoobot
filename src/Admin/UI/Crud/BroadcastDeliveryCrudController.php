@@ -37,8 +37,8 @@ final class BroadcastDeliveryCrudController extends AbstractCrudController
     {
         return $crud
             ->setDefaultSort(['id' => 'DESC'])
-            ->setEntityLabelInSingular('Broadcast Delivery')
-            ->setEntityLabelInPlural('Broadcast Deliveries');
+            ->setEntityLabelInSingular('entity.broadcast_delivery.singular')
+            ->setEntityLabelInPlural('entity.broadcast_delivery.plural');
     }
 
     public function configureActions(Actions $actions): Actions

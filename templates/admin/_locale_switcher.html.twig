@@ -1,0 +1,6 @@
+{% set currentLocale = app.request.locale|default('fa') %}
+<nav class="admin-locale-switcher" aria-label="{{ 'login.language'|trans({}, 'messages') }}">
+    <a href="{{ path('admin_locale_switch', {locale: 'fa', redirect_to: app.request.uri}) }}" lang="fa" class="{{ currentLocale starts with 'fa' ? 'active' : '' }}">فارسی</a>
+    <span aria-hidden="true">|</span>
+    <a href="{{ path('admin_locale_switch', {locale: 'en', redirect_to: app.request.uri}) }}" lang="en" class="{{ currentLocale starts with 'en' ? 'active' : '' }}">English</a>
+</nav>

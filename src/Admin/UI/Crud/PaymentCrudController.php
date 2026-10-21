@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Admin\UI\Crud;
 
 use App\Admin\UI\PaymentModerationController;
+use App\Admin\UI\Support\AdminFormat;
 use App\Admin\UI\Support\AdminStatusBadge;
 use App\Entity\Payment;
 use App\Payment\Domain\PaymentStatus;
@@ -32,6 +33,7 @@ use EasyCorp\Bundle\EasyAdminBundle\Filter\ChoiceFilter;
 use EasyCorp\Bundle\EasyAdminBundle\Filter\EntityFilter;
 use Symfony\Component\HttpFoundation\RequestStack;
 use Symfony\Component\Security\Csrf\CsrfTokenManagerInterface;
+use Symfony\Contracts\Translation\TranslatorInterface;
 
 /**
  * Payments, one list with status tabs (?tab=...): the tabs replace the separate "needs review" and "provisioning
@@ -56,6 +58,8 @@ final class PaymentCrudController extends AbstractCrudController
         private readonly CsrfTokenManagerInterface $csrfTokenManager,
         private readonly RequestStack $requestStack,
         private readonly EntityManagerInterface $entityManager,
+        private readonly AdminFormat $format,
+        private readonly TranslatorInterface $translator,
     ) {
     }
 
@@ -73,7 +77,12 @@ final class PaymentCrudController extends AbstractCrudController
 
     public function createIndexQueryBuilder(SearchDto $searchDto, EntityDto $entityDto, FieldCollection $fields, FilterCollection $filters): QueryBuilder
     {
-        $qb = parent::createIndexQueryBuilder($searchDto, $entityDto, $fields, $filters);
+        $qb = parent::createIndexQueryBuilder($searchDto, $entityDto, $fields, $filters)
+            // The list's customer, order and method columns, in the same query (no query per row).
+            ->leftJoin('entity.order', 'listOrder')->addSelect('listOrder')
+            ->leftJoin('listOrder.user', 'listUser')->addSelect('listUser')
+            ->leftJoin('entity.storePaymentMethod', 'listMethod')->addSelect('listMethod')
+            ->leftJoin('entity.gateway', 'listGateway')->addSelect('listGateway');
         $tab = $this->currentTab();
         if ([] !== self::TABS[$tab]) {
             $qb->andWhere('entity.status IN (:tabStatuses)')->setParameter('tabStatuses', self::TABS[$tab]);
@@ -153,26 +162,26 @@ final class PaymentCrudController extends AbstractCrudController
     {
         // POST forms straight to PaymentModerationController (not via the dashboard router, which would
         // drop the query string) carrying a per-payment CSRF token.
-        $confirm = Action::new('confirmPayment', 'Approve')
+        $confirm = Action::new('confirmPayment', 'action.confirm_payment')
             ->linkToUrl(fn (Payment $payment): string => $this->generateUrl('admin_payment_confirm', $this->routeParameters($payment)))
             ->renderAsForm()
             ->setCssClass('btn btn-success')
             ->displayIf(fn (Payment $payment): bool => in_array($payment->getStatus(), [PaymentStatus::PENDING, PaymentStatus::SUBMITTED, PaymentStatus::NEEDS_REVIEW], true));
 
-        $retry = Action::new('retryProvisioning', 'Retry provisioning')
+        $retry = Action::new('retryProvisioning', 'action.retry_provisioning')
             ->linkToUrl(fn (Payment $payment): string => $this->generateUrl('admin_payment_retry', $this->routeParameters($payment)))
             ->renderAsForm()
             ->setCssClass('btn btn-primary')
             ->displayIf(fn (Payment $payment): bool => PaymentStatus::PROVISIONING_FAILED === $payment->getStatus());
 
-        $reject = Action::new('rejectPayment', 'Reject')
+        $reject = Action::new('rejectPayment', 'action.reject_payment')
             ->linkToUrl(fn (Payment $payment): string => $this->generateUrl('admin_payment_reject', $this->routeParameters($payment)))
             ->renderAsForm()
             ->setCssClass('btn btn-warning')
             ->displayIf(fn (Payment $payment): bool => in_array($payment->getStatus(), [PaymentStatus::PENDING, PaymentStatus::SUBMITTED, PaymentStatus::NEEDS_REVIEW, PaymentStatus::PROVISIONING_FAILED], true));
 
         // Closing a duplicate (or any reviewed payment) whose money was sent back to the customer.
-        $rejectRefunded = Action::new('rejectPaymentRefunded', 'Reject (refunded)')
+        $rejectRefunded = Action::new('rejectPaymentRefunded', 'action.reject_payment_refunded')
             ->linkToUrl(fn (Payment $payment): string => $this->generateUrl('admin_payment_reject', $this->routeParameters($payment) + ['refunded' => 1]))
             ->renderAsForm()
             ->setCssClass('btn btn-secondary')
@@ -197,58 +206,66 @@ final class PaymentCrudController extends AbstractCrudController
         ];
     }
 
+    /**
+     * List: customer, order, method, amount (store currency), status, when. Gateway details, amounts as verified,
+     * review/provisioning data, receipts and crypto data are on the detail page.
+     */
     public function configureFields(string $pageName): iterable
     {
+        $f = $this->format;
+
         return [
             IdField::new('id')->onlyOnIndex(),
-            AssociationField::new('order')->setLabel('admin.orders'),
-            TextField::new('order.type', 'orderType')->hideOnForm(),
-            AssociationField::new('storePaymentMethod')->hideOnForm(),
-            AssociationField::new('gateway')->setLabel('admin.payment_gateways'),
-            TextField::new('method')->setLabel('Method'),
-            TextField::new('gatewayType')->setLabel('Gateway Type'),
-            IntegerField::new('amount')->setLabel('Amount'),
-            IntegerField::new('payableAmount')->setLabel('Payable Amount'),
-            TextField::new('currency')->setLabel('Currency'),
+            AdminFormat::field('customer', static fn (mixed $v, ?Payment $p): string => null === $p ? '' : AdminFormat::e((string) $p->getOrder()->getUser()), 'field.customer')->onlyOnIndex(),
+            AssociationField::new('order'),
+            AdminFormat::field('orderType', fn (mixed $v, ?Payment $p): string => null === $p ? '' : AdminFormat::e($this->translator->trans('order.type.'.$p->getOrder()->getType(), [], 'admin')), 'field.order_type')->hideOnIndex(),
+            // The method the customer chose (its store title), else the gateway's title, else the raw method code.
+            AdminFormat::field('paidWith', static fn (mixed $v, ?Payment $p): string => AdminFormat::e((string) ($p?->getStorePaymentMethod()?->getTitle() ?? $p?->getGateway()?->getTitle() ?? $p?->getMethod() ?? '')) ?: AdminFormat::NONE, 'field.method')->onlyOnIndex(),
+            IntegerField::new('amount')->setTemplatePath(AdminFormat::TEMPLATE)->formatValue(static fn (mixed $v): string => $f->money($v)),
             // Read-only: only PaymentSettlementService / the moderation actions may change a payment's status.
-            TextField::new('status')
-                ->formatValue(static fn (mixed $value): string => AdminStatusBadge::html($value))
-                ->renderAsHtml()
-                ->hideOnForm(),
-            TextField::new('amountFlag')->setLabel('Amount flag')->hideOnForm(),
-            DateTimeField::new('refundedAt')->setLabel('Refunded at')->hideOnIndex()->hideOnForm(),
-            TextareaField::new('reviewReason')->setLabel('Review reason')->hideOnIndex()->hideOnForm(),
-            TextareaField::new('provisioningError')->setLabel('Provisioning error')->hideOnIndex()->hideOnForm(),
-            IntegerField::new('provisioningAttempts')->setLabel('Provisioning attempts')->hideOnIndex()->hideOnForm(),
-            DateTimeField::new('provisioningFailedAt')->setLabel('Provisioning failed at')->hideOnIndex()->hideOnForm(),
-            TextField::new('expectedAmount')->setLabel('Expected amount')->hideOnIndex()->hideOnForm(),
-            TextField::new('expectedCurrency')->setLabel('Expected currency')->hideOnIndex()->hideOnForm(),
-            TextField::new('verifiedAmount')->setLabel('Verified amount')->hideOnIndex()->hideOnForm(),
-            TextField::new('verifiedCurrency')->setLabel('Verified currency')->hideOnIndex()->hideOnForm(),
-            TextField::new('confirmationSource')->setLabel('Confirmation source')->hideOnIndex()->hideOnForm(),
-            IntegerField::new('confirmedByAdminId')->setLabel('Confirmed by admin #')->hideOnIndex()->hideOnForm(),
-            TextField::new('confirmedByTelegramId')->setLabel('Confirmed by Telegram ID')->hideOnIndex()->hideOnForm(),
+            TextField::new('status')->hideOnForm()->setTemplatePath(AdminFormat::TEMPLATE)->formatValue(static fn (mixed $v): string => $f->status($v)),
+            DateTimeField::new('createdAt')->hideOnForm(),
+
+            // Detail page and form.
+            AssociationField::new('storePaymentMethod')->hideOnForm()->hideOnIndex(),
+            AssociationField::new('gateway')->hideOnIndex(),
+            TextField::new('method')->hideOnIndex(),
+            TextField::new('gatewayType')->hideOnIndex(),
+            IntegerField::new('payableAmount')->hideOnIndex()->setTemplatePath(AdminFormat::TEMPLATE)->formatValue(static fn (mixed $v): string => $f->money($v)),
+            TextField::new('currency')->hideOnIndex(),
+            TextField::new('amountFlag')->hideOnForm()->hideOnIndex(),
+            DateTimeField::new('refundedAt')->hideOnIndex()->hideOnForm(),
+            TextareaField::new('reviewReason')->hideOnIndex()->hideOnForm(),
+            TextareaField::new('provisioningError')->hideOnIndex()->hideOnForm(),
+            IntegerField::new('provisioningAttempts')->hideOnIndex()->hideOnForm(),
+            DateTimeField::new('provisioningFailedAt')->hideOnIndex()->hideOnForm(),
+            TextField::new('expectedAmount')->hideOnIndex()->hideOnForm(),
+            TextField::new('expectedCurrency')->hideOnIndex()->hideOnForm(),
+            TextField::new('verifiedAmount')->hideOnIndex()->hideOnForm(),
+            TextField::new('verifiedCurrency')->hideOnIndex()->hideOnForm(),
+            TextField::new('confirmationSource')->hideOnIndex()->hideOnForm(),
+            IntegerField::new('confirmedByAdminId')->hideOnIndex()->hideOnForm(),
+            TextField::new('confirmedByTelegramId')->hideOnIndex()->hideOnForm(),
             TextField::new('gatewayTransactionId')->hideOnIndex(),
             TextField::new('authority')->hideOnIndex(),
             TextField::new('paymentUrl')->hideOnIndex(),
             DateTimeField::new('verifiedAt')->hideOnIndex(),
             DateTimeField::new('failedAt')->hideOnIndex(),
-            TextField::new('trackingCode'),
-            TextField::new('receiptFileId'),
+            TextField::new('trackingCode')->hideOnIndex(),
+            TextField::new('receiptFileId')->hideOnIndex(),
             TextareaField::new('receiptMessage')->hideOnIndex(),
             TextareaField::new('adminNote')->hideOnIndex(),
-            DateTimeField::new('createdAt')->setLabel('common.created_at')->hideOnForm(),
-            DateTimeField::new('submittedAt'),
-            DateTimeField::new('confirmedAt'),
+            DateTimeField::new('submittedAt')->hideOnIndex(),
+            DateTimeField::new('confirmedAt')->hideOnIndex(),
             // Crypto fields
-            TextField::new('cryptoPaymentId')->hideOnIndex()->setLabel('Crypto Payment ID'),
-            TextField::new('cryptoPaymentStatus')->hideOnIndex()->setLabel('Crypto Status'),
-            TextField::new('cryptoPayAmount')->hideOnIndex()->setLabel('Crypto Pay Amount'),
-            TextField::new('cryptoPayCurrency')->hideOnIndex()->setLabel('Crypto Pay Currency'),
-            TextField::new('cryptoAddress')->hideOnIndex()->setLabel('Crypto Address'),
-            TextField::new('cryptoPriceCurrency')->hideOnIndex()->setLabel('Crypto Price Currency'),
-            TextField::new('cryptoPurchaseId')->hideOnIndex()->setLabel('Crypto Purchase ID'),
-            DateTimeField::new('cryptoExpiresAt')->hideOnIndex()->setLabel('Crypto Expires At'),
+            TextField::new('cryptoPaymentId')->hideOnIndex(),
+            TextField::new('cryptoPaymentStatus')->hideOnIndex(),
+            TextField::new('cryptoPayAmount')->hideOnIndex(),
+            TextField::new('cryptoPayCurrency')->hideOnIndex(),
+            TextField::new('cryptoAddress')->hideOnIndex(),
+            TextField::new('cryptoPriceCurrency')->hideOnIndex(),
+            TextField::new('cryptoPurchaseId')->hideOnIndex(),
+            DateTimeField::new('cryptoExpiresAt')->hideOnIndex(),
         ];
     }
 }
