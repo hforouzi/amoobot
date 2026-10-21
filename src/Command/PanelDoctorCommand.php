@@ -8,6 +8,7 @@ use App\Entity\VpnInbound;
 use App\Entity\VpnPanel;
 use App\Provisioning\Application\PanelConnectionReport;
 use App\Provisioning\Application\PanelConnectionTester;
+use App\Provisioning\Application\PanelSubscriptionUrlCheck;
 use App\Provisioning\Domain\Dto\CreateVpnServiceRequest;
 use App\Provisioning\Domain\Dto\RenewVpnServiceRequest;
 use App\Provisioning\Infrastructure\PanelCredentials;
@@ -123,6 +124,20 @@ final class PanelDoctorCommand extends Command
             $output->writeln('      detail: '.$this->safe($report->message));
         } else {
             $output->writeln(sprintf('PASS  connection (%s API)', $report->detectedMode->value ?? '?'));
+        }
+
+        // A warning, not a failure: the connection works, but customers would get no usable subscription link.
+        $problem = PanelSubscriptionUrlCheck::problem($panel);
+        $sample = (string) PanelSubscriptionUrlCheck::sampleUrl($panel);
+        if (null === $problem) {
+            $output->writeln(sprintf('PASS  subscription URL is publicly usable (%s)', $this->safe($sample)));
+        } else {
+            $output->writeln('WARN  subscription URL is not publicly usable');
+            $output->writeln('      '.$this->safe($this->translator->trans('panel_connection.subscription_check.'.$problem, [
+                '%url%' => $sample,
+                '%field%' => $this->translator->trans('panel_connection.form.subscription_base_url', [], 'admin', $locale),
+                '%section%' => $this->translator->trans('panel_connection.form.advanced', [], 'admin', $locale),
+            ], 'admin', $locale)));
         }
     }
 

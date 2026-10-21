@@ -10,6 +10,7 @@ use App\Entity\VpnInbound;
 use App\Entity\VpnPanel;
 use App\Provisioning\Application\ModernModeGuard;
 use App\Provisioning\Application\PanelConnectionTester;
+use App\Provisioning\Application\PanelSubscriptionUrlCheck;
 use App\Provisioning\Domain\SanaeiIntegrationMode;
 use App\Provisioning\Infrastructure\PanelCredentials;
 use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http\PanelApiException;
@@ -223,6 +224,8 @@ final class PanelSetupController extends AbstractController
             'token_mask' => $this->tokenMask($panel),
             'report' => $report,
             'used_by_active_plan' => $this->modernModeGuard->usedByActivePlan($panel),
+            'subscription_problem' => PanelSubscriptionUrlCheck::problem($panel),
+            'subscription_sample' => PanelSubscriptionUrlCheck::sampleUrl($panel),
         ]);
     }
 

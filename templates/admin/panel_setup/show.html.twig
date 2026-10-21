@@ -13,6 +13,17 @@
     <div class="admin-custom-page">
         {% include 'admin/panel_setup/_steps.html.twig' with {current: 1} %}
 
+        {% if subscription_problem|default(null) %}
+            <div class="alert alert-warning" id="subscription-url-warning">
+                {{ ('panel_connection.subscription_check.' ~ subscription_problem)|trans({
+                    '%url%': subscription_sample,
+                    '%field%': 'panel_connection.form.subscription_base_url'|trans,
+                    '%section%': 'panel_connection.form.advanced'|trans,
+                }) }}
+                <a href="{{ path('admin_panel_setup_edit', {id: panel.id}) }}">{{ 'panel_connection.edit_button'|trans }}</a>
+            </div>
+        {% endif %}
+
         <div class="admin-form-card mb-3">
             <dl class="row mb-0">
                 <dt class="col-sm-3">{{ 'panel_connection.form.url'|trans }}</dt>

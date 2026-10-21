@@ -42,6 +42,25 @@ final class PanelSetupFlowTest extends IntegrationTestCase
         $this->client->loginUser($admin, 'main');
     }
 
+    public function testTheDetailPageWarnsWhenCustomersWouldGetNoUsableSubscriptionUrl(): void
+    {
+        $panel = (new VpnPanel())->setType('sanaei_3xui')->setTitle('Local panel')->setBaseUrl('http://127.0.0.1:2096/secret/');
+        $this->em->persist($panel);
+        $this->em->flush();
+
+        $this->client->request('GET', '/admin/panel-setup/'.$panel->getId());
+        $this->assertResponseIsSuccessfulHere();
+        $warning = $this->client->getCrawler()->filter('#subscription-url-warning');
+        self::assertCount(1, $warning);
+        self::assertStringContainsString($this->trans('panel_connection.form.subscription_base_url'), $warning->text());
+        self::assertStringContainsString($this->trans('panel_connection.form.advanced'), $warning->text());
+
+        $panel->setSubscriptionBaseUrl('https://sub.example.com:2096');
+        $this->em->flush();
+        $this->client->request('GET', '/admin/panel-setup/'.$panel->getId());
+        self::assertCount(0, $this->client->getCrawler()->filter('#subscription-url-warning'));
+    }
+
     public function testTheWholeGuidedFlow(): void
     {
         $crawler = $this->client->request('GET', '/admin/panel-setup/new');
