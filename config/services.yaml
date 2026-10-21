@@ -5,6 +5,7 @@ parameters:
     app.supported_locales: ['fa', 'en']
     default_telegram_mode: long_polling
     default_telegram_proxy: ''
+    default_telegram_webhook_secret_token: ''
     default_panel_proxy_enabled: 'false'
     default_panel_proxy_type: socks5
     default_panel_proxy_host: ''
@@ -39,6 +40,7 @@ services:
         bind:
             string $botToken: '%env(TELEGRAM_BOT_TOKEN)%'
             string $webhookSecret: '%env(TELEGRAM_WEBHOOK_SECRET)%'
+            string $webhookSecretToken: '%env(default:default_telegram_webhook_secret_token:TELEGRAM_WEBHOOK_SECRET_TOKEN)%'
             $adminChatId: '%env(default::TELEGRAM_ADMIN_CHAT_ID)%'
             string $telegramMode: '%env(default:default_telegram_mode:TELEGRAM_MODE)%'
             string $telegramProxy: '%env(default:default_telegram_proxy:TELEGRAM_PROXY)%'

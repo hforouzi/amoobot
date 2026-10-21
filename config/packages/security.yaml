@@ -2,6 +2,9 @@ security:
     password_hashers:
         App\Entity\AdminUser: auto
 
+    role_hierarchy:
+        ROLE_SUPER_ADMIN: ROLE_ADMIN
+
     providers:
         admin_users:
             entity:
@@ -24,6 +27,10 @@ security:
                 enable_csrf: true
                 csrf_parameter: _csrf_token
                 csrf_token_id: authenticate
+            # 5 failed admin logins per 15 minutes per email+IP (and 25 per IP). nginx also rate-limits /admin/login.
+            login_throttling:
+                max_attempts: 5
+                interval: '15 minutes'
             remember_me:
                 secret: '%env(APP_SECRET)%'
                 lifetime: 1209600

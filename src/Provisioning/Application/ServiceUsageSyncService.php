@@ -4,7 +4,10 @@ declare(strict_types=1);
 
 namespace App\Provisioning\Application;
 
+use App\Entity\VpnPanel;
 use App\Entity\VpnService;
+use App\Provisioning\Domain\BatchUsageDriverInterface;
+use App\Provisioning\Domain\Dto\VpnUsage;
 use App\Provisioning\Domain\VpnServiceStatus;
 use App\Provisioning\Infrastructure\VpnPanelDriverRegistry;
 use Doctrine\ORM\EntityManagerInterface;
@@ -20,7 +23,10 @@ final class ServiceUsageSyncService
     ) {
     }
 
-    public function syncOne(VpnService $service, bool $dryRun = false, bool $flush = true): SyncResult
+    /**
+     * @param VpnUsage|null $prefetched usage already read in a batch for this service (syncActiveServices)
+     */
+    public function syncOne(VpnService $service, bool $dryRun = false, bool $flush = true, ?VpnUsage $prefetched = null): SyncResult
     {
         $serviceId = (int) ($service->getId() ?? 0);
         if (VpnServiceStatus::DELETED === $service->getStatus()) {
@@ -50,8 +56,7 @@ final class ServiceUsageSyncService
         ));
 
         try {
-            $driver = $this->driverRegistry->resolve($panel);
-            $usage = $driver->getUsage($remoteId, $panel);
+            $usage = $prefetched ?? $this->driverRegistry->resolve($panel)->getUsage($remoteId, $panel);
         } catch (\Throwable $e) {
             $safeError = $this->sanitizeMessage($e->getMessage());
             $this->log(sprintf(
@@ -120,9 +125,10 @@ final class ServiceUsageSyncService
         $updated = 0;
         $failed = 0;
         $skipped = 0;
+        $prefetched = $this->prefetchBatchUsages($services);
 
         foreach ($services as $service) {
-            $result = $this->syncOne($service, $dryRun, false);
+            $result = $this->syncOne($service, $dryRun, false, $prefetched[spl_object_id($service)] ?? null);
             ++$checked;
             if ($result->isUpdated()) {
                 ++$updated;
@@ -142,6 +148,50 @@ final class ServiceUsageSyncService
         }
 
         return new SyncSummary($checked, $updated, $failed, $skipped);
+    }
+
+    /**
+     * Panels whose driver reads many clients in one request (BatchUsageDriverInterface): one request per panel instead
+     * of one per service. A panel whose batch fails is left to the per-service path (and its own error reporting).
+     *
+     * @param VpnService[] $services
+     *
+     * @return array<int, VpnUsage> by spl_object_id of the service
+     */
+    private function prefetchBatchUsages(array $services): array
+    {
+        /** @var array<int, array{panel: VpnPanel, services: list<VpnService>}> $byPanel */
+        $byPanel = [];
+        foreach ($services as $service) {
+            $panel = $service->getPanel();
+            if (null === $panel || VpnServiceStatus::DELETED === $service->getStatus() || '' === trim((string) $service->getRemoteId())) {
+                continue;
+            }
+            $byPanel[spl_object_id($panel)]['panel'] = $panel;
+            $byPanel[spl_object_id($panel)]['services'][] = $service;
+        }
+
+        $usages = [];
+        foreach ($byPanel as ['panel' => $panel, 'services' => $panelServices]) {
+            try {
+                $driver = $this->driverRegistry->resolve($panel);
+                if (!$driver instanceof BatchUsageDriverInterface) {
+                    continue;
+                }
+                $batch = $driver->getUsages($panel, array_map(static fn (VpnService $s): string => trim((string) $s->getRemoteId()), $panelServices));
+            } catch (\Throwable $e) {
+                $this->log(sprintf('batch_usage_failed panel_id=%d error="%s"', $panel->getId() ?? 0, $this->sanitizeMessage($e->getMessage())));
+                continue;
+            }
+            foreach ($panelServices as $service) {
+                $usage = $batch[trim((string) $service->getRemoteId())] ?? null;
+                if (null !== $usage) {
+                    $usages[spl_object_id($service)] = $usage;
+                }
+            }
+        }
+
+        return $usages;
     }
 
     private function bytesToGb(int $bytes): int

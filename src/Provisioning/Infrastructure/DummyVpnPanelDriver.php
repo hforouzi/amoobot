@@ -18,6 +18,11 @@ class DummyVpnPanelDriver implements VpnPanelDriverInterface
         return null === $panel || 'dummy' === $panel->getType();
     }
 
+    public function supportsProvisioning(?VpnPanel $panel): bool
+    {
+        return true;
+    }
+
     public function createService(CreateVpnServiceRequest $request, ?VpnPanel $panel = null): CreatedVpnService
     {
         $token = bin2hex(random_bytes(8));

@@ -663,7 +663,10 @@ class TelegramUpdateHandler
             return;
         }
 
-        $plans = $this->entityManager->getRepository(Plan::class)->findBy(['isActive' => true], ['id' => 'ASC']);
+        $plans = array_values(array_filter(
+            $this->entityManager->getRepository(Plan::class)->findBy(['isActive' => true], ['id' => 'ASC']),
+            static fn (Plan $plan): bool => $plan->isAvailableForSale(),
+        ));
         if ([] === $plans) {
             $this->showPopupOrMessage($chatId, $callbackId, $this->botTextResolver->message('plan.list_empty'), 'popup_no_active_plans');
 
@@ -765,7 +768,7 @@ class TelegramUpdateHandler
         }
 
         $plan = $this->entityManager->getRepository(Plan::class)->find($planId);
-        if (!$plan instanceof Plan || !$plan->isActive()) {
+        if (!$plan instanceof Plan || !$plan->isAvailableForSale()) {
             $this->showPopupOrMessage($chatId, $callbackId, 'این پلن دیگر فعال نیست یا وجود ندارد.', 'popup_invalid_plan');
 
             return;
@@ -1266,7 +1269,7 @@ class TelegramUpdateHandler
         }
 
         $plan = $this->entityManager->getRepository(Plan::class)->find($planId);
-        if (!$plan instanceof Plan || !$plan->isActive()) {
+        if (!$plan instanceof Plan || !$plan->isAvailableForSale()) {
             $this->showPopupOrMessage($chatId, $callbackId, 'این پلن دیگر فعال نیست یا وجود ندارد.', 'popup_invalid_plan_select_payment_method');
 
             return;
@@ -1621,7 +1624,6 @@ class TelegramUpdateHandler
         if (in_array($gateway->getType(), [PaymentGatewayType::ZIBAL, PaymentGatewayType::CUSTOM_API], true) || null !== $gateway->getPluginCode()) {
             if (!$requestResult->success || null === $payment->getPaymentUrl()) {
                 $logKey = match ($gateway->getPluginCode()) {
-                    'greenpay' => 'greenpay_request_failed_new_service',
                     null => 'zibal_request_failed_new_service',
                     default => 'plugin_request_failed_new_service',
                 };
@@ -2734,11 +2736,6 @@ class TelegramUpdateHandler
 
         $this->acknowledgeCallback($callbackId);
         $this->telegramApiClient->sendMessage($chatId, implode("\n", $lines), $this->keyboardFactory->backToAdminMenu());
-    }
-
-    private function handleAdminServices(string $chatId, ?string $callbackId = null): void
-    {
-        $this->serviceManagementService->handleAdminServices($chatId, $callbackId);
     }
 
     private function handleAdminOrders(string $chatId, ?string $callbackId = null): void

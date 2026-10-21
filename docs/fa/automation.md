@@ -32,3 +32,40 @@ php bin/console app:service:send-notifications
 ```
 
 روی داده واقعی ابتدا `--dry-run` اجرا کنید.
+
+## زمان‌بندی (Production)
+
+همه‌ی کارهای دوره‌ای از طریق `app:automation:run --only=<task>` اجرا می‌شوند، نه دستورهای مستقل. دلیل: فقط این دستور به
+Toggleهای پنل ادمین (`automation.*`) احترام می‌گذارد. اگر کاری در پنل خاموش باشد، اجرای زمان‌بندی‌شده هم کاری انجام نمی‌دهد.
+`deploy.sh` این کارها را به‌صورت systemd timer نصب می‌کند (راهنما: [deployment.md](deployment.md)).
+
+| کار | دستور | فاصله‌ی پیشنهادی | زمان اجرا | پیش‌فرض Toggle |
+|---|---|---|---|---|
+| `broadcasts` | `app:automation:run --only=broadcasts` | هر ۲ دقیقه | `*:0/2` | روشن |
+| `orders` (منقضی کردن سفارش‌های ناقص) | `app:automation:run --only=orders` | هر ۱۰ دقیقه | `*:0/10` | روشن |
+| `sync` (مصرف سرویس‌ها از پنل) | `app:automation:run --only=sync` | هر ۱۵ دقیقه | `:00 :15 :30 :45` | روشن |
+| `expiry` (بررسی انقضا) | `app:automation:run --only=expiry` | هر ۱۵ دقیقه، بعد از sync | `:05 :20 :35 :50` | روشن |
+| `suspend` (تعلیق خودکار) | `app:automation:run --only=suspend` | هر ۱۵ دقیقه، بعد از expiry | `:08 :23 :38 :53` | **خاموش** (اختیاری) |
+| `notifications` (اعلان انقضا و ترافیک) | `app:automation:run --only=notifications` | هر ۳۰ دقیقه | `:10 :40` | روشن |
+
+- ترتیب sync ← expiry ← suspend عمدی است: انقضا و تعلیق روی داده‌ی تازه‌ی مصرف تصمیم می‌گیرند.
+- اعلان‌ها تکراری ارسال نمی‌شوند (کلید یکتای `service_id + type + key` در `service_notification_log`)، پس اجرای مکرر بی‌خطر است.
+- `suspend` فقط وقتی کاری انجام می‌دهد که ادمین «تعلیق خودکار» را در تنظیمات روشن کرده باشد. پیش‌فرض خاموش است و زمان‌بندی آن را روشن نمی‌کند.
+
+### عمداً زمان‌بندی نمی‌شوند
+
+| دستور | دلیل |
+|---|---|
+| `app:payments:repair-stuck` | تعمیر پرداخت‌ها تصمیم انسانی می‌خواهد (`--apply` وضعیت پرداخت را تغییر می‌دهد) |
+| `app:service:sync-usage`، `app:service:check-expiry`، `app:service:send-notifications`، `app:orders:expire-incomplete`، `app:broadcast:run` | همان کارهای `automation:run` هستند ولی Toggleهای پنل را نادیده می‌گیرند. فقط برای اجرای دستی |
+| `app:broadcast:send` / `prepare` / `retry-failed` | برای یک broadcast مشخص (آرگومان لازم دارند). ارسال زمان‌بندی‌شده با `--only=broadcasts` انجام می‌شود |
+| `app:payment:check-nowpayments` | برای یک پرداخت مشخص. IPN درگاه وضعیت را خودکار به‌روز می‌کند |
+| `app:telegram:poll` | فقط برای حالت long polling (توسعه). Production از webhook استفاده می‌کند |
+| `app:panel:sync-inbounds`، `app:inbound:regenerate-service-configs` | تغییر دسته‌جمعی پیکربندی‌ها، فقط دستی |
+| سلامت پنل‌ها | دستور جداگانه‌ای ندارد. خطای اتصال به پنل باعث شکست کار `sync` و ارسال هشدار می‌شود |
+
+### محدودیت مهم: `automation.batch_limit`
+
+`sync`، `expiry` و `suspend` در هر اجرا فقط **جدیدترین** `automation.batch_limit` سرویس را بررسی می‌کنند (پیش‌فرض ۱۰۰، حداکثر ۱۰۰۰، مرتب‌سازی `id DESC`).
+بنابراین اگر تعداد سرویس‌ها از این عدد بیشتر شود، سرویس‌های قدیمی‌تر **هیچ‌وقت** همگام یا منقضی نمی‌شوند و کوتاه‌تر کردن فاصله‌ی اجرا هم کمکی نمی‌کند.
+`automation.batch_limit` را در تنظیمات همیشه بیشتر از تعداد کل سرویس‌ها نگه دارید. (اصلاح خود این رفتار خارج از این تغییر است.)

@@ -7,8 +7,10 @@ Amoobot is a self-hosted Telegram VPN shop with an admin panel, VPN panel integr
 Create the first admin user:
 
 ```bash
-php bin/console app:admin:create-user --email=admin@example.com --password='StrongPass123!' --role=ROLE_SUPER_ADMIN
+php bin/console app:admin:create-user --email=admin@example.com --role=ROLE_SUPER_ADMIN
 ```
+
+The password is asked for interactively (hidden input), so it never ends up in your shell history.
 
 Login URL: `/admin/login`
 

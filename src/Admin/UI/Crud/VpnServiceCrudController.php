@@ -44,7 +44,9 @@ class VpnServiceCrudController extends AbstractCrudController
 
         return $actions
             ->add(Action::INDEX, $regenerateConfig)
-            ->add(Action::DETAIL, $regenerateConfig);
+            ->add(Action::DETAIL, $regenerateConfig)
+            // Its route lives in VpnPanelInboundActionsController, which is super-admin only.
+            ->setPermission('regenerateConfig', 'ROLE_SUPER_ADMIN');
     }
 
     public function configureFields(string $pageName): iterable

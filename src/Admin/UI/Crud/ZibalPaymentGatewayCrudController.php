@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Admin\UI\Crud;
 
+use App\Entity\AdminUser;
 use App\Entity\PaymentGateway;
 use App\Payment\Domain\PaymentGatewayType;
 use Doctrine\ORM\QueryBuilder;
@@ -11,6 +12,7 @@ use EasyCorp\Bundle\EasyAdminBundle\Collection\FieldCollection;
 use EasyCorp\Bundle\EasyAdminBundle\Collection\FilterCollection;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Action;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Actions;
+use EasyCorp\Bundle\EasyAdminBundle\Config\Crud;
 use EasyCorp\Bundle\EasyAdminBundle\Controller\AbstractCrudController;
 use EasyCorp\Bundle\EasyAdminBundle\Dto\EntityDto;
 use EasyCorp\Bundle\EasyAdminBundle\Dto\SearchDto;
@@ -20,12 +22,19 @@ use EasyCorp\Bundle\EasyAdminBundle\Field\FormField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\IdField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\TextareaField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\TextField;
+use Symfony\Component\Security\Http\Attribute\IsGranted;
 
+#[IsGranted('ROLE_SUPER_ADMIN')]
 final class ZibalPaymentGatewayCrudController extends AbstractCrudController
 {
     public static function getEntityFqcn(): string
     {
         return PaymentGateway::class;
+    }
+
+    public function configureCrud(Crud $crud): Crud
+    {
+        return $crud->setEntityPermission(AdminUser::ROLE_SUPER_ADMIN);
     }
 
     public function configureActions(Actions $actions): Actions

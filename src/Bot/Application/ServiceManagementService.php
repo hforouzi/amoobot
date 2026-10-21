@@ -25,6 +25,7 @@ use App\Provisioning\Application\ServiceConfigDeliveryRefresher;
 use App\Provisioning\Application\TrafficAddonSettingsProvider;
 use App\Provisioning\Application\FinalConfigLinkProvider;
 use App\Provisioning\Application\VpnConfigLinkSetResult;
+use App\Provisioning\Domain\ServiceActivationDriverInterface;
 use App\Provisioning\Domain\Dto\RenewVpnServiceRequest;
 use App\Provisioning\Domain\VpnServiceStatus;
 use App\Provisioning\Infrastructure\VpnPanelDriverRegistry;
@@ -1365,7 +1366,6 @@ class ServiceManagementService
         if (in_array($gateway->getType(), [PaymentGatewayType::ZIBAL, PaymentGatewayType::CUSTOM_API], true) || null !== $gateway->getPluginCode()) {
             if (!$requestResult->success || null === $payment->getPaymentUrl()) {
                 $logKey = match ($gateway->getPluginCode()) {
-                    'greenpay' => 'greenpay_request_failed',
                     null => 'zibal_request_failed',
                     default => 'plugin_request_failed',
                 };
@@ -1509,11 +1509,15 @@ class ServiceManagementService
         if ($this->shouldSyncWithPanel($service)) {
             try {
                 $driver = $this->driverRegistry->resolve($service->getPanel());
-                $driver->renewService((string) $service->getRemoteId(), new RenewVpnServiceRequest(
-                    durationDays: 0,
-                    trafficLimitGb: $service->getTrafficLimitGb(),
-                    serviceId: (int) ($service->getId() ?? 0),
-                ), $service->getPanel());
+                if ($driver instanceof ServiceActivationDriverInterface) {
+                    $driver->activateService((string) $service->getRemoteId(), $service->getPanel());
+                } else {
+                    $driver->renewService((string) $service->getRemoteId(), new RenewVpnServiceRequest(
+                        durationDays: 0,
+                        trafficLimitGb: $service->getTrafficLimitGb(),
+                        serviceId: (int) ($service->getId() ?? 0),
+                    ), $service->getPanel());
+                }
             } catch (\Throwable $e) {
                 $this->debugLog(sprintf('service_sync_failure action=activate service_id=%d message="%s"', $serviceId, $e->getMessage()));
                 $this->showPopupOrMessage($chatId, $callbackId, 'عملیات روی پنل انجام نشد. لاگ را بررسی کنید.', 'panel_activate_failed');

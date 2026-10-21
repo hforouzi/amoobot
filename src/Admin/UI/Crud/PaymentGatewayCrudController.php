@@ -7,6 +7,7 @@ namespace App\Admin\UI\Crud;
 use App\Admin\UI\DashboardController;
 use App\Admin\UI\Support\AdminJsonFormatter;
 use App\Admin\UI\Support\AdminStatusBadge;
+use App\Entity\AdminUser;
 use App\Entity\PaymentGateway;
 use App\Entity\StorePaymentMethod;
 use App\Payment\Application\PaymentGatewayModuleRegistry;
@@ -42,9 +43,11 @@ use Symfony\Component\HttpFoundation\RedirectResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Attribute\Route;
+use Symfony\Component\Security\Http\Attribute\IsGranted;
 use Symfony\Component\Validator\Constraints\NotBlank;
 use Symfony\Component\Validator\Constraints\Positive;
 
+#[IsGranted('ROLE_SUPER_ADMIN')]
 final class PaymentGatewayCrudController extends AbstractCrudController
 {
     public function __construct(
@@ -67,6 +70,7 @@ final class PaymentGatewayCrudController extends AbstractCrudController
         return $crud
             ->setEntityLabelInSingular('admin.payment_gateway')
             ->setEntityLabelInPlural('admin.payment_gateways')
+            ->setEntityPermission(AdminUser::ROLE_SUPER_ADMIN)
             ->setDefaultSort(['sortOrder' => 'ASC', 'id' => 'ASC']);
     }
 
@@ -286,20 +290,18 @@ final class PaymentGatewayCrudController extends AbstractCrudController
             throw $this->createNotFoundException('Unsupported payment gateway module.');
         }
 
+        $storedConfig = is_array($gateway->getConfig()) ? $gateway->getConfig() : [];
         $form = $this->createGatewaySchemaForm($type, [
             'title' => $gateway->getTitle(),
             'currency' => $gateway->getCurrency(),
             'isActive' => $gateway->isActive(),
             'description' => $gateway->getDescription() ?? '',
-            'config' => array_replace(
-                $this->moduleRegistry->defaultConfig($type),
-                is_array($gateway->getConfig()) ? $gateway->getConfig() : []
-            ),
-        ]);
+            'config' => array_replace($this->moduleRegistry->defaultConfig($type), $storedConfig),
+        ], $storedConfig);
         $form->handleRequest($request);
 
         if ($form->isSubmitted() && $form->isValid()) {
-            $data = $this->normalizeGatewayFormData((array) $form->getData(), $type);
+            $data = $this->normalizeGatewayFormData((array) $form->getData(), $type, $storedConfig);
 
             $gateway
                 ->setTitle($data['title'])
@@ -354,8 +356,9 @@ final class PaymentGatewayCrudController extends AbstractCrudController
 
     /**
      * @param array{title?: string, currency?: string, isActive?: bool, description?: ?string, config?: array<string, mixed>} $data
+     * @param array<string, mixed> $storedConfig the gateway's saved config when editing ([] when installing)
      */
-    private function createGatewaySchemaForm(string $type, array $data): \Symfony\Component\Form\FormInterface
+    private function createGatewaySchemaForm(string $type, array $data, array $storedConfig = []): \Symfony\Component\Form\FormInterface
     {
         $builder = $this->createFormBuilder($this->flattenGatewayFormData($data), [
             'translation_domain' => 'admin',
@@ -434,6 +437,11 @@ final class PaymentGatewayCrudController extends AbstractCrudController
             }
 
             if ('password' === $fieldType) {
+                // A stored secret may be left empty: normalizeGatewayFormData() then keeps it.
+                if (self::hasValue($storedConfig[$name] ?? null)) {
+                    $options['required'] = false;
+                    $options['constraints'] = [];
+                }
                 $builder->add($name, PasswordType::class, $options + [
                     'always_empty' => false,
                     'empty_data' => '',
@@ -474,11 +482,16 @@ final class PaymentGatewayCrudController extends AbstractCrudController
     }
 
     /**
+     * The submitted schema fields overlaid on the stored config: keys the form does not show are kept, an empty
+     * secret (password field) keeps its stored value, any other emptied field is removed.
+     *
+     * @param array<string, mixed> $storedConfig the gateway's saved config when editing ([] when installing)
+     *
      * @return array{title: string, currency: string, isActive: bool, description: ?string, config: array<string, mixed>}
      */
-    private function normalizeGatewayFormData(array $data, string $type): array
+    private function normalizeGatewayFormData(array $data, string $type, array $storedConfig = []): array
     {
-        $config = [];
+        $config = $storedConfig;
         foreach ((array) ($this->moduleRegistry->get($type)['configSchema'] ?? []) as $field) {
             if (!is_array($field)) {
                 continue;
@@ -494,7 +507,10 @@ final class PaymentGatewayCrudController extends AbstractCrudController
                 $value = trim($value);
             }
 
-            if ('' === $value || null === $value) {
+            if (!self::hasValue($value)) {
+                if ('password' !== (string) ($field['type'] ?? '') || !self::hasValue($config[$name] ?? null)) {
+                    unset($config[$name]);
+                }
                 continue;
             }
 
@@ -520,6 +536,11 @@ final class PaymentGatewayCrudController extends AbstractCrudController
             'description' => '' === trim((string) ($data['description'] ?? '')) ? null : trim((string) $data['description']),
             'config' => $config,
         ];
+    }
+
+    private static function hasValue(mixed $value): bool
+    {
+        return null !== $value && '' !== (is_string($value) ? trim($value) : $value);
     }
 
     private function configFieldLabel(string $field): string

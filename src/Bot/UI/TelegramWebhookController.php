@@ -15,18 +15,35 @@ use Symfony\Component\Routing\Attribute\Route;
 
 class TelegramWebhookController extends AbstractController
 {
+    public const SECRET_TOKEN_HEADER = 'X-Telegram-Bot-Api-Secret-Token';
+
     public function __construct(
         private readonly TelegramUpdateHandler $telegramUpdateHandler,
         private readonly BotMessageLogger $botMessageLogger,
         private readonly string $webhookSecret,
         private readonly LoggerInterface $logger,
+        private readonly string $webhookSecretToken = '',
     ) {
+    }
+
+    /**
+     * The secret_token registered with setWebhook: TELEGRAM_WEBHOOK_SECRET_TOKEN, or the URL secret when unset.
+     */
+    public static function effectiveSecretToken(string $webhookSecretToken, string $webhookSecret): string
+    {
+        return '' !== $webhookSecretToken ? $webhookSecretToken : $webhookSecret;
     }
 
     #[Route('/telegram/webhook/{secret}', name: 'telegram_webhook', methods: ['POST'])]
     public function __invoke(Request $request, string $secret): JsonResponse
     {
-        if ($secret !== $this->webhookSecret) {
+        if ('' === $this->webhookSecret || !hash_equals($this->webhookSecret, $secret)) {
+            return new JsonResponse(['ok' => false, 'error' => 'invalid secret'], 403);
+        }
+
+        $expectedToken = self::effectiveSecretToken($this->webhookSecretToken, $this->webhookSecret);
+        $headerToken = (string) $request->headers->get(self::SECRET_TOKEN_HEADER, '');
+        if (!hash_equals($expectedToken, $headerToken)) {
             return new JsonResponse(['ok' => false, 'error' => 'invalid secret'], 403);
         }
 

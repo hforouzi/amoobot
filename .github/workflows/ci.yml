@@ -21,12 +21,14 @@ jobs:
       APP_ENV: test
       DATABASE_URL: mysql://root@127.0.0.1:3306/amoobot?serverVersion=10.11.0-MariaDB&charset=utf8mb4
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: shivammathur/setup-php@v2
         with:
           php-version: '8.2'
           extensions: intl, pdo_mysql, sodium, gd
           coverage: none
+      # libfaketime: tests/Clock/MidnightCrossingTest runs the settlement/expiry tests across midnight boundaries.
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends faketime
       - run: composer install --no-interaction --no-progress --prefer-dist
       - run: php bin/console doctrine:database:create --if-not-exists
       - run: php bin/console doctrine:migrations:migrate --no-interaction
@@ -35,3 +37,6 @@ jobs:
         run: |
           APP_ENV=dev php bin/console cache:warmup
           vendor/bin/phpstan analyse --memory-limit=1G --no-progress
+      - run: php bin/console lint:container
+      # --parse-tags: config/services.yaml uses !tagged_iterator.
+      - run: php bin/console lint:yaml config --parse-tags

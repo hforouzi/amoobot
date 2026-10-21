@@ -212,9 +212,17 @@ class TelegramApiClient
         return $this->callApi('deleteWebhook', $payload);
     }
 
-    public function setWebhook(string $url): array
+    /**
+     * @param string|null $secretToken echoed back by Telegram in the X-Telegram-Bot-Api-Secret-Token header
+     */
+    public function setWebhook(string $url, ?string $secretToken = null): array
     {
-        return $this->callApi('setWebhook', ['url' => $url]);
+        $payload = ['url' => $url];
+        if (null !== $secretToken && '' !== $secretToken) {
+            $payload['secret_token'] = $secretToken;
+        }
+
+        return $this->callApi('setWebhook', $payload);
     }
 
     public function getWebhookInfo(): array
