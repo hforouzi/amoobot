@@ -1,0 +1,16 @@
+{# SettingsAdminController: one settings page, one tab at a time (each tab saves on its own). #}
+{% extends '@EasyAdmin/page/content.html.twig' %}
+{% trans_default_domain 'admin' %}
+
+{% block content_title %}{{ 'settings_page.title'|trans }}{% endblock %}
+
+{% block content_header_wrapper %}
+    {{ include('admin/_tabs.html.twig', {tabs: tabs, label: 'settings_page.title'}) }}
+    {{ parent() }}
+{% endblock %}
+
+{% block main %}
+    <div class="admin-custom-page admin-settings-page">
+        {{ include('admin/settings/_' ~ tab ~ '.html.twig') }}
+    </div>
+{% endblock %}

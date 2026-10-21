@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace App\Admin\Security;
 
+use App\Admin\Routing\LegacyAdminRoutes;
 use App\Admin\UI\Crud;
 use App\Admin\UI\PanelSetupController;
 use App\Admin\UI\PaymentModerationController;
+use App\Admin\UI\SettingsAdminController;
 use App\Admin\UI\VpnPanelInboundActionsController;
 use App\Security\AdminPermission;
 
@@ -19,10 +21,11 @@ use App\Security\AdminPermission;
  */
 final class AdminCrudPermissions
 {
-    /** Routes whose permission differs from their controller's (checked first). */
+    /**
+     * Routes whose permission differs from their controller's (checked first). The old URLs of moved pages
+     * (LegacyAdminRoutes) need the permission of the page they lead to.
+     */
     private const ROUTES = [
-        'admin_renewal_pricing_settings' => AdminPermission::SETTINGS_MANAGE,
-        'admin_automation_settings' => AdminPermission::SETTINGS_MANAGE,
         'admin_bulk_plan_price_adjustment' => AdminPermission::PLANS_MANAGE,
     ];
 
@@ -44,14 +47,13 @@ final class AdminCrudPermissions
             Crud\OrderCrudController::class => $p(AdminPermission::ORDERS_VIEW, AdminPermission::ORDERS_MANAGE),
             Crud\OrderDraftCrudController::class => $p(AdminPermission::ORDERS_VIEW, AdminPermission::ORDERS_MANAGE),
             Crud\PaymentCrudController::class => $p(AdminPermission::PAYMENTS_VIEW, AdminPermission::PAYMENTS_MODERATE),
-            Crud\PaymentNeedsReviewCrudController::class => $p(AdminPermission::PAYMENTS_VIEW, AdminPermission::PAYMENTS_MODERATE),
-            Crud\PaymentProvisioningFailedCrudController::class => $p(AdminPermission::PAYMENTS_VIEW, AdminPermission::PAYMENTS_MODERATE),
             PaymentModerationController::class => $p(AdminPermission::PAYMENTS_MODERATE),
             Crud\DiscountCodeCrudController::class => $p(AdminPermission::DISCOUNTS_MANAGE),
             Crud\DiscountUsageCrudController::class => $p(AdminPermission::DISCOUNTS_MANAGE),
             Crud\PlanCrudController::class => $p(AdminPermission::PLANS_MANAGE),
             Crud\TrialPlanCrudController::class => $p(AdminPermission::PLANS_MANAGE),
             Crud\TrialClaimCrudController::class => $p(AdminPermission::PLANS_MANAGE),
+            // Only the bulk price adjustment is left here (PLANS_MANAGE, ROUTES); settings moved to SettingsAdminController.
             \App\Admin\UI\RenewalPricingAdminController::class => $p(AdminPermission::SETTINGS_MANAGE),
             Crud\UserCrudController::class => $p(AdminPermission::CUSTOMERS_VIEW, AdminPermission::CUSTOMERS_MANAGE),
             Crud\TelegramAccountCrudController::class => $p(AdminPermission::CUSTOMERS_VIEW, AdminPermission::CUSTOMERS_MANAGE),
@@ -60,6 +62,7 @@ final class AdminCrudPermissions
             Crud\BroadcastDeliveryCrudController::class => $p(AdminPermission::BROADCAST_SEND),
             Crud\BotMessageTemplateCrudController::class => $p(AdminPermission::BOT_TEXTS_MANAGE),
             Crud\BotButtonLabelCrudController::class => $p(AdminPermission::BOT_TEXTS_MANAGE),
+            SettingsAdminController::class => $p(AdminPermission::SETTINGS_MANAGE),
             Crud\SettingCrudController::class => $p(AdminPermission::SETTINGS_MANAGE),
             Crud\RequiredChannelCrudController::class => $p(AdminPermission::SETTINGS_MANAGE),
             Crud\PaymentGatewayCrudController::class => $p(AdminPermission::GATEWAYS_MANAGE),
@@ -87,7 +90,7 @@ final class AdminCrudPermissions
 
     public static function forRoute(string $routeName): ?AdminPermission
     {
-        return self::ROUTES[$routeName] ?? null;
+        return self::ROUTES[$routeName] ?? LegacyAdminRoutes::permission($routeName);
     }
 
     public static function isOpen(string $controllerClass): bool

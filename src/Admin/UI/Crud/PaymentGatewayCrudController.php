@@ -22,6 +22,7 @@ use EasyCorp\Bundle\EasyAdminBundle\Collection\FilterCollection;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Action;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Actions;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Crud;
+use EasyCorp\Bundle\EasyAdminBundle\Config\KeyValueStore;
 use EasyCorp\Bundle\EasyAdminBundle\Context\AdminContext;
 use EasyCorp\Bundle\EasyAdminBundle\Controller\AbstractCrudController;
 use EasyCorp\Bundle\EasyAdminBundle\Dto\EntityDto;
@@ -69,7 +70,42 @@ final class PaymentGatewayCrudController extends AbstractCrudController
             ->setEntityLabelInSingular('admin.payment_gateway')
             ->setEntityLabelInPlural('admin.payment_gateways')
             ->setEntityPermission(AdminCrudPermissions::view(self::class))
-            ->setDefaultSort(['sortOrder' => 'ASC', 'id' => 'ASC']);
+            ->setDefaultSort(['sortOrder' => 'ASC', 'id' => 'ASC'])
+            // + the store payment methods section (StorePaymentMethodCrudController's list).
+            ->overrideTemplate('crud/index', 'admin/payment_gateway/index.html.twig');
+    }
+
+    public function configureResponseParameters(KeyValueStore $responseParameters): KeyValueStore
+    {
+        if (Crud::PAGE_INDEX !== $responseParameters->get('pageName')) {
+            return $responseParameters;
+        }
+
+        $methods = StorePaymentMethodCrudController::ordered($this->entityManager);
+        $rows = [];
+        foreach ($methods as $index => $method) {
+            $id = $method->getId();
+            $rows[] = [
+                'id' => $id,
+                'title' => $method->getTitle(),
+                'gateway' => $method->getGateway()->getTitle(),
+                'active' => $method->isActive(),
+                'sortOrder' => $method->getSortOrder(),
+                'minAmount' => $method->getMinAmount(),
+                'maxAmount' => $method->getMaxAmount(),
+                'currency' => $method->getCurrency(),
+                'editUrl' => $this->generateUrl('admin_store_payment_method_edit', ['entityId' => $id]),
+                'deleteUrl' => $this->generateUrl('admin_store_payment_method_delete', ['entityId' => $id]),
+                'toggleUrl' => $this->generateUrl('admin_store_payment_method_toggle', ['id' => $id]),
+                'upUrl' => 0 === $index ? null : $this->generateUrl('admin_store_payment_method_move', ['id' => $id, 'direction' => 'up']),
+                'downUrl' => $index === count($methods) - 1 ? null : $this->generateUrl('admin_store_payment_method_move', ['id' => $id, 'direction' => 'down']),
+            ];
+        }
+
+        $responseParameters->set('store_methods', $rows);
+        $responseParameters->set('store_method_new_url', $this->generateUrl('admin_store_payment_method_new'));
+
+        return $responseParameters;
     }
 
     public function configureActions(Actions $actions): Actions

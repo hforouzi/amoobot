@@ -6,8 +6,6 @@ namespace App\Tests\Admin;
 
 use App\Admin\UI\Crud\AdminAuditLogCrudController;
 use App\Admin\UI\Crud\AdminUserCrudController;
-use App\Admin\UI\Crud\BotButtonLabelCrudController;
-use App\Admin\UI\Crud\BotMessageLogCrudController;
 use App\Admin\UI\Crud\BotMessageTemplateCrudController;
 use App\Admin\UI\Crud\BroadcastDeliveryCrudController;
 use App\Admin\UI\Crud\BroadcastMessageCrudController;
@@ -17,19 +15,11 @@ use App\Admin\UI\Crud\OrderCrudController;
 use App\Admin\UI\Crud\OrderDraftCrudController;
 use App\Admin\UI\Crud\PaymentCrudController;
 use App\Admin\UI\Crud\PaymentGatewayCrudController;
-use App\Admin\UI\Crud\PaymentNeedsReviewCrudController;
-use App\Admin\UI\Crud\PaymentProvisioningFailedCrudController;
 use App\Admin\UI\Crud\PlanCrudController;
 use App\Admin\UI\Crud\PluginCrudController;
-use App\Admin\UI\Crud\RequiredChannelCrudController;
-use App\Admin\UI\Crud\ServiceNotificationLogCrudController;
-use App\Admin\UI\Crud\SettingCrudController;
-use App\Admin\UI\Crud\StorePaymentMethodCrudController;
-use App\Admin\UI\Crud\TelegramAccountCrudController;
 use App\Admin\UI\Crud\TrialClaimCrudController;
 use App\Admin\UI\Crud\TrialPlanCrudController;
 use App\Admin\UI\Crud\UserCrudController;
-use App\Admin\UI\Crud\VpnInboundCrudController;
 use App\Admin\UI\Crud\VpnPanelCrudController;
 use App\Admin\UI\Crud\VpnServiceCrudController;
 use App\Entity\AdminUser;
@@ -71,19 +61,15 @@ final class MenuStructureTest extends IntegrationTestCase
     public function testSupportMenu(): void
     {
         $support = $this->createAdmin('menu-support@shop.test', [AdminUser::ROLE_SUPPORT]);
-        $needsAttention = $this->trans('admin.menu.needs_attention').' > ';
 
         self::assertSame([
             '' => ['/admin', '/admin/logout'],
             $this->trans('admin.menu.sales') => [
                 $this->path(OrderCrudController::class),
                 $this->path(PaymentCrudController::class),
-                $needsAttention.$this->path(PaymentNeedsReviewCrudController::class),
-                $needsAttention.$this->path(PaymentProvisioningFailedCrudController::class),
             ],
             $this->trans('admin.menu.customers') => [
                 $this->path(UserCrudController::class),
-                $this->path(TelegramAccountCrudController::class),
                 $this->path(VpnServiceCrudController::class),
             ],
         ], $this->menuFor($support));
@@ -105,20 +91,29 @@ final class MenuStructureTest extends IntegrationTestCase
         self::assertSame($this->commonGroups() + [
             $this->trans('admin.menu.system') => [
                 $this->path(PaymentGatewayCrudController::class),
-                $this->path(StorePaymentMethodCrudController::class),
                 $this->path(VpnPanelCrudController::class),
-                $this->path(VpnInboundCrudController::class),
-                $this->path(SettingCrudController::class),
+                '/admin/settings',
                 $this->path(PluginCrudController::class),
                 $this->path(AdminUserCrudController::class),
-                $this->path(RequiredChannelCrudController::class),
-                'route:admin_renewal_pricing_settings',
-                'route:admin_automation_settings',
-                $this->trans('admin.menu.logs').' > '.$this->path(ServiceNotificationLogCrudController::class),
-                $this->trans('admin.menu.logs').' > '.$this->path(BotMessageLogCrudController::class),
-                $this->trans('admin.menu.logs').' > '.$this->path(AdminAuditLogCrudController::class),
+                $this->path(AdminAuditLogCrudController::class),
             ],
         ], $this->menuFor($this->superAdmin));
+    }
+
+    /**
+     * The consolidated pages are one entry each, named after the page (not one of its tabs).
+     */
+    public function testConsolidatedEntriesAreNamedAfterTheirPage(): void
+    {
+        $this->client->loginUser($this->superAdmin, 'main');
+        $crawler = $this->client->request('GET', '/admin');
+        $labels = $crawler->filter('#main-menu a.ea-sidebar-item-link')->each(static fn (Crawler $a): string => trim($a->text()));
+        foreach (['admin.customers', 'admin.bot_texts', 'admin.settings', 'admin.logs', 'admin.payment_gateways', 'admin.vpn_panels'] as $key) {
+            self::assertContains($this->trans($key), $labels, $key);
+        }
+        foreach (['admin.users', 'admin.telegram_accounts', 'admin.bot_button_labels', 'admin.store_payment_methods', 'admin.vpn_inbounds', 'admin.required_channels', 'admin.renewal_pricing_settings', 'admin.automation_settings', 'admin.payments_needs_review', 'admin.payments_provisioning_failed', 'admin.notifications', 'admin.bot_logs'] as $key) {
+            self::assertNotContains($this->trans($key), $labels, $key);
+        }
     }
 
     public function testEveryMenuEntryOpensForTheRoleThatSeesIt(): void
@@ -168,16 +163,12 @@ final class MenuStructureTest extends IntegrationTestCase
      */
     private function commonGroups(): array
     {
-        $needsAttention = $this->trans('admin.menu.needs_attention').' > ';
-
         return [
             // Dashboard (first group) and logout (last group) have no label.
             '' => ['/admin', '/admin/logout'],
             $this->trans('admin.menu.sales') => [
                 $this->path(OrderCrudController::class),
                 $this->path(PaymentCrudController::class),
-                $needsAttention.$this->path(PaymentNeedsReviewCrudController::class),
-                $needsAttention.$this->path(PaymentProvisioningFailedCrudController::class),
                 $this->path(DiscountCodeCrudController::class),
             ],
             $this->trans('admin.menu.catalog') => [
@@ -185,13 +176,11 @@ final class MenuStructureTest extends IntegrationTestCase
             ],
             $this->trans('admin.menu.customers') => [
                 $this->path(UserCrudController::class),
-                $this->path(TelegramAccountCrudController::class),
                 $this->path(VpnServiceCrudController::class),
             ],
             $this->trans('admin.menu.messaging') => [
                 $this->path(BroadcastMessageCrudController::class),
                 $this->path(BotMessageTemplateCrudController::class),
-                $this->path(BotButtonLabelCrudController::class),
             ],
         ];
     }

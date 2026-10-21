@@ -9,13 +9,21 @@ use App\Entity\Setting;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Action;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Actions;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Crud;
+use EasyCorp\Bundle\EasyAdminBundle\Context\AdminContext;
 use EasyCorp\Bundle\EasyAdminBundle\Controller\AbstractCrudController;
 use EasyCorp\Bundle\EasyAdminBundle\Field\DateTimeField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\IdField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\TextareaField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\TextField;
+use Symfony\Component\HttpFoundation\Response;
 class SettingCrudController extends AbstractCrudController
 {
+    /** The raw list is the "advanced" tab of the settings page; edit/detail stay here. */
+    public function index(AdminContext $context): Response
+    {
+        return $this->redirectToRoute('admin_settings', ['tab' => 'advanced']);
+    }
+
     public static function getEntityFqcn(): string
     {
         return Setting::class;

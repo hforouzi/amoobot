@@ -12,6 +12,7 @@ use App\Security\AdminPermission;
 use Doctrine\ORM\QueryBuilder;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Action;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Actions;
+use EasyCorp\Bundle\EasyAdminBundle\Config\Filters;
 use EasyCorp\Bundle\EasyAdminBundle\Controller\AbstractCrudController;
 use EasyCorp\Bundle\EasyAdminBundle\Dto\EntityDto;
 use EasyCorp\Bundle\EasyAdminBundle\Dto\SearchDto;
@@ -24,6 +25,7 @@ use EasyCorp\Bundle\EasyAdminBundle\Field\IdField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\IntegerField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\TextField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\TextareaField;
+use EasyCorp\Bundle\EasyAdminBundle\Filter\EntityFilter;
 
 class VpnServiceCrudController extends AbstractCrudController
 {
@@ -48,6 +50,12 @@ class VpnServiceCrudController extends AbstractCrudController
             ->add(Action::DETAIL, $regenerateConfig)
             // Its route lives in VpnPanelInboundActionsController (PANELS_MANAGE).
             ->setPermission('regenerateConfig', AdminPermission::PANELS_MANAGE->value);
+    }
+
+    /** By customer: the Customers page links each customer's services here. */
+    public function configureFilters(Filters $filters): Filters
+    {
+        return $filters->add(EntityFilter::new('user'));
     }
 
     public function configureFields(string $pageName): iterable

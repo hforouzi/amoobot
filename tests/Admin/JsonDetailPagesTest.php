@@ -76,11 +76,11 @@ final class JsonDetailPagesTest extends IntegrationTestCase
         $this->em->persist($log);
         $this->em->flush();
 
-        $html = $this->detail('/admin/bot-message-log/'.$log->getId());
+        $html = $this->detail('/admin/logs/bot-messages/'.$log->getId());
         self::assertStringContainsString('buyer_42', $html);
         self::assertStringContainsString('سلام، سرویس می‌خواهم', $html);
         self::assertStringNotContainsString('bot-token-should-not-show', $html);
-        $this->assertEditLoads('/admin/bot-message-log/'.$log->getId());
+        $this->assertEditLoads('/admin/logs/bot-messages/'.$log->getId());
     }
 
     public function testServiceNotificationLogWithAPayload(): void
@@ -92,11 +92,11 @@ final class JsonDetailPagesTest extends IntegrationTestCase
         $this->em->persist($log);
         $this->em->flush();
 
-        $html = $this->detail('/admin/service-notification-log/'.$log->getId());
+        $html = $this->detail('/admin/logs/notifications/'.$log->getId());
         self::assertStringContainsString('daysLeft', $html);
         self::assertStringContainsString('2026-11-01', $html);
         self::assertStringNotContainsString('ak-should-not-show-4c', $html);
-        $this->assertEditLoads('/admin/service-notification-log/'.$log->getId());
+        $this->assertEditLoads('/admin/logs/notifications/'.$log->getId());
     }
 
     public function testPaymentWithRawGatewayData(): void

@@ -5,14 +5,22 @@ declare(strict_types=1);
 namespace App\Admin\UI\Crud;
 
 use App\Entity\TelegramAccount;
+use EasyCorp\Bundle\EasyAdminBundle\Context\AdminContext;
 use EasyCorp\Bundle\EasyAdminBundle\Controller\AbstractCrudController;
 use EasyCorp\Bundle\EasyAdminBundle\Field\AssociationField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\DateTimeField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\IdField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\TextField;
+use Symfony\Component\HttpFoundation\Response;
 
 class TelegramAccountCrudController extends AbstractCrudController
 {
+    /** The list is the Customers page (UserCrudController); Telegram account detail/edit pages stay here. */
+    public function index(AdminContext $context): Response
+    {
+        return $this->redirectToRoute('admin_customer_index', $context->getRequest()->query->all());
+    }
+
     public static function getEntityFqcn(): string
     {
         return TelegramAccount::class;

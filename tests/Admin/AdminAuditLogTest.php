@@ -106,7 +106,7 @@ final class AdminAuditLogTest extends IntegrationTestCase
         self::assertTrue($this->client->getResponse()->isRedirect(), (string) $this->client->getResponse()->getStatusCode());
         $this->assertLogged('payment_gateway.install', 'PaymentGateway', null, AdminAuditLog::SOURCE_WEB);
 
-        $crawler = $this->client->request('GET', '/admin/settings/renewal-pricing');
+        $crawler = $this->client->request('GET', '/admin/settings?tab=sales');
         $this->client->submit($crawler->filter('form')->form());
         $this->assertLogged('settings.update', 'Setting', null, AdminAuditLog::SOURCE_WEB);
 
@@ -141,7 +141,7 @@ final class AdminAuditLogTest extends IntegrationTestCase
         $payment = $this->createPayment($order, null, PaymentStatus::PENDING);
         self::getContainer()->get(PaymentSettlementService::class)->settle($payment, VerifiedPayment::fromGateway(new PaymentVerificationResult(success: true, paid: true, amount: '100', currency: 'IRR')), 'test');
 
-        $crawler = $this->client->request('GET', '/admin/payment-needs-review');
+        $crawler = $this->client->request('GET', '/admin/payment?tab=needs_review');
         $action = (string) $crawler->filter(sprintf('form[action*="/admin/payment/%d/reject"]', $payment->getId()))->attr('action');
         $this->client->request('POST', $action);
         $this->assertLogged('payment.reject', 'Payment', (string) $payment->getId(), AdminAuditLog::SOURCE_WEB);

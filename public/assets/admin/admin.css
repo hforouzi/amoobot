@@ -813,3 +813,80 @@ html[dir="ltr"] .admin-actions {
         padding: 1.25rem;
     }
 }
+
+/* Consolidated pages: tab strip (templates/admin/_tabs.html.twig). */
+.admin-tabs {
+    flex-wrap: wrap;
+    gap: .25rem;
+    margin-bottom: 1rem;
+}
+
+.admin-tabs .nav-link {
+    display: inline-flex;
+    align-items: center;
+    gap: .4rem;
+}
+
+.admin-tab-count {
+    background: var(--gray-200, #e5e7eb);
+    color: var(--gray-800, #1f2937);
+    font-weight: 600;
+}
+
+.admin-tabs .nav-link.active .admin-tab-count {
+    background: var(--color-primary, #4f46e5);
+    color: #fff;
+}
+
+/* Dashboard: payments to act on. */
+.admin-dashboard-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1rem;
+    margin: 1rem 0 1.5rem;
+}
+
+.admin-dashboard-card {
+    display: flex;
+    flex-direction: column;
+    gap: .25rem;
+    padding: 1rem 1.25rem;
+    border: 1px solid var(--border-color, #e5e7eb);
+    border-radius: 12px;
+    color: inherit;
+    text-decoration: none;
+}
+
+.admin-dashboard-card:hover {
+    border-color: var(--color-primary, #4f46e5);
+}
+
+.admin-dashboard-card-count {
+    font-size: 1.75rem;
+    font-weight: 700;
+}
+
+.admin-dashboard-card-attention .admin-dashboard-card-count {
+    color: var(--color-danger, #dc2626);
+}
+
+/* A list embedded in another page (store payment methods, panel inbounds, required channels, raw settings). */
+.admin-embedded-section {
+    margin-top: 2rem;
+}
+
+.admin-embedded-section .admin-embedded-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: .75rem;
+}
+
+.admin-embedded-section table form {
+    display: inline;
+}
+
+.admin-advanced-warning {
+    margin-bottom: 1rem;
+}

@@ -8,9 +8,11 @@ use App\Admin\Security\AdminCrudPermissions;
 use App\Entity\PaymentGateway;
 use App\Entity\StorePaymentMethod;
 use App\Payment\Application\PaymentGatewayModuleRegistry;
+use App\Security\AdminAuditLogger;
 use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\ORM\EntityRepository;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Crud;
+use EasyCorp\Bundle\EasyAdminBundle\Context\AdminContext;
 use EasyCorp\Bundle\EasyAdminBundle\Controller\AbstractCrudController;
 use EasyCorp\Bundle\EasyAdminBundle\Field\AssociationField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\BooleanField;
@@ -19,14 +21,93 @@ use EasyCorp\Bundle\EasyAdminBundle\Field\FormField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\IdField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\IntegerField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\TextField;
+use Symfony\Component\HttpFoundation\RedirectResponse;
+use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\RequestStack;
+use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\Routing\Attribute\Route;
+
+/**
+ * Store payment methods (what customers see in the bot). Listed, ordered and switched on/off on the payment gateways
+ * page (PaymentGatewayCrudController, "store payment methods" section); this controller keeps the create/edit/detail
+ * pages and the move/toggle actions. Its own list redirects to that section.
+ */
 final class StorePaymentMethodCrudController extends AbstractCrudController
 {
+    public const CSRF_PREFIX = 'store-payment-method-';
+
     public function __construct(
         private readonly RequestStack $requestStack,
         private readonly EntityManagerInterface $entityManager,
         private readonly PaymentGatewayModuleRegistry $moduleRegistry,
+        private readonly AdminAuditLogger $auditLogger,
     ) {
+    }
+
+    /** The list lives on the payment gateways page. */
+    public function index(AdminContext $context): Response
+    {
+        return new RedirectResponse(self::listUrl($this->generateUrl('admin_payment_gateway_index')));
+    }
+
+    public static function listUrl(string $gatewaysUrl): string
+    {
+        return $gatewaysUrl.'#store-payment-methods';
+    }
+
+    /**
+     * The methods in the order the bot shows them (sortOrder, then id).
+     *
+     * @return list<StorePaymentMethod>
+     */
+    public static function ordered(EntityManagerInterface $entityManager): array
+    {
+        return $entityManager->getRepository(StorePaymentMethod::class)->findBy([], ['sortOrder' => 'ASC', 'id' => 'ASC']);
+    }
+
+    #[Route('/admin/store-payment-method/{id}/move/{direction}', name: 'admin_store_payment_method_move', requirements: ['id' => '\d+', 'direction' => 'up|down'], methods: ['POST'])]
+    public function move(Request $request, StorePaymentMethod $method, string $direction): RedirectResponse
+    {
+        $this->checkToken($request, $method);
+
+        // Renumber 10, 20, 30... in the current order (equal sort orders get apart), then swap with the neighbour.
+        $methods = self::ordered($this->entityManager);
+        $position = array_search($method, $methods, true);
+        $neighbour = false === $position ? false : $position + ('up' === $direction ? -1 : 1);
+        if (false !== $neighbour && isset($methods[$neighbour])) {
+            [$methods[$position], $methods[$neighbour]] = [$methods[$neighbour], $methods[$position]];
+            $now = new \DateTimeImmutable();
+            foreach ($methods as $index => $each) {
+                if ($each->getSortOrder() !== ($index + 1) * 10) {
+                    $each->setSortOrder(($index + 1) * 10)->setUpdatedAt($now);
+                    $this->auditLogger->record('store_payment_method.update', 'StorePaymentMethod', (string) $each->getId(), ['changed' => ['sortOrder']]);
+                }
+            }
+            $this->entityManager->flush();
+            $this->addFlash('success', 'store_methods.updated');
+        }
+
+        return new RedirectResponse(self::listUrl($this->generateUrl('admin_payment_gateway_index')));
+    }
+
+    #[Route('/admin/store-payment-method/{id}/toggle', name: 'admin_store_payment_method_toggle', requirements: ['id' => '\d+'], methods: ['POST'])]
+    public function toggle(Request $request, StorePaymentMethod $method): RedirectResponse
+    {
+        $this->checkToken($request, $method);
+
+        $method->setIsActive(!$method->isActive())->setUpdatedAt(new \DateTimeImmutable());
+        $this->auditLogger->record('store_payment_method.update', 'StorePaymentMethod', (string) $method->getId(), ['changed' => ['isActive']]);
+        $this->entityManager->flush();
+        $this->addFlash('success', 'store_methods.updated');
+
+        return new RedirectResponse(self::listUrl($this->generateUrl('admin_payment_gateway_index')));
+    }
+
+    private function checkToken(Request $request, StorePaymentMethod $method): void
+    {
+        if (!$this->isCsrfTokenValid(self::CSRF_PREFIX.$method->getId(), (string) $request->request->get('_token'))) {
+            throw $this->createAccessDeniedException('Invalid CSRF token.');
+        }
     }
 
     public static function getEntityFqcn(): string

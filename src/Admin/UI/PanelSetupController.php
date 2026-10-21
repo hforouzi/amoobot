@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Admin\UI;
 
 use App\Admin\Form\PanelConnectionType;
+use App\Admin\UI\Crud\VpnPanelCrudController;
 use App\Entity\Plan;
 use App\Entity\VpnInbound;
 use App\Entity\VpnPanel;
@@ -226,6 +227,7 @@ final class PanelSetupController extends AbstractController
             'used_by_active_plan' => $this->modernModeGuard->usedByActivePlan($panel),
             'subscription_problem' => PanelSubscriptionUrlCheck::problem($panel),
             'subscription_sample' => PanelSubscriptionUrlCheck::sampleUrl($panel),
+            'panel_inbounds' => VpnPanelCrudController::inbounds($this->entityManager, $panel),
         ]);
     }
 

@@ -65,7 +65,7 @@ final class AdminPaymentAttentionTest extends IntegrationTestCase
         [$order, $payment] = $this->paymentInReview();
         $admin = $this->loginAdmin();
 
-        $crawler = $this->client->request('GET', '/admin/payment-needs-review');
+        $crawler = $this->client->request('GET', '/admin/payment?tab=needs_review');
         self::assertSame(200, $this->client->getResponse()->getStatusCode(), (string) $this->client->getResponse()->getContent());
         $form = $crawler->filter(sprintf('form[action*="/admin/payment/%d/confirm"]', $payment->getId()));
         self::assertCount(1, $form, 'Approve is rendered as a POST form');
@@ -93,7 +93,7 @@ final class AdminPaymentAttentionTest extends IntegrationTestCase
         self::getContainer()->get(PaymentSettlementService::class)->approveByAdmin($payment, null, null, 'test');
         $this->loginAdmin();
 
-        $crawler = $this->client->request('GET', '/admin/payment-provisioning-failed');
+        $crawler = $this->client->request('GET', '/admin/payment?tab=provisioning_failed');
         $form = $crawler->filter(sprintf('form[action*="/admin/payment/%d/retry"]', $payment->getId()));
         self::assertCount(1, $form);
         $this->client->request('POST', (string) $form->attr('action'));

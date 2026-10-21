@@ -9,11 +9,18 @@ use App\Admin\UI\Support\AdminStatusBadge;
 use App\Entity\Payment;
 use App\Payment\Domain\PaymentStatus;
 use App\Security\AdminPermission;
+use Doctrine\ORM\EntityManagerInterface;
+use Doctrine\ORM\QueryBuilder;
+use EasyCorp\Bundle\EasyAdminBundle\Collection\FieldCollection;
+use EasyCorp\Bundle\EasyAdminBundle\Collection\FilterCollection;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Action;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Actions;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Crud;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Filters;
+use EasyCorp\Bundle\EasyAdminBundle\Config\KeyValueStore;
 use EasyCorp\Bundle\EasyAdminBundle\Controller\AbstractCrudController;
+use EasyCorp\Bundle\EasyAdminBundle\Dto\EntityDto;
+use EasyCorp\Bundle\EasyAdminBundle\Dto\SearchDto;
 use EasyCorp\Bundle\EasyAdminBundle\Field\AssociationField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\ChoiceField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\DateTimeField;
@@ -23,12 +30,33 @@ use EasyCorp\Bundle\EasyAdminBundle\Field\TextareaField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\TextField;
 use EasyCorp\Bundle\EasyAdminBundle\Filter\ChoiceFilter;
 use EasyCorp\Bundle\EasyAdminBundle\Filter\EntityFilter;
+use Symfony\Component\HttpFoundation\RequestStack;
 use Symfony\Component\Security\Csrf\CsrfTokenManagerInterface;
 
-class PaymentCrudController extends AbstractCrudController
+/**
+ * Payments, one list with status tabs (?tab=...): the tabs replace the separate "needs review" and "provisioning
+ * failed" lists (their old URLs redirect here, LegacyAdminRoutes). Each tab shows how many payments it holds.
+ */
+final class PaymentCrudController extends AbstractCrudController
 {
-    public function __construct(private readonly CsrfTokenManagerInterface $csrfTokenManager)
-    {
+    /** Tab => the statuses it lists ("all": no filter). */
+    public const TABS = [
+        'all' => [],
+        'pending' => [PaymentStatus::PENDING, PaymentStatus::SUBMITTED],
+        'needs_review' => [PaymentStatus::NEEDS_REVIEW],
+        'provisioning_failed' => [PaymentStatus::PROVISIONING_FAILED],
+        'confirmed' => [PaymentStatus::CONFIRMED],
+        'rejected' => [PaymentStatus::REJECTED],
+    ];
+
+    /** Tabs an admin works through: oldest first (as the old "needs attention" lists). */
+    private const OLDEST_FIRST = ['needs_review', 'provisioning_failed'];
+
+    public function __construct(
+        private readonly CsrfTokenManagerInterface $csrfTokenManager,
+        private readonly RequestStack $requestStack,
+        private readonly EntityManagerInterface $entityManager,
+    ) {
     }
 
     public static function getEntityFqcn(): string
@@ -38,7 +66,80 @@ class PaymentCrudController extends AbstractCrudController
 
     public function configureCrud(Crud $crud): Crud
     {
-        return $crud->setDefaultSort(['id' => 'DESC']);
+        return $crud
+            ->setDefaultSort(['id' => 'DESC'])
+            ->overrideTemplate('crud/index', 'admin/crud/index_tabs.html.twig');
+    }
+
+    public function createIndexQueryBuilder(SearchDto $searchDto, EntityDto $entityDto, FieldCollection $fields, FilterCollection $filters): QueryBuilder
+    {
+        $qb = parent::createIndexQueryBuilder($searchDto, $entityDto, $fields, $filters);
+        $tab = $this->currentTab();
+        if ([] !== self::TABS[$tab]) {
+            $qb->andWhere('entity.status IN (:tabStatuses)')->setParameter('tabStatuses', self::TABS[$tab]);
+        }
+        if (in_array($tab, self::OLDEST_FIRST, true) && [] === $searchDto->getCustomSort()) {
+            $qb->orderBy('entity.id', 'ASC');
+        }
+
+        return $qb;
+    }
+
+    public function configureResponseParameters(KeyValueStore $responseParameters): KeyValueStore
+    {
+        if (Crud::PAGE_INDEX === $responseParameters->get('pageName')) {
+            $responseParameters->set('admin_tabs', $this->tabs());
+        }
+
+        return $responseParameters;
+    }
+
+    /**
+     * Payments per status tab, for the tabs and the dashboard cards.
+     *
+     * @return array<string, int>
+     */
+    public static function countByTab(EntityManagerInterface $entityManager): array
+    {
+        $byStatus = [];
+        foreach ($entityManager->createQueryBuilder()->select('p.status AS status', 'COUNT(p.id) AS total')->from(Payment::class, 'p')->groupBy('p.status')->getQuery()->getArrayResult() as $row) {
+            $byStatus[(string) $row['status']] = (int) $row['total'];
+        }
+
+        $counts = [];
+        foreach (self::TABS as $tab => $statuses) {
+            $counts[$tab] = [] === $statuses ? array_sum($byStatus) : array_sum(array_map(static fn (string $status): int => $byStatus[$status] ?? 0, $statuses));
+        }
+
+        return $counts;
+    }
+
+    /**
+     * @return list<array{key: string, label: string, url: string, active: bool, count: int}>
+     */
+    private function tabs(): array
+    {
+        $counts = self::countByTab($this->entityManager);
+        $active = $this->currentTab();
+        $tabs = [];
+        foreach (array_keys(self::TABS) as $tab) {
+            $tabs[] = [
+                'key' => $tab,
+                'label' => 'payment.tabs.'.$tab,
+                'url' => $this->generateUrl('admin_payment_index', 'all' === $tab ? [] : ['tab' => $tab]),
+                'active' => $tab === $active,
+                'count' => $counts[$tab],
+            ];
+        }
+
+        return $tabs;
+    }
+
+    private function currentTab(): string
+    {
+        $tab = (string) $this->requestStack->getCurrentRequest()?->query->get('tab', 'all');
+
+        return array_key_exists($tab, self::TABS) ? $tab : 'all';
     }
 
     public function configureFilters(Filters $filters): Filters

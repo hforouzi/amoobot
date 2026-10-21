@@ -182,11 +182,17 @@ final class SuperAdminGatingTest extends IntegrationTestCase
         $pages[] = '/admin/payment-gateways/install';
         $pages[] = '/admin/payment-gateways/'.$this->ids[PaymentGatewayCrudController::class].'/config';
         $pages[] = '/admin/plugins/upload';
-        $pages[] = '/admin/settings/renewal-pricing';
-        $pages[] = '/admin/settings/automation';
+        $pages[] = '/admin/settings';
+        $pages[] = '/admin/settings?tab=automation';
+        $pages[] = '/admin/settings?tab=channels';
+        $pages[] = '/admin/settings?tab=advanced';
 
         foreach ($pages as $page) {
             $this->client->request('GET', $page);
+            // A list folded into another page (store payment methods, settings, required channels) redirects there.
+            if ($this->client->getResponse()->isRedirect()) {
+                $this->client->followRedirect();
+            }
             self::assertSame(200, $this->client->getResponse()->getStatusCode(), 'GET '.$page);
         }
 
@@ -213,7 +219,7 @@ final class SuperAdminGatingTest extends IntegrationTestCase
 
     public function testMenuShowsGatedEntriesOnlyToSuperAdmins(): void
     {
-        $gatedLinks = ['/admin/payment-gateway"', '/admin/store-payment-method"', '/admin/vpn-panel"', '/admin/vpn-inbound"', '/admin/setting"', '/admin/plugin"', '/admin/required-channel"', '/admin/service-notification-log"', '/admin/bot-message-log"', 'routeName=admin_renewal_pricing_settings"', 'routeName=admin_automation_settings"'];
+        $gatedLinks = ['/admin/payment-gateway"', '/admin/vpn-panel"', '/admin/settings"', '/admin/plugin"', '/admin/logs/audit"'];
 
         $this->client->loginUser($this->admin, 'main');
         $this->client->request('GET', '/admin');
@@ -280,6 +286,12 @@ final class SuperAdminGatingTest extends IntegrationTestCase
             ['POST', '/admin/settings/renewal-pricing', []],
             ['GET', '/admin/settings/automation', []],
             ['POST', '/admin/settings/automation', []],
+            ['GET', '/admin/settings', []],
+            ['POST', '/admin/settings?tab=sales', []],
+            ['POST', '/admin/settings?tab=automation', []],
+            ['GET', '/admin/settings?tab=advanced', []],
+            ['POST', '/admin/store-payment-method/'.$this->ids[StorePaymentMethodCrudController::class].'/move/up', []],
+            ['POST', '/admin/store-payment-method/'.$this->ids[StorePaymentMethodCrudController::class].'/toggle', []],
         ];
     }
 

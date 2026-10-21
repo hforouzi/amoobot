@@ -49,6 +49,9 @@ admin:
   sales_settings: Sales Settings
   automation_settings: Automation Settings
   bulk_plan_price_adjustment: Bulk Plan Price Adjustment
+  customers: Customers
+  bot_texts: Bot texts
+  logs: Logs
   plugins: Plugins
 
 status:
@@ -111,6 +114,13 @@ plugin:
   disable: Disable
 
 payment:
+  tabs:
+    all: All
+    pending: Pending
+    needs_review: Needs review
+    provisioning_failed: Provisioning failed
+    confirmed: Confirmed
+    rejected: Rejected / cancelled
   gateway:
     manual_card: Manual Card Gateway
     zibal: Zibal Gateway
@@ -393,3 +403,59 @@ audit:
   target_type: Record type
   target_id: Record id
   details: Details
+
+settings_page:
+  title: Settings
+  tabs:
+    sales: Sales & renewal pricing
+    automation: Automation
+    channels: Required channels
+    advanced: Advanced
+  channels_intro: Channels a customer must join before buying or claiming a trial.
+  channels_add: Add channel
+  channels_empty: No required channels yet.
+  chat_id: Chat ID
+  require_for_purchase: For purchase
+  require_for_trial: For trial
+  sort_order: Order
+  advanced_warning: These are the raw settings the other tabs write. Changing a key here skips their validation; use the other tabs unless you know exactly what a key does.
+  advanced_show: Show raw settings
+  key: Key
+  type: Type
+
+store_methods:
+  delete_confirm: Delete this store payment method?
+  title: Store payment methods
+  intro: What customers see in the bot, in this order. A method uses one of the gateways above.
+  add: Add store payment method
+  empty: No store payment methods yet.
+  gateway: Gateway
+  amounts: Amount range
+  move_up: Move up
+  move_down: Move down
+  enable: Enable
+  disable: Disable
+  updated: Store payment method updated.
+
+customer:
+  name: Name
+  mobile: Mobile
+  status: Status
+  telegram_username: Telegram username
+  telegram_id: Telegram ID
+  language: Language
+  services: Services
+  orders: Orders
+  joined_at: Joined
+  telegram_account: Telegram account
+  search_help: Search by id (#12), @username, Telegram id, name or mobile.
+
+panel_inbounds:
+  title: Inbounds
+  view_all: Open the inbound list of this panel
+  empty: No inbounds yet. Sync or select them in the panel setup.
+  remote_id: Remote ID
+  protocol: Protocol
+  port: Port
+  active: Active
+  last_synced: Last synced

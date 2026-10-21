@@ -1,0 +1,45 @@
+{# Settings page, "required channels" tab: the RequiredChannel list; new/edit/delete are its CRUD pages. #}
+{% trans_default_domain 'admin' %}
+<section id="required-channels" class="admin-embedded-section">
+    <div class="admin-embedded-header">
+        <p class="text-muted mb-0">{{ 'settings_page.channels_intro'|trans }}</p>
+        <a class="btn btn-primary" href="{{ path('admin_required_channel_new') }}">{{ 'settings_page.channels_add'|trans }}</a>
+    </div>
+
+    {% if channels is empty %}
+        <p>{{ 'settings_page.channels_empty'|trans }}</p>
+    {% else %}
+        <table class="table datagrid">
+            <thead>
+                <tr>
+                    <th>{{ 'settings_page.sort_order'|trans }}</th>
+                    <th>{{ 'payment_gateway.title'|trans }}</th>
+                    <th>{{ 'settings_page.chat_id'|trans }}</th>
+                    <th>{{ 'payment_gateway.active'|trans }}</th>
+                    <th>{{ 'settings_page.require_for_purchase'|trans }}</th>
+                    <th>{{ 'settings_page.require_for_trial'|trans }}</th>
+                    <th>{{ 'common.actions'|trans }}</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for channel in channels %}
+                    <tr data-id="{{ channel.id }}">
+                        <td>{{ channel.sortOrder }}</td>
+                        <td>{{ channel.title }}</td>
+                        <td dir="ltr">{{ channel.chatId }}</td>
+                        <td>{{ (channel.isActive ? 'common.yes' : 'common.no')|trans }}</td>
+                        <td>{{ (channel.requireForPurchase ? 'common.yes' : 'common.no')|trans }}</td>
+                        <td>{{ (channel.requireForTrial ? 'common.yes' : 'common.no')|trans }}</td>
+                        <td>
+                            <a class="btn btn-sm btn-link" href="{{ path('admin_required_channel_edit', {entityId: channel.id}) }}">{{ 'common.edit'|trans }}</a>
+                            <form method="post" action="{{ path('admin_required_channel_delete', {entityId: channel.id}) }}" onsubmit="return confirm({{ 'common.delete'|trans|json_encode }} + '?');">
+                                <input type="hidden" name="token" value="{{ csrf_token('ea-delete') }}">
+                                <button type="submit" class="btn btn-sm btn-link text-danger">{{ 'common.delete'|trans }}</button>
+                            </form>
+                        </td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% endif %}
+</section>

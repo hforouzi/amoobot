@@ -1,0 +1,38 @@
+{# A panel's inbounds (VPN panel detail and panel setup pages); the full, filterable list with the inbound actions
+   is the inbound list filtered on this panel (admin_vpn_panel_view_inbounds). #}
+{% trans_default_domain 'admin' %}
+<section id="panel-inbounds" class="admin-embedded-section">
+    <div class="admin-embedded-header">
+        <h2 class="h5 mb-0">{{ 'panel_inbounds.title'|trans }} ({{ inbounds|length }})</h2>
+        <a class="btn btn-secondary" href="{{ path('admin_vpn_panel_view_inbounds', {id: panel.id}) }}">{{ 'panel_inbounds.view_all'|trans }}</a>
+    </div>
+
+    {% if inbounds is empty %}
+        <p>{{ 'panel_inbounds.empty'|trans }}</p>
+    {% else %}
+        <table class="table datagrid">
+            <thead>
+                <tr>
+                    <th>{{ 'payment_gateway.title'|trans }}</th>
+                    <th>{{ 'panel_inbounds.remote_id'|trans }}</th>
+                    <th>{{ 'panel_inbounds.protocol'|trans }}</th>
+                    <th>{{ 'panel_inbounds.port'|trans }}</th>
+                    <th>{{ 'panel_inbounds.active'|trans }}</th>
+                    <th>{{ 'panel_inbounds.last_synced'|trans }}</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for inbound in inbounds %}
+                    <tr data-id="{{ inbound.id }}">
+                        <td><a href="{{ path('admin_vpn_inbound_detail', {entityId: inbound.id}) }}">{{ inbound.title }}</a></td>
+                        <td dir="ltr">{{ inbound.remoteInboundId }}</td>
+                        <td>{{ inbound.protocol ?? '–' }}</td>
+                        <td>{{ inbound.port ?? '–' }}</td>
+                        <td>{{ (inbound.isActive ? 'common.yes' : 'common.no')|trans }}</td>
+                        <td>{{ inbound.lastSyncedAt ? inbound.lastSyncedAt|date('Y-m-d H:i') : '–' }}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% endif %}
+</section>

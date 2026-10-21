@@ -20,7 +20,7 @@
                 <a href="{{ path('admin') }}">{{ 'admin.dashboard'|trans }}</a>
                 {% if is_granted('ROLE_SUPER_ADMIN') %}
                     <a href="{{ path('admin_payment_gateway_index') }}">{{ 'admin.payment_gateways'|trans }}</a>
-                    <a href="{{ path('admin_store_payment_method_index') }}">{{ 'admin.store_payment_methods'|trans }}</a>
+                    
                 {% endif %}
             </nav>
         </aside>

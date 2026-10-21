@@ -4,11 +4,15 @@ The admin panel is built with EasyAdmin and supports Persian and English. Persia
 
 ## Main Areas
 
-- Store: plans, discounts, orders, payments, payment gateways, store payment methods
-- VPN: panels, inbounds, and provisioned VPN services
-- Users: users and Telegram accounts
-- Automation: lifecycle checks and background operational commands
-- System: settings, plugins, logs, and operational diagnostics
+The menu has one entry per page; related lists are tabs or sections of that page.
+
+- Sales: orders (order drafts inside), payments (status tabs: all, pending, needs review, provisioning failed, confirmed, rejected), discount codes (usages inside)
+- Catalog: plans (trial plans, trial claims and bulk price adjustment inside)
+- Customers: customers (Telegram username and id, language, services and orders; Telegram account pages linked from each customer), VPN services
+- Messaging: broadcasts (deliveries inside), bot texts (tabs: message templates, button labels)
+- System (super admin): payment gateways (store payment methods: order, enable/disable, below the gateways), panels (each panel lists its inbounds), settings (tabs: sales & renewal pricing, automation, required channels, advanced), plugins, admin users, logs (tabs: audit, notifications, bot messages)
+
+Old addresses of pages that moved (for example `/admin/payment-needs-review` or `/admin/settings/automation`) redirect to their new place.
 
 ## Core Concepts
 

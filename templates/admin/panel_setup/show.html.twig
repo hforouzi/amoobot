@@ -83,5 +83,7 @@
                 {% endif %}
             </div>
         {% endif %}
+
+        {{ include('admin/vpn_panel/_inbounds.html.twig', {panel: panel, inbounds: panel_inbounds}) }}
     </div>
 {% endblock %}

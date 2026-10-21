@@ -8,5 +8,17 @@
             {{ admin_user.displayName ?: admin_user.userIdentifier }}
         </p>
     {% endif %}
+
+    {% if payment_cards is not empty %}
+        <section class="admin-dashboard-cards" aria-label="{{ 'admin.payments'|trans({}, 'admin') }}">
+            {% for card in payment_cards %}
+                <a class="admin-dashboard-card{{ card.count > 0 ? ' admin-dashboard-card-attention' }}" href="{{ card.url }}" data-tab="{{ card.key }}">
+                    <span class="admin-dashboard-card-count">{{ card.count }}</span>
+                    <span class="admin-dashboard-card-label">{{ 'admin.payments'|trans({}, 'admin') }}: {{ card.label|trans({}, 'admin') }}</span>
+                </a>
+            {% endfor %}
+        </section>
+    {% endif %}
+
     <p>{{ 'Use the left menu to manage plans, orders, payments, services and bot logs.'|trans({}, 'messages') }}</p>
 {% endblock %}
