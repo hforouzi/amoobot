@@ -48,11 +48,13 @@ final class RoleAccessWebTest extends IntegrationTestCase
         'ServiceNotificationLogCrudController' => 'LOGS_VIEW',
         'BotMessageLogCrudController' => 'LOGS_VIEW',
         'AdminAuditLogCrudController' => 'LOGS_VIEW',
+        'AppDownloadCrudController' => 'APPS_MANAGE',
+        'ClientAppCrudController' => 'APPS_MANAGE',
     ];
 
     private const ROLE_PERMISSIONS = [
         AdminUser::ROLE_SUPPORT => ['ORDERS_VIEW', 'PAYMENTS_VIEW', 'CUSTOMERS_VIEW', 'SERVICES_VIEW', 'SERVICES_ASSIST'],
-        AdminUser::ROLE_ADMIN => ['ORDERS_VIEW', 'ORDERS_MANAGE', 'PAYMENTS_VIEW', 'PAYMENTS_MODERATE', 'CUSTOMERS_VIEW', 'CUSTOMERS_MANAGE', 'SERVICES_VIEW', 'SERVICES_ASSIST', 'SERVICES_MANAGE', 'SERVICES_DELETE', 'PLANS_MANAGE', 'DISCOUNTS_MANAGE', 'BROADCAST_SEND', 'BOT_TEXTS_MANAGE'],
+        AdminUser::ROLE_ADMIN => ['ORDERS_VIEW', 'ORDERS_MANAGE', 'PAYMENTS_VIEW', 'PAYMENTS_MODERATE', 'CUSTOMERS_VIEW', 'CUSTOMERS_MANAGE', 'SERVICES_VIEW', 'SERVICES_ASSIST', 'SERVICES_MANAGE', 'SERVICES_DELETE', 'PLANS_MANAGE', 'DISCOUNTS_MANAGE', 'BROADCAST_SEND', 'BOT_TEXTS_MANAGE', 'APPS_MANAGE'],
     ];
 
     private KernelBrowser $client;

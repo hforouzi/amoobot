@@ -1,0 +1,30 @@
+{% trans_default_domain 'subscription' %}
+<section class="card">
+    <h2>{{ 'link.title'|trans }}</h2>
+    {% if view.subscriptionUrl %}
+        <button type="button" class="btn" data-copy="{{ view.subscriptionUrl }}">📋 {{ 'link.copy'|trans }}</button>
+        <input class="url" type="text" readonly value="{{ view.subscriptionUrl }}" aria-label="{{ 'link.title'|trans }}" data-select-all>
+        {% if view.qrDataUri %}
+            <img class="qr" src="{{ view.qrDataUri }}" alt="{{ 'link.qr_alt'|trans }}" width="280" height="280">
+            <p class="muted" style="text-align:center">{{ 'link.qr_hint'|trans }}</p>
+        {% endif %}
+    {% elseif view.accessWithheld %}
+        <p>{{ 'link.withheld'|trans }}</p>
+    {% else %}
+        <p class="muted">{{ 'link.missing'|trans }}</p>
+    {% endif %}
+    {% if view.configLinks is not empty %}
+        <details>
+            <summary>{{ 'link.advanced'|trans }}</summary>
+            <p class="muted" style="margin-top:8px">{{ 'link.advanced_hint'|trans }}</p>
+            <ol class="configs">
+                {% for link in view.configLinks %}
+                    <li>
+                        <code>{{ link }}</code>
+                        <button type="button" class="btn secondary small" data-copy="{{ link }}" style="margin-top:6px">{{ 'link.copy_config'|trans }}</button>
+                    </li>
+                {% endfor %}
+            </ol>
+        </details>
+    {% endif %}
+</section>

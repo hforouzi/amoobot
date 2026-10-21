@@ -77,6 +77,7 @@ set_globals() {
   REPO_URL=git@github.com:hforouzi/amoobot.git MIRROR_DIR=/var/lib/amoobot/mirror.git STATE_DIR=/var/lib/amoobot
   ALLOWED_SIGNERS_FILE=/etc/amoobot/allowed_signers GIT_ENV_PATH="$PATH" MIRROR_PROTOCOL=ssh HSTS_STATE_FILE="$WORK/hsts-enabled"
   DEPLOY_MARKER_SET=0 JOBS_PAUSED=0 DEPLOY_MARKER=/var/lib/amoobot/deploy-in-progress DEPLOY_WATCHDOG_UNIT=amoobot-deploy-watchdog
+  APP_DOWNLOADS_MAX_MB=200 UPLOAD_BODY_MARGIN_MB=16 PHP_UPLOADS_INI=98-amoobot-uploads.ini
 }
 die() { printf 'DIE: %s\n' "$*" >&2; return 1; }
 log() { printf '%s\n' "$*"; }
@@ -1052,7 +1053,7 @@ set_globals
 NGINX_SITE=/etc/nginx/sites-available/amoobot NGINX_MAINTENANCE_FILE=/etc/nginx/snippets/amoobot-maintenance.conf
 PHP_VERSION=8.4 DOMAIN=bot.example.test CERT_DIR="$WORK/no-cert"
 ADMIN_ALLOW_LIST=() NGINX_IPV6=0   # deploy.sh's preflight always sets these
-load_fn render_maintenance set_maintenance maintenance_instructions on_exit app_locations render_nginx admin_access_rules listen_lines acme_location
+load_fn render_maintenance set_maintenance maintenance_instructions on_exit app_locations render_upload_location render_nginx admin_access_rules listen_lines acme_location
 check "maintenance on = 503 with Retry-After" bash -c '[[ "$1" == *"add_header Retry-After 120 always;"*"return 503;"* ]]' _ "$(render_maintenance on)"
 check "maintenance off = no directives" not grep -qE 'return|add_header' <<< "$(render_maintenance off)"
 APP_LOC="$(app_locations)"
@@ -1184,7 +1185,7 @@ set_globals
 NGINX_MAINTENANCE_FILE=/etc/nginx/snippets/amoobot-maintenance.conf ACME_WEBROOT=/var/www/letsencrypt PHP_VERSION=8.4 DOMAIN=bot.example.test
 HSTS_STATE_FILE="$WORK/hsts-enabled" CERT_DIR="$WORK/cert"; mkdir -p "$CERT_DIR"
 ADMIN_ALLOW_LIST=() NGINX_IPV6=0
-load_fn valid_ip_or_cidr admin_access_rules listen_lines acme_location app_locations render_nginx render_maintenance
+load_fn valid_ip_or_cidr admin_access_rules listen_lines acme_location app_locations render_upload_location render_nginx render_maintenance
 for ip in 203.0.113.7 10.0.0.0/8 192.168.1.0/24 0.0.0.0/0 2001:db8::1 2001:db8::/32 ::1; do check "ADMIN_ALLOW_IPS entry $ip accepted" valid_ip_or_cidr "$ip"; done
 for ip in 256.1.1.1 1.2.3 1.2.3.4/33 1.2.3.4/ 2001:db8::/129 example.com 'all;' '1.2.3.4;deny' '*' ''; do check "ADMIN_ALLOW_IPS entry '$ip' rejected" not valid_ip_or_cidr "$ip"; done
 
@@ -1234,8 +1235,8 @@ check "limit_req_zone defined once, outside the server blocks" bash -c \
 check "ADMIN_ALLOW_IPS empty -> no allow rules, no /admin block (only the dotfile deny)" bash -c '! grep -q "allow " <<< "$1" && ! grep -qF "location ^~ /admin {" <<< "$1" && [[ $(grep -c "deny all;" <<< "$1") -eq 1 ]]' _ "$HTTPS"
 ADMIN_ALLOW_LIST=(203.0.113.7 10.0.0.0/8)
 RESTRICTED="$(render_nginx)"
-check "ADMIN_ALLOW_IPS set -> allow each entry, deny all, on /admin and /admin/login" bash -c \
-  '[[ $(grep -c "^        allow 203.0.113.7;$" <<< "$1") -eq 2 && $(grep -c "^        allow 10.0.0.0/8;$" <<< "$1") -eq 2 && $(grep -c "^        deny all;$" <<< "$1") -eq 3 ]] &&
+check "ADMIN_ALLOW_IPS set -> allow each entry, deny all, on /admin, /admin/login and /admin/apps/downloads" bash -c \
+  '[[ $(grep -c "^        allow 203.0.113.7;$" <<< "$1") -eq 3 && $(grep -c "^        allow 10.0.0.0/8;$" <<< "$1") -eq 3 && $(grep -c "^        deny all;$" <<< "$1") -eq 4 ]] &&
    grep -q "location ^~ /admin {" <<< "$1"' _ "$RESTRICTED"
 ADMIN_ALLOW_LIST=()
 check "Symfony login_throttling: 5 attempts / 15 minutes on the admin firewall" bash -c \
@@ -1527,6 +1528,45 @@ if can_dry_run; then
       'grep -qF "[dry-run] write /etc/php/8.4/$2/conf.d/99-amoobot-timezone.ini (644 root:root)" <<< "$1" && grep -A3 "99-amoobot-timezone.ini (644" <<< "$1" | grep -q "+ date.timezone = UTC"' _ "$OUT" "$sapi"
   done
   check "dry-run announces the CLI + FPM timezone verification" grep -qF '[dry-run] verify the effective PHP timezone is UTC: CLI (php -r), FPM (php-fpm8.4 -i and pool.d overrides)' <<< "$OUT"
+else
+  skip "$DRY_RUN_SKIP"
+fi
+
+echo "== app downloads: upload limits scoped to the admin upload page"
+set_globals
+PHP_VERSION=8.4 PHP_ETC_DIR=/etc/php ADMIN_ALLOW_LIST=() NGINX_MAINTENANCE_FILE=/etc/nginx/snippets/amoobot-maintenance.conf
+load_fn php_uploads_ini_path render_php_uploads_ini install_php_uploads php_uploads_problems render_upload_location admin_access_rules app_locations
+check "ini path: the FPM conf.d only (the CLI never receives uploads)" test "$(php_uploads_ini_path)" = "/etc/php/8.4/fpm/conf.d/98-amoobot-uploads.ini"
+INI="$(render_php_uploads_ini)"
+check "ini: upload_max_filesize = APP_DOWNLOADS_MAX_MB" grep -qx 'upload_max_filesize = 200M' <<< "$INI"
+check "ini: post_max_size = APP_DOWNLOADS_MAX_MB + margin" grep -qx 'post_max_size = 216M' <<< "$INI"
+check "ini follows APP_DOWNLOADS_MAX_MB" grep -qx 'upload_max_filesize = 500M' <<< "$(APP_DOWNLOADS_MAX_MB=500; render_php_uploads_ini)"
+out="$( (write_file() { echo "write $1 $2 $3"; cat > /dev/null; }; install_php_uploads) )"
+check "install writes the FPM ini 644 root:root" grep -qx 'write /etc/php/8.4/fpm/conf.d/98-amoobot-uploads.ini 644 root:root' <<< "$out"
+LOC="$(app_locations)"
+check "nginx: one location for the upload page with the large body limit" test "$(grep -c '^    location ^~ /admin/apps/downloads {$' <<< "$LOC")" -eq 1
+check "  ...client_max_body_size = max + margin, only there" bash -c 'grep -A2 "location ^~ /admin/apps/downloads" <<< "$1" | grep -q "client_max_body_size 216M;" && test "$(grep -c "client_max_body_size 216M" <<< "$1")" -eq 1' _ "$LOC"
+check "  ...every other path keeps 50M" grep -q '^    client_max_body_size 50M;$' <<< "$LOC"
+check "  ...fastcgi directly (no try_files: the 50M of /index.php would apply again)" bash -c 'sed -n "/location ^~ \/admin\/apps\/downloads/,/^    }/p" <<< "$1" | grep -q "fastcgi_pass" && ! sed -n "/location ^~ \/admin\/apps\/downloads/,/^    }/p" <<< "$1" | grep -q try_files' _ "$LOC"
+LOC_IPS="$(ADMIN_ALLOW_LIST=(203.0.113.7); app_locations)"
+check "  ...keeps the ADMIN_ALLOW_IPS rules" bash -c 'sed -n "/location ^~ \/admin\/apps\/downloads/,/^    }/p" <<< "$1" | grep -q "allow 203.0.113.7;"' _ "$LOC_IPS"
+UPB="$WORK/upbin"; mkdir -p "$UPB"
+printf '#!/bin/sh\nprintf "upload_max_filesize => %%s => %%s\\npost_max_size => %%s => %%s\\n" "$UP" "$UP" "$POST" "$POST"\n' > "$UPB/php-fpm8.4"; chmod +x "$UPB/php-fpm8.4"
+up_case() {  # up_case <upload_max_filesize> <post_max_size> [pool override] -> problems
+  rm -rf "$WORK/upetc"; mkdir -p "$WORK/upetc/8.4/fpm/pool.d"; printf '[www]\n%s\n' "${3:-}" > "$WORK/upetc/8.4/fpm/pool.d/www.conf"
+  ( export PATH="$UPB:$PATH" UP="$1" POST="$2"; PHP_ETC_DIR="$WORK/upetc"; php_uploads_problems )
+}
+check "FPM limits as configured -> no problem" test -z "$(up_case 200M 216M)"
+check "FPM still on the 2M default -> problem" grep -q "upload_max_filesize '2M', expected at least 200M" <<< "$(up_case 2M 8M)"
+check "post_max_size too small -> problem" grep -q "post_max_size '200M', expected at least 216M" <<< "$(up_case 200M 200M)"
+check "pool override -> problem" grep -q "overrides: upload_max_filesize" <<< "$(up_case 200M 216M 'php_admin_value[upload_max_filesize] = 8M')"
+check "step 18 installs the uploads ini before the FPM restart and dies when the limits are too low" bash -c \
+  'b=$(sed -n "/^step \"18\/18\"/,/^fi$/p" "$1"); i=$(grep -n "^install_php_uploads$" <<< "$b" | cut -d: -f1); r=$(grep -n "systemctl restart \"php\${PHP_VERSION}-fpm\"" <<< "$b" | cut -d: -f1)
+   [[ -n $i && -n $r && $i -lt $r ]] && grep -q "die \"PHP upload limits are too low" <<< "$b"' _ "$ROOT/deploy.sh"
+check "APP_DOWNLOADS_MAX_MB is validated (1..2048)" grep -q 'APP_DOWNLOADS_MAX_MB must be a whole number of megabytes from 1 to 2048' "$ROOT/deploy.sh"
+check "var/downloads is created with the other var/ directories" grep -q 'mkdir -p .*"\$APP_DIR/var/downloads"' "$ROOT/deploy.sh"
+if can_dry_run; then
+  check "dry-run writes the FPM uploads ini" grep -qF '[dry-run] write /etc/php/8.4/fpm/conf.d/98-amoobot-uploads.ini (644 root:root)' <<< "$BASE_OUT"
 else
   skip "$DRY_RUN_SKIP"
 fi

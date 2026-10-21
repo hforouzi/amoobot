@@ -9,6 +9,7 @@ use Endroid\QrCode\ErrorCorrectionLevel;
 use Endroid\QrCode\QrCode;
 use Endroid\QrCode\RoundBlockSizeMode;
 use Endroid\QrCode\Writer\PngWriter;
+use Endroid\QrCode\Writer\SvgWriter;
 
 /**
  * QR code images for customers, sized for phone scanners (V2Box, v2rayNG, ...): every module at least 8px, a quiet
@@ -60,5 +61,24 @@ final class QrCodeImage
         );
 
         return (new PngWriter())->write($qrCode)->getString();
+    }
+
+    /**
+     * The same code as an SVG document (the public subscription page shows it inline, scaled by the browser).
+     *
+     * @throws \Throwable when the content does not fit in a QR code
+     */
+    public static function svg(string $content): string
+    {
+        $modules = self::moduleCount($content);
+        $qrCode = new QrCode(
+            data: $content,
+            errorCorrectionLevel: self::errorCorrection($content),
+            size: $modules * self::MIN_MODULE_PX,
+            margin: self::QUIET_ZONE_MODULES * self::MIN_MODULE_PX,
+            roundBlockSizeMode: RoundBlockSizeMode::Margin,
+        );
+
+        return (new SvgWriter())->write($qrCode, null, null, [SvgWriter::WRITER_OPTION_EXCLUDE_XML_DECLARATION => true])->getString();
     }
 }

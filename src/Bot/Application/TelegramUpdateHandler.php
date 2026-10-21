@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Bot\Application;
 
+use App\Provisioning\Domain\PublicUrlPolicy;
+use App\Subscription\Application\AppDownloadCatalog;
 use App\Bot\Application\Admin\AdminBotHandler;
 use App\Bot\Application\ServiceAction\ServiceActionContext;
 use App\Bot\Application\ServiceAction\ServiceActionResolver;
@@ -86,6 +88,8 @@ class TelegramUpdateHandler
         private readonly AdminAccessPolicy $accessPolicy,
         private readonly AdminAuditLogger $auditLogger,
         private readonly AdminBotHandler $adminBotHandler,
+        private readonly SubscriptionPageButton $subscriptionPageButton,
+        private readonly AppDownloadCatalog $appDownloads,
         private readonly string $paymentCardNumber = '',
         private readonly string $paymentCardHolder = '',
         private readonly ?string $paymentDescription = null,
@@ -176,6 +180,12 @@ class TelegramUpdateHandler
 
         if ('button.main.support' === $replyButtonKey || self::BUTTON_SUPPORT === $text) {
             $this->handleSupport($chatId);
+
+            return;
+        }
+
+        if ('button.main.downloads' === $replyButtonKey) {
+            $this->handleAppDownloads($chatId);
 
             return;
         }
@@ -656,11 +666,14 @@ class TelegramUpdateHandler
             return;
         }
 
-        foreach ($this->paymentCustomerNotifier->buildNewServiceConfirmedMessages($result->vpnService, '🎁 اکانت تست شما آماده شد') as $message) {
+        $messages = $this->paymentCustomerNotifier->buildNewServiceConfirmedMessages($result->vpnService, '🎁 اکانت تست شما آماده شد');
+        $pageKeyboard = $this->subscriptionPageButton->keyboardFor($result->vpnService);
+        foreach ($messages as $i => $message) {
+            $keyboard = $i === count($messages) - 1 ? $pageKeyboard : null;
             if (str_contains($message, '<code>')) {
-                $this->telegramApiClient->sendHtmlMessage($chatId, $message);
+                $this->telegramApiClient->sendHtmlMessage($chatId, $message, $keyboard);
             } else {
-                $this->telegramApiClient->sendMessage($chatId, $message);
+                $this->telegramApiClient->sendMessage($chatId, $message, $keyboard);
             }
         }
     }
@@ -2174,6 +2187,32 @@ class TelegramUpdateHandler
     private function handleMyServices(TelegramAccount $account, string $chatId, ?string $callbackId = null): void
     {
         $this->serviceManagementService->handleMyServices($account, $chatId, $callbackId);
+    }
+
+    /**
+     * Active app downloads by platform, as URL buttons to /d/{id}. Without a public shop address (DEFAULT_URI)
+     * Telegram would refuse the buttons, so only the titles are listed.
+     */
+    private function handleAppDownloads(string $chatId): void
+    {
+        $downloads = [];
+        foreach ($this->appDownloads->active() as $download) {
+            $downloads[] = ['title' => $download->getTitle(), 'platform' => $download->getPlatform(), 'url' => $this->appDownloads->absoluteUrl($download)];
+        }
+        if ([] === $downloads) {
+            $this->telegramApiClient->sendMessage($chatId, $this->botTextResolver->message('downloads.empty'));
+
+            return;
+        }
+
+        if (!PublicUrlPolicy::isPubliclyUsableUrl($downloads[0]['url'])) {
+            $titles = array_map(static fn (array $d): string => '• '.$d['title'], $downloads);
+            $this->telegramApiClient->sendMessage($chatId, $this->botTextResolver->message('downloads.list')."\n\n".implode("\n", $titles));
+
+            return;
+        }
+
+        $this->telegramApiClient->sendMessage($chatId, $this->botTextResolver->message('downloads.list'), $this->keyboardFactory->appDownloads($downloads));
     }
 
     private function handleSupport(string $chatId, ?string $callbackId = null): void

@@ -42,6 +42,7 @@ use App\Shop\Domain\OrderDraftStatus;
 use App\Shop\Domain\OrderStatus;
 use App\Shop\Domain\OrderType;
 use App\Security\AdminPermission;
+use App\Subscription\Application\SubscriptionPageUrl;
 use Doctrine\ORM\EntityManagerInterface;
 
 class ServiceManagementService
@@ -74,6 +75,7 @@ class ServiceManagementService
         private readonly VpnAccessMessageFormatter $vpnAccessMessageFormatter,
         private readonly QrCodeSender $qrCodeSender,
         private readonly CustomerAccessGuard $accessGuard,
+        private readonly SubscriptionPageUrl $subscriptionPageUrl,
         private readonly string $paymentCardNumber = '',
         private readonly string $paymentCardHolder = '',
         private readonly ?string $paymentDescription = null,
@@ -1888,7 +1890,9 @@ class ServiceManagementService
             $this->keyboardFactory->userServiceDetail(
                 (int) $service->getId(),
                 VpnServiceStatus::DELETED !== $service->getStatus() && $this->salesSettingsProvider->renewalsEnabled(),
-                VpnServiceStatus::DELETED !== $service->getStatus() && $this->salesSettingsProvider->addTrafficEnabled()
+                VpnServiceStatus::DELETED !== $service->getStatus() && $this->salesSettingsProvider->addTrafficEnabled(),
+                // A deleted service has no page.
+                VpnServiceStatus::DELETED !== $service->getStatus() ? $this->subscriptionPageUrl->forTelegram($service) : null,
             )
         );
 

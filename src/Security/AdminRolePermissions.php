@@ -19,6 +19,7 @@ final class AdminRolePermissions
     {
         return match ($role) {
             AdminUser::ROLE_SUPER_ADMIN => AdminPermission::cases(),
+            // Everything except system configuration; includes APPS_MANAGE (client apps and app downloads).
             AdminUser::ROLE_ADMIN => self::allExcept(
                 AdminPermission::GATEWAYS_MANAGE,
                 AdminPermission::PANELS_MANAGE,

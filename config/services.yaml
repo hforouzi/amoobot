@@ -24,6 +24,12 @@ parameters:
     default_traffic_addon_max_gb: '100'
     default_traffic_addon_price_per_gb: '0'
     app.plugin_max_upload_bytes: 10485760
+    # App downloads (AppDownloadStorage): kept outside public/, served by /d/{id}. Large uploads also need the web
+    # server and PHP limits raised (deploy.sh, docs/fa/deployment.md "App downloads").
+    app.downloads_dir_default: '%kernel.project_dir%/var/downloads'
+    app.downloads_dir: '%env(default:app.downloads_dir_default:APP_DOWNLOADS_DIR)%'
+    app.downloads_max_mb_default: '200'
+    app.downloads_max_mb: '%env(int:default:app.downloads_max_mb_default:APP_DOWNLOADS_MAX_MB)%'
 
 services:
     _instanceof:
@@ -93,3 +99,7 @@ services:
     App\Admin\UI\Field\AdminValueConfigurator:
         autoconfigure: false
         tags: [{ name: 'ea.field_configurator', priority: -10 }]
+
+when@test:
+    parameters:
+        app.downloads_dir_default: '%kernel.project_dir%/var/test-downloads'

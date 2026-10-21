@@ -1,0 +1,31 @@
+{% extends 'subscription/_layout.html.twig' %}
+{% trans_default_domain 'subscription' %}
+{# The public subscription page. Each section is a component taking only `view` (SubscriptionPageView), so the later
+   Mini App can render the same ones for an authenticated user. #}
+
+{% block body %}
+    {{ include('subscription/_status.html.twig', {view: view}) }}
+    {% if view.isUsable %}
+        {{ include('subscription/_link.html.twig', {view: view}) }}
+        {% if view.apps is not empty %}
+            {{ include('subscription/_apps.html.twig', {view: view}) }}
+        {% endif %}
+    {% else %}
+        <section class="card notice">
+            <p>{{ ('notice.' ~ view.status)|trans }}</p>
+            <p class="muted">{{ 'notice.renew_in_bot'|trans }}</p>
+        </section>
+    {% endif %}
+    {% if view.downloads is not empty %}
+        {{ include('subscription/_downloads.html.twig', {view: view}) }}
+    {% endif %}
+    <footer class="muted">
+        {% set lang = app.request.locale == 'en' ? 'en' : 'fa' %}
+        <a href="?{{ {lang: lang == 'fa' ? 'en' : 'fa', platform: view.platform ? view.platform.value : null}|filter(v => v is not null)|url_encode }}">{{ 'footer.other_language'|trans }}</a>
+    </footer>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+{% endblock %}
+
+{% block scripts %}
+    {{ include('subscription/_script.html.twig') }}
+{% endblock %}

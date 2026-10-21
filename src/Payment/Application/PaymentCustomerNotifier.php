@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Payment\Application;
 
 use App\Bot\Application\BotTextResolver;
+use App\Bot\Application\SubscriptionPageButton;
 use App\Bot\Application\VpnAccessMessageFormatter;
 use App\Entity\VpnService;
 use App\Bot\Infrastructure\TelegramApiClient;
@@ -35,11 +36,15 @@ class PaymentCustomerNotifier
         private readonly ServiceConfigDeliveryRefresher $deliveryRefresher,
         private readonly LoggerInterface $logger,
         private readonly CustomerAccessGuard $accessGuard,
+        private readonly SubscriptionPageButton $subscriptionPageButton,
     ) {
     }
 
     public function confirmed(Payment $payment, ?VpnService $vpnService): void
     {
+        // A new service: "Open subscription page" under the last message.
+        $orderType = $payment->getOrder()->getType();
+        $lastMessageKeyboard = OrderType::RENEWAL !== $orderType && OrderType::ADD_TRAFFIC !== $orderType ? $this->subscriptionPageButton->keyboardFor($vpnService) : null;
         $this->deliver($payment, 'confirmed', function () use ($payment, $vpnService): array {
             $orderType = $payment->getOrder()->getType();
             if (OrderType::RENEWAL === $orderType) {
@@ -52,7 +57,7 @@ class PaymentCustomerNotifier
             }
 
             return $this->buildNewServiceConfirmedMessages($vpnService);
-        });
+        }, $lastMessageKeyboard);
     }
 
     public function rejected(Payment $payment): void
@@ -74,9 +79,10 @@ class PaymentCustomerNotifier
     }
 
     /**
-     * @param callable(): string[] $buildMessages
+     * @param callable(): string[]       $buildMessages
+     * @param array<string, mixed>|null $lastMessageKeyboard reply markup of the last message
      */
-    private function deliver(Payment $payment, string $kind, callable $buildMessages): void
+    private function deliver(Payment $payment, string $kind, callable $buildMessages, ?array $lastMessageKeyboard = null): void
     {
         try {
             $telegramAccount = $this->entityManager->getRepository(TelegramAccount::class)->findOneBy(['user' => $payment->getOrder()->getUser()]);
@@ -84,11 +90,13 @@ class PaymentCustomerNotifier
                 return;
             }
 
-            foreach ($buildMessages() as $message) {
+            $messages = array_values($buildMessages());
+            foreach ($messages as $i => $message) {
+                $keyboard = $i === count($messages) - 1 ? $lastMessageKeyboard : null;
                 if (str_contains($message, '<code>')) {
-                    $this->telegramApiClient->sendHtmlMessage($telegramAccount->getTelegramId(), $message);
+                    $this->telegramApiClient->sendHtmlMessage($telegramAccount->getTelegramId(), $message, $keyboard);
                 } else {
-                    $this->telegramApiClient->sendMessage($telegramAccount->getTelegramId(), $message);
+                    $this->telegramApiClient->sendMessage($telegramAccount->getTelegramId(), $message, $keyboard);
                 }
             }
         } catch (\Throwable $e) {

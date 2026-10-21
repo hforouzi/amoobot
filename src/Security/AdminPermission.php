@@ -36,6 +36,8 @@ enum AdminPermission: string
     case PANELS_MANAGE = 'PERM_PANELS_MANAGE';
     case PLUGINS_MANAGE = 'PERM_PLUGINS_MANAGE';
     case ADMINS_MANAGE = 'PERM_ADMINS_MANAGE';
+    /** Client apps (import deep links) and app downloads of the customer subscription page. */
+    case APPS_MANAGE = 'PERM_APPS_MANAGE';
     /** Notification log, bot message log, admin audit log. */
     case LOGS_VIEW = 'PERM_LOGS_VIEW';
 }

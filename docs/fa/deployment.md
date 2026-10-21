@@ -290,9 +290,33 @@ sudo amoobot-deploy --app-only --ref v1.6.0
   فعال شده است) هدر `Strict-Transport-Security` را هم تکرار می‌کند.
 - **ورود ادمین:** سیمفونی `login_throttling` (۵ تلاش ناموفق در ۱۵ دقیقه برای هر ایمیل+IP، و ۲۵ برای هر IP) و nginx
   `limit_req` برای `= /admin/login` (۱۰ درخواست در دقیقه برای هر IP، burst ۱۰، پاسخ `429`).
-- **`ADMIN_ALLOW_IPS` (اختیاری):** فهرست IP یا CIDR (IPv4/IPv6، جدا با کاما). اگر پر باشد فقط همین‌ها به `/admin` و `/admin/login` دسترسی دارند
+- **`ADMIN_ALLOW_IPS` (اختیاری):** فهرست IP یا CIDR (IPv4/IPv6، جدا با کاما). اگر پر باشد فقط همین‌ها به `/admin`، `/admin/login` و `/admin/apps/downloads` دسترسی دارند
   (بقیه `403`). خالی (پیش‌فرض) یعنی بدون محدودیت IP. پشت CDN یا reverse proxy، nginx آدرس proxy را می‌بیند؛ در آن حالت این
   تنظیم و `limit_req` هر دو روی IP proxy کار می‌کنند، پس یا خالی بگذارید یا real_ip را جداگانه تنظیم کنید.
+
+### دانلود برنامه‌ها (App downloads) و آپلودهای بزرگ
+
+ادمین‌ها در «کاتالوگ ← برنامه‌ها ← دانلودها» فایل نصب برنامه‌ها (apk، exe، msi، zip، dmg، pkg، AppImage، deb) را آپلود می‌کنند. برای
+فایل‌های بزرگ (مثلاً APKهای ۱۰۰ مگابایتی) سه محدودیت باید بالا برود؛ `deploy.sh` هر سه را با `APP_DOWNLOADS_MAX_MB` (پیش‌فرض ۲۰۰، حداکثر
+۲۰۴۸) تنظیم می‌کند و هر بار اجرا همان نتیجه را می‌دهد (idempotent):
+
+| محدودیت | مقدار | کجا |
+|---|---|---|
+| nginx `client_max_body_size` | `APP_DOWNLOADS_MAX_MB + 16`M، `client_body_timeout 300s`، `fastcgi_read_timeout 300s` | فقط `location ^~ /admin/apps/downloads` (بقیه‌ی سایت همان `50M`) |
+| PHP `upload_max_filesize` | `APP_DOWNLOADS_MAX_MB`M | `/etc/php/<نسخه>/fpm/conf.d/98-amoobot-uploads.ini` |
+| PHP `post_max_size` | `APP_DOWNLOADS_MAX_MB + 16`M (کل فرم؛ ۱۶ مگابایت برای بقیه‌ی فیلدها و قالب multipart) | همان فایل، به‌همراه `max_input_time = 300` |
+| خود برنامه | `APP_DOWNLOADS_MAX_MB` | `AppDownloadStorage` (پیام خطای فرم) |
+
+- این ini فقط برای FPM است (CLI آپلود نمی‌گیرد). مرحله‌ی ۱۸ پس از restart با `php-fpm<نسخه> -i` مقدار مؤثر را می‌خواند و اگر کمتر باشد یا یک pool در
+  `pool.d` آن را با `php_value`/`php_admin_value` بازنویسی کرده باشد، استقرار را متوقف می‌کند.
+- location آپلود مستقیم به PHP-FPM می‌رود (بدون try_files)؛ چون بعد از redirect داخلی به `index.php`، nginx حجم بدنه را دوباره با محدودیت
+  `50M` همان location می‌سنجد و `413` می‌دهد.
+- فایل‌ها خارج از `public/` در `var/downloads` (یا `APP_DOWNLOADS_DIR`) با نام تصادفی ذخیره و فقط از `/d/{id}` سرو می‌شوند (پشتیبانی Range برای
+  ادامه‌ی دانلود، شمارنده‌ی دانلود، محدودیت ۶۰ درخواست در دقیقه برای هر IP). checkout در همان پوشه به‌روز می‌شود، پس این فایل‌ها بین استقرارها
+  می‌مانند؛ ولی در بکاپ دیتابیس نیستند: اگر فایل آپلود می‌کنید (نه لینک خارجی)، این پوشه را جداگانه بکاپ بگیرید.
+- اگر سایت پشت CDN است (مثلاً Cloudflare)، محدودیت حجم بدنه‌ی خود CDN هم باید بزرگ‌تر باشد (پلن رایگان Cloudflare: ۱۰۰ مگابایت).
+- صفحه‌ی عمومی اشتراک `/s/{token}` و دانلود `/d/{id}` محدودیت نرخ برای هر IP دارند (`config/packages/rate_limiter.yaml`). پشت CDN یا reverse
+  proxy بدون تنظیم real_ip، همه‌ی کاربران یک IP دیده می‌شوند و زودتر به محدودیت می‌خورند.
 
 ---
 

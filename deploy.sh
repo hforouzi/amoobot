@@ -34,6 +34,7 @@ DEFAULT_DEPLOY_REF="main"
 DEFAULT_BACKUP_DIR="/var/backups/amoobot"
 DEFAULT_BACKUP_RETENTION_DAYS="14"
 DEFAULT_BACKUP_CRON="30 3 * * *"
+DEFAULT_APP_DOWNLOADS_MAX_MB="200"
 
 REQUIRED_SQL_MODE="STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION"
 WEB_USER="www-data"
@@ -447,6 +448,42 @@ php_timezone_problems() {
   pool="$(grep -rhoE '^[[:space:]]*php(_admin)?_value\[date\.timezone\][[:space:]]*=[[:space:]]*[^[:space:];]+' \
     "${PHP_ETC_DIR}/${PHP_VERSION}/fpm/pool.d" 2> /dev/null | sed 's/.*=[[:space:]]*//' | grep -vx UTC | sort -u | tr '\n' ' ')"
   [[ -z "$pool" ]] || echo "FPM: a pool in ${PHP_ETC_DIR}/${PHP_VERSION}/fpm/pool.d overrides date.timezone with: ${pool}"
+  return 0
+}
+
+# PHP upload limits for app downloads (admin uploads of client app installers, up to APP_DOWNLOADS_MAX_MB). FPM only (the
+# CLI never receives uploads). post_max_size is the body of the whole form: the file plus a margin for the other fields
+# and the multipart framing. max_input_time: a large file over a slow link. Scoped by nginx: only the upload location
+# (render_upload_location) accepts bodies this large; every other path keeps client_max_body_size 50M.
+PHP_UPLOADS_INI="98-amoobot-uploads.ini"
+UPLOAD_BODY_MARGIN_MB=16
+php_uploads_ini_path() {
+  printf '%s\n' "${PHP_ETC_DIR}/${PHP_VERSION}/fpm/conf.d/${PHP_UPLOADS_INI}"
+}
+render_php_uploads_ini() {
+  printf '; Managed by amoobot deploy.sh: admin uploads of app downloads (APP_DOWNLOADS_MAX_MB=%s).\n' "$APP_DOWNLOADS_MAX_MB"
+  printf 'upload_max_filesize = %sM\npost_max_size = %sM\nmax_input_time = 300\n' "$APP_DOWNLOADS_MAX_MB" "$(( APP_DOWNLOADS_MAX_MB + UPLOAD_BODY_MARGIN_MB ))"
+}
+
+# install_php_uploads  writes the FPM ini (idempotent; FPM is restarted in step 18)
+install_php_uploads() {
+  render_php_uploads_ini | write_file "$(php_uploads_ini_path)" 644 root:root --show-diff
+}
+
+# php_uploads_problems  ->  one line per FPM limit lower than needed (empty = fine). php-fpmX -i plus pool.d overrides.
+php_uploads_problems() {
+  local info key need have pool
+  info="$("php-fpm${PHP_VERSION}" -i 2> /dev/null)"
+  for key in upload_max_filesize post_max_size; do
+    need="$APP_DOWNLOADS_MAX_MB"
+    [[ "$key" == post_max_size ]] && need="$(( APP_DOWNLOADS_MAX_MB + UPLOAD_BODY_MARGIN_MB ))"
+    have="$(awk -F' => ' -v k="$key" '$1 == k { print $2; exit }' <<< "$info")"
+    [[ "$have" =~ ^([0-9]+)M$ ]] && (( BASH_REMATCH[1] >= need )) \
+      || echo "FPM: php-fpm${PHP_VERSION} -i shows ${key} '${have:-unknown}', expected at least ${need}M"
+  done
+  pool="$(grep -rhoE '^[[:space:]]*php(_admin)?_value\[(upload_max_filesize|post_max_size)\]' \
+    "${PHP_ETC_DIR}/${PHP_VERSION}/fpm/pool.d" 2> /dev/null | sed 's/.*\[//; s/\]//' | sort -u | tr '\n' ' ')"
+  [[ -z "$pool" ]] || echo "FPM: a pool in ${PHP_ETC_DIR}/${PHP_VERSION}/fpm/pool.d overrides: ${pool}"
   return 0
 }
 
@@ -1377,6 +1414,8 @@ BACKUP_CRON="${BACKUP_CRON:-$DEFAULT_BACKUP_CRON}"
 SSH_PERMIT_ROOT_LOGIN="${SSH_PERMIT_ROOT_LOGIN:-prohibit-password}"
 ADMIN_ALLOW_IPS="${ADMIN_ALLOW_IPS:-}"
 MONITOR_PING_URL="${MONITOR_PING_URL:-}"
+# App downloads (admin uploads of client app installers): the app's own limit, and the web server / PHP limits below.
+APP_DOWNLOADS_MAX_MB="${APP_DOWNLOADS_MAX_MB:-$DEFAULT_APP_DOWNLOADS_MAX_MB}"
 LETSENCRYPT_EMAIL="${LETSENCRYPT_EMAIL:-admin@${DOMAIN}}"
 
 # APP_ENV / APP_DEBUG are enforced: anything other than prod / 0 is a hard error, never silently accepted.
@@ -1453,6 +1492,8 @@ if [[ -n "$MONITOR_PING_URL" ]]; then
   [[ "$MONITOR_PING_URL" =~ $monitor_url_re ]] \
     || die "MONITOR_PING_URL must be an https:// URL without spaces, quotes, \$ or backslashes (value not shown)."
 fi
+[[ "$APP_DOWNLOADS_MAX_MB" =~ ^[1-9][0-9]{0,3}$ ]] && (( APP_DOWNLOADS_MAX_MB <= 2048 )) \
+  || die "APP_DOWNLOADS_MAX_MB must be a whole number of megabytes from 1 to 2048 (got '${APP_DOWNLOADS_MAX_MB}')."
 # Optional: only these addresses/networks may reach /admin (comma or space separated). Empty = no IP restriction.
 ADMIN_ALLOW_LIST=()
 read -ra admin_ips <<< "${ADMIN_ALLOW_IPS//,/ }"
@@ -1901,7 +1942,7 @@ set_app_permissions() {
   run chown -R -h -P "$DEPLOY_USER:$WEB_USER" "$APP_DIR"
   as "$DEPLOY_USER" mkdir -p "$APP_DIR/var" "$APP_DIR/public/bundles"
   run chown -h "$WEB_USER:$WEB_USER" "$APP_DIR/var" "$APP_DIR/public/bundles"
-  as "$WEB_USER" mkdir -p "$APP_DIR/var/plugins" "$APP_DIR/var/plugin_uploads" "$APP_DIR/var/log"
+  as "$WEB_USER" mkdir -p "$APP_DIR/var/plugins" "$APP_DIR/var/plugin_uploads" "$APP_DIR/var/log" "$APP_DIR/var/downloads"
   run chown -R -h -P "$WEB_USER:$WEB_USER" "$APP_DIR/var" "$APP_DIR/public/bundles"
   # var/ and public/bundles: writable by PHP (www-data and its group), closed to others.
   as "$WEB_USER" chmod -R ug+rwX,o-rwx "$APP_DIR/var" "$APP_DIR/public/bundles"
@@ -1990,6 +2031,27 @@ acme_location() {
 EOF
 }
 
+# The admin upload page of app downloads: the only location that accepts a body of APP_DOWNLOADS_MAX_MB (+ margin) and
+# waits long enough for it. fastcgi directly (no try_files): after an internal redirect nginx would check the body
+# against the /index.php location's 50M again. Same admin IP rules as /admin.
+render_upload_location() {
+  cat <<EOF
+
+    # App downloads: admin uploads of client app installers (APP_DOWNLOADS_MAX_MB=${APP_DOWNLOADS_MAX_MB}).
+    location ^~ /admin/apps/downloads {
+        client_max_body_size $(( APP_DOWNLOADS_MAX_MB + UPLOAD_BODY_MARGIN_MB ))M;
+        client_body_timeout 300s;
+$(admin_access_rules)
+        fastcgi_pass unix:/run/php/php${PHP_VERSION}-fpm.sock;
+        include fastcgi_params;
+        fastcgi_param SCRIPT_FILENAME \$realpath_root/index.php;
+        fastcgi_param SCRIPT_NAME /index.php;
+        fastcgi_param DOCUMENT_ROOT \$realpath_root;
+        fastcgi_read_timeout 300s;
+    }
+EOF
+}
+
 # The application locations of the HTTPS server.
 app_locations() {
   cat <<EOF
@@ -2037,6 +2099,7 @@ app_locations() {
 $(admin_access_rules)
         try_files \$uri /index.php\$is_args\$args;
     }
+$(render_upload_location)
 EOF
   if (( ${#ADMIN_ALLOW_LIST[@]} )); then
     cat <<EOF
@@ -2343,6 +2406,7 @@ step "18/18" "Running final checks..."
 
 # PHP timezone pinned to UTC for FPM and CLI (no behaviour change: it was UTC by PHP's default); FPM restarts just below.
 install_php_timezone
+install_php_uploads
 run systemctl restart "php${PHP_VERSION}-fpm"
 run systemctl reload nginx
 if (( DRY_RUN )); then
@@ -2351,6 +2415,9 @@ else
   tz_problems="$(php_timezone_problems)"
   [[ -z "$tz_problems" ]] || die "PHP timezone is not UTC everywhere: ${tz_problems//$'\n'/; }"
   log "PHP timezone: UTC for CLI and FPM ($(php_timezone_ini_paths | tr '\n' ' '))."
+  upload_problems="$(php_uploads_problems)"
+  [[ -z "$upload_problems" ]] || die "PHP upload limits are too low for APP_DOWNLOADS_MAX_MB=${APP_DOWNLOADS_MAX_MB}: ${upload_problems//$'\n'/; }"
+  log "PHP upload limits: ${APP_DOWNLOADS_MAX_MB}M per file ($(php_uploads_ini_path)); nginx accepts that only on /admin/apps/downloads."
 fi
 
 if (( ! DRY_RUN )); then

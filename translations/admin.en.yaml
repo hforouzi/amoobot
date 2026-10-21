@@ -1,4 +1,9 @@
 admin:
+  client_apps: "Client apps"
+  client_app: "Client app"
+  app_downloads: "Downloads"
+  app_download: "App download"
+  apps: "Apps"
   bot_button_label: Button Label
   bot_button_labels: Button Labels
   bot_message_template: Message Template
@@ -132,6 +137,15 @@ payment:
     custom_api: Custom API Gateway
 
 help:
+  client_app.notes: "For admins only: where the link was verified, or why the app is inactive."
+  client_app.store_url: "Install page (Play Store, App Store or GitHub). A download linked to this app takes precedence."
+  client_app.template: "Placeholders: {url} the subscription URL, {url_encoded} percent-encoded for a parameter, {url_base64} base64, {name} the profile name (encoded). Empty: no add button (copy the link)."
+  client_app.icon: "Optional: a short emoji."
+  client_app.index: "Apps offered on the customer subscription page with an \"Add subscription\" button. Apps whose link is not verified are inactive; test them on a phone before enabling."
+  app_download.client_app: "Optional: the \"Install app\" button of this app on the subscription page leads here."
+  app_download.external_url: "Only for an \"external link\" download; http or https only."
+  app_download.file: "Allowed: %allowed% — at most %max% MB. Choosing a new file replaces the current one."
+  app_download.upload: "Upload an installer or link to a download page. Customers see it on their subscription page and under the bot's \"Download apps\" button."
   payment_gateway_store_method: PaymentGateway stores gateway credentials. StorePaymentMethod controls what users see in the bot.
   plan_custom_pricing: If enabled, custom pricing is calculated based on traffic and duration values.
   nowpayments_rate: Set conversion rates based on the selected amount unit (toman or rial).
@@ -508,6 +522,8 @@ panel_inbounds:
   last_synced: Last synced
 
 action:
+  rotate_page_link_confirm: "The current subscription page link of this service will stop working; the customer gets the new one from the bot. Continue?"
+  rotate_page_link: "New subscription page link"
   confirm_payment: "Approve"
   retry_provisioning: "Retry provisioning"
   reject_payment: "Reject"
@@ -575,6 +591,10 @@ discount:
   type.percent: "Percent"
 
 entity:
+  client_app.plural: "Client apps"
+  client_app.singular: "Client app"
+  app_download.plural: "Downloads"
+  app_download.singular: "App download"
   admin_user.singular: "Admin user"
   bot_message_log.singular: "Bot message"
   bot_message_log.plural: "Bot message log"
@@ -627,6 +647,25 @@ entity:
   bot_message_template.plural: "Message templates"
 
 field:
+  name: "Name"
+  version: "Version"
+  size: "Size"
+  sha256: "SHA-256"
+  mime_type: "Content type"
+  original_name: "File name"
+  download_count: "Downloads"
+  client_app: "Client app"
+  external_url: "External URL"
+  notes: "Notes"
+  icon: "Icon"
+  store_url: "Install page URL"
+  platform: "Platform"
+  platforms: "Platforms"
+  import_url_template: "Add-subscription link template"
+  import_example: "Import link example"
+  public_link: "Download link"
+  uploaded_file: "File"
+  subscription_page: "Customer subscription page"
   admin_note: "Admin note"
   allow_custom_username: "Custom username allowed"
   alpn: "ALPN"
@@ -855,6 +894,8 @@ field:
   zibal_sandbox: "Sandbox"
 
 flash:
+  service.page_link_csrf: "Invalid request (security token). Reload the page and try again."
+  service.page_link_rotated: "The subscription page link of service #%id% was replaced; the old link no longer works."
   error: "Error: %error%"
   csrf_expired: "Invalid or expired security token. Please reload the page and try again."
   settings.discount_range: "The discount must be between 0 and 100 percent."
@@ -957,3 +998,25 @@ service:
 locale:
   fa: "Persian"
   en: "English"
+platform:
+  android: "Android"
+  ios: "iOS"
+  windows: "Windows"
+  macos: "macOS"
+  linux: "Linux"
+app_download:
+  type.file: "Uploaded file"
+  type.url: "External link"
+  upload.required: "Choose a file for an \"uploaded file\" download."
+  upload.failed: "The upload failed. For a large file, the server upload limits (nginx and PHP) must be at least %max% MB."
+  upload.extension: "This file type is not allowed. Allowed extensions: %allowed%"
+  upload.empty: "The file is empty."
+  upload.too_large: "The file is larger than the limit (%max% MB)."
+  upload.content_type: "The file content does not match its extension (detected: %type%)."
+  external_url.required: "Enter the URL of an \"external link\" download."
+client_app:
+  template.no_scheme: "The link must start with a scheme such as hiddify://."
+  template.forbidden_scheme: "This scheme is not allowed."
+  template.invalid_characters: "The link must not contain spaces, quotes or < >."
+  template.no_url: "The link must contain {url}, {url_encoded} or {url_base64}."
+  platforms.required: "Choose at least one platform."

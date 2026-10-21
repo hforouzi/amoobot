@@ -1,0 +1,21 @@
+{% trans_default_domain 'subscription' %}
+<section class="card">
+    <h2>{{ 'downloads.title'|trans }}</h2>
+    <ul class="downloads">
+        {% for download in view.downloads %}
+            <li>
+                <div class="head">
+                    <strong>{{ download.title }}</strong>
+                    <span class="muted">{{ ('platform.' ~ download.platform)|trans }}{% if download.version %} · <span class="ltr">{{ download.version }}</span>{% endif %}</span>
+                </div>
+                {% if download.description %}<p class="muted">{{ download.description }}</p>{% endif %}
+                <a class="btn small" style="margin-top:8px" href="{{ download.url }}" rel="noopener noreferrer"{% if download.isExternal %} target="_blank"{% endif %}>
+                    ⬇️ {{ download.isExternal ? 'downloads.open'|trans : 'downloads.download'|trans }}{% if download.sizeBytes %} <span class="ltr">({{ download.sizeBytes|sub_bytes }})</span>{% endif %}
+                </a>
+                {% if download.sha256 %}
+                    <p class="sha" style="margin-top:6px">SHA-256: {{ download.sha256 }}</p>
+                {% endif %}
+            </li>
+        {% endfor %}
+    </ul>
+</section>

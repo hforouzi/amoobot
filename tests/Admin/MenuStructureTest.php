@@ -6,6 +6,7 @@ namespace App\Tests\Admin;
 
 use App\Admin\UI\Crud\AdminAuditLogCrudController;
 use App\Admin\UI\Crud\AdminUserCrudController;
+use App\Admin\UI\Crud\AppDownloadCrudController;
 use App\Admin\UI\Crud\BotMessageTemplateCrudController;
 use App\Admin\UI\Crud\BroadcastDeliveryCrudController;
 use App\Admin\UI\Crud\BroadcastMessageCrudController;
@@ -108,10 +109,10 @@ final class MenuStructureTest extends IntegrationTestCase
         $this->client->loginUser($this->superAdmin, 'main');
         $crawler = $this->client->request('GET', '/admin');
         $labels = $crawler->filter('#main-menu a.ea-sidebar-item-link')->each(static fn (Crawler $a): string => trim($a->text()));
-        foreach (['admin.customers', 'admin.bot_texts', 'admin.settings', 'admin.logs', 'admin.payment_gateways', 'admin.vpn_panels'] as $key) {
+        foreach (['admin.customers', 'admin.bot_texts', 'admin.settings', 'admin.logs', 'admin.payment_gateways', 'admin.vpn_panels', 'admin.apps'] as $key) {
             self::assertContains($this->trans($key), $labels, $key);
         }
-        foreach (['admin.users', 'admin.telegram_accounts', 'admin.bot_button_labels', 'admin.store_payment_methods', 'admin.vpn_inbounds', 'admin.required_channels', 'admin.renewal_pricing_settings', 'admin.automation_settings', 'admin.payments_needs_review', 'admin.payments_provisioning_failed', 'admin.notifications', 'admin.bot_logs'] as $key) {
+        foreach (['admin.users', 'admin.telegram_accounts', 'admin.bot_button_labels', 'admin.store_payment_methods', 'admin.vpn_inbounds', 'admin.required_channels', 'admin.renewal_pricing_settings', 'admin.automation_settings', 'admin.payments_needs_review', 'admin.payments_provisioning_failed', 'admin.notifications', 'admin.bot_logs', 'admin.client_apps', 'admin.app_downloads'] as $key) {
             self::assertNotContains($this->trans($key), $labels, $key);
         }
     }
@@ -173,6 +174,8 @@ final class MenuStructureTest extends IntegrationTestCase
             ],
             $this->trans('admin.menu.catalog') => [
                 $this->path(PlanCrudController::class),
+                // Downloads and client apps: one "Apps" page with two tabs.
+                $this->path(AppDownloadCrudController::class),
             ],
             $this->trans('admin.menu.customers') => [
                 $this->path(UserCrudController::class),
