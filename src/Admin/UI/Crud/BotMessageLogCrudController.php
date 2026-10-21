@@ -4,14 +4,13 @@ declare(strict_types=1);
 
 namespace App\Admin\UI\Crud;
 
-use App\Admin\UI\Support\AdminJsonFormatter;
+use App\Admin\UI\Field\JsonField;
 use App\Entity\AdminUser;
 use App\Entity\BotMessageLog;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Crud;
 use EasyCorp\Bundle\EasyAdminBundle\Controller\AbstractCrudController;
 use EasyCorp\Bundle\EasyAdminBundle\Field\DateTimeField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\IdField;
-use EasyCorp\Bundle\EasyAdminBundle\Field\TextareaField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\TextField;
 use Symfony\Component\Security\Http\Attribute\IsGranted;
 
@@ -35,11 +34,7 @@ class BotMessageLogCrudController extends AbstractCrudController
             TextField::new('telegramId'),
             TextField::new('direction'),
             TextField::new('updateType'),
-            TextareaField::new('payload')
-                ->formatValue(static fn (mixed $value): string => AdminJsonFormatter::toPrettyHtml($value))
-                ->renderAsHtml()
-                ->hideOnIndex()
-                ->hideOnForm(),
+            JsonField::new('payload'),
             DateTimeField::new('createdAt')->hideOnForm(),
         ];
     }

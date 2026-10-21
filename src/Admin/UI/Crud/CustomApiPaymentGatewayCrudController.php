@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Admin\UI\Crud;
 
+use App\Admin\UI\Field\JsonField;
 use App\Entity\AdminUser;
 use App\Entity\PaymentGateway;
 use App\Payment\Domain\PaymentGatewayType;
@@ -161,7 +162,10 @@ TEXT;
             TextareaField::new('configJson')
                 ->setLabel('config_json')
                 ->setHelp(self::CONFIG_HELP)
-                ->hideOnIndex(),
+                ->hideOnIndex()
+                ->hideOnDetail(),
+            // The detail page shows the stored config read-only with secrets masked; the form above edits it.
+            JsonField::new('config', 'config_json'),
             FormField::addFieldset('fieldset.metadata'),
             DateTimeField::new('createdAt')->hideOnForm(),
             DateTimeField::new('updatedAt')->hideOnForm(),

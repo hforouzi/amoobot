@@ -164,14 +164,8 @@ final class SuperAdminGatingTest extends IntegrationTestCase
         $pages = [];
         foreach (self::GATED_CRUDS as $controller) {
             $pages[] = $this->crudPath($controller, 'index');
-            // Known, unrelated bug: the bot log detail page fails on any row (its array "payload" is a TextareaField,
-            // which EasyAdmin refuses for non-strings). Only the gate is checked for it here.
-            if (BotMessageLogCrudController::class !== $controller) {
-                $pages[] = $this->crudPath($controller, 'detail', $this->ids[$controller]);
-            }
+            $pages[] = $this->crudPath($controller, 'detail', $this->ids[$controller]);
         }
-        $this->client->request('GET', $this->crudPath(BotMessageLogCrudController::class, 'detail', $this->ids[BotMessageLogCrudController::class]));
-        self::assertNotSame(403, $this->client->getResponse()->getStatusCode());
         foreach ([StorePaymentMethodCrudController::class, VpnInboundCrudController::class, SettingCrudController::class] as $controller) {
             $pages[] = $this->crudPath($controller, 'edit', $this->ids[$controller]);
         }
