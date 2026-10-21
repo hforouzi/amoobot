@@ -7,6 +7,7 @@ namespace App\Admin\UI\Crud;
 use App\Admin\UI\DashboardController;
 use App\Admin\UI\Support\AdminJsonFormatter;
 use App\Admin\UI\Support\AdminStatusBadge;
+use App\Entity\AdminUser;
 use App\Entity\Plugin;
 use App\Plugin\PaymentPluginDoctor;
 use App\Plugin\PluginManager;
@@ -25,9 +26,11 @@ use Symfony\Component\HttpFoundation\File\UploadedFile;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Attribute\Route;
+use Symfony\Component\Security\Http\Attribute\IsGranted;
 use Symfony\Component\Validator\Constraints\File;
 use Symfony\Component\Validator\Constraints\NotNull;
 
+#[IsGranted('ROLE_SUPER_ADMIN')]
 final class PluginCrudController extends AbstractCrudController
 {
     public function __construct(
@@ -48,6 +51,7 @@ final class PluginCrudController extends AbstractCrudController
         return $crud
             ->setEntityLabelInSingular('plugin.singular')
             ->setEntityLabelInPlural('plugin.plural')
+            ->setEntityPermission(AdminUser::ROLE_SUPER_ADMIN)
             ->setDefaultSort(['installedAt' => 'DESC', 'id' => 'DESC'])
             ->setSearchFields(['code', 'type', 'version', 'mainClass', 'path']);
     }

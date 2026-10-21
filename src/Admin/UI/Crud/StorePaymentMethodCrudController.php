@@ -4,11 +4,13 @@ declare(strict_types=1);
 
 namespace App\Admin\UI\Crud;
 
+use App\Entity\AdminUser;
 use App\Entity\PaymentGateway;
 use App\Entity\StorePaymentMethod;
 use App\Payment\Application\PaymentGatewayModuleRegistry;
 use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\ORM\EntityRepository;
+use EasyCorp\Bundle\EasyAdminBundle\Config\Crud;
 use EasyCorp\Bundle\EasyAdminBundle\Controller\AbstractCrudController;
 use EasyCorp\Bundle\EasyAdminBundle\Field\AssociationField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\BooleanField;
@@ -18,7 +20,9 @@ use EasyCorp\Bundle\EasyAdminBundle\Field\IdField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\IntegerField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\TextField;
 use Symfony\Component\HttpFoundation\RequestStack;
+use Symfony\Component\Security\Http\Attribute\IsGranted;
 
+#[IsGranted('ROLE_SUPER_ADMIN')]
 final class StorePaymentMethodCrudController extends AbstractCrudController
 {
     public function __construct(
@@ -31,6 +35,11 @@ final class StorePaymentMethodCrudController extends AbstractCrudController
     public static function getEntityFqcn(): string
     {
         return StorePaymentMethod::class;
+    }
+
+    public function configureCrud(Crud $crud): Crud
+    {
+        return $crud->setEntityPermission(AdminUser::ROLE_SUPER_ADMIN);
     }
 
     public function createEntity(string $entityFqcn): object

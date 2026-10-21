@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Admin\UI\Crud;
 
 use App\Admin\UI\EscapesFlashMessages;
+use App\Entity\AdminUser;
 use App\Entity\VpnPanel;
 use App\Provisioning\Application\ModernModeGuard;
 use App\Provisioning\Domain\SanaeiIntegrationMode;
@@ -20,8 +21,10 @@ use EasyCorp\Bundle\EasyAdminBundle\Field\DateTimeField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\IdField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\TextField;
 use Symfony\Component\Form\Extension\Core\Type\PasswordType;
+use Symfony\Component\Security\Http\Attribute\IsGranted;
 use Symfony\Contracts\Translation\TranslatorInterface;
 
+#[IsGranted('ROLE_SUPER_ADMIN')]
 class VpnPanelCrudController extends AbstractCrudController
 {
     use EscapesFlashMessages;
@@ -35,6 +38,11 @@ class VpnPanelCrudController extends AbstractCrudController
     public static function getEntityFqcn(): string
     {
         return VpnPanel::class;
+    }
+
+    public function configureCrud(Crud $crud): Crud
+    {
+        return $crud->setEntityPermission(AdminUser::ROLE_SUPER_ADMIN);
     }
 
     public function configureActions(Actions $actions): Actions

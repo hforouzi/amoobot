@@ -2738,11 +2738,6 @@ class TelegramUpdateHandler
         $this->telegramApiClient->sendMessage($chatId, implode("\n", $lines), $this->keyboardFactory->backToAdminMenu());
     }
 
-    private function handleAdminServices(string $chatId, ?string $callbackId = null): void
-    {
-        $this->serviceManagementService->handleAdminServices($chatId, $callbackId);
-    }
-
     private function handleAdminOrders(string $chatId, ?string $callbackId = null): void
     {
         $orders = $this->entityManager->getRepository(Order::class)->findBy([], ['id' => 'DESC'], 10);

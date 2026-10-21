@@ -17,14 +17,15 @@ use App\Provisioning\Application\VpnInboundSyncService;
 use App\Provisioning\Application\VpnServiceConfigRefreshService;
 use App\Provisioning\Domain\Dto\CreateVpnServiceRequest;
 use App\Provisioning\Domain\VpnServiceStatus;
-use App\Provisioning\Infrastructure\Sanaei3xui\Sanaei3xuiApiClient;
 use App\Provisioning\Infrastructure\VpnPanelDriverRegistry;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\RedirectResponse;
 use Symfony\Component\Routing\Attribute\Route;
+use Symfony\Component\Security\Http\Attribute\IsGranted;
 
 #[Route('/admin')]
+#[IsGranted('ROLE_SUPER_ADMIN')]
 final class VpnPanelInboundActionsController extends AbstractController
 {
     use EscapesFlashMessages;
@@ -36,41 +37,6 @@ final class VpnPanelInboundActionsController extends AbstractController
         private readonly VpnServiceConfigRefreshService $configRefreshService,
         private readonly ServiceConfigDeliveryRefresher $deliveryRefresher,
     ) {
-    }
-
-    #[Route('/vpn-panel/{id}/test-connection', name: 'admin_vpn_panel_test_connection', methods: ['GET'])]
-    public function testPanelConnection(VpnPanel $panel, Sanaei3xuiApiClient $apiClient): RedirectResponse
-    {
-        if ('sanaei_3xui' !== $panel->getType()) {
-            $this->addFlash('danger', 'این عملیات فقط برای پنل sanaei_3xui قابل انجام است.');
-
-            return $this->redirectToPanels();
-        }
-
-        $result = $apiClient->login($panel);
-        if (($result['ok'] ?? false) !== true) {
-            $panel->setLastTestResult('FAIL', 'Auth/login failed');
-            $this->entityManager->flush();
-            $this->addFlash('danger', $this->safePanelError($result));
-
-            return $this->redirectToPanels();
-        }
-
-        $listResult = $apiClient->listInbounds($panel);
-        if (($listResult['ok'] ?? false) === true) {
-            $payload = is_array($listResult['data'] ?? null) ? $listResult['data'] : [];
-            $obj = $payload['obj'] ?? $payload;
-            $count = is_array($obj) ? count($obj) : 0;
-            $panel->setLastTestResult('OK', sprintf('list_inbounds_ok count=%d', $count));
-            $this->entityManager->flush();
-            $this->addFlash('success', sprintf('اتصال به پنل موفق بود. تعداد اینباند: %d', $count));
-        } else {
-            $panel->setLastTestResult('FAIL', sprintf('list_inbounds_failed status=%s error=%s', (string) ($listResult['status'] ?? 'null'), (string) ($listResult['error'] ?? 'unknown')));
-            $this->entityManager->flush();
-            $this->addFlash('danger', $this->safePanelError($listResult));
-        }
-
-        return $this->redirectToPanels();
     }
 
     #[Route('/vpn-panel/{id}/sync-inbounds', name: 'admin_vpn_panel_sync_inbounds', methods: ['GET'])]
@@ -318,21 +284,6 @@ final class VpnPanelInboundActionsController extends AbstractController
         return $this->redirectToServices();
     }
 
-
-    /**
-     * @param array<string, mixed> $result
-     */
-    private function safePanelError(array $result): string
-    {
-        $status = $result['status'] ?? null;
-        $error = trim((string) ($result['error'] ?? 'unknown_error'));
-
-        if (null === $status) {
-            return sprintf('اتصال ناموفق بود. خطا: %s', $error);
-        }
-
-        return sprintf('اتصال ناموفق بود. status=%s, error=%s', (string) $status, $error);
-    }
 
     private function redirectToPanels(): RedirectResponse
     {

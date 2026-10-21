@@ -211,12 +211,6 @@ parameters:
 			path: src/Bot/Application/TelegramUpdateHandler.php
 
 		-
-			message: '#^Method App\\Bot\\Application\\TelegramUpdateHandler\:\:handleAdminServices\(\) is unused\.$#'
-			identifier: method.unused
-			count: 1
-			path: src/Bot/Application/TelegramUpdateHandler.php
-
-		-
 			message: '#^Method App\\Bot\\Application\\TelegramUpdateHandler\:\:handleMyServices\(\) is unused\.$#'
 			identifier: method.unused
 			count: 1
