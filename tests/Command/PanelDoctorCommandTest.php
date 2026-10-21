@@ -93,7 +93,8 @@ final class PanelDoctorCommandTest extends IntegrationTestCase
 
         self::assertSame(Command::FAILURE, $code, $out);
         self::assertMatchesRegularExpression('/^FAIL  update quota\/expiry/m', $out);
-        self::assertMatchesRegularExpression('/^CLEANUP  removed amoobot_selftest_[0-9a-f]{8}$/m', $out);
+        // \r?: the console output ends lines with PHP_EOL (\r\n on Windows).
+        self::assertMatchesRegularExpression('/^CLEANUP  removed amoobot_selftest_[0-9a-f]{8}\r?$/m', $out);
         self::assertStringContainsString('RESULT: FAILED', $out);
         self::assertSame(['customer@shop'], array_keys($this->fake->clients));
         $this->assertOnlySelfTestClientWritten();
