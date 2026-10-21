@@ -19,7 +19,7 @@ use Symfony\Contracts\Translation\TranslatorInterface;
 
 /**
  * The guided panel setup in the admin, against the fake 3x-ui (through the test HttpClient): URL + token only, the
- * connection report, inbound selection, plan mapping, validation, the modern-mode refusal in the classic form, and the
+ * connection report, inbound selection, plan mapping, validation, the modern-mode refusal (the classic edit URL leads to the guided form), and the
  * token never rendered back.
  */
 final class PanelSetupFlowTest extends IntegrationTestCase
@@ -189,16 +189,9 @@ final class PanelSetupFlowTest extends IntegrationTestCase
         self::assertSame(422, $this->client->getResponse()->getStatusCode());
         self::assertStringContainsString(htmlspecialchars($this->trans('panel_connection.guard.not_confirmed', ['%status%' => '<b>auth_rejected</b>']), ENT_QUOTES), (string) $this->client->getResponse()->getContent());
 
-        // The classic EasyAdmin form applies the same rule.
-        $crawler = $this->client->request('GET', '/admin/vpn-panel/'.$panel->getId().'/edit');
-        $this->assertResponseIsSuccessfulHere();
-        $form = $crawler->filter('form[name="VpnPanel"]')->form();
-        $this->choice($form, 'VpnPanel[integrationModeValue]')->select('modern');
-        $this->client->submit($form);
-        $this->client->followRedirect();
-        $html = (string) $this->client->getResponse()->getContent();
-        self::assertStringNotContainsString('<b>auth_rejected</b>', $html);
-        self::assertStringContainsString('&lt;b&gt;auth_rejected&lt;/b&gt;', $html);
+        // There is no second (classic) form to get around the rule: its URL leads to this one.
+        $this->client->request('GET', '/admin/vpn-panel/'.$panel->getId().'/edit');
+        self::assertTrue($this->client->getResponse()->isRedirect('/admin/panel-setup/'.$panel->getId().'/edit'));
         $this->em->clear();
         self::assertSame(SanaeiIntegrationMode::AUTO, $this->em->find(VpnPanel::class, $panel->getId())?->getIntegrationMode());
 

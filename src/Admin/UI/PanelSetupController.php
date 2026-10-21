@@ -10,6 +10,7 @@ use App\Entity\VpnInbound;
 use App\Entity\VpnPanel;
 use App\Provisioning\Application\ModernModeGuard;
 use App\Provisioning\Application\PanelConnectionTester;
+use App\Provisioning\Domain\SanaeiIntegrationMode;
 use App\Provisioning\Infrastructure\PanelCredentials;
 use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http\PanelApiException;
 use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http\PanelEndpoint;
@@ -52,13 +53,21 @@ final class PanelSetupController extends AbstractController
         $isNew = null === $panel;
         $panel ??= (new VpnPanel())->setType('sanaei_3xui');
         $previousMode = $panel->getIntegrationModeValue();
-        $form = $this->createForm(PanelConnectionType::class, $panel);
+        $legacyCredentials = !$isNew && $this->usesLegacyCredentials($panel);
+        $form = $this->createForm(PanelConnectionType::class, $panel, ['legacy_credentials' => $legacyCredentials]);
         $form->handleRequest($request);
 
         if ($form->isSubmitted() && $form->isValid()) {
-            $this->validateConnectionSettings($form, $panel, $previousMode);
+            $this->validateConnectionSettings($form, $panel, $previousMode, $legacyCredentials);
             if (0 === count($form->getErrors(true))) {
-                $panel->setType('sanaei_3xui')->setUpdatedAt(new \DateTimeImmutable());
+                // New panels are 3x-ui; an existing panel keeps its type (this is also the only edit form).
+                if ($isNew) {
+                    $panel->setType('sanaei_3xui');
+                }
+                // The form skips the setter when the value is unchanged; an old row may still have the URL only in the
+                // config copy (read through the getter's fallback): store it in its one place now.
+                $panel->setSubscriptionBaseUrl($panel->getSubscriptionBaseUrl());
+                $panel->setUpdatedAt(new \DateTimeImmutable());
                 $this->entityManager->persist($panel);
                 $this->entityManager->flush();
                 $this->addFlash('success', $this->trans($isNew ? 'panel_connection.flash.created' : 'panel_connection.flash.saved'));
@@ -72,6 +81,7 @@ final class PanelSetupController extends AbstractController
             'panel' => $panel,
             'is_new' => $isNew,
             'token_mask' => $isNew ? '' : $this->tokenMask($panel),
+            'password_configured' => $panel->hasPassword(),
         ]);
     }
 
@@ -215,11 +225,28 @@ final class PanelSetupController extends AbstractController
     }
 
     /**
-     * URL (parsable, http only to local addresses), token present, TLS pin format, and the modern-mode rule.
+     * A panel on the old username/password API: forced to legacy, detected as legacy, or already holding a username
+     * or password (a panel added before the guided setup and never probed). A new or token-only panel is not.
+     */
+    private function usesLegacyCredentials(VpnPanel $panel): bool
+    {
+        if ($panel->isModern()) {
+            return false;
+        }
+
+        return SanaeiIntegrationMode::LEGACY === $panel->getIntegrationMode()
+            || SanaeiIntegrationMode::LEGACY === $panel->getDetectedIntegrationMode()
+            || '' !== trim((string) $panel->getUsername())
+            || $panel->hasPassword();
+    }
+
+    /**
+     * URL (parsable, http only to local addresses), token present (or, on a legacy panel, a username and password),
+     * TLS pin format, and the modern-mode rule.
      *
      * @param \Symfony\Component\Form\FormInterface<VpnPanel> $form
      */
-    private function validateConnectionSettings(\Symfony\Component\Form\FormInterface $form, VpnPanel $panel, string $previousMode): void
+    private function validateConnectionSettings(\Symfony\Component\Form\FormInterface $form, VpnPanel $panel, string $previousMode, bool $legacyCredentials): void
     {
         try {
             $endpoint = PanelEndpoint::fromParts((string) $panel->getBaseUrl(), $panel->getBasePath());
@@ -231,8 +258,9 @@ final class PanelSetupController extends AbstractController
         } catch (PanelApiException) {
             $form->get('baseUrl')->addError(new FormError($this->trans('panel_connection.validation.url_invalid')));
         }
-        if (!$panel->isApiTokenConfigured()) {
-            $form->get('plainApiToken')->addError(new FormError($this->trans('panel_connection.validation.token_required')));
+        $legacyLogin = $legacyCredentials && '' !== trim((string) $panel->getUsername()) && $panel->hasPassword();
+        if (!$panel->isApiTokenConfigured() && !$legacyLogin) {
+            $form->get('plainApiToken')->addError(new FormError($this->trans($legacyCredentials ? 'panel_connection.validation.token_or_login_required' : 'panel_connection.validation.token_required')));
         }
         try {
             $panel->setTlsPinSha256((string) $form->get('tlsPin')->getData());

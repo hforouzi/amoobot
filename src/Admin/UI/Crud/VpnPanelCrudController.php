@@ -4,15 +4,14 @@ declare(strict_types=1);
 
 namespace App\Admin\UI\Crud;
 
-use App\Admin\UI\EscapesFlashMessages;
 use App\Entity\AdminUser;
 use App\Entity\VpnPanel;
-use App\Provisioning\Application\ModernModeGuard;
 use App\Provisioning\Domain\SanaeiIntegrationMode;
-use Doctrine\ORM\EntityManagerInterface;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Action;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Actions;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Crud;
+use EasyCorp\Bundle\EasyAdminBundle\Config\KeyValueStore;
+use EasyCorp\Bundle\EasyAdminBundle\Context\AdminContext;
 use EasyCorp\Bundle\EasyAdminBundle\Controller\AbstractCrudController;
 use EasyCorp\Bundle\EasyAdminBundle\Field\BooleanField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\ChoiceField;
@@ -20,21 +19,12 @@ use EasyCorp\Bundle\EasyAdminBundle\Field\CodeEditorField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\DateTimeField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\IdField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\TextField;
-use Symfony\Component\Form\Extension\Core\Type\PasswordType;
+use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Security\Http\Attribute\IsGranted;
-use Symfony\Contracts\Translation\TranslatorInterface;
 
 #[IsGranted('ROLE_SUPER_ADMIN')]
 class VpnPanelCrudController extends AbstractCrudController
 {
-    use EscapesFlashMessages;
-
-    public function __construct(
-        private readonly ModernModeGuard $modernModeGuard,
-        private readonly TranslatorInterface $translator,
-    ) {
-    }
-
     public static function getEntityFqcn(): string
     {
         return VpnPanel::class;
@@ -47,8 +37,8 @@ class VpnPanelCrudController extends AbstractCrudController
 
     public function configureActions(Actions $actions): Actions
     {
-        // The guided setup (PanelSetupController) is where panels are added and tested; the classic form stays for
-        // old (legacy) panels and the remaining fields.
+        // Panels are added, edited and tested in the guided setup (PanelSetupController, PanelConnectionType); this
+        // controller keeps the list and the detail page.
         $testConnection = Action::new('testConnection', 'panel_connection.steps.connect')
             ->linkToRoute('admin_panel_setup_show', fn (VpnPanel $panel): array => ['id' => $panel->getId()])
             ->setCssClass('btn btn-success')
@@ -66,6 +56,8 @@ class VpnPanelCrudController extends AbstractCrudController
 
         return $actions
             ->update(Crud::PAGE_INDEX, Action::NEW, static fn (Action $action): Action => $action->linkToRoute('admin_panel_setup_new'))
+            ->update(Crud::PAGE_INDEX, Action::EDIT, static fn (Action $action): Action => $action->linkToRoute('admin_panel_setup_edit', static fn (VpnPanel $panel): array => ['id' => $panel->getId()]))
+            ->update(Crud::PAGE_DETAIL, Action::EDIT, static fn (Action $action): Action => $action->linkToRoute('admin_panel_setup_edit', static fn (VpnPanel $panel): array => ['id' => $panel->getId()]))
             ->add(Action::INDEX, $testConnection)
             ->add(Action::INDEX, $syncInbounds)
             ->add(Action::INDEX, $viewInbounds)
@@ -123,19 +115,8 @@ class VpnPanelCrudController extends AbstractCrudController
             TextField::new('publicHost')
                 ->setHelp('Used as fallback host for generated single links when inbound/external proxy host is missing.'),
             TextField::new('username'),
-            TextField::new('plainPassword', 'Password')
-                ->setFormType(PasswordType::class)
-                ->setFormTypeOption('always_empty', true)
-                ->setFormTypeOption('required', false)
-                ->onlyOnForms(),
             TextField::new('passwordConfiguredLabel', 'Password configured')
                 ->hideOnForm(),
-            TextField::new('plainApiToken', 'API Token')
-                ->setFormType(PasswordType::class)
-                ->setFormTypeOption('always_empty', true)
-                ->setFormTypeOption('required', false)
-                ->setHelp('help.panel_bearer_token')
-                ->onlyOnForms(),
             TextField::new('apiTokenConfiguredLabel', 'Token configured')
                 ->hideOnForm(),
             TextField::new('lastTestResultSummary', 'Last test result')
@@ -152,45 +133,23 @@ class VpnPanelCrudController extends AbstractCrudController
         ];
 
         if (!$legacyOnly) {
-            $fields = array_values(array_filter($fields, static fn (object $field): bool => !in_array($field->getAsDto()->getProperty(), ['apiVersion', 'authMode', 'clientApiMode', 'basePath', 'username', 'plainPassword', 'passwordConfiguredLabel'], true)));
+            $fields = array_values(array_filter($fields, static fn (object $field): bool => !in_array($field->getAsDto()->getProperty(), ['apiVersion', 'authMode', 'clientApiMode', 'basePath', 'username', 'passwordConfiguredLabel'], true)));
         }
 
         return $fields;
     }
 
-    public function persistEntity(EntityManagerInterface $entityManager, $entityInstance): void
-    {
-        if ($entityInstance instanceof VpnPanel) {
-            $this->enforceModeGuard($entityInstance, SanaeiIntegrationMode::AUTO->value);
-        }
-        parent::persistEntity($entityManager, $entityInstance);
-    }
-
-    public function updateEntity(EntityManagerInterface $entityManager, $entityInstance): void
-    {
-        if ($entityInstance instanceof VpnPanel) {
-            $original = $entityManager->getUnitOfWork()->getOriginalEntityData($entityInstance);
-            $this->enforceModeGuard($entityInstance, (string) ($original['sanaeiIntegrationMode'] ?? SanaeiIntegrationMode::AUTO->value));
-        }
-        parent::updateEntity($entityManager, $entityInstance);
-    }
-
     /**
-     * A refused switch to "modern" keeps the previous mode; the rest of the form is saved (the flash text is escaped
-     * by EscapesFlashMessages).
+     * The one panel form is the guided one: /admin/vpn-panel/new and /admin/vpn-panel/{id}/edit lead there.
      */
-    private function enforceModeGuard(VpnPanel $panel, string $previousMode): void
+    public function new(AdminContext $context): KeyValueStore|Response
     {
-        $requested = $panel->getIntegrationMode();
-        if ($requested->value === $previousMode) {
-            return;
-        }
-        $refusal = $this->modernModeGuard->refusal($panel, $requested);
-        if (null === $refusal) {
-            return;
-        }
-        $panel->setIntegrationMode($previousMode);
-        $this->addFlash('danger', $this->translator->trans($refusal['key'], $refusal['params'], 'admin').' '.$this->translator->trans('panel_connection.guard.mode_kept', [], 'admin'));
+        return $this->redirectToRoute('admin_panel_setup_new');
+    }
+
+    public function edit(AdminContext $context): KeyValueStore|Response
+    {
+        return $this->redirectToRoute('admin_panel_setup_edit', ['id' => $context->getEntity()->getPrimaryKeyValue()]);
     }
 
     private static function formatJsonConfig(mixed $value): string

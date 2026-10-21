@@ -15,15 +15,34 @@
             {% if token_mask %}
                 <p class="form-text">{{ 'panel_connection.form.token_kept'|trans({'%mask%': token_mask}) }}</p>
             {% endif %}
+            {{ form_row(form.isActive) }}
 
-            <details class="mt-3 mb-3" {{ form.useProxy.vars.errors|length or form.tlsPin.vars.errors|length or form.integrationModeValue.vars.errors|length ? 'open' }}>
+            {% if form.username is defined %}
+                <fieldset class="admin-form-card mt-3" id="legacy-credentials">
+                    <legend class="h6">{{ 'panel_connection.form.legacy_credentials'|trans }}</legend>
+                    <p class="form-text">{{ 'panel_connection.form.legacy_credentials_help'|trans }}</p>
+                    {{ form_row(form.username) }}
+                    {{ form_row(form.plainPassword) }}
+                    {% if password_configured %}
+                        <p class="form-text">{{ 'panel_connection.form.password_kept'|trans }}</p>
+                    {% endif %}
+                    {{ form_row(form.apiVersion) }}
+                    {{ form_row(form.authMode) }}
+                    {{ form_row(form.clientApiMode) }}
+                    {{ form_row(form.basePath) }}
+                </fieldset>
+            {% endif %}
+
+            {% set advanced = [form.useProxy, form.tlsPin, form.integrationModeValue, form.subscriptionBaseUrl, form.subscriptionPathPrefix, form.publicHost] %}
+            <details class="mt-3 mb-3" {{ advanced|filter(f => f.vars.errors|length)|length ? 'open' }}>
                 <summary>{{ 'panel_connection.form.advanced'|trans }}</summary>
                 <div class="mt-2">
+                    {{ form_row(form.subscriptionBaseUrl) }}
+                    {{ form_row(form.subscriptionPathPrefix) }}
                     {{ form_row(form.useProxy) }}
                     {{ form_row(form.tlsPin) }}
                     {{ form_row(form.integrationModeValue) }}
-                    {{ form_row(form.subscriptionBaseUrl) }}
-                    {{ form_row(form.subscriptionPathPrefix) }}
+                    {{ form_row(form.publicHost) }}
                 </div>
             </details>
 

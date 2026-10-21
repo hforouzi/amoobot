@@ -142,11 +142,13 @@ final class SuperAdminGatingTest extends IntegrationTestCase
             $pages[] = $this->crudPath($controller, 'index');
             $pages[] = $this->crudPath($controller, 'detail', $this->ids[$controller]);
         }
-        foreach ([StorePaymentMethodCrudController::class, VpnPanelCrudController::class, VpnInboundCrudController::class, SettingCrudController::class] as $controller) {
+        foreach ([StorePaymentMethodCrudController::class, VpnInboundCrudController::class, SettingCrudController::class] as $controller) {
             $pages[] = $this->crudPath($controller, 'edit', $this->ids[$controller]);
         }
         $pages[] = $this->crudPath(StorePaymentMethodCrudController::class, 'new');
         $pages[] = $this->crudPath(VpnInboundCrudController::class, 'new');
+        $pages[] = '/admin/panel-setup/new';
+        $pages[] = '/admin/panel-setup/'.$this->ids[VpnPanelCrudController::class].'/edit';
         $pages[] = '/admin/payment-gateways/install';
         $pages[] = '/admin/payment-gateways/'.$this->ids[PaymentGatewayCrudController::class].'/config';
         $pages[] = '/admin/plugins/upload';
