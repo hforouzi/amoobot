@@ -10,6 +10,8 @@ use App\Provisioning\Domain\SanaeiIntegrationMode;
 use App\Tests\Support\Fake3xui\Fake3xuiPanel;
 use App\Tests\Support\IntegrationTestCase;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
+use Symfony\Component\DomCrawler\Field\ChoiceFormField;
+use Symfony\Component\DomCrawler\Form;
 
 /**
  * The one panel form (PanelConnectionType through PanelSetupController) for create and edit: title, URL, token,
@@ -48,7 +50,7 @@ final class PanelFormTest extends IntegrationTestCase
             'panel_connection[subscriptionPathPrefix]' => '/feed',
             'panel_connection[publicHost]' => 'edge.example.test',
         ]);
-        $form['panel_connection[isActive]']->untick();
+        $this->checkbox($form, 'panel_connection[isActive]')->untick();
         $this->client->submit($form);
         self::assertTrue($this->client->getResponse()->isRedirect(), (string) $this->client->getResponse()->getStatusCode());
 
@@ -66,7 +68,7 @@ final class PanelFormTest extends IntegrationTestCase
         self::assertSame(200, $this->client->getResponse()->getStatusCode());
         self::assertCount(0, $crawler->filter('#legacy-credentials'));
         $form = $crawler->filter('form')->form(['panel_connection[title]' => 'Main panel (renamed)']);
-        $form['panel_connection[isActive]']->tick();
+        $this->checkbox($form, 'panel_connection[isActive]')->tick();
         $this->client->submit($form);
         self::assertTrue($this->client->getResponse()->isRedirect(), (string) $this->client->getResponse()->getStatusCode());
 
@@ -155,6 +157,14 @@ final class PanelFormTest extends IntegrationTestCase
 
         $crawler = $this->client->request('GET', '/admin/vpn-panel');
         self::assertCount(1, $crawler->filter('a[href*="routeName=admin_panel_setup_edit"][href*="'.urlencode('routeParams[id]').'='.$panel->getId().'"]'), 'the list links to the guided edit');
+    }
+
+    private function checkbox(Form $form, string $name): ChoiceFormField
+    {
+        $field = $form[$name];
+        self::assertInstanceOf(ChoiceFormField::class, $field);
+
+        return $field;
     }
 
     private function tokenPanel(string $title): VpnPanel
