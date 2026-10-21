@@ -41,7 +41,7 @@ final class VpnServiceConfigRefreshService
                 ->setLastAccessInfoSyncedAt(new \DateTimeImmutable());
 
             if (null !== $result->subscriptionUrl && '' !== trim($result->subscriptionUrl)) {
-                $service->setSubscriptionUrl($result->subscriptionUrl."/");
+                $service->setSubscriptionUrl($result->subscriptionUrl);
             }
 
             $this->log(sprintf(

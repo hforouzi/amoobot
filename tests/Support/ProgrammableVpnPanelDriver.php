@@ -27,6 +27,8 @@ use App\Provisioning\Domain\VpnPanelDriverInterface;
  * - TEST_PANEL_SLEEP_AFTER_CREATE_MS env var: sleeps after the client was created (and saved), giving a
  *   test the moment to kill the process between createService and the database commit
  * - $usage / $usageFails: what getUsage() reports (the panel's current state of a client)
+ * - $subscriptionBase / $linkHost: what the created service's subscription URL (base + "/" + sub id, like the real
+ *   drivers; null = no subscription base) and config link point to
  */
 final class ProgrammableVpnPanelDriver implements VpnPanelDriverInterface, ExistingClientAwareDriverInterface
 {
@@ -44,6 +46,8 @@ final class ProgrammableVpnPanelDriver implements VpnPanelDriverInterface, Exist
     /** @var array<string, array{uuid: string, email: string, subId: string}> */
     public array $clients = [];
     public ?string $stateFile = null;
+    public ?string $subscriptionBase = 'https://panel.test/sub';
+    public string $linkHost = 'edge.panel.test';
 
     public function failNext(int $times = 1, ?string $message = null): void
     {
@@ -68,6 +72,8 @@ final class ProgrammableVpnPanelDriver implements VpnPanelDriverInterface, Exist
         $this->lookupFails = false;
         $this->clients = [];
         $this->stateFile = null;
+        $this->subscriptionBase = 'https://panel.test/sub';
+        $this->linkHost = 'edge.panel.test';
     }
 
     public function supports(?VpnPanel $panel): bool
@@ -160,15 +166,17 @@ final class ProgrammableVpnPanelDriver implements VpnPanelDriverInterface, Exist
      */
     private function service(array $client): CreatedVpnService
     {
+        $link = 'vless://'.$client['uuid'].'@'.$this->linkHost.':443?type=tcp&security=none#test';
+
         return new CreatedVpnService(
             remoteId: 'test_'.$client['uuid'],
             username: $client['email'],
-            subscriptionUrl: 'https://panel.test/sub',
-            configText: 'vless://test',
+            subscriptionUrl: null !== $this->subscriptionBase ? $this->subscriptionBase.'/'.$client['subId'] : null,
+            configText: $link,
             clientUuid: $client['uuid'],
             clientEmail: $client['email'],
             subId: $client['subId'],
-            configLinks: ['vless://test'],
+            configLinks: [$link],
         );
     }
 
