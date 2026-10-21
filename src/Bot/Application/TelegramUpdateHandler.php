@@ -44,6 +44,8 @@ use App\Shop\Domain\OrderDraftStatus;
 use App\Shop\Domain\OrderStatus;
 use App\Shop\Domain\OrderType;
 use App\Security\AdminAccessPolicy;
+use App\Security\AdminActor;
+use App\Security\AdminAuditLogger;
 use App\Security\AdminPermission;
 use Doctrine\ORM\EntityManagerInterface;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Action;
@@ -93,6 +95,7 @@ class TelegramUpdateHandler
         private readonly AdminUrlGeneratorInterface $adminUrlGenerator,
         private readonly RequestStack $requestStack,
         private readonly AdminAccessPolicy $accessPolicy,
+        private readonly AdminAuditLogger $auditLogger,
         private readonly string $paymentCardNumber = '',
         private readonly string $paymentCardHolder = '',
         private readonly ?string $paymentDescription = null,
@@ -318,13 +321,13 @@ class TelegramUpdateHandler
             }
 
             if (str_starts_with($data, 'admin_confirm_payment:')) {
-                $this->handleAdminConfirmPayment($chatId, (int) str_replace('admin_confirm_payment:', '', $data), $callbackId);
+                $this->handleAdminConfirmPayment($chatId, (int) str_replace('admin_confirm_payment:', '', $data), $callbackId, $admin);
 
                 return;
             }
 
             if (str_starts_with($data, 'admin_reject_payment:')) {
-                $this->handleAdminRejectPayment($chatId, (int) str_replace('admin_reject_payment:', '', $data), $callbackId);
+                $this->handleAdminRejectPayment($chatId, (int) str_replace('admin_reject_payment:', '', $data), $callbackId, $admin);
 
                 return;
             }
@@ -337,6 +340,7 @@ class TelegramUpdateHandler
                 data: $data,
                 admin: $admin,
                 policy: $this->accessPolicy,
+                auditLogger: $this->auditLogger,
             ))) {
                 return;
             }
@@ -577,6 +581,7 @@ class TelegramUpdateHandler
             data: $data,
             admin: $admin,
             policy: $this->accessPolicy,
+            auditLogger: $this->auditLogger,
         ))) {
             return;
         }
@@ -2638,7 +2643,7 @@ class TelegramUpdateHandler
         $this->debugLog(sprintf('admin_view_payment_sent_receipt_photo payment_id=%d', $paymentId));
     }
 
-    private function handleAdminConfirmPayment(string $chatId, int $paymentId, ?string $callbackId = null): void
+    private function handleAdminConfirmPayment(string $chatId, int $paymentId, ?string $callbackId = null, ?AdminActor $admin = null): void
     {
         $payment = $this->entityManager->getRepository(Payment::class)->find($paymentId);
         if (!$payment instanceof Payment) {
@@ -2649,9 +2654,11 @@ class TelegramUpdateHandler
         }
 
         // On a PROVISIONING_FAILED payment "confirm" means: retry fulfilment (already verified).
-        $result = PaymentStatus::PROVISIONING_FAILED === $payment->getStatus()
-            ? $this->paymentSettlementService->retryProvisioning($payment, null, $chatId, 'telegram_retry_provisioning')
-            : $this->paymentSettlementService->approveByAdmin($payment, null, $chatId, 'telegram_payment_approval');
+        $retry = PaymentStatus::PROVISIONING_FAILED === $payment->getStatus();
+        $result = $retry
+            ? $this->paymentSettlementService->retryProvisioning($payment, $admin?->adminUserId, $chatId, 'telegram_retry_provisioning')
+            : $this->paymentSettlementService->approveByAdmin($payment, $admin?->adminUserId, $chatId, 'telegram_payment_approval');
+        $this->auditLogger->record($retry ? 'payment.retry' : 'payment.approve', 'Payment', $paymentId, ['outcome' => $result->outcome->value], $admin);
         $this->debugLog(sprintf(
             'admin_confirm_result payment_id=%d outcome=%s message="%s"',
             $paymentId,
@@ -2674,7 +2681,7 @@ class TelegramUpdateHandler
         $this->telegramApiClient->sendMessage($chatId, $this->botTextResolver->message('admin.payment_confirmed'));
     }
 
-    private function handleAdminRejectPayment(string $chatId, int $paymentId, ?string $callbackId = null): void
+    private function handleAdminRejectPayment(string $chatId, int $paymentId, ?string $callbackId = null, ?AdminActor $admin = null): void
     {
         $payment = $this->entityManager->getRepository(Payment::class)->find($paymentId);
         if (!$payment instanceof Payment) {
@@ -2684,7 +2691,8 @@ class TelegramUpdateHandler
             return;
         }
 
-        $result = $this->paymentSettlementService->reject($payment, null, null, $chatId, 'telegram_payment_reject');
+        $result = $this->paymentSettlementService->reject($payment, null, $admin?->adminUserId, $chatId, 'telegram_payment_reject');
+        $this->auditLogger->record('payment.reject', 'Payment', $paymentId, ['outcome' => $result->outcome->value], $admin);
         $this->debugLog(sprintf(
             'admin_reject_result payment_id=%d outcome=%s message="%s"',
             $paymentId,

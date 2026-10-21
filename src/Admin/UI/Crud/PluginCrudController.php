@@ -11,6 +11,7 @@ use App\Admin\UI\Support\AdminStatusBadge;
 use App\Entity\Plugin;
 use App\Plugin\PaymentPluginDoctor;
 use App\Plugin\PluginManager;
+use App\Security\AdminAuditLogger;
 use Doctrine\ORM\EntityManagerInterface;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Action;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Actions;
@@ -140,7 +141,7 @@ final class PluginCrudController extends AbstractCrudController
     }
 
     #[Route('/admin/plugins/upload', name: 'admin_plugins_upload', methods: ['GET', 'POST'])]
-    public function upload(Request $request): Response
+    public function upload(Request $request, AdminAuditLogger $auditLogger): Response
     {
         $form = $this->createFormBuilder(null, [
             'translation_domain' => 'admin',
@@ -162,6 +163,7 @@ final class PluginCrudController extends AbstractCrudController
             if ($file instanceof UploadedFile) {
                 $result = $this->pluginManager->installFromZip($file);
                 if ($result->success && null !== $result->plugin) {
+                    $auditLogger->record('plugin.install', 'Plugin', $result->plugin->getId(), ['code' => $result->plugin->getCode(), 'version' => $result->plugin->getVersion()]);
                     $this->addFlash('success', 'Plugin installed successfully.');
 
                     return $this->redirect($this->pluginDetailUrl($result->plugin));
@@ -178,18 +180,20 @@ final class PluginCrudController extends AbstractCrudController
     }
 
     #[Route('/admin/plugins/{id}/enable', name: 'admin_plugins_enable', methods: ['GET'])]
-    public function enable(Plugin $plugin): Response
+    public function enable(Plugin $plugin, AdminAuditLogger $auditLogger): Response
     {
         $this->pluginManager->enable($plugin);
+        $auditLogger->record('plugin.enable', 'Plugin', $plugin->getId(), ['code' => $plugin->getCode()]);
         $this->addFlash('success', 'Plugin enabled.');
 
         return $this->redirect($this->pluginListUrl());
     }
 
     #[Route('/admin/plugins/{id}/disable', name: 'admin_plugins_disable', methods: ['GET'])]
-    public function disable(Plugin $plugin): Response
+    public function disable(Plugin $plugin, AdminAuditLogger $auditLogger): Response
     {
         $this->pluginManager->disable($plugin);
+        $auditLogger->record('plugin.disable', 'Plugin', $plugin->getId(), ['code' => $plugin->getCode()]);
         $this->addFlash('success', 'Plugin disabled.');
 
         return $this->redirect($this->pluginListUrl());

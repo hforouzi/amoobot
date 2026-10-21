@@ -9,6 +9,7 @@ use App\Broadcast\BroadcastSender;
 use App\Entity\AdminUser;
 use App\Entity\BroadcastDelivery;
 use App\Entity\BroadcastMessage;
+use App\Security\AdminAuditLogger;
 use Doctrine\ORM\EntityManagerInterface;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Action;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Actions;
@@ -206,7 +207,7 @@ final class BroadcastMessageCrudController extends AbstractCrudController
         return $this->redirect($this->detailUrl($broadcast));
     }
 
-    public function sendNow(AdminContext $context): RedirectResponse
+    public function sendNow(AdminContext $context, AdminAuditLogger $auditLogger): RedirectResponse
     {
         $broadcast = $this->requireBroadcast($context);
 
@@ -220,6 +221,7 @@ final class BroadcastMessageCrudController extends AbstractCrudController
 
         $this->broadcastSender->prepareDeliveries($broadcast);
         $summary = $this->broadcastSender->sendPending($broadcast, 50);
+        $auditLogger->record('broadcast.send', 'BroadcastMessage', $broadcast->getId(), ['target' => $broadcast->getTargetType(), 'sent' => $summary->sent, 'failed' => $summary->failed, 'pending' => $summary->pending]);
 
         if ($summary->pending > 0) {
             $this->addFlash('warning', 'ارسال در صف قرار گرفت. برای پردازش cron/command اجرا شود.');

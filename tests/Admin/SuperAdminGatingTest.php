@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Admin;
 
+use App\Admin\UI\Crud\AdminAuditLogCrudController;
 use App\Admin\UI\Crud\BotMessageLogCrudController;
 use App\Admin\UI\Crud\CustomApiPaymentGatewayCrudController;
 use App\Admin\UI\Crud\NowPaymentsPaymentGatewayCrudController;
@@ -17,6 +18,7 @@ use App\Admin\UI\Crud\VpnInboundCrudController;
 use App\Admin\UI\Crud\VpnPanelCrudController;
 use App\Admin\UI\Crud\ZibalPaymentGatewayCrudController;
 use App\Bot\Domain\BotMessageDirection;
+use App\Entity\AdminAuditLog;
 use App\Entity\AdminUser;
 use App\Entity\BotMessageLog;
 use App\Entity\Plugin;
@@ -53,6 +55,7 @@ final class SuperAdminGatingTest extends IntegrationTestCase
         RequiredChannelCrudController::class,
         ServiceNotificationLogCrudController::class,
         BotMessageLogCrudController::class,
+        AdminAuditLogCrudController::class,
     ];
 
     private KernelBrowser $client;
@@ -88,7 +91,8 @@ final class SuperAdminGatingTest extends IntegrationTestCase
         $channel = (new RequiredChannel())->setTitle('gating test channel')->setChatId('@gating_test');
         $notification = (new ServiceNotificationLog())->setService($service)->setUser($user)->setType('expiry')->setKeyName('gating-test')->setSentAt(new \DateTimeImmutable());
         $botLog = (new BotMessageLog())->setDirection(BotMessageDirection::INCOMING)->setPayload([]);
-        foreach ([$channel, $notification, $botLog] as $entity) {
+        $auditEntry = new AdminAuditLog(null, 'gating test', AdminAuditLog::SOURCE_CLI, 'gating.test', null, null, null);
+        foreach ([$channel, $notification, $botLog, $auditEntry] as $entity) {
             $this->em->persist($entity);
         }
         $this->em->flush();
@@ -106,6 +110,7 @@ final class SuperAdminGatingTest extends IntegrationTestCase
             RequiredChannelCrudController::class => (int) $channel->getId(),
             ServiceNotificationLogCrudController::class => (int) $notification->getId(),
             BotMessageLogCrudController::class => (int) $botLog->getId(),
+            AdminAuditLogCrudController::class => (int) $auditEntry->getId(),
         ];
 
         $this->client = new KernelBrowser(self::$kernel);

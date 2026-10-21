@@ -32,5 +32,6 @@ final class SuspendServiceAction implements ServiceActionInterface
 
         $serviceId = (int) str_replace('service_suspend:', '', $context->data);
         $this->serviceManagementService->suspendService($serviceId, $context->chatId, $context->callbackId);
+        $context->audit('service.suspend', $serviceId);
     }
 }

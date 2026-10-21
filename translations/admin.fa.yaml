@@ -38,6 +38,8 @@ admin:
   store_payment_methods: روش‌های پرداخت فروشگاه
   discount_codes: کدهای تخفیف
   discount_usages: مصرف کد تخفیف
+  audit_log: گزارش فعالیت ادمین‌ها
+  audit_log_entry: رویداد
   bot_logs: لاگ‌های بات
   settings: تنظیمات
   notifications: لاگ اعلان سرویس
@@ -379,3 +381,12 @@ panel_connection:
     inactive: غیرفعال
     save: ذخیره
     saved: '%count% پلن به‌روز شد.'
+
+audit:
+  source: منبع
+  actor: ادمین
+  actor_id: شناسه ادمین
+  action: عملیات
+  target_type: نوع رکورد
+  target_id: شناسه رکورد
+  details: جزئیات

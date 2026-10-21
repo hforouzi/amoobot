@@ -55,5 +55,7 @@ final class ExtendServiceAction implements ServiceActionInterface
         }
 
         $this->serviceManagementService->extendService($serviceId, $days, $context->chatId, $context->callbackId);
+
+        $context->audit('service.extend', $serviceId, ['days' => $days]);
     }
 }

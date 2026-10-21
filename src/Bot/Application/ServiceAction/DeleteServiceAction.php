@@ -42,6 +42,8 @@ final class DeleteServiceAction implements ServiceActionInterface
 
             $this->serviceManagementService->deleteService($serviceId, $context->chatId, $context->callbackId);
 
+            $context->audit('service.delete', $serviceId);
+
             return;
         }
 

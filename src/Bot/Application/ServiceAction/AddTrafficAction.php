@@ -55,5 +55,7 @@ final class AddTrafficAction implements ServiceActionInterface
         }
 
         $this->serviceManagementService->addTraffic($serviceId, $trafficGb, $context->chatId, $context->callbackId);
+
+        $context->audit('service.add_traffic', $serviceId, ['trafficGb' => $trafficGb]);
     }
 }

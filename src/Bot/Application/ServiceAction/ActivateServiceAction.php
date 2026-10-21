@@ -32,5 +32,6 @@ final class ActivateServiceAction implements ServiceActionInterface
 
         $serviceId = (int) str_replace('service_activate:', '', $context->data);
         $this->serviceManagementService->activateService($serviceId, $context->chatId, $context->callbackId);
+        $context->audit('service.activate', $serviceId);
     }
 }

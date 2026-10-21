@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Admin;
 
+use App\Admin\UI\Crud\AdminAuditLogCrudController;
 use App\Admin\UI\Crud\AdminUserCrudController;
 use App\Admin\UI\Crud\BotButtonLabelCrudController;
 use App\Admin\UI\Crud\BotMessageLogCrudController;
@@ -115,6 +116,7 @@ final class MenuStructureTest extends IntegrationTestCase
                 'route:admin_automation_settings',
                 $this->trans('admin.menu.logs').' > '.$this->path(ServiceNotificationLogCrudController::class),
                 $this->trans('admin.menu.logs').' > '.$this->path(BotMessageLogCrudController::class),
+                $this->trans('admin.menu.logs').' > '.$this->path(AdminAuditLogCrudController::class),
             ],
         ], $this->menuFor($this->superAdmin));
     }

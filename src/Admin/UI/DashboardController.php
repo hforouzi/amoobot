@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Admin\UI;
 
 use App\Admin\Security\AdminCrudPermissions;
+use App\Admin\UI\Crud\AdminAuditLogCrudController;
 use App\Admin\UI\Crud\AdminUserCrudController;
 use App\Admin\UI\Crud\BotMessageLogCrudController;
 use App\Admin\UI\Crud\BroadcastMessageCrudController;
@@ -126,6 +127,7 @@ class DashboardController extends AbstractDashboardController
                     ->setSubItems([
                         $this->crudLink(ServiceNotificationLogCrudController::class, 'admin.notifications', 'fa fa-bell'),
                         $this->crudLink(BotMessageLogCrudController::class, 'admin.bot_logs', 'fa fa-file-text'),
+                        $this->crudLink(AdminAuditLogCrudController::class, 'admin.audit_log', 'fa fa-history'),
                     ]),
             ]))],
         ];

@@ -16,6 +16,7 @@ use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http\PanelApiException;
 use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http\PanelEndpoint;
 use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http\SecretRedactor;
 use App\Provisioning\Infrastructure\Sanaei3xui\Modern\ModernClientsApi;
+use App\Security\AdminAuditLogger;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\Form\FormError;
@@ -46,7 +47,7 @@ final class PanelSetupController extends AbstractController
 
     #[Route('/new', name: 'admin_panel_setup_new', methods: ['GET', 'POST'])]
     #[Route('/{id}/edit', name: 'admin_panel_setup_edit', methods: ['GET', 'POST'], requirements: ['id' => '\d+'])]
-    public function edit(Request $request, ?VpnPanel $panel = null): Response
+    public function edit(Request $request, AdminAuditLogger $auditLogger, ?VpnPanel $panel = null): Response
     {
         $isNew = null === $panel;
         $panel ??= (new VpnPanel())->setType('sanaei_3xui');
@@ -68,6 +69,7 @@ final class PanelSetupController extends AbstractController
                 $panel->setUpdatedAt(new \DateTimeImmutable());
                 $this->entityManager->persist($panel);
                 $this->entityManager->flush();
+                $auditLogger->record($isNew ? 'vpn_panel.create' : 'vpn_panel.update', 'VpnPanel', $panel->getId(), ['mode' => $panel->getIntegrationModeValue()]);
                 $this->addFlash('success', $this->trans($isNew ? 'panel_connection.flash.created' : 'panel_connection.flash.saved'));
 
                 return $this->redirectToRoute('admin_panel_setup_show', ['id' => $panel->getId()]);
@@ -104,7 +106,7 @@ final class PanelSetupController extends AbstractController
     }
 
     #[Route('/{id}/inbounds', name: 'admin_panel_setup_inbounds', methods: ['GET', 'POST'], requirements: ['id' => '\d+'])]
-    public function inbounds(VpnPanel $panel, Request $request): Response
+    public function inbounds(VpnPanel $panel, Request $request, AdminAuditLogger $auditLogger): Response
     {
         if (!$panel->isModern()) {
             $this->addFlash('warning', $this->trans('panel_connection.inbounds.needs_modern'));
@@ -155,6 +157,7 @@ final class PanelSetupController extends AbstractController
                 ++$count;
             }
             $this->entityManager->flush();
+            $auditLogger->record('vpn_panel.inbounds_update', 'VpnPanel', $panel->getId(), ['selected' => $count]);
             $this->addFlash('success', $this->trans('panel_connection.inbounds.saved', ['%count%' => $count]));
 
             return $this->redirectToRoute('admin_panel_setup_plans', ['id' => $panel->getId()]);
@@ -172,7 +175,7 @@ final class PanelSetupController extends AbstractController
     }
 
     #[Route('/{id}/plans', name: 'admin_panel_setup_plans', methods: ['GET', 'POST'], requirements: ['id' => '\d+'])]
-    public function plans(VpnPanel $panel, Request $request): Response
+    public function plans(VpnPanel $panel, Request $request, AdminAuditLogger $auditLogger): Response
     {
         $inbounds = $this->entityManager->getRepository(VpnInbound::class)->findBy(['panel' => $panel, 'isActive' => true], ['id' => 'ASC']);
         $plans = $this->entityManager->getRepository(Plan::class)->findBy([], ['isActive' => 'DESC', 'id' => 'ASC']);
@@ -197,6 +200,7 @@ final class PanelSetupController extends AbstractController
                 }
             }
             $this->entityManager->flush();
+            $auditLogger->record('vpn_panel.plans_update', 'VpnPanel', $panel->getId(), ['changed' => $changed]);
             $this->addFlash('success', $this->trans('panel_connection.plans.saved', ['%count%' => $changed]));
 
             return $this->redirectToRoute('admin_panel_setup_plans', ['id' => $panel->getId()]);

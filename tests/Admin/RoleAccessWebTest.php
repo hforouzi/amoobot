@@ -49,6 +49,7 @@ final class RoleAccessWebTest extends IntegrationTestCase
         'AdminUserCrudController' => 'ADMINS_MANAGE',
         'ServiceNotificationLogCrudController' => 'LOGS_VIEW',
         'BotMessageLogCrudController' => 'LOGS_VIEW',
+        'AdminAuditLogCrudController' => 'LOGS_VIEW',
     ];
 
     private const ROLE_PERMISSIONS = [

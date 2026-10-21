@@ -32,5 +32,6 @@ final class ResetUsageAction implements ServiceActionInterface
 
         $serviceId = (int) str_replace('service_reset_usage:', '', $context->data);
         $this->serviceManagementService->resetUsage($serviceId, $context->chatId, $context->callbackId);
+        $context->audit('service.reset_usage', $serviceId);
     }
 }

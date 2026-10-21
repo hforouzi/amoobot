@@ -76,6 +76,7 @@ final class AdminCrudPermissions
             Crud\AdminUserCrudController::class => $p(AdminPermission::ADMINS_MANAGE),
             Crud\ServiceNotificationLogCrudController::class => $p(AdminPermission::LOGS_VIEW),
             Crud\BotMessageLogCrudController::class => $p(AdminPermission::LOGS_VIEW),
+            Crud\AdminAuditLogCrudController::class => $p(AdminPermission::LOGS_VIEW),
         ];
     }
 

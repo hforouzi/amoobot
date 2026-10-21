@@ -14,6 +14,7 @@ use App\Payment\Application\PaymentGatewayModuleRegistry;
 use App\Payment\Plugin\PluginConfigSchemaValidator;
 use App\Plugin\PaymentPluginDoctor;
 use App\Plugin\PluginRegistry;
+use App\Security\AdminAuditLogger;
 use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\ORM\QueryBuilder;
 use EasyCorp\Bundle\EasyAdminBundle\Collection\FieldCollection;
@@ -195,7 +196,7 @@ final class PaymentGatewayCrudController extends AbstractCrudController
     }
 
     #[Route('/admin/payment-gateways/install/{type}', name: 'admin_payment_gateways_install_type', methods: ['GET', 'POST'])]
-    public function installType(Request $request, string $type): Response
+    public function installType(Request $request, string $type, AdminAuditLogger $auditLogger): Response
     {
         if (!$this->moduleRegistry->supports($type)) {
             throw $this->createNotFoundException('Unsupported payment gateway module.');
@@ -225,6 +226,7 @@ final class PaymentGatewayCrudController extends AbstractCrudController
 
             $this->entityManager->persist($gateway);
             $this->entityManager->flush();
+            $auditLogger->record('payment_gateway.install', 'PaymentGateway', $gateway->getId(), ['type' => $type, 'config_keys' => array_keys($data['config'])]);
 
             return $this->redirectToRoute('admin_payment_gateways_install_success', [
                 'id' => $gateway->getId(),
@@ -253,7 +255,7 @@ final class PaymentGatewayCrudController extends AbstractCrudController
     }
 
     #[Route('/admin/payment-gateways/{id}/add-store-method', name: 'admin_payment_gateways_add_store_method', methods: ['POST'])]
-    public function addStoreMethod(Request $request, PaymentGateway $gateway): RedirectResponse
+    public function addStoreMethod(Request $request, PaymentGateway $gateway, AdminAuditLogger $auditLogger): RedirectResponse
     {
         if (!$this->isCsrfTokenValid('add_store_payment_method_'.$gateway->getId(), (string) $request->request->get('_token'))) {
             throw $this->createAccessDeniedException('Invalid CSRF token.');
@@ -269,6 +271,7 @@ final class PaymentGatewayCrudController extends AbstractCrudController
 
         $this->entityManager->persist($method);
         $this->entityManager->flush();
+        $auditLogger->record('store_payment_method.create', 'StorePaymentMethod', $method->getId(), ['gateway' => $gateway->getId()]);
 
         return $this->redirect($this->adminUrlGenerator
             ->unsetAll()
@@ -280,7 +283,7 @@ final class PaymentGatewayCrudController extends AbstractCrudController
     }
 
     #[Route('/admin/payment-gateways/{id}/config', name: 'admin_payment_gateways_config', methods: ['GET', 'POST'])]
-    public function config(Request $request, PaymentGateway $gateway): Response
+    public function config(Request $request, PaymentGateway $gateway, AdminAuditLogger $auditLogger): Response
     {
         $type = $gateway->getType();
         if (!$this->moduleRegistry->supports($type)) {
@@ -309,6 +312,7 @@ final class PaymentGatewayCrudController extends AbstractCrudController
                 ->setUpdatedAt(new \DateTimeImmutable());
 
             $this->entityManager->flush();
+            $auditLogger->record('payment_gateway.config_update', 'PaymentGateway', $gateway->getId(), ['config_keys' => array_keys($data['config'])]);
 
             return $this->redirect($this->gatewayListUrl());
         }
