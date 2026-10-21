@@ -225,6 +225,9 @@ sales_settings:
     disabled_message: پیام غیرفعال بودن فروش
 
 panel_connection:
+  subscription_check:
+    missing: 'مشتریان لینک اشتراک دریافت نمی‌کنند: «%field%» خالی است. آن را در «%section%» پنل با آدرسی که مشتریان استفاده می‌کنند پر کنید؛ مثلاً https://sub.example.com:2096 (نه آدرس 127.0.0.1 که ربات با آن به پنل وصل می‌شود).'
+    not_public: 'لینک اشتراک %url% از گوشی مشتری قابل دسترسی نیست (آدرس محلی، خصوصی یا loopback). «%field%» را در «%section%» پنل با آدرس عمومی پر کنید؛ مثلاً https://sub.example.com:2096.'
   integration_mode: حالت اتصال
   integration_mode_help: «خودکار» با تست اتصال تشخیص می‌دهد پنل API جدید (توکن) دارد یا نسخه قدیمی (نام کاربری/رمز) است. فقط در صورت نیاز حالت را دستی انتخاب کنید.
   mode:

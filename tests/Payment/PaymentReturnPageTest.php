@@ -86,6 +86,32 @@ final class PaymentReturnPageTest extends IntegrationTestCase
         self::assertSame('no-referrer', $headers->get('Referrer-Policy'));
     }
 
+    public function testAnAddressCustomersCannotReachIsNotShown(): void
+    {
+        // Panel set up without a public subscription address: the panel answers on 127.0.0.1.
+        $this->driver()->subscriptionBase = 'http://127.0.0.1:2096/sub';
+        $this->driver()->linkHost = '127.0.0.1';
+        [$order, $payment] = $this->nowPayment();
+        $this->apiSays('finished');
+
+        $content = $this->open($payment);
+
+        self::assertSame(1, $this->countServicesForOrder($order));
+        self::assertStringNotContainsString('127.0.0.1', $content);
+        self::assertStringNotContainsString('http-equiv="refresh"', $content, 'no redirect to it');
+        self::assertStringContainsString('با پشتیبانی تماس بگیرید', $content);
+        $customerChat = (string) $order->getUser()->getTelegramAccount()?->getTelegramId();
+        $toCustomer = 0;
+        foreach ($this->http->requests('/sendMessage') as $request) {
+            $body = json_decode((string) ($request['options']['body'] ?? ''), true);
+            if (is_array($body) && (string) ($body['chat_id'] ?? '') === $customerChat) {
+                ++$toCustomer;
+                self::assertStringNotContainsString('127.0.0.1', (string) ($body['text'] ?? ''), 'not in the Telegram confirmation either');
+            }
+        }
+        self::assertGreaterThan(0, $toCustomer, 'the customer was notified');
+    }
+
     public function testPendingPaymentShowsAutoRefreshingWaitingState(): void
     {
         [$order, $payment] = $this->nowPayment();

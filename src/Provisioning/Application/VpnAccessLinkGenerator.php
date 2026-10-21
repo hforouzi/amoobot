@@ -6,6 +6,7 @@ namespace App\Provisioning\Application;
 
 use App\Entity\VpnPanel;
 use App\Entity\VpnService;
+use App\Provisioning\Domain\PublicUrlPolicy;
 use App\Provisioning\Infrastructure\Sanaei3xui\Sanaei3xuiConfigGenerator;
 use App\Provisioning\Infrastructure\Sanaei3xui\Sanaei3xuiRemoteIdParser;
 
@@ -603,15 +604,19 @@ final class VpnAccessLinkGenerator
         return str_contains($normalized, 'external_proxy');
     }
 
+    /** The panel address as a last-resort server host, only when a client can reach it (not 127.0.0.1 / private). */
     private function hostFromBaseUrl(?string $baseUrl): ?string
     {
         $host = parse_url(trim((string) $baseUrl), PHP_URL_HOST);
 
-        return is_string($host) && '' !== trim($host) ? trim($host) : null;
+        return is_string($host) && PublicUrlPolicy::isPublicHost($host) ? trim($host) : null;
     }
 
     private function portFromBaseUrl(?string $baseUrl): ?int
     {
+        if (null === $this->hostFromBaseUrl($baseUrl)) {
+            return null;
+        }
         $port = parse_url(trim((string) $baseUrl), PHP_URL_PORT);
 
         return is_int($port) && $port > 0 && $port <= 65535 ? $port : null;

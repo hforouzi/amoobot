@@ -225,6 +225,9 @@ sales_settings:
     disabled_message: Sales disabled message
 
 panel_connection:
+  subscription_check:
+    missing: 'Customers get no subscription URL: "%field%" is empty. Fill it in the panel''s %section% with the address customers use, e.g. https://sub.example.com:2096 (not the 127.0.0.1 address the bot uses to reach the panel).'
+    not_public: 'The subscription URL %url% cannot be reached from a customer''s phone (loopback, private or local address). Fill "%field%" in the panel''s %section% with the public address, e.g. https://sub.example.com:2096.'
   integration_mode: Connection mode
   integration_mode_help: '"Auto" uses the connection test to detect whether the panel has the new API (token) or is an old one (username/password). Choose a mode by hand only if you need to.'
   mode:

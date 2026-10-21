@@ -138,9 +138,44 @@ class TelegramApiClient
             return;
         }
 
+        $this->uploadFile('sendPhoto', 'photo', DataPart::fromPath($filePath), $chatId, $caption, $replyMarkup);
+
+        $this->botMessageLogger->log(BotMessageDirection::OUTGOING, [
+            'method' => 'sendPhotoFile',
+            'payload' => [
+                'chat_id' => $chatId,
+                'photo_path' => $filePath,
+                'caption' => $caption,
+            ],
+        ], $chatId, 'photo');
+    }
+
+    /**
+     * Sends the file as is (Telegram does not recompress documents, unlike photos).
+     */
+    public function sendDocumentFile(string $chatId, string $filePath, string $caption = '', ?array $replyMarkup = null, ?string $fileName = null, ?string $contentType = null): void
+    {
+        if (!is_file($filePath)) {
+            return;
+        }
+
+        $this->uploadFile('sendDocument', 'document', DataPart::fromPath($filePath, $fileName, $contentType), $chatId, $caption, $replyMarkup);
+
+        $this->botMessageLogger->log(BotMessageDirection::OUTGOING, [
+            'method' => 'sendDocumentFile',
+            'payload' => [
+                'chat_id' => $chatId,
+                'document_path' => $filePath,
+                'caption' => $caption,
+            ],
+        ], $chatId, 'document');
+    }
+
+    private function uploadFile(string $method, string $field, DataPart $file, string $chatId, string $caption, ?array $replyMarkup): void
+    {
         $payload = [
             'chat_id' => $chatId,
-            'photo' => DataPart::fromPath($filePath),
+            $field => $file,
         ];
 
         if ('' !== trim($caption)) {
@@ -165,24 +200,15 @@ class TelegramApiClient
         try {
             $response = $this->httpClient->request(
                 'POST',
-                sprintf('https://api.telegram.org/bot%s/%s', $this->botToken, 'sendPhoto'),
+                sprintf('https://api.telegram.org/bot%s/%s', $this->botToken, $method),
                 $options
             );
             $data = $response->toArray(false);
             if (!is_array($data) || true !== ($data['ok'] ?? false)) {
-                throw new \RuntimeException('Telegram sendPhoto file request returned non-ok response.');
+                throw new \RuntimeException(sprintf('Telegram %s file request returned non-ok response.', $method));
             }
         } catch (\Throwable) {
         }
-
-        $this->botMessageLogger->log(BotMessageDirection::OUTGOING, [
-            'method' => 'sendPhotoFile',
-            'payload' => [
-                'chat_id' => $chatId,
-                'photo_path' => $filePath,
-                'caption' => $caption,
-            ],
-        ], $chatId, 'photo');
     }
 
     public function getUpdates(?int $offset = null, int $limit = 20, int $timeout = 25): array

@@ -51,6 +51,29 @@ final class PanelDoctorCommandTest extends IntegrationTestCase
         self::assertSame(SanaeiIntegrationMode::MODERN, $this->em->find(VpnPanel::class, $this->panel->getId())?->getDetectedIntegrationMode(), 'the probe is stored');
     }
 
+    public function testTheSubscriptionUrlCheck(): void
+    {
+        [$code, $out] = $this->doctor([]);
+        self::assertSame(Command::SUCCESS, $code, 'a warning: the connection itself works');
+        self::assertStringContainsString('WARN  subscription URL is not publicly usable', $out);
+        self::assertStringContainsString('"Subscription base URL"', $out);
+        self::assertStringContainsString('Advanced settings', $out);
+
+        // The address the bot uses to reach the panel is no subscription address for customers.
+        $this->panel->setSubscriptionBaseUrl('http://127.0.0.1:2096');
+        $this->em->flush();
+        [, $out] = $this->doctor([]);
+        self::assertStringContainsString('WARN  subscription URL is not publicly usable', $out);
+        self::assertStringContainsString('127.0.0.1', $out);
+
+        $this->panel->setSubscriptionBaseUrl('https://sub.example.com:2096');
+        $this->em->flush();
+        [$code, $out] = $this->doctor([]);
+        self::assertSame(Command::SUCCESS, $code);
+        self::assertStringContainsString('PASS  subscription URL is publicly usable (https://sub.example.com:2096/sub/<subId>)', $out);
+        self::assertStringNotContainsString('WARN', $out);
+    }
+
     public function testReportOfAFailure(): void
     {
         $this->fake->tokenRevoked = true;

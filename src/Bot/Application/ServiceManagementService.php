@@ -23,6 +23,7 @@ use App\Provisioning\Application\RenewalSettingsProvider;
 use App\Provisioning\Application\ServiceUsageSyncService;
 use App\Provisioning\Application\ServiceConfigDeliveryRefresher;
 use App\Provisioning\Application\TrafficAddonSettingsProvider;
+use App\Provisioning\Application\CustomerAccessGuard;
 use App\Provisioning\Application\FinalConfigLinkProvider;
 use App\Provisioning\Application\VpnConfigLinkSetResult;
 use App\Provisioning\Domain\ServiceActivationDriverInterface;
@@ -42,8 +43,6 @@ use App\Shop\Domain\OrderStatus;
 use App\Shop\Domain\OrderType;
 use App\Security\AdminPermission;
 use Doctrine\ORM\EntityManagerInterface;
-use Endroid\QrCode\QrCode;
-use Endroid\QrCode\Writer\PngWriter;
 
 class ServiceManagementService
 {
@@ -73,6 +72,8 @@ class ServiceManagementService
         private readonly PaymentGatewayRegistry $paymentGatewayRegistry,
         private readonly StorePaymentMethodResolver $storePaymentMethodResolver,
         private readonly VpnAccessMessageFormatter $vpnAccessMessageFormatter,
+        private readonly QrCodeSender $qrCodeSender,
+        private readonly CustomerAccessGuard $accessGuard,
         private readonly string $paymentCardNumber = '',
         private readonly string $paymentCardHolder = '',
         private readonly ?string $paymentDescription = null,
@@ -224,7 +225,15 @@ class ServiceManagementService
             return;
         }
 
-        $subscriptionUrl = trim((string) $service->getSubscriptionUrl());
+        $subscriptionUrl = (string) $this->accessGuard->subscriptionUrl($service);
+        if ('' === $subscriptionUrl && '' !== trim((string) $service->getSubscriptionUrl())) {
+            // Stored but not reachable by a client: the access message says so (contact support) and carries any usable link.
+            $this->acknowledgeCallback($callbackId);
+            $this->sendAccessMessages($chatId, $service, '✅ سرویس شما آماده شد', 'telegram_subscription_withheld');
+            $this->debugLog(sprintf('service_subscription_withheld service_id=%d', $serviceId));
+
+            return;
+        }
         if ('' === $subscriptionUrl) {
             $this->showPopupOrMessage($chatId, $callbackId, 'لینک اشتراک برای این سرویس موجود نیست.', 'missing_subscription_url');
             $configLinkSet = $this->collectConfigLinks($service, 'telegram_subscription_fallback_config');
@@ -270,7 +279,7 @@ class ServiceManagementService
         }
 
         $configLinkSet = $this->collectConfigLinks($service, 'telegram_resend_config');
-        if ([] === $configLinkSet->finalLinks) {
+        if ([] === $this->accessGuard->configLinks($service, $configLinkSet->finalLinks) && null === $this->accessGuard->subscriptionUrl($service)) {
             $this->showPopupOrMessage($chatId, $callbackId, 'اطلاعات اتصال کامل نیست. لطفاً با پشتیبانی تماس بگیرید.', 'missing_config');
 
             return;
@@ -305,10 +314,15 @@ class ServiceManagementService
             return;
         }
 
-        $subscriptionUrl = trim((string) ($service->getSubscriptionUrl() ?? ''));
+        $subscriptionUrl = (string) $this->accessGuard->subscriptionUrl($service);
         if ('' === $subscriptionUrl) {
+            if ('' !== trim((string) ($service->getSubscriptionUrl() ?? ''))) {
+                $this->acknowledgeCallback($callbackId);
+                $this->telegramApiClient->sendMessage($chatId, CustomerAccessGuard::SUPPORT_NOTICE);
+            }
             $configLinkSet = $this->collectConfigLinks($service, 'telegram_qr_fallback_config');
-            if ([] === $configLinkSet->finalLinks) {
+            $qrLinks = $this->accessGuard->configLinks($service, $configLinkSet->finalLinks);
+            if ([] === $qrLinks) {
                 $this->showPopupOrMessage($chatId, $callbackId, 'برای این سرویس هنوز لینک اشتراک یا کانفیگ قابل ساخت QR موجود نیست.', 'missing_subscription_and_config_qr');
 
                 return;
@@ -318,17 +332,10 @@ class ServiceManagementService
             $this->telegramApiClient->sendMessage($chatId, 'لینک اشتراک برای این سرویس موجود نیست. QR کانفیگ‌ها ارسال می‌شود.');
 
             $failedCount = 0;
-            $total = count($configLinkSet->finalLinks);
-            foreach ($configLinkSet->finalLinks as $index => $configLink) {
-                $qrPath = $this->createQrTempFile($configLink, (int) ($service->getId() ?? 0), sprintf('config-%d', $index + 1));
-                if (null === $qrPath) {
-                    ++$failedCount;
-                    $this->telegramApiClient->sendMessage($chatId, 'ساخت QR Code با خطا مواجه شد. لطفاً از لینک متنی استفاده کنید.');
-                    continue;
-                }
-
+            $total = count($qrLinks);
+            foreach ($qrLinks as $index => $configLink) {
                 try {
-                    $this->telegramApiClient->sendPhotoFile($chatId, $qrPath, sprintf('QR کانفیگ %d از %d', $index + 1, $total));
+                    $sent = $this->qrCodeSender->send($chatId, $configLink, sprintf('QR کانفیگ %d از %d', $index + 1, $total), sprintf('service-%d-config-%d', $serviceId, $index + 1));
                 } catch (\Throwable $e) {
                     ++$failedCount;
                     $this->debugLog(sprintf(
@@ -338,8 +345,12 @@ class ServiceManagementService
                         $index + 1,
                         $e->getMessage()
                     ));
-                } finally {
-                    $this->deleteTempQrFile($qrPath);
+                    continue;
+                }
+                if (!$sent) {
+                    ++$failedCount;
+                    $this->debugLog(sprintf('qr_generation_failed service_id=%d suffix="config-%d"', $serviceId, $index + 1));
+                    $this->telegramApiClient->sendMessage($chatId, 'ساخت QR Code با خطا مواجه شد. لطفاً از لینک متنی استفاده کنید.');
                 }
             }
 
@@ -357,21 +368,14 @@ class ServiceManagementService
             return;
         }
 
-        $qrPath = $this->createQrTempFile($subscriptionUrl, (int) ($service->getId() ?? 0), 'subscription');
-        if (null === $qrPath) {
-            $this->acknowledgeCallback($callbackId);
+        $this->acknowledgeCallback($callbackId);
+        if (!$this->qrCodeSender->send($chatId, $subscriptionUrl, 'QR لینک اشتراک شما', sprintf('service-%d-subscription', $serviceId))) {
+            $this->debugLog(sprintf('qr_generation_failed service_id=%d suffix="subscription"', $serviceId));
             $this->telegramApiClient->sendMessage($chatId, 'ساخت QR Code با خطا مواجه شد. لطفاً از لینک متنی استفاده کنید.');
 
             return;
         }
-
-        $this->acknowledgeCallback($callbackId);
-        try {
-            $this->telegramApiClient->sendPhotoFile($chatId, $qrPath, 'QR لینک اشتراک شما');
-            $this->debugLog(sprintf('service_subscription_qr_sent service_id=%d user_id=%d link_count=1 failed_count=0', $serviceId, $account->getUser()->getId()));
-        } finally {
-            $this->deleteTempQrFile($qrPath);
-        }
+        $this->debugLog(sprintf('service_subscription_qr_sent service_id=%d user_id=%d link_count=1 failed_count=0', $serviceId, $account->getUser()->getId()));
     }
 
     public function sendConfigLinks(TelegramAccount $account, int $serviceId, string $chatId, string $callbackId): void
@@ -1868,7 +1872,7 @@ class ServiceManagementService
             $remaining,
             $service->getLastUsageSyncedAt()?->format('Y-m-d H:i:s') ?? '-',
             null === $ipLimit ? 'پیشفرض/نامحدود' : (string) $ipLimit,
-            $service->getSubscriptionUrl() ?: '-'
+            $this->accessGuard->subscriptionUrl($service) ?? ('' !== trim((string) $service->getSubscriptionUrl()) ? CustomerAccessGuard::SUPPORT_NOTICE : '-')
         );
     }
 
@@ -2149,49 +2153,5 @@ class ServiceManagementService
         }
 
         return implode("\n\n", $parts);
-    }
-
-    private function createQrTempFile(string $content, int $serviceId, string $suffix): ?string
-    {
-        $tmpDir = dirname(__DIR__, 3).'/var/cache/qr';
-        if (!is_dir($tmpDir)) {
-            @mkdir($tmpDir, 0775, true);
-        }
-        if (!is_dir($tmpDir)) {
-            $error = error_get_last();
-            $this->debugLog(sprintf(
-                'qr_generation_failed service_id=%d suffix="%s" message="%s"',
-                $serviceId,
-                $suffix,
-                is_array($error) ? (string) ($error['message'] ?? 'QR cache directory could not be created') : 'QR cache directory could not be created'
-            ));
-
-            return null;
-        }
-
-        try {
-            $safeSuffix = preg_replace('/[^a-zA-Z0-9_-]+/', '-', $suffix) ?: 'qr';
-            $targetPath = sprintf('%s/service-%d-%s-%s.png', $tmpDir, $serviceId, $safeSuffix, bin2hex(random_bytes(4)));
-            $writer = new PngWriter();
-            $qrCode = new QrCode(
-                data: $content,
-                size: 420,
-                margin: 12
-            );
-            $writer->write($qrCode)->saveToFile($targetPath);
-        } catch (\Throwable $e) {
-            $this->debugLog(sprintf('qr_generation_failed service_id=%d suffix="%s" message="%s"', $serviceId, $suffix, $e->getMessage()));
-
-            return null;
-        }
-
-        return is_file($targetPath) ? $targetPath : null;
-    }
-
-    private function deleteTempQrFile(string $path): void
-    {
-        if (is_file($path)) {
-            @unlink($path);
-        }
     }
 }

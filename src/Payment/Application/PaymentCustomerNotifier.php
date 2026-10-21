@@ -12,6 +12,7 @@ use App\Entity\Payment;
 use App\Entity\TelegramAccount;
 use Doctrine\ORM\EntityManagerInterface;
 use App\Shop\Domain\OrderType;
+use App\Provisioning\Application\CustomerAccessGuard;
 use App\Provisioning\Application\FinalConfigLinkProvider;
 use App\Provisioning\Application\ServiceConfigDeliveryRefresher;
 use App\Provisioning\Application\ServiceConfigRefreshOutcome;
@@ -33,6 +34,7 @@ class PaymentCustomerNotifier
         private readonly FinalConfigLinkProvider $finalConfigLinkProvider,
         private readonly ServiceConfigDeliveryRefresher $deliveryRefresher,
         private readonly LoggerInterface $logger,
+        private readonly CustomerAccessGuard $accessGuard,
     ) {
     }
 
@@ -130,10 +132,10 @@ class PaymentCustomerNotifier
             sprintf('شناسه سرویس: %d', $vpnService->getId() ?? 0),
             sprintf('تاریخ انقضای جدید: %s', $this->html($vpnService->getExpiresAt()?->format('Y-m-d H:i:s') ?? 'نامحدود')),
             sprintf('حجم کل جدید: %s', null === $vpnService->getTrafficLimitGb() ? 'نامحدود' : ((string) $vpnService->getTrafficLimitGb().' گیگ')),
-            sprintf('لینک اشتراک: %s', $vpnService->getSubscriptionUrl() ? $this->htmlCode($vpnService->getSubscriptionUrl()) : '-'),
+            sprintf('لینک اشتراک: %s', $this->subscriptionLine($vpnService)),
         ];
 
-        $configLinks = $this->finalConfigLinkProvider->getFinalLinksForService($vpnService, 'payment_confirmed_renewal');
+        $configLinks = $this->accessGuard->configLinks($vpnService, $this->finalConfigLinkProvider->getFinalLinksForService($vpnService, 'payment_confirmed_renewal'));
         if ([] !== $configLinks) {
             $lines[] = 'لینکهای اتصال:';
             foreach ($configLinks as $index => $link) {
@@ -168,10 +170,10 @@ class PaymentCustomerNotifier
             sprintf('شناسه سرویس: %d', $vpnService->getId() ?? 0),
             sprintf('حجم افزوده: %d گیگ', max(0, $addedTrafficGb)),
             sprintf('حجم کل جدید: %s', null === $vpnService->getTrafficLimitGb() ? 'نامحدود' : ((string) $vpnService->getTrafficLimitGb().' گیگ')),
-            sprintf('لینک اشتراک: %s', $vpnService->getSubscriptionUrl() ? $this->htmlCode($vpnService->getSubscriptionUrl()) : '-'),
+            sprintf('لینک اشتراک: %s', $this->subscriptionLine($vpnService)),
         ];
 
-        $configLinks = $this->finalConfigLinkProvider->getFinalLinksForService($vpnService, 'payment_confirmed_add_traffic');
+        $configLinks = $this->accessGuard->configLinks($vpnService, $this->finalConfigLinkProvider->getFinalLinksForService($vpnService, 'payment_confirmed_add_traffic'));
         if ([] !== $configLinks) {
             $lines[] = 'لینکهای اتصال:';
             foreach ($configLinks as $index => $link) {
@@ -184,6 +186,17 @@ class PaymentCustomerNotifier
         }
 
         return $this->splitLongMessage(implode("\n", $lines));
+    }
+
+    /** The usable subscription URL, the support notice when the stored one cannot be reached, or "-". */
+    private function subscriptionLine(VpnService $vpnService): string
+    {
+        $url = $this->accessGuard->subscriptionUrl($vpnService);
+        if (null !== $url) {
+            return $this->htmlCode($url);
+        }
+
+        return '' !== trim((string) $vpnService->getSubscriptionUrl()) ? $this->html(CustomerAccessGuard::SUPPORT_NOTICE) : '-';
     }
 
     /**
