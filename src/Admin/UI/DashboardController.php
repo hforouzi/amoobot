@@ -96,7 +96,7 @@ class DashboardController extends AbstractDashboardController
 
         yield MenuItem::section('admin.menu.vpn', 'fa fa-server');
         yield MenuItem::linkTo(VpnPanelCrudController::class, 'admin.vpn_panels', 'fa fa-server')->setPermission('ROLE_SUPER_ADMIN');
-        yield MenuItem::linkTo(VpnInboundCrudController::class, 'admin.vpn_inbounds', 'fa fa-globe');
+        yield MenuItem::linkTo(VpnInboundCrudController::class, 'admin.vpn_inbounds', 'fa fa-globe')->setPermission('ROLE_SUPER_ADMIN');
         yield MenuItem::linkTo(VpnServiceCrudController::class, 'admin.vpn_services', 'fa fa-link');
 
         yield MenuItem::section('admin.menu.users', 'fa fa-users');
@@ -110,17 +110,17 @@ class DashboardController extends AbstractDashboardController
         yield MenuItem::linkTo(BroadcastMessageCrudController::class, 'ارسال پیام همگانی', 'fa fa-bullhorn');
         yield MenuItem::linkTo(BroadcastDeliveryCrudController::class, 'Broadcast Deliveries', 'fa fa-paper-plane-o');
         if ($this->routeExists('admin_renewal_pricing_settings')) {
-            yield MenuItem::linkToRoute('admin.renewal_pricing_settings', 'fa fa-sliders', 'admin_renewal_pricing_settings');
+            yield MenuItem::linkToRoute('admin.renewal_pricing_settings', 'fa fa-sliders', 'admin_renewal_pricing_settings')->setPermission('ROLE_SUPER_ADMIN');
         }
         if ($this->routeExists('admin_automation_settings')) {
-            yield MenuItem::linkToRoute('admin.automation_settings', 'fa fa-clock-o', 'admin_automation_settings');
+            yield MenuItem::linkToRoute('admin.automation_settings', 'fa fa-clock-o', 'admin_automation_settings')->setPermission('ROLE_SUPER_ADMIN');
         }
         if ($this->routeExists('admin_bulk_plan_price_adjustment')) {
             yield MenuItem::linkToRoute('admin.bulk_plan_price_adjustment', 'fa fa-percent', 'admin_bulk_plan_price_adjustment');
         }
 
         yield MenuItem::section('admin.menu.system', 'fa fa-cogs');
-        yield MenuItem::linkTo(PluginCrudController::class, 'admin.plugins', 'fa fa-plug');
+        yield MenuItem::linkTo(PluginCrudController::class, 'admin.plugins', 'fa fa-plug')->setPermission('ROLE_SUPER_ADMIN');
         yield MenuItem::linkTo(SettingCrudController::class, 'admin.settings', 'fa fa-cog')->setPermission('ROLE_SUPER_ADMIN');
         yield MenuItem::linkTo(BotMessageLogCrudController::class, 'admin.bot_logs', 'fa fa-file-text');
 
