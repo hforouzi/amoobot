@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace App\Admin\UI\Crud;
 
+use App\Admin\UI\Field\JsonField;
 use App\Admin\UI\Support\AdminStatusBadge;
-use App\Admin\UI\Support\AdminJsonFormatter;
 use App\Admin\UI\DashboardController;
 use App\Entity\Order;
 use App\Shop\Domain\OrderStatus;
@@ -19,7 +19,6 @@ use EasyCorp\Bundle\EasyAdminBundle\Field\ChoiceField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\DateTimeField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\IdField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\IntegerField;
-use EasyCorp\Bundle\EasyAdminBundle\Field\TextareaField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\TextField;
 use EasyCorp\Bundle\EasyAdminBundle\Filter\ChoiceFilter;
 use EasyCorp\Bundle\EasyAdminBundle\Filter\EntityFilter;
@@ -79,12 +78,7 @@ class OrderCrudController extends AbstractCrudController
             TextField::new('status')
                 ->formatValue(static fn (mixed $value): string => AdminStatusBadge::html($value))
                 ->renderAsHtml(),
-            TextareaField::new('metadata')
-                ->setLabel('Metadata')
-                ->formatValue(static fn (mixed $value): string => AdminJsonFormatter::toPrettyHtml($value))
-                ->renderAsHtml()
-                ->hideOnIndex()
-                ->hideOnForm(),
+            JsonField::new('metadata')->setLabel('Metadata'),
             DateTimeField::new('createdAt')->setLabel('common.created_at')->hideOnForm(),
             DateTimeField::new('paidAt')->setLabel('Paid At'),
             DateTimeField::new('provisionedAt')->setLabel('Provisioned At'),

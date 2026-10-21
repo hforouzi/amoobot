@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Admin\UI\Crud;
 
+use App\Admin\UI\Field\JsonField;
 use App\Broadcast\BroadcastSender;
 use App\Entity\AdminUser;
 use App\Entity\BroadcastDelivery;
@@ -18,7 +19,6 @@ use EasyCorp\Bundle\EasyAdminBundle\Field\AssociationField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\BooleanField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\ChoiceField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\DateTimeField;
-use EasyCorp\Bundle\EasyAdminBundle\Field\Field;
 use EasyCorp\Bundle\EasyAdminBundle\Field\IdField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\IntegerField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\TextareaField;
@@ -112,9 +112,7 @@ final class BroadcastMessageCrudController extends AbstractCrudController
                 'ادمین‌ها' => BroadcastMessage::TARGET_ADMINS,
             ]);
 
-        yield Field::new('targetUserIds', 'شناسه کاربران انتخابی')
-            ->onlyOnDetail()
-            ->formatValue(static fn (mixed $value): string => self::formatJsonValue($value));
+        yield JsonField::new('targetUserIds', 'شناسه کاربران انتخابی');
 
         yield ChoiceField::new('parseMode', 'فرمت متن')
             ->setChoices([
@@ -127,9 +125,7 @@ final class BroadcastMessageCrudController extends AbstractCrudController
 
         yield DateTimeField::new('sendAt', 'زمان ارسال');
 
-        yield Field::new('metadata', 'متادیتا')
-            ->onlyOnDetail()
-            ->formatValue(static fn (mixed $value): string => self::formatJsonValue($value));
+        yield JsonField::new('metadata', 'متادیتا');
 
         yield IntegerField::new('totalRecipients', 'تعداد گیرندگان')->hideOnForm();
         yield IntegerField::new('sentCount', 'ارسال‌شده')->hideOnForm();
@@ -334,21 +330,4 @@ final class BroadcastMessageCrudController extends AbstractCrudController
             ->generateUrl();
     }
 
-    private static function formatJsonValue(mixed $value): string
-    {
-        if (null === $value || [] === $value || '' === $value) {
-            return '-';
-        }
-
-        if (is_string($value)) {
-            return $value;
-        }
-
-        $encoded = json_encode(
-            $value,
-            JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
-        );
-
-        return false === $encoded ? '-' : $encoded;
-    }
 }

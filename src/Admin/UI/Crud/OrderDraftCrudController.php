@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Admin\UI\Crud;
 
-use App\Admin\UI\Support\AdminJsonFormatter;
+use App\Admin\UI\Field\JsonField;
 use App\Admin\UI\Support\AdminStatusBadge;
 use App\Entity\OrderDraft;
 use App\Shop\Domain\OrderDraftStatus;
@@ -15,7 +15,6 @@ use EasyCorp\Bundle\EasyAdminBundle\Field\AssociationField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\DateTimeField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\IdField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\IntegerField;
-use EasyCorp\Bundle\EasyAdminBundle\Field\TextareaField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\TextField;
 use EasyCorp\Bundle\EasyAdminBundle\Filter\ChoiceFilter;
 use EasyCorp\Bundle\EasyAdminBundle\Filter\EntityFilter;
@@ -66,11 +65,7 @@ final class OrderDraftCrudController extends AbstractCrudController
             IntegerField::new('durationDays'),
             IntegerField::new('calculatedAmount'),
             IntegerField::new('finalAmount'),
-            TextareaField::new('data')
-                ->formatValue(static fn (mixed $value): string => AdminJsonFormatter::toPrettyHtml($value))
-                ->renderAsHtml()
-                ->hideOnIndex()
-                ->hideOnForm(),
+            JsonField::new('data'),
             DateTimeField::new('createdAt')->hideOnForm(),
             DateTimeField::new('updatedAt'),
             DateTimeField::new('expiresAt'),
