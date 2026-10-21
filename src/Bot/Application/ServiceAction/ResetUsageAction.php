@@ -6,6 +6,7 @@ namespace App\Bot\Application\ServiceAction;
 
 use App\Bot\Application\ServiceManagementService;
 use App\Bot\Infrastructure\TelegramApiClient;
+use App\Security\AdminPermission;
 
 final class ResetUsageAction implements ServiceActionInterface
 {
@@ -22,7 +23,7 @@ final class ResetUsageAction implements ServiceActionInterface
 
     public function handle(ServiceActionContext $context): void
     {
-        if (!$context->isAdmin) {
+        if (!$context->can(AdminPermission::SERVICES_MANAGE)) {
             error_log(sprintf('[ServiceAction] unauthorized service_reset_usage actor_id="%s"', $context->actorId));
             $this->telegramApiClient->answerCallbackQuery($context->callbackId, 'Unauthorized', true);
 
@@ -31,5 +32,6 @@ final class ResetUsageAction implements ServiceActionInterface
 
         $serviceId = (int) str_replace('service_reset_usage:', '', $context->data);
         $this->serviceManagementService->resetUsage($serviceId, $context->chatId, $context->callbackId);
+        $context->audit('service.reset_usage', $serviceId);
     }
 }

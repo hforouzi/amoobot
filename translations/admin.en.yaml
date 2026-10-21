@@ -38,6 +38,8 @@ admin:
   store_payment_methods: Store Payment Methods
   discount_codes: Discount Codes
   discount_usages: Discount Usage
+  audit_log: Admin Audit Log
+  audit_log_entry: Audit entry
   bot_logs: Bot Logs
   settings: Settings
   notifications: Service Notification Logs
@@ -379,3 +381,12 @@ panel_connection:
     inactive: inactive
     save: Save
     saved: '%count% plan(s) updated.'
+
+audit:
+  source: Source
+  actor: Admin
+  actor_id: Admin user id
+  action: Action
+  target_type: Record type
+  target_id: Record id
+  details: Details

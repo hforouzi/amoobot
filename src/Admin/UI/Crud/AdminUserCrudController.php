@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Admin\UI\Crud;
 
+use App\Admin\Security\AdminCrudPermissions;
 use App\Entity\AdminUser;
 use Doctrine\ORM\EntityManagerInterface;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Crud;
@@ -34,7 +35,7 @@ final class AdminUserCrudController extends AbstractCrudController
         return $crud
             ->setEntityLabelInSingular('Admin user')
             ->setEntityLabelInPlural('کاربران ادمین')
-            ->setEntityPermission(AdminUser::ROLE_SUPER_ADMIN)
+            ->setEntityPermission(AdminCrudPermissions::view(self::class))
             ->setDefaultSort(['id' => 'DESC']);
     }
 
@@ -54,6 +55,9 @@ final class AdminUserCrudController extends AbstractCrudController
             TextField::new('email'),
             TextField::new('username')->setRequired(false),
             TextField::new('displayName')->setRequired(false),
+            TextField::new('telegramUserId', 'Telegram user id')
+                ->setRequired(false)
+                ->setHelp('Numeric Telegram id (not the @username). The admin then has the same permissions in the bot; empty = no bot access (except TELEGRAM_ADMIN_CHAT_ID).'),
             ChoiceField::new('roles')
                 ->setChoices([
                     'ROLE_SUPER_ADMIN' => AdminUser::ROLE_SUPER_ADMIN,

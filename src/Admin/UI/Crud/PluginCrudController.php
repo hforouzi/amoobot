@@ -4,13 +4,14 @@ declare(strict_types=1);
 
 namespace App\Admin\UI\Crud;
 
+use App\Admin\Security\AdminCrudPermissions;
 use App\Admin\UI\DashboardController;
 use App\Admin\UI\Support\AdminJsonFormatter;
 use App\Admin\UI\Support\AdminStatusBadge;
-use App\Entity\AdminUser;
 use App\Entity\Plugin;
 use App\Plugin\PaymentPluginDoctor;
 use App\Plugin\PluginManager;
+use App\Security\AdminAuditLogger;
 use Doctrine\ORM\EntityManagerInterface;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Action;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Actions;
@@ -26,11 +27,8 @@ use Symfony\Component\HttpFoundation\File\UploadedFile;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Attribute\Route;
-use Symfony\Component\Security\Http\Attribute\IsGranted;
 use Symfony\Component\Validator\Constraints\File;
 use Symfony\Component\Validator\Constraints\NotNull;
-
-#[IsGranted('ROLE_SUPER_ADMIN')]
 final class PluginCrudController extends AbstractCrudController
 {
     public function __construct(
@@ -51,7 +49,7 @@ final class PluginCrudController extends AbstractCrudController
         return $crud
             ->setEntityLabelInSingular('plugin.singular')
             ->setEntityLabelInPlural('plugin.plural')
-            ->setEntityPermission(AdminUser::ROLE_SUPER_ADMIN)
+            ->setEntityPermission(AdminCrudPermissions::view(self::class))
             ->setDefaultSort(['installedAt' => 'DESC', 'id' => 'DESC'])
             ->setSearchFields(['code', 'type', 'version', 'mainClass', 'path']);
     }
@@ -143,7 +141,7 @@ final class PluginCrudController extends AbstractCrudController
     }
 
     #[Route('/admin/plugins/upload', name: 'admin_plugins_upload', methods: ['GET', 'POST'])]
-    public function upload(Request $request): Response
+    public function upload(Request $request, AdminAuditLogger $auditLogger): Response
     {
         $form = $this->createFormBuilder(null, [
             'translation_domain' => 'admin',
@@ -165,6 +163,7 @@ final class PluginCrudController extends AbstractCrudController
             if ($file instanceof UploadedFile) {
                 $result = $this->pluginManager->installFromZip($file);
                 if ($result->success && null !== $result->plugin) {
+                    $auditLogger->record('plugin.install', 'Plugin', $result->plugin->getId(), ['code' => $result->plugin->getCode(), 'version' => $result->plugin->getVersion()]);
                     $this->addFlash('success', 'Plugin installed successfully.');
 
                     return $this->redirect($this->pluginDetailUrl($result->plugin));
@@ -181,18 +180,20 @@ final class PluginCrudController extends AbstractCrudController
     }
 
     #[Route('/admin/plugins/{id}/enable', name: 'admin_plugins_enable', methods: ['GET'])]
-    public function enable(Plugin $plugin): Response
+    public function enable(Plugin $plugin, AdminAuditLogger $auditLogger): Response
     {
         $this->pluginManager->enable($plugin);
+        $auditLogger->record('plugin.enable', 'Plugin', $plugin->getId(), ['code' => $plugin->getCode()]);
         $this->addFlash('success', 'Plugin enabled.');
 
         return $this->redirect($this->pluginListUrl());
     }
 
     #[Route('/admin/plugins/{id}/disable', name: 'admin_plugins_disable', methods: ['GET'])]
-    public function disable(Plugin $plugin): Response
+    public function disable(Plugin $plugin, AdminAuditLogger $auditLogger): Response
     {
         $this->pluginManager->disable($plugin);
+        $auditLogger->record('plugin.disable', 'Plugin', $plugin->getId(), ['code' => $plugin->getCode()]);
         $this->addFlash('success', 'Plugin disabled.');
 
         return $this->redirect($this->pluginListUrl());

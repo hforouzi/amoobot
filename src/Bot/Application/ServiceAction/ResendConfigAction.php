@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Bot\Application\ServiceAction;
 
 use App\Bot\Application\ServiceManagementService;
+use App\Security\AdminPermission;
 
 final class ResendConfigAction implements ServiceActionInterface
 {
@@ -29,6 +30,6 @@ final class ResendConfigAction implements ServiceActionInterface
         }
 
         $serviceId = (int) str_replace('service_resend_config:', '', $context->data);
-        $this->serviceManagementService->resendConfig($context->account, $serviceId, $context->chatId, $context->callbackId, $context->isAdmin);
+        $this->serviceManagementService->resendConfig($context->account, $serviceId, $context->chatId, $context->callbackId, $context->can(AdminPermission::SERVICES_ASSIST));
     }
 }

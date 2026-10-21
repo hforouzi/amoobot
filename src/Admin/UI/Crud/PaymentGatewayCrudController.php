@@ -4,16 +4,17 @@ declare(strict_types=1);
 
 namespace App\Admin\UI\Crud;
 
+use App\Admin\Security\AdminCrudPermissions;
 use App\Admin\UI\DashboardController;
 use App\Admin\UI\Support\AdminJsonFormatter;
 use App\Admin\UI\Support\AdminStatusBadge;
-use App\Entity\AdminUser;
 use App\Entity\PaymentGateway;
 use App\Entity\StorePaymentMethod;
 use App\Payment\Application\PaymentGatewayModuleRegistry;
 use App\Payment\Plugin\PluginConfigSchemaValidator;
 use App\Plugin\PaymentPluginDoctor;
 use App\Plugin\PluginRegistry;
+use App\Security\AdminAuditLogger;
 use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\ORM\QueryBuilder;
 use EasyCorp\Bundle\EasyAdminBundle\Collection\FieldCollection;
@@ -43,11 +44,8 @@ use Symfony\Component\HttpFoundation\RedirectResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Attribute\Route;
-use Symfony\Component\Security\Http\Attribute\IsGranted;
 use Symfony\Component\Validator\Constraints\NotBlank;
 use Symfony\Component\Validator\Constraints\Positive;
-
-#[IsGranted('ROLE_SUPER_ADMIN')]
 final class PaymentGatewayCrudController extends AbstractCrudController
 {
     public function __construct(
@@ -70,7 +68,7 @@ final class PaymentGatewayCrudController extends AbstractCrudController
         return $crud
             ->setEntityLabelInSingular('admin.payment_gateway')
             ->setEntityLabelInPlural('admin.payment_gateways')
-            ->setEntityPermission(AdminUser::ROLE_SUPER_ADMIN)
+            ->setEntityPermission(AdminCrudPermissions::view(self::class))
             ->setDefaultSort(['sortOrder' => 'ASC', 'id' => 'ASC']);
     }
 
@@ -198,7 +196,7 @@ final class PaymentGatewayCrudController extends AbstractCrudController
     }
 
     #[Route('/admin/payment-gateways/install/{type}', name: 'admin_payment_gateways_install_type', methods: ['GET', 'POST'])]
-    public function installType(Request $request, string $type): Response
+    public function installType(Request $request, string $type, AdminAuditLogger $auditLogger): Response
     {
         if (!$this->moduleRegistry->supports($type)) {
             throw $this->createNotFoundException('Unsupported payment gateway module.');
@@ -228,6 +226,7 @@ final class PaymentGatewayCrudController extends AbstractCrudController
 
             $this->entityManager->persist($gateway);
             $this->entityManager->flush();
+            $auditLogger->record('payment_gateway.install', 'PaymentGateway', $gateway->getId(), ['type' => $type, 'config_keys' => array_keys($data['config'])]);
 
             return $this->redirectToRoute('admin_payment_gateways_install_success', [
                 'id' => $gateway->getId(),
@@ -256,7 +255,7 @@ final class PaymentGatewayCrudController extends AbstractCrudController
     }
 
     #[Route('/admin/payment-gateways/{id}/add-store-method', name: 'admin_payment_gateways_add_store_method', methods: ['POST'])]
-    public function addStoreMethod(Request $request, PaymentGateway $gateway): RedirectResponse
+    public function addStoreMethod(Request $request, PaymentGateway $gateway, AdminAuditLogger $auditLogger): RedirectResponse
     {
         if (!$this->isCsrfTokenValid('add_store_payment_method_'.$gateway->getId(), (string) $request->request->get('_token'))) {
             throw $this->createAccessDeniedException('Invalid CSRF token.');
@@ -272,6 +271,7 @@ final class PaymentGatewayCrudController extends AbstractCrudController
 
         $this->entityManager->persist($method);
         $this->entityManager->flush();
+        $auditLogger->record('store_payment_method.create', 'StorePaymentMethod', $method->getId(), ['gateway' => $gateway->getId()]);
 
         return $this->redirect($this->adminUrlGenerator
             ->unsetAll()
@@ -283,7 +283,7 @@ final class PaymentGatewayCrudController extends AbstractCrudController
     }
 
     #[Route('/admin/payment-gateways/{id}/config', name: 'admin_payment_gateways_config', methods: ['GET', 'POST'])]
-    public function config(Request $request, PaymentGateway $gateway): Response
+    public function config(Request $request, PaymentGateway $gateway, AdminAuditLogger $auditLogger): Response
     {
         $type = $gateway->getType();
         if (!$this->moduleRegistry->supports($type)) {
@@ -312,6 +312,7 @@ final class PaymentGatewayCrudController extends AbstractCrudController
                 ->setUpdatedAt(new \DateTimeImmutable());
 
             $this->entityManager->flush();
+            $auditLogger->record('payment_gateway.config_update', 'PaymentGateway', $gateway->getId(), ['config_keys' => array_keys($data['config'])]);
 
             return $this->redirect($this->gatewayListUrl());
         }

@@ -11,12 +11,12 @@ use App\Provisioning\Application\TrafficAddonSettingsProvider;
 use App\Shop\Application\IncompleteOrderSettingsProvider;
 use App\Shop\Application\PlanPriceAdjustmentService;
 use App\Shop\Application\SalesSettingsProvider;
+use App\Security\AdminAuditLogger;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Attribute\Route;
-use Symfony\Component\Security\Http\Attribute\IsGranted;
 
 #[Route('/admin')]
 final class RenewalPricingAdminController extends AbstractController
@@ -31,10 +31,8 @@ final class RenewalPricingAdminController extends AbstractController
         private readonly SalesSettingsProvider $salesSettingsProvider,
     ) {
     }
-
-    #[IsGranted('ROLE_SUPER_ADMIN')]
     #[Route('/settings/renewal-pricing', name: 'admin_renewal_pricing_settings', methods: ['GET', 'POST'])]
-    public function renewalPricingSettings(Request $request): Response
+    public function renewalPricingSettings(Request $request, AdminAuditLogger $auditLogger): Response
     {
         if ($request->isMethod('POST')) {
             $discountRaw = trim((string) $request->request->get('pricing_global_discount_percent', '0'));
@@ -69,6 +67,7 @@ final class RenewalPricingAdminController extends AbstractController
                 $this->upsertSetting(SalesSettingsProvider::ADD_TRAFFIC_ENABLED, $request->request->has('sales_add_traffic_enabled') ? 'true' : 'false', 'boolean');
                 $this->upsertSetting(SalesSettingsProvider::DISABLED_MESSAGE, $disabledMessage, 'text');
                 $this->entityManager->flush();
+                $auditLogger->record('settings.update', 'Setting', null, ['page' => 'renewal_pricing']);
                 $this->addFlash('success', 'تنظیمات تمدید و قیمتگذاری بروزرسانی شد.');
             }
         }
@@ -98,7 +97,7 @@ final class RenewalPricingAdminController extends AbstractController
     }
 
     #[Route('/plans/bulk-adjust-prices', name: 'admin_bulk_plan_price_adjustment', methods: ['GET', 'POST'])]
-    public function bulkPlanPriceAdjustment(Request $request): Response
+    public function bulkPlanPriceAdjustment(Request $request, AdminAuditLogger $auditLogger): Response
     {
         $input = [
             'adjustmentType' => (string) $request->request->get('adjustmentType', 'percent'),
@@ -135,6 +134,7 @@ final class RenewalPricingAdminController extends AbstractController
                         $this->addFlash('warning', 'برای اعمال، تایید نهایی را فعال کنید.');
                     } else {
                         $applied = $this->planPriceAdjustmentService->apply($changes);
+                        $auditLogger->record('plan.bulk_price_adjust', 'Plan', null, ['direction' => $direction, 'field' => $field, 'percent' => $percent, 'amount' => $amount, 'applied' => $applied]);
                         $this->addFlash('success', sprintf('تغییر گروهی قیمت انجام شد. %d تغییر اعمال شد.', $applied));
                         $changes = [];
                     }
@@ -147,10 +147,8 @@ final class RenewalPricingAdminController extends AbstractController
             'changes' => $changes,
         ]);
     }
-
-    #[IsGranted('ROLE_SUPER_ADMIN')]
     #[Route('/settings/automation', name: 'admin_automation_settings', methods: ['GET', 'POST'])]
-    public function automationSettings(Request $request): Response
+    public function automationSettings(Request $request, AdminAuditLogger $auditLogger): Response
     {
         if ($request->isMethod('POST')) {
             $batchLimitRaw = trim((string) $request->request->get('automation_batch_limit', '100'));
@@ -171,6 +169,7 @@ final class RenewalPricingAdminController extends AbstractController
                 $this->upsertSetting('automation.batch_limit', (string) $batchLimit, 'number');
                 $this->upsertSetting('orders.incomplete_expire_hours', (string) $expireHours, 'number');
                 $this->entityManager->flush();
+                $auditLogger->record('settings.update', 'Setting', null, ['page' => 'automation']);
                 $this->addFlash('success', 'تنظیمات اتوماسیون بروزرسانی شد.');
             }
         }

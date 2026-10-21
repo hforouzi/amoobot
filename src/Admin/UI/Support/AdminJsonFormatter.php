@@ -47,6 +47,18 @@ final class AdminJsonFormatter
         );
     }
 
+    /**
+     * The same masking as the display, for data that is stored (audit log details).
+     *
+     * @param array<array-key, mixed> $value
+     *
+     * @return array<array-key, mixed>
+     */
+    public static function maskSecrets(array $value): array
+    {
+        return (array) self::mask($value, 0);
+    }
+
     private static function normalize(mixed $value): mixed
     {
         if ($value instanceof \JsonSerializable) {

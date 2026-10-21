@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Bot\Application\ServiceAction;
 
 use App\Bot\Application\ServiceManagementService;
+use App\Security\AdminPermission;
 
 final class RefreshServiceAction implements ServiceActionInterface
 {
@@ -32,7 +33,7 @@ final class RefreshServiceAction implements ServiceActionInterface
             $serviceId,
             $context->chatId,
             $context->callbackId,
-            $context->isAdmin
+            $context->can(AdminPermission::SERVICES_ASSIST)
         );
     }
 }

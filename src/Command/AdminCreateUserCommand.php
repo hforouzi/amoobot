@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Command;
 
 use App\Entity\AdminUser;
+use App\Security\AdminAuditLogger;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
@@ -21,6 +22,7 @@ final class AdminCreateUserCommand extends Command
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
         private readonly UserPasswordHasherInterface $passwordHasher,
+        private readonly AdminAuditLogger $auditLogger,
     ) {
         parent::__construct();
     }
@@ -94,6 +96,7 @@ final class AdminCreateUserCommand extends Command
 
         $this->entityManager->persist($adminUser);
         $this->entityManager->flush();
+        $this->auditLogger->record('admin_user.create', 'AdminUser', $adminUser->getId(), ['email' => $adminUser->getEmail(), 'roles' => $adminUser->getAssignedRoles()]);
 
         $output->writeln(sprintf('<info>Created admin user #%d: %s</info>', $adminUser->getId(), $adminUser->getEmail()));
 

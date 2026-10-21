@@ -7,16 +7,20 @@ namespace App\Entity;
 use Doctrine\DBAL\Types\Types;
 use Doctrine\ORM\Mapping as ORM;
 use Symfony\Bridge\Doctrine\Validator\Constraints\UniqueEntity;
+use Symfony\Component\Security\Core\User\EquatableInterface;
 use Symfony\Component\Security\Core\User\PasswordAuthenticatedUserInterface;
 use Symfony\Component\Security\Core\User\UserInterface;
+use Symfony\Component\Validator\Constraints as Assert;
 
 #[ORM\Entity]
 #[ORM\Table(name: 'admin_user')]
 #[ORM\UniqueConstraint(name: 'uniq_admin_user_email', columns: ['email'])]
 #[ORM\UniqueConstraint(name: 'uniq_admin_user_username', columns: ['username'])]
+#[ORM\UniqueConstraint(name: 'uniq_admin_user_telegram_user_id', columns: ['telegram_user_id'])]
 #[UniqueEntity(fields: ['email'])]
 #[UniqueEntity(fields: ['username'], ignoreNull: true)]
-class AdminUser implements UserInterface, PasswordAuthenticatedUserInterface
+#[UniqueEntity(fields: ['telegramUserId'], ignoreNull: true, message: 'This Telegram user is already linked to another admin.')]
+class AdminUser implements UserInterface, PasswordAuthenticatedUserInterface, EquatableInterface
 {
     public const ROLE_SUPER_ADMIN = 'ROLE_SUPER_ADMIN';
     public const ROLE_ADMIN = 'ROLE_ADMIN';
@@ -53,6 +57,11 @@ class AdminUser implements UserInterface, PasswordAuthenticatedUserInterface
 
     #[ORM\Column]
     private bool $isActive = true;
+
+    /** Numeric Telegram user id: this admin acts with the same permissions in the bot. */
+    #[ORM\Column(length: 32, nullable: true)]
+    #[Assert\Regex(pattern: '/^\d{5,20}$/', message: 'A Telegram user id is a number (5 to 20 digits).')]
+    private ?string $telegramUserId = null;
 
     #[ORM\Column(nullable: true)]
     private ?\DateTimeImmutable $lastLoginAt = null;
@@ -137,6 +146,31 @@ class AdminUser implements UserInterface, PasswordAuthenticatedUserInterface
     }
 
     /**
+     * The roles given to this admin, without the ROLE_ADMIN that getRoles() always adds for the /admin access rule.
+     * Permissions (AdminRolePermissions) are decided from these.
+     *
+     * @return list<string>
+     */
+    public function getAssignedRoles(): array
+    {
+        return array_values(array_filter($this->roles, static fn (string $role): bool => in_array($role, self::SUPPORTED_ROLES, true)));
+    }
+
+    /**
+     * Compared on every request with the row reloaded from the database: a deactivated admin, or one whose password,
+     * email or roles changed, is logged out at once (not only at the next login).
+     */
+    public function isEqualTo(UserInterface $user): bool
+    {
+        return $user instanceof self
+            && $user->isActive()
+            && $user->getId() === $this->id
+            && $user->getUserIdentifier() === $this->getUserIdentifier()
+            && $user->getPassword() === $this->password
+            && $user->getAssignedRoles() === $this->getAssignedRoles();
+    }
+
+    /**
      * @param list<string> $roles
      */
     public function setRoles(array $roles): self
@@ -167,6 +201,19 @@ class AdminUser implements UserInterface, PasswordAuthenticatedUserInterface
     public function setIsActive(bool $isActive): self
     {
         $this->isActive = $isActive;
+
+        return $this;
+    }
+
+    public function getTelegramUserId(): ?string
+    {
+        return $this->telegramUserId;
+    }
+
+    public function setTelegramUserId(?string $telegramUserId): self
+    {
+        $telegramUserId = null === $telegramUserId ? null : trim($telegramUserId);
+        $this->telegramUserId = '' === $telegramUserId ? null : $telegramUserId;
 
         return $this;
     }

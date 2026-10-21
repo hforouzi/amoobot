@@ -10,6 +10,7 @@ use App\Payment\Application\Settlement\PaymentSettlementService;
 use App\Payment\Application\Settlement\SettlementOutcome;
 use App\Payment\Application\Settlement\SettlementResult;
 use App\Payment\Domain\PaymentStatus;
+use App\Security\AdminAuditLogger;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\RedirectResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -29,32 +30,37 @@ class PaymentModerationController extends AbstractController
      * this retries fulfilment (the payment was already verified).
      */
     #[Route('/{id}/confirm', name: 'admin_payment_confirm', methods: ['POST'])]
-    public function confirm(Payment $payment, Request $request, PaymentSettlementService $settlement): RedirectResponse
+    public function confirm(Payment $payment, Request $request, PaymentSettlementService $settlement, AdminAuditLogger $auditLogger): RedirectResponse
     {
         if (!$this->validToken($payment, $request)) {
             return $this->invalidToken($request);
         }
 
         $adminId = $this->currentAdminId();
-        $result = PaymentStatus::PROVISIONING_FAILED === $payment->getStatus()
+        $retry = PaymentStatus::PROVISIONING_FAILED === $payment->getStatus();
+        $result = $retry
             ? $settlement->retryProvisioning($payment, $adminId, null, 'easyadmin_retry_provisioning')
             : $settlement->approveByAdmin($payment, $adminId, null, 'easyadmin_payment_approval');
+        $auditLogger->record($retry ? 'payment.retry' : 'payment.approve', 'Payment', $payment->getId(), ['outcome' => $result->outcome->value]);
 
         return $this->back($request, $result);
     }
 
     #[Route('/{id}/retry', name: 'admin_payment_retry', methods: ['POST'])]
-    public function retry(Payment $payment, Request $request, PaymentSettlementService $settlement): RedirectResponse
+    public function retry(Payment $payment, Request $request, PaymentSettlementService $settlement, AdminAuditLogger $auditLogger): RedirectResponse
     {
         if (!$this->validToken($payment, $request)) {
             return $this->invalidToken($request);
         }
 
-        return $this->back($request, $settlement->retryProvisioning($payment, $this->currentAdminId(), null, 'easyadmin_retry_provisioning'));
+        $result = $settlement->retryProvisioning($payment, $this->currentAdminId(), null, 'easyadmin_retry_provisioning');
+        $auditLogger->record('payment.retry', 'Payment', $payment->getId(), ['outcome' => $result->outcome->value]);
+
+        return $this->back($request, $result);
     }
 
     #[Route('/{id}/reject', name: 'admin_payment_reject', methods: ['POST'])]
-    public function reject(Payment $payment, Request $request, PaymentSettlementService $settlement): RedirectResponse
+    public function reject(Payment $payment, Request $request, PaymentSettlementService $settlement, AdminAuditLogger $auditLogger): RedirectResponse
     {
         if (!$this->validToken($payment, $request)) {
             return $this->invalidToken($request);
@@ -63,6 +69,7 @@ class PaymentModerationController extends AbstractController
         $note = $request->request->get('note');
         $refunded = '1' === (string) ($request->query->get('refunded') ?? $request->request->get('refunded') ?? '');
         $result = $settlement->reject($payment, is_string($note) ? $note : null, $this->currentAdminId(), null, 'easyadmin_payment_reject', $refunded);
+        $auditLogger->record('payment.reject', 'Payment', $payment->getId(), ['outcome' => $result->outcome->value, 'refunded' => $refunded]);
 
         return $this->back($request, $result);
     }

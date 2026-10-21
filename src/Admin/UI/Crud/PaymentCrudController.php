@@ -8,6 +8,7 @@ use App\Admin\UI\PaymentModerationController;
 use App\Admin\UI\Support\AdminStatusBadge;
 use App\Entity\Payment;
 use App\Payment\Domain\PaymentStatus;
+use App\Security\AdminPermission;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Action;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Actions;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Crud;
@@ -77,7 +78,8 @@ class PaymentCrudController extends AbstractCrudController
             ->displayIf(fn (Payment $payment): bool => in_array($payment->getStatus(), [PaymentStatus::NEEDS_REVIEW, PaymentStatus::PROVISIONING_FAILED], true));
 
         foreach ([$confirm, $retry, $reject, $rejectRefunded] as $action) {
-            $actions->add(Action::INDEX, $action)->add(Action::DETAIL, $action);
+            $actions->add(Action::INDEX, $action)->add(Action::DETAIL, $action)
+                ->setPermission($action->getAsDto()->getName(), AdminPermission::PAYMENTS_MODERATE->value);
         }
 
         return $actions;

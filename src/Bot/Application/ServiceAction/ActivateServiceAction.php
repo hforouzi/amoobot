@@ -6,6 +6,7 @@ namespace App\Bot\Application\ServiceAction;
 
 use App\Bot\Application\ServiceManagementService;
 use App\Bot\Infrastructure\TelegramApiClient;
+use App\Security\AdminPermission;
 
 final class ActivateServiceAction implements ServiceActionInterface
 {
@@ -22,7 +23,7 @@ final class ActivateServiceAction implements ServiceActionInterface
 
     public function handle(ServiceActionContext $context): void
     {
-        if (!$context->isAdmin) {
+        if (!$context->can(AdminPermission::SERVICES_MANAGE)) {
             error_log(sprintf('[ServiceAction] unauthorized service_activate actor_id="%s"', $context->actorId));
             $this->telegramApiClient->answerCallbackQuery($context->callbackId, 'Unauthorized', true);
 
@@ -31,5 +32,6 @@ final class ActivateServiceAction implements ServiceActionInterface
 
         $serviceId = (int) str_replace('service_activate:', '', $context->data);
         $this->serviceManagementService->activateService($serviceId, $context->chatId, $context->callbackId);
+        $context->audit('service.activate', $serviceId);
     }
 }

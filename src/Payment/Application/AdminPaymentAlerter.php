@@ -7,10 +7,14 @@ namespace App\Payment\Application;
 use App\Bot\Application\TelegramKeyboardFactory;
 use App\Bot\Infrastructure\TelegramApiClient;
 use App\Entity\Payment;
+use App\Security\AdminAccessPolicy;
+use App\Security\AdminPermission;
 use Psr\Log\LoggerInterface;
 
 /**
- * Telegram alerts to the admin chat (TELEGRAM_ADMIN_CHAT_ID) when a payment needs a human.
+ * Telegram alerts when a payment needs a human: to every admin who may act on it (AdminAccessPolicy recipients:
+ * linked admins and TELEGRAM_ADMIN_CHAT_ID, each once). Alerts with approve/reject buttons need PAYMENTS_MODERATE,
+ * the others PAYMENTS_VIEW.
  *
  * Sent after the settlement transaction has committed; failures are logged, never thrown.
  */
@@ -20,7 +24,7 @@ class AdminPaymentAlerter
         private readonly TelegramApiClient $telegramApiClient,
         private readonly TelegramKeyboardFactory $keyboardFactory,
         private readonly LoggerInterface $logger,
-        private readonly ?string $adminChatId = null,
+        private readonly AdminAccessPolicy $accessPolicy,
     ) {
     }
 
@@ -41,9 +45,9 @@ class AdminPaymentAlerter
 
     private function send(Payment $payment, string $title, string $detail, bool $withActions = false): void
     {
-        $chatId = trim((string) $this->adminChatId);
-        if ('' === $chatId) {
-            $this->logger->warning('Admin payment alert not sent: TELEGRAM_ADMIN_CHAT_ID is empty.', ['payment_id' => $payment->getId(), 'title' => $title]);
+        $chats = $this->accessPolicy->telegramRecipients($withActions ? AdminPermission::PAYMENTS_MODERATE : AdminPermission::PAYMENTS_VIEW);
+        if ([] === $chats) {
+            $this->logger->warning('Admin payment alert not sent: no admin chat (TELEGRAM_ADMIN_CHAT_ID empty and no linked admin).', ['payment_id' => $payment->getId(), 'title' => $title]);
 
             return;
         }
@@ -60,11 +64,13 @@ class AdminPaymentAlerter
             'Detail: '.mb_substr($detail, 0, 1500),
         ]);
 
-        try {
-            // Approve / Retry / Reject buttons; the bot checks the admin id again when they are pressed.
-            $this->telegramApiClient->sendMessage($chatId, $text, $withActions ? $this->keyboardFactory->adminPaymentAttentionActions((int) $payment->getId(), $payment->getStatus()) : null);
-        } catch (\Throwable $e) {
-            $this->logger->error('Admin payment alert failed.', ['payment_id' => $payment->getId(), 'error' => $e->getMessage()]);
+        foreach ($chats as $chatId) {
+            try {
+                // Approve / Retry / Reject buttons; the bot checks the admin's permission again when they are pressed.
+                $this->telegramApiClient->sendMessage($chatId, $text, $withActions ? $this->keyboardFactory->adminPaymentAttentionActions((int) $payment->getId(), $payment->getStatus()) : null);
+            } catch (\Throwable $e) {
+                $this->logger->error('Admin payment alert failed.', ['payment_id' => $payment->getId(), 'chat' => $chatId, 'error' => $e->getMessage()]);
+            }
         }
     }
 }

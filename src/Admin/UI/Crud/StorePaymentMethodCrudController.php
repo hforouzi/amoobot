@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Admin\UI\Crud;
 
-use App\Entity\AdminUser;
+use App\Admin\Security\AdminCrudPermissions;
 use App\Entity\PaymentGateway;
 use App\Entity\StorePaymentMethod;
 use App\Payment\Application\PaymentGatewayModuleRegistry;
@@ -20,9 +20,6 @@ use EasyCorp\Bundle\EasyAdminBundle\Field\IdField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\IntegerField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\TextField;
 use Symfony\Component\HttpFoundation\RequestStack;
-use Symfony\Component\Security\Http\Attribute\IsGranted;
-
-#[IsGranted('ROLE_SUPER_ADMIN')]
 final class StorePaymentMethodCrudController extends AbstractCrudController
 {
     public function __construct(
@@ -39,7 +36,7 @@ final class StorePaymentMethodCrudController extends AbstractCrudController
 
     public function configureCrud(Crud $crud): Crud
     {
-        return $crud->setEntityPermission(AdminUser::ROLE_SUPER_ADMIN);
+        return $crud->setEntityPermission(AdminCrudPermissions::view(self::class));
     }
 
     public function createEntity(string $entityFqcn): object
