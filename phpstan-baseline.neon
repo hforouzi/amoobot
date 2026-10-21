@@ -403,12 +403,6 @@ parameters:
 			path: src/Command/PaymentTestPluginGatewayCommand.php
 
 		-
-			message: '#^Using nullsafe property access "\?\-\>clientId" on left side of \?\? is unnecessary\. Use \-\> instead\.$#'
-			identifier: nullsafe.neverNull
-			count: 1
-			path: src/Command/ServiceDebugLinksCommand.php
-
-		-
 			message: '#^Using nullsafe property access "\?\-\>email" on left side of \?\? is unnecessary\. Use \-\> instead\.$#'
 			identifier: nullsafe.neverNull
 			count: 1
