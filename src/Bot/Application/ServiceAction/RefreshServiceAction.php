@@ -33,7 +33,8 @@ final class RefreshServiceAction implements ServiceActionInterface
             $serviceId,
             $context->chatId,
             $context->callbackId,
-            $context->can(AdminPermission::SERVICES_ASSIST)
+            $context->can(AdminPermission::SERVICES_ASSIST),
+            $context->granted(),
         );
     }
 }

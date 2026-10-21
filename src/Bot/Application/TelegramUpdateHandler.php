@@ -177,7 +177,7 @@ class TelegramUpdateHandler
                 return;
             }
 
-            $this->adminBotHandler->showMenu($chatId);
+            $this->adminBotHandler->showMenu($chatId, $this->accessPolicy->botActor($actorId));
 
             return;
         }

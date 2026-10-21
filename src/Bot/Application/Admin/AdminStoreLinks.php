@@ -14,6 +14,7 @@ use App\Admin\UI\DashboardController;
 use App\Bot\Application\BotTextResolver;
 use App\Bot\Application\TelegramKeyboardFactory;
 use App\Bot\Infrastructure\TelegramApiClient;
+use App\Security\AdminActor;
 use App\Security\AdminPermission;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Action;
 use EasyCorp\Bundle\EasyAdminBundle\Router\AdminUrlGeneratorInterface;
@@ -31,13 +32,29 @@ final class AdminStoreLinks
         private readonly AdminUrlGeneratorInterface $adminUrlGenerator,
         private readonly RequestStack $requestStack,
         private readonly AdminBotReplies $replies,
+        private readonly AdminKeyboards $keyboards,
     ) {
     }
 
-    public function menu(string $chatId, ?string $callbackId = null): void
+    public function menu(string $chatId, ?AdminActor $admin, ?string $callbackId = null): void
     {
         $this->replies->ack($callbackId);
-        $this->telegramApiClient->sendMessage($chatId, 'مدیریت فروشگاه:', $this->keyboardFactory->adminStoreManagementMenu());
+        $this->telegramApiClient->sendMessage($chatId, 'مدیریت فروشگاه:', $this->keyboards->screenMenu($admin, $this->menuItems()));
+    }
+
+    /**
+     * The store screens as [label key, callback, any-of permissions].
+     *
+     * @return list<array{0: string, 1: string, 2: list<AdminPermission>}>
+     */
+    public function menuItems(): array
+    {
+        $items = [];
+        foreach ($this->sections() as $callback => $section) {
+            $items[] = [$section['button'], $callback, [$section['permission']]];
+        }
+
+        return $items;
     }
 
     public function action(string $chatId, string $action, ?string $callbackId = null): void

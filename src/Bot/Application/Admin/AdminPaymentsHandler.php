@@ -11,8 +11,10 @@ use App\Entity\Payment;
 use App\Payment\Application\Settlement\PaymentSettlementService;
 use App\Payment\Application\Settlement\SettlementOutcome;
 use App\Payment\Domain\PaymentStatus;
+use App\Security\AdminAccessPolicy;
 use App\Security\AdminActor;
 use App\Security\AdminAuditLogger;
+use App\Security\AdminPermission;
 use App\Shop\Domain\OrderType;
 use Doctrine\ORM\EntityManagerInterface;
 
@@ -30,14 +32,21 @@ final class AdminPaymentsHandler
         private readonly PaymentSettlementService $paymentSettlementService,
         private readonly AdminAuditLogger $auditLogger,
         private readonly AdminBotReplies $replies,
+        private readonly AdminAccessPolicy $accessPolicy,
     ) {
+    }
+
+    /** Approve / reject buttons only for admins who may use them (the callbacks are checked again). */
+    private function canModerate(?AdminActor $admin): bool
+    {
+        return $this->accessPolicy->can($admin, AdminPermission::PAYMENTS_MODERATE);
     }
 
     /**
      * Payments that need a human: NEEDS_REVIEW (amount/currency mismatch, duplicate) and
      * PROVISIONING_FAILED (paid, service not created yet). One message per payment with its actions.
      */
-    public function attention(string $chatId, ?string $callbackId = null): void
+    public function attention(string $chatId, ?AdminActor $admin, ?string $callbackId = null): void
     {
         $payments = $this->entityManager->getRepository(Payment::class)->findBy([
             'status' => [PaymentStatus::NEEDS_REVIEW, PaymentStatus::PROVISIONING_FAILED],
@@ -63,7 +72,7 @@ final class AdminPaymentsHandler
                     ? 'علت بررسی: '.mb_substr((string) ($payment->getReviewReason() ?? '-'), 0, 500)
                     : sprintf('خطای ساخت سرویس (%d تلاش): %s', $payment->getProvisioningAttempts(), mb_substr((string) ($payment->getProvisioningError() ?? '-'), 0, 500)),
             ]);
-            $this->telegramApiClient->sendMessage($chatId, $text, $this->keyboardFactory->adminPaymentAttentionActions((int) $payment->getId(), $payment->getStatus()));
+            $this->telegramApiClient->sendMessage($chatId, $text, $this->canModerate($admin) ? $this->keyboardFactory->adminPaymentAttentionActions((int) $payment->getId(), $payment->getStatus()) : $this->keyboardFactory->backToAdminMenu());
         }
     }
 
@@ -129,7 +138,7 @@ final class AdminPaymentsHandler
         $this->telegramApiClient->sendMessage($chatId, implode("\n", $lines), $this->keyboardFactory->adminPendingPayments($paymentIds));
     }
 
-    public function view(string $chatId, int $paymentId, ?string $callbackId = null): void
+    public function view(string $chatId, int $paymentId, ?AdminActor $admin, ?string $callbackId = null): void
     {
         $this->replies->ack($callbackId);
         $payment = $this->entityManager->getRepository(Payment::class)->find($paymentId);
@@ -223,7 +232,8 @@ final class AdminPaymentsHandler
                 $payment->getSubmittedAt()?->format('Y-m-d H:i:s') ?? '-'
             );
         }
-        $this->telegramApiClient->sendMessage($chatId, $detail, $this->keyboardFactory->adminPaymentActions((int) $payment->getId()));
+        $actions = $this->canModerate($admin) ? $this->keyboardFactory->adminPaymentActions((int) $payment->getId()) : $this->keyboardFactory->backToAdminMenu();
+        $this->telegramApiClient->sendMessage($chatId, $detail, $actions);
 
         $receiptFileId = (string) ($payment->getReceiptFileId() ?? '');
         if ('' === $receiptFileId) {
@@ -263,7 +273,7 @@ final class AdminPaymentsHandler
                 $payment->getAmount()
             ));
 
-        $this->telegramApiClient->sendPhoto($chatId, $receiptFileId, $caption, $this->keyboardFactory->adminPaymentActions((int) $payment->getId()));
+        $this->telegramApiClient->sendPhoto($chatId, $receiptFileId, $caption, $actions);
         $this->replies->log(sprintf('admin_view_payment_sent_receipt_photo payment_id=%d', $paymentId));
     }
 

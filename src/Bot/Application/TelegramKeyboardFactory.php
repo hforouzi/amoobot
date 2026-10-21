@@ -10,6 +10,7 @@ use App\Payment\Domain\PaymentStatus;
 use App\Entity\Plan;
 use App\Entity\TrialPlan;
 use App\Shop\Application\SalesSettingsProvider;
+use App\Security\AdminPermission;
 
 class TelegramKeyboardFactory
 {
@@ -445,79 +446,6 @@ class TelegramKeyboardFactory
     }
 
     /**
-     * @return array<string, array<array<array<string, string>>>>
-     */
-    public function adminMenu(): array
-    {
-        return [
-            'inline_keyboard' => [
-                [[
-                    'text' => $this->button('button.admin.store_management'),
-                    'callback_data' => 'admin.store_menu',
-                ], [
-                    'text' => $this->button('button.admin.payments'),
-                    'callback_data' => 'admin_pending_payments',
-                ]],
-                [[
-                    'text' => '⚠️ پرداخت‌های نیازمند رسیدگی',
-                    'callback_data' => 'admin_attention_payments',
-                ]],
-                [[
-                    'text' => $this->button('button.admin.services'),
-                    'callback_data' => 'admin_services',
-                ], [
-                    'text' => $this->button('button.admin.users'),
-                    'callback_data' => 'admin_users',
-                ]],
-                [[
-                    'text' => $this->button('button.common.back_to_main_menu'),
-                    'callback_data' => 'main_menu',
-                ]],
-            ],
-        ];
-    }
-
-    /**
-     * @return array<string, array<array<array<string, string>>>>
-     */
-    public function adminStoreManagementMenu(): array
-    {
-        return [
-            'inline_keyboard' => [
-                [[
-                    'text' => $this->button('button.admin.store.settings'),
-                    'callback_data' => 'admin.store.settings',
-                ], [
-                    'text' => $this->button('button.admin.store.plans'),
-                    'callback_data' => 'admin.store.plans',
-                ]],
-                [[
-                    'text' => $this->button('button.admin.store.discounts'),
-                    'callback_data' => 'admin.store.discounts',
-                ], [
-                    'text' => $this->button('button.admin.store.payment_methods'),
-                    'callback_data' => 'admin.store.payment_methods',
-                ]],
-                [[
-                    'text' => $this->button('button.admin.store.payment_gateways'),
-                    'callback_data' => 'admin.store.payment_gateways',
-                ], [
-                    'text' => $this->button('button.admin.store.orders'),
-                    'callback_data' => 'admin.store.orders',
-                ]],
-                [[
-                    'text' => $this->button('button.admin.back_to_management'),
-                    'callback_data' => 'admin.menu',
-                ]],
-                [[
-                    'text' => $this->button('button.common.back_to_main_menu'),
-                    'callback_data' => 'main_menu',
-                ]],
-            ],
-        ];
-    }
-
-    /**
      * @param list<int> $paymentIds
      *
      * @return array<string, array<array<array<string, string>>>>
@@ -648,57 +576,77 @@ class TelegramKeyboardFactory
     /**
      * @return array<string, array<array<array<string, string>>>>
      */
-    public function adminServiceDetail(int $serviceId, int $userId): array
+    /**
+     * @param list<AdminPermission>|null $granted the admin's permissions: each row needs its own (null = all rows)
+     */
+    public function adminServiceDetail(int $serviceId, int $userId, ?array $granted = null): array
     {
-        return [
-            'inline_keyboard' => [
-                [[
-                    'text' => '⏸ غیرفعال',
-                    'callback_data' => 'service_suspend:'.$serviceId,
-                ], [
-                    'text' => '▶️ فعال',
-                    'callback_data' => 'service_activate:'.$serviceId,
-                ]],
-                [[
-                    'text' => '📅 تمدید',
-                    'callback_data' => 'service_extend_menu:'.$serviceId,
-                ], [
-                    'text' => '➕ افزایش حجم',
-                    'callback_data' => 'service_add_traffic_menu:'.$serviceId,
-                ]],
-                [[
-                    'text' => $this->button('button.service.renew'),
-                    'callback_data' => 'service_renew:'.$serviceId,
-                ]],
-                [[
-                    'text' => '🔄 ریست مصرف',
-                    'callback_data' => 'service_reset_usage:'.$serviceId,
-                ], [
-                    'text' => $this->button('button.service.refresh_usage'),
-                    'callback_data' => 'service_sync_usage:'.$serviceId,
-                ]],
-                [[
-                    'text' => $this->button('button.service.configs'),
-                    'callback_data' => 'service_resend_config:'.$serviceId,
-                ]],
-                [[
-                    'text' => '🗑 حذف سرویس',
-                    'callback_data' => 'service_delete:'.$serviceId,
-                ]],
-                [[
-                    'text' => '👤 مشاهده کاربر',
-                    'callback_data' => 'admin_user_view:'.$userId.':'.$serviceId,
-                ], [
-                    'text' => $this->button('button.common.back'),
-                    'callback_data' => 'admin_services',
-                ]],
-            ],
+        $can = static fn (AdminPermission $permission): bool => null === $granted || in_array($permission, $granted, true);
+        $rows = [];
+        if ($can(AdminPermission::SERVICES_MANAGE)) {
+            $rows[] = [[
+                'text' => '⏸ غیرفعال',
+                'callback_data' => 'service_suspend:'.$serviceId,
+            ], [
+                'text' => '▶️ فعال',
+                'callback_data' => 'service_activate:'.$serviceId,
+            ]];
+            $rows[] = [[
+                'text' => '📅 تمدید',
+                'callback_data' => 'service_extend_menu:'.$serviceId,
+            ], [
+                'text' => '➕ افزایش حجم',
+                'callback_data' => 'service_add_traffic_menu:'.$serviceId,
+            ]];
+            $rows[] = [[
+                'text' => $this->button('button.service.renew'),
+                'callback_data' => 'service_renew:'.$serviceId,
+            ]];
+        }
+        $usageRow = [];
+        if ($can(AdminPermission::SERVICES_MANAGE)) {
+            $usageRow[] = [
+                'text' => '🔄 ریست مصرف',
+                'callback_data' => 'service_reset_usage:'.$serviceId,
+            ];
+        }
+        if ($can(AdminPermission::SERVICES_ASSIST)) {
+            $usageRow[] = [
+                'text' => $this->button('button.service.refresh_usage'),
+                'callback_data' => 'service_sync_usage:'.$serviceId,
+            ];
+        }
+        if ([] !== $usageRow) {
+            $rows[] = $usageRow;
+        }
+        if ($can(AdminPermission::SERVICES_ASSIST)) {
+            $rows[] = [[
+                'text' => $this->button('button.service.configs'),
+                'callback_data' => 'service_resend_config:'.$serviceId,
+            ]];
+        }
+        if ($can(AdminPermission::SERVICES_DELETE)) {
+            $rows[] = [[
+                'text' => '🗑 حذف سرویس',
+                'callback_data' => 'service_delete:'.$serviceId,
+            ]];
+        }
+        $lastRow = [];
+        if ($can(AdminPermission::CUSTOMERS_VIEW)) {
+            $lastRow[] = [
+                'text' => '👤 مشاهده کاربر',
+                'callback_data' => 'admin_user_view:'.$userId.':'.$serviceId,
+            ];
+        }
+        $lastRow[] = [
+            'text' => $this->button('button.common.back'),
+            'callback_data' => 'admin_services',
         ];
+        $rows[] = $lastRow;
+
+        return ['inline_keyboard' => $rows];
     }
 
-    /**
-     * @return array<string, array<array<array<string, string>>>>
-     */
     public function serviceExtendMenu(int $serviceId): array
     {
         return [

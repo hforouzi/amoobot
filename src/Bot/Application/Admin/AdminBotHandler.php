@@ -7,10 +7,10 @@ namespace App\Bot\Application\Admin;
 use App\Bot\Application\BotTextResolver;
 use App\Bot\Application\ServiceAction\ServiceActionContext;
 use App\Bot\Application\ServiceAction\ServiceActionResolver;
-use App\Bot\Application\TelegramKeyboardFactory;
 use App\Bot\Infrastructure\TelegramApiClient;
 use App\Entity\TelegramAccount;
 use App\Security\AdminAccessPolicy;
+use App\Security\AdminActor;
 use App\Security\AdminAuditLogger;
 use App\Security\AdminPermission;
 
@@ -26,13 +26,13 @@ final class AdminBotHandler
         private readonly AdminAuditLogger $auditLogger,
         private readonly ServiceActionResolver $serviceActionResolver,
         private readonly TelegramApiClient $telegramApiClient,
-        private readonly TelegramKeyboardFactory $keyboardFactory,
         private readonly BotTextResolver $botTextResolver,
         private readonly AdminBotReplies $replies,
         private readonly AdminPaymentsHandler $payments,
         private readonly AdminOrdersHandler $orders,
         private readonly AdminCustomersHandler $customers,
         private readonly AdminStoreLinks $store,
+        private readonly AdminKeyboards $keyboards,
     ) {
     }
 
@@ -50,13 +50,13 @@ final class AdminBotHandler
         $this->replies->log(sprintf('admin_callback_execute data="%s" actor_id="%s"', $data, $actorId));
 
         if ('admin_menu' === $data || 'admin.menu' === $data) {
-            $this->showMenu($chatId, $callbackId);
+            $this->showMenu($chatId, $admin, $callbackId);
 
             return;
         }
 
         if ('admin.store_menu' === $data) {
-            $this->store->menu($chatId, $callbackId);
+            $this->store->menu($chatId, $admin, $callbackId);
 
             return;
         }
@@ -74,7 +74,7 @@ final class AdminBotHandler
         }
 
         if ('admin_attention_payments' === $data) {
-            $this->payments->attention($chatId, $callbackId);
+            $this->payments->attention($chatId, $admin, $callbackId);
 
             return;
         }
@@ -92,7 +92,7 @@ final class AdminBotHandler
         }
 
         if (str_starts_with($data, 'admin_view_payment:')) {
-            $this->payments->view($chatId, (int) str_replace('admin_view_payment:', '', $data), $callbackId);
+            $this->payments->view($chatId, (int) str_replace('admin_view_payment:', '', $data), $admin, $callbackId);
 
             return;
         }
@@ -128,10 +128,13 @@ final class AdminBotHandler
         return;
     }
 
-    public function showMenu(string $chatId, ?string $callbackId = null): void
+    /**
+     * The admin menu, with only the buttons this admin may use.
+     */
+    public function showMenu(string $chatId, ?AdminActor $admin, ?string $callbackId = null): void
     {
         $this->replies->ack($callbackId);
-        $this->telegramApiClient->sendMessage($chatId, 'منوی مدیریت:', $this->keyboardFactory->adminMenu());
+        $this->telegramApiClient->sendMessage($chatId, 'منوی مدیریت:', $this->keyboards->menu($admin, $this->store->menuItems()));
     }
 
     /**

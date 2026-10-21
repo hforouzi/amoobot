@@ -144,7 +144,7 @@ final class BotContentRegistry
             'admin.payment_rejected' => ['title' => 'Admin payment rejected', 'body' => '❌ پرداخت رد شد.', 'category' => 'admin'],
             'admin.order_created' => ['title' => 'Admin order created', 'body' => 'سفارش جدید ثبت شد.', 'category' => 'admin'],
             'admin.unauthorized' => ['title' => 'Admin unauthorized', 'body' => 'Unauthorized', 'category' => 'admin'],
-        ];
+        ] + Admin\AdminBotTexts::messages();
     }
 
     private function englishMessages(): array
@@ -222,7 +222,7 @@ final class BotContentRegistry
             'button.service.renew' => ['label' => '🔄 تمدید سرویس', 'buttonType' => 'inline', 'category' => 'service'],
             'button.service.add_traffic' => ['label' => '➕ خرید حجم اضافه', 'buttonType' => 'inline', 'category' => 'service'],
             'button.service.refresh_usage' => ['label' => '🔄 بروزرسانی مصرف', 'buttonType' => 'inline', 'category' => 'service'],
-        ];
+        ] + Admin\AdminBotTexts::buttons();
     }
 
     private function englishButtons(): array
