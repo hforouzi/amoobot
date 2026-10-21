@@ -43,6 +43,8 @@ use App\Shop\Application\TrialAccountService;
 use App\Shop\Domain\OrderDraftStatus;
 use App\Shop\Domain\OrderStatus;
 use App\Shop\Domain\OrderType;
+use App\Security\AdminAccessPolicy;
+use App\Security\AdminPermission;
 use Doctrine\ORM\EntityManagerInterface;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Action;
 use EasyCorp\Bundle\EasyAdminBundle\Router\AdminUrlGeneratorInterface;
@@ -90,7 +92,7 @@ class TelegramUpdateHandler
         private readonly BotButtonMatcher $botButtonMatcher,
         private readonly AdminUrlGeneratorInterface $adminUrlGenerator,
         private readonly RequestStack $requestStack,
-        private readonly ?string $adminChatId = null,
+        private readonly AdminAccessPolicy $accessPolicy,
         private readonly string $paymentCardNumber = '',
         private readonly string $paymentCardHolder = '',
         private readonly ?string $paymentDescription = null,
@@ -124,7 +126,7 @@ class TelegramUpdateHandler
 
         $account = $this->telegramUserResolver->resolveFromTelegramUser($telegramUser);
         $text = trim((string) ($message['text'] ?? ''));
-        $isAdmin = $this->isAdminUserId($actorId);
+        $isAdmin = null !== $this->accessPolicy->botActor($actorId);
         $replyButtonKey = $this->botButtonMatcher->matchReplyButton($text);
 
         if ('/start' === $text) {
@@ -256,7 +258,9 @@ class TelegramUpdateHandler
         $account = $this->telegramUserResolver->resolveFromTelegramUser($telegramUser);
 
         if ($this->isAdminCallback($data)) {
-            if (!$this->isAdminUserId($actorId)) {
+            $admin = $this->accessPolicy->botActor($actorId);
+            $permission = $this->adminCallbackPermission($data);
+            if (null === $admin || (null !== $permission && !$this->accessPolicy->can($admin, $permission))) {
                 $this->debugLog(sprintf('admin_callback_unauthorized data="%s" actor_id="%s" chat_id="%s"', $data, $actorId, $chatId));
                 $this->telegramApiClient->answerCallbackQuery($callbackId, $this->botTextResolver->message('admin.unauthorized'), true);
 
@@ -331,7 +335,8 @@ class TelegramUpdateHandler
                 chatId: $chatId,
                 callbackId: $callbackId,
                 data: $data,
-                isAdmin: true,
+                admin: $admin,
+                policy: $this->accessPolicy,
             ))) {
                 return;
             }
@@ -342,7 +347,8 @@ class TelegramUpdateHandler
             return;
         }
 
-        $isAdmin = $this->isAdminUserId($actorId);
+        $admin = $this->accessPolicy->botActor($actorId);
+        $isAdmin = null !== $admin;
 
         if ('main_menu' === $data) {
             $this->acknowledgeCallback($callbackId);
@@ -569,7 +575,8 @@ class TelegramUpdateHandler
             chatId: $chatId,
             callbackId: $callbackId,
             data: $data,
-            isAdmin: $isAdmin,
+            admin: $admin,
+            policy: $this->accessPolicy,
         ))) {
             return;
         }
@@ -2302,7 +2309,7 @@ class TelegramUpdateHandler
     }
 
     /**
-     * @return array<string, array{button:string, controller:class-string}>
+     * @return array<string, array{button:string, controller:class-string, permission:AdminPermission}>
      */
     private function adminStoreSections(): array
     {
@@ -2310,26 +2317,32 @@ class TelegramUpdateHandler
             'admin.store.settings' => [
                 'button' => 'button.admin.store.settings',
                 'controller' => SettingCrudController::class,
+                'permission' => AdminPermission::SETTINGS_MANAGE,
             ],
             'admin.store.plans' => [
                 'button' => 'button.admin.store.plans',
                 'controller' => PlanCrudController::class,
+                'permission' => AdminPermission::PLANS_MANAGE,
             ],
             'admin.store.discounts' => [
                 'button' => 'button.admin.store.discounts',
                 'controller' => DiscountCodeCrudController::class,
+                'permission' => AdminPermission::DISCOUNTS_MANAGE,
             ],
             'admin.store.payment_methods' => [
                 'button' => 'button.admin.store.payment_methods',
                 'controller' => StorePaymentMethodCrudController::class,
+                'permission' => AdminPermission::GATEWAYS_MANAGE,
             ],
             'admin.store.payment_gateways' => [
                 'button' => 'button.admin.store.payment_gateways',
                 'controller' => PaymentGatewayCrudController::class,
+                'permission' => AdminPermission::GATEWAYS_MANAGE,
             ],
             'admin.store.orders' => [
                 'button' => 'button.admin.store.orders',
                 'controller' => OrderCrudController::class,
+                'permission' => AdminPermission::ORDERS_VIEW,
             ],
         ];
     }
@@ -3830,7 +3843,8 @@ class TelegramUpdateHandler
 
     private function notifyAdmin(Payment $payment, string $kind): void
     {
-        if (null === $this->adminChatId || '' === trim($this->adminChatId)) {
+        $chats = $this->accessPolicy->telegramRecipients(AdminPermission::PAYMENTS_MODERATE);
+        if ([] === $chats) {
             return;
         }
 
@@ -3906,12 +3920,9 @@ class TelegramUpdateHandler
         if ('receipt_photo' === $kind) {
             $receiptFileId = (string) ($payment->getReceiptFileId() ?? '');
             if ('' !== $receiptFileId) {
-                $this->telegramApiClient->sendPhoto(
-                    $this->adminChatId,
-                    $receiptFileId,
-                    $message,
-                    $this->keyboardFactory->adminPaymentActions((int) $payment->getId())
-                );
+                foreach ($chats as $chat) {
+                    $this->telegramApiClient->sendPhoto($chat, $receiptFileId, $message, $this->keyboardFactory->adminPaymentActions((int) $payment->getId()));
+                }
                 $this->debugLog(sprintf('notify_admin_sent_receipt_photo payment_id=%d', $payment->getId()));
 
                 return;
@@ -3920,7 +3931,9 @@ class TelegramUpdateHandler
             $this->debugLog(sprintf('notify_admin_missing_receipt_file payment_id=%d', $payment->getId()));
         }
 
-        $this->telegramApiClient->sendMessage($this->adminChatId, $message, $this->keyboardFactory->adminPaymentActions((int) $payment->getId()));
+        foreach ($chats as $chat) {
+            $this->telegramApiClient->sendMessage($chat, $message, $this->keyboardFactory->adminPaymentActions((int) $payment->getId()));
+        }
     }
 
     private function acknowledgeCallback(?string $callbackId): void
@@ -3975,15 +3988,23 @@ class TelegramUpdateHandler
         ));
     }
 
-    private function isAdminUserId(string $actorId): bool
+    /**
+     * The permission an admin callback needs; null = any admin (menus), or checked by the service action itself
+     * (admin_services, admin_service_view:, admin_user_*).
+     */
+    private function adminCallbackPermission(string $data): ?AdminPermission
     {
-        if (null === $this->adminChatId || '' === trim($this->adminChatId)) {
-            return false;
+        if (str_starts_with($data, 'admin.store.')) {
+            return $this->adminStoreSections()[$data]['permission'] ?? null;
         }
 
-        $adminChatId = trim($this->adminChatId);
-
-        return $actorId === $adminChatId;
+        return match (true) {
+            'admin_pending_payments' === $data, 'admin_attention_payments' === $data, str_starts_with($data, 'admin_view_payment:') => AdminPermission::PAYMENTS_VIEW,
+            str_starts_with($data, 'admin_confirm_payment:'), str_starts_with($data, 'admin_reject_payment:') => AdminPermission::PAYMENTS_MODERATE,
+            'admin_users' === $data => AdminPermission::CUSTOMERS_VIEW,
+            'admin_orders' === $data => AdminPermission::ORDERS_VIEW,
+            default => null,
+        };
     }
 
     private function isAdminCallback(string $data): bool

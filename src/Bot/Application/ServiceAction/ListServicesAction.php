@@ -6,6 +6,7 @@ namespace App\Bot\Application\ServiceAction;
 
 use App\Bot\Application\ServiceManagementService;
 use App\Bot\Infrastructure\TelegramApiClient;
+use App\Security\AdminPermission;
 
 final class ListServicesAction implements ServiceActionInterface
 {
@@ -28,7 +29,7 @@ final class ListServicesAction implements ServiceActionInterface
             return;
         }
 
-        if (!$context->isAdmin) {
+        if (!$context->can(AdminPermission::SERVICES_VIEW)) {
             error_log(sprintf('[ServiceAction] unauthorized admin_services actor_id="%s"', $context->actorId));
             $this->telegramApiClient->answerCallbackQuery($context->callbackId, 'Unauthorized', true);
 

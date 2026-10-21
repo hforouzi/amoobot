@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Bot\Application\ServiceAction;
 
 use App\Bot\Application\ServiceManagementService;
+use App\Security\AdminPermission;
 
 final class ShowServiceAction implements ServiceActionInterface
 {
@@ -27,7 +28,7 @@ final class ShowServiceAction implements ServiceActionInterface
             return;
         }
 
-        if (!$context->isAdmin) {
+        if (!$context->can(AdminPermission::SERVICES_VIEW)) {
             $this->serviceManagementService->handleMyServices($context->account, $context->chatId, $context->callbackId);
 
             return;

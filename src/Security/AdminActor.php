@@ -31,7 +31,7 @@ final class AdminActor
 
     public static function fromAdminUser(AdminUser $admin, string $source = self::SOURCE_WEB): self
     {
-        return new self($admin->getId(), $admin->getEmail(), $admin->getAssignedRoles(), $admin->isActive(), $source, null);
+        return new self($admin->getId(), $admin->getEmail(), $admin->getAssignedRoles(), $admin->isActive(), $source, $admin->getTelegramUserId());
     }
 
     public static function environmentBotAdmin(string $telegramUserId): self

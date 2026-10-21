@@ -6,6 +6,7 @@ namespace App\Bot\Application\ServiceAction;
 
 use App\Bot\Application\ServiceManagementService;
 use App\Bot\Infrastructure\TelegramApiClient;
+use App\Security\AdminPermission;
 
 final class DeleteServiceAction implements ServiceActionInterface
 {
@@ -23,7 +24,7 @@ final class DeleteServiceAction implements ServiceActionInterface
 
     public function handle(ServiceActionContext $context): void
     {
-        if (!$context->isAdmin) {
+        if (!$context->can(AdminPermission::SERVICES_DELETE)) {
             error_log(sprintf('[ServiceAction] unauthorized service_delete actor_id="%s"', $context->actorId));
             $this->telegramApiClient->answerCallbackQuery($context->callbackId, 'Unauthorized', true);
 

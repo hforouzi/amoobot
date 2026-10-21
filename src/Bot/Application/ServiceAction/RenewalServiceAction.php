@@ -6,6 +6,7 @@ namespace App\Bot\Application\ServiceAction;
 
 use App\Bot\Application\ServiceManagementService;
 use App\Bot\Infrastructure\TelegramApiClient;
+use App\Security\AdminPermission;
 
 final class RenewalServiceAction implements ServiceActionInterface
 {
@@ -25,7 +26,7 @@ final class RenewalServiceAction implements ServiceActionInterface
     {
         if (str_starts_with($context->data, 'service_renew:')) {
             $serviceId = (int) str_replace('service_renew:', '', $context->data);
-            $this->serviceManagementService->showRenewalSummary($context->account, $serviceId, $context->chatId, $context->callbackId, $context->isAdmin);
+            $this->serviceManagementService->showRenewalSummary($context->account, $serviceId, $context->chatId, $context->callbackId, $context->can(AdminPermission::SERVICES_MANAGE));
 
             return;
         }
@@ -37,6 +38,6 @@ final class RenewalServiceAction implements ServiceActionInterface
             return;
         }
 
-        $this->serviceManagementService->confirmRenewal($context->account, $serviceId, $context->chatId, $context->callbackId, $context->isAdmin);
+        $this->serviceManagementService->confirmRenewal($context->account, $serviceId, $context->chatId, $context->callbackId, $context->can(AdminPermission::SERVICES_MANAGE));
     }
 }
