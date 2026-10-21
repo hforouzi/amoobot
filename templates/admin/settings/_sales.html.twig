@@ -1,11 +1,6 @@
-{% extends '@EasyAdmin/page/content.html.twig' %}
+{# Settings page, "sales & renewal pricing" tab (was the renewal pricing settings page). #}
 {% trans_default_domain 'admin' %}
-
-{% block content_title %}{{ 'renewal_pricing_settings.title'|trans }}{% endblock %}
-
-{% block main %}
-    <div class="admin-custom-page admin-settings-page">
-    <form method="post" class="admin-form-card admin-settings-form">
+    <form method="post" action="{{ path('admin_settings', {tab: 'sales'}) }}" class="admin-form-card admin-settings-form">
         <div class="admin-section">
             <h2>{{ 'renewal_pricing_settings.sections.renewal'|trans }}</h2>
 
@@ -89,5 +84,3 @@
             <button type="submit" class="btn btn-primary">{{ 'common.save'|trans }}</button>
         </div>
     </form>
-    </div>
-{% endblock %}

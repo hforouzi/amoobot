@@ -49,6 +49,9 @@ admin:
   sales_settings: تنظیمات فروش
   automation_settings: تنظیمات اتوماسیون
   bulk_plan_price_adjustment: تغییر گروهی قیمت پلن‌ها
+  customers: مشتریان
+  bot_texts: متن‌های بات
+  logs: لاگ‌ها
   plugins: پلاگین‌ها
 
 status:
@@ -111,6 +114,13 @@ plugin:
   disable: غیرفعال‌سازی
 
 payment:
+  tabs:
+    all: همه
+    pending: در انتظار
+    needs_review: نیازمند بررسی
+    provisioning_failed: خطای ساخت سرویس
+    confirmed: تأییدشده
+    rejected: ردشده / لغوشده
   gateway:
     manual_card: درگاه کارت‌به‌کارت
     zibal: درگاه زیبال
@@ -393,3 +403,59 @@ audit:
   target_type: نوع رکورد
   target_id: شناسه رکورد
   details: جزئیات
+
+settings_page:
+  title: تنظیمات
+  tabs:
+    sales: فروش و قیمت تمدید
+    automation: اتوماسیون
+    channels: کانال‌های اجباری
+    advanced: پیشرفته
+  channels_intro: کانال‌هایی که مشتری باید پیش از خرید یا دریافت اکانت تست عضو آن‌ها باشد.
+  channels_add: افزودن کانال
+  channels_empty: هنوز کانال اجباری ثبت نشده است.
+  chat_id: شناسه چت
+  require_for_purchase: برای خرید
+  require_for_trial: برای اکانت تست
+  sort_order: ترتیب
+  advanced_warning: این‌ها تنظیمات خامی هستند که تب‌های دیگر ذخیره می‌کنند. تغییر یک کلید در اینجا اعتبارسنجی آن تب‌ها را دور می‌زند؛ مگر اینکه دقیقاً بدانید هر کلید چه می‌کند، از تب‌های دیگر استفاده کنید.
+  advanced_show: نمایش تنظیمات خام
+  key: کلید
+  type: نوع
+
+store_methods:
+  delete_confirm: این روش پرداخت فروشگاه حذف شود؟
+  title: روش‌های پرداخت فروشگاه
+  intro: آنچه مشتری در بات می‌بیند، به همین ترتیب. هر روش از یکی از درگاه‌های بالا استفاده می‌کند.
+  add: افزودن روش پرداخت فروشگاه
+  empty: هنوز روش پرداختی ثبت نشده است.
+  gateway: درگاه
+  amounts: بازه مبلغ
+  move_up: انتقال به بالا
+  move_down: انتقال به پایین
+  enable: فعال‌سازی
+  disable: غیرفعال‌سازی
+  updated: روش پرداخت فروشگاه بروزرسانی شد.
+
+customer:
+  name: نام
+  mobile: موبایل
+  status: وضعیت
+  telegram_username: نام کاربری تلگرام
+  telegram_id: شناسه تلگرام
+  language: زبان
+  services: سرویس‌ها
+  orders: سفارش‌ها
+  joined_at: تاریخ عضویت
+  telegram_account: اکانت تلگرام
+  search_help: جستجو با شناسه (#12)، @نام‌کاربری، شناسه تلگرام، نام یا موبایل.
+
+panel_inbounds:
+  title: اینباندها
+  view_all: باز کردن فهرست اینباندهای این پنل
+  empty: هنوز اینباندی ثبت نشده است. آن‌ها را در راه‌اندازی پنل همگام‌سازی یا انتخاب کنید.
+  remote_id: شناسه در پنل
+  protocol: پروتکل
+  port: پورت
+  active: فعال
+  last_synced: آخرین همگام‌سازی

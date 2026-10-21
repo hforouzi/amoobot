@@ -7,6 +7,7 @@ namespace App\Admin\UI\Crud;
 use App\Admin\Security\AdminCrudPermissions;
 use App\Admin\UI\Field\JsonField;
 use App\Entity\AdminAuditLog;
+use EasyCorp\Bundle\EasyAdminBundle\Attribute\AdminRoute;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Action;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Actions;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Crud;
@@ -19,7 +20,10 @@ use EasyCorp\Bundle\EasyAdminBundle\Field\TextField;
 
 /**
  * Read-only admin audit trail (AdminAuditLogger): who did what, from the web, the bot or the console.
+ *
+ * Logs page, "audit log" tab (AdminTabs); was /admin/admin-audit-log (redirects here).
  */
+#[AdminRoute(path: '/logs/audit', name: 'logs_audit')]
 final class AdminAuditLogCrudController extends AbstractCrudController
 {
     public static function getEntityFqcn(): string
@@ -34,7 +38,8 @@ final class AdminAuditLogCrudController extends AbstractCrudController
             ->setEntityLabelInPlural('admin.audit_log')
             ->setEntityPermission(AdminCrudPermissions::view(self::class))
             ->setDefaultSort(['id' => 'DESC'])
-            ->setSearchFields(['action', 'actorLabel', 'targetType', 'targetId']);
+            ->setSearchFields(['action', 'actorLabel', 'targetType', 'targetId'])
+            ->overrideTemplate('crud/index', 'admin/crud/index_tabs.html.twig');
     }
 
     public function configureActions(Actions $actions): Actions

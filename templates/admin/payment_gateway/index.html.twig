@@ -1,0 +1,72 @@
+{# Payment gateways, and below them the store payment methods (the methods customers see in the bot). #}
+{% extends '@EasyAdmin/crud/index.html.twig' %}
+{% trans_default_domain 'admin' %}
+
+{% block main %}
+    {{ parent() }}
+
+    {% set csrf_prefix = constant('App\\Admin\\UI\\Crud\\StorePaymentMethodCrudController::CSRF_PREFIX') %}
+    <section id="store-payment-methods" class="admin-embedded-section">
+        <div class="admin-embedded-header">
+            <div>
+                <h2>{{ 'store_methods.title'|trans }}</h2>
+                <p class="text-muted mb-0">{{ 'store_methods.intro'|trans }}</p>
+            </div>
+            <a class="btn btn-primary" href="{{ store_method_new_url }}">{{ 'store_methods.add'|trans }}</a>
+        </div>
+
+        {% if store_methods is empty %}
+            <p>{{ 'store_methods.empty'|trans }}</p>
+        {% else %}
+            <table class="table datagrid">
+                <thead>
+                    <tr>
+                        <th>{{ 'payment_gateway.sort_order'|trans }}</th>
+                        <th>{{ 'payment_gateway.title'|trans }}</th>
+                        <th>{{ 'store_methods.gateway'|trans }}</th>
+                        <th>{{ 'payment_gateway.active'|trans }}</th>
+                        <th>{{ 'store_methods.amounts'|trans }}</th>
+                        <th>{{ 'common.actions'|trans }}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for method in store_methods %}
+                        <tr data-id="{{ method.id }}">
+                            <td>{{ method.sortOrder }}</td>
+                            <td class="admin-store-method-title">{{ method.title }}</td>
+                            <td>{{ method.gateway }}</td>
+                            <td>
+                                <span class="badge {{ method.active ? 'badge-success' : 'badge-secondary' }}">{{ (method.active ? 'common.enabled' : 'common.disabled')|trans }}</span>
+                            </td>
+                            <td>{{ method.minAmount ?? '–' }} – {{ method.maxAmount ?? '–' }} {{ method.currency }}</td>
+                            <td>
+                                {% if method.upUrl %}
+                                    <form method="post" action="{{ method.upUrl }}" data-method="{{ method.id }}" data-action="up">
+                                        <input type="hidden" name="_token" value="{{ csrf_token(csrf_prefix ~ method.id) }}">
+                                        <button type="submit" class="btn btn-sm btn-secondary" title="{{ 'store_methods.move_up'|trans }}" aria-label="{{ 'store_methods.move_up'|trans }}">↑</button>
+                                    </form>
+                                {% endif %}
+                                {% if method.downUrl %}
+                                    <form method="post" action="{{ method.downUrl }}" data-method="{{ method.id }}" data-action="down">
+                                        <input type="hidden" name="_token" value="{{ csrf_token(csrf_prefix ~ method.id) }}">
+                                        <button type="submit" class="btn btn-sm btn-secondary" title="{{ 'store_methods.move_down'|trans }}" aria-label="{{ 'store_methods.move_down'|trans }}">↓</button>
+                                    </form>
+                                {% endif %}
+                                <form method="post" action="{{ method.toggleUrl }}" data-method="{{ method.id }}" data-action="toggle">
+                                    <input type="hidden" name="_token" value="{{ csrf_token(csrf_prefix ~ method.id) }}">
+                                    <button type="submit" class="btn btn-sm {{ method.active ? 'btn-warning' : 'btn-success' }}">{{ (method.active ? 'store_methods.disable' : 'store_methods.enable')|trans }}</button>
+                                </form>
+                                <a class="btn btn-sm btn-link" href="{{ method.editUrl }}">{{ 'common.edit'|trans }}</a>
+                                {# EasyAdmin's own delete action (its CSRF token, audit and redirect back here). #}
+                                <form method="post" action="{{ method.deleteUrl }}" data-method="{{ method.id }}" data-action="delete" onsubmit="return confirm({{ 'store_methods.delete_confirm'|trans|json_encode }});">
+                                    <input type="hidden" name="token" value="{{ csrf_token('ea-delete') }}">
+                                    <button type="submit" class="btn btn-sm btn-link text-danger">{{ 'common.delete'|trans }}</button>
+                                </form>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% endif %}
+    </section>
+{% endblock %}

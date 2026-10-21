@@ -22,8 +22,6 @@ final class RoleAccessWebTest extends IntegrationTestCase
         'OrderCrudController' => 'ORDERS_VIEW',
         'OrderDraftCrudController' => 'ORDERS_VIEW',
         'PaymentCrudController' => 'PAYMENTS_VIEW',
-        'PaymentNeedsReviewCrudController' => 'PAYMENTS_VIEW',
-        'PaymentProvisioningFailedCrudController' => 'PAYMENTS_VIEW',
         'DiscountCodeCrudController' => 'DISCOUNTS_MANAGE',
         'DiscountUsageCrudController' => 'DISCOUNTS_MANAGE',
         'PlanCrudController' => 'PLANS_MANAGE',
@@ -85,6 +83,10 @@ final class RoleAccessWebTest extends IntegrationTestCase
             foreach (self::VIEW as $controller => $permission) {
                 $path = $this->indexPath('App\\Admin\\UI\\Crud\\'.$controller);
                 $this->client->request('GET', $path);
+                // A list folded into another page redirects there (only once the permission check passed).
+                if ($this->allowed($role, $permission) && $this->client->getResponse()->isRedirect()) {
+                    $this->client->followRedirect();
+                }
                 self::assertSame($this->allowed($role, $permission) ? 200 : 403, $this->client->getResponse()->getStatusCode(), sprintf('%s GET %s', $role, $path));
             }
         }
@@ -103,13 +105,15 @@ final class RoleAccessWebTest extends IntegrationTestCase
             ['/admin/order/new', 'ORDERS_MANAGE'],
             ['/admin/payment/'.$payment->getId(), 'PAYMENTS_VIEW'],
             ['/admin/payment/'.$payment->getId().'/edit', 'PAYMENTS_MODERATE'],
-            ['/admin/user/'.$user->getId(), 'CUSTOMERS_VIEW'],
-            ['/admin/user/'.$user->getId().'/edit', 'CUSTOMERS_MANAGE'],
+            ['/admin/customer/'.$user->getId(), 'CUSTOMERS_VIEW'],
+            ['/admin/customer/'.$user->getId().'/edit', 'CUSTOMERS_MANAGE'],
             ['/admin/vpn-service/'.$service->getId(), 'SERVICES_VIEW'],
             ['/admin/vpn-service/'.$service->getId().'/edit', 'SERVICES_MANAGE'],
             ['/admin/plans/bulk-adjust-prices', 'PLANS_MANAGE'],
-            ['/admin/settings/renewal-pricing', 'SETTINGS_MANAGE'],
-            ['/admin/settings/automation', 'SETTINGS_MANAGE'],
+            ['/admin/settings', 'SETTINGS_MANAGE'],
+            ['/admin/settings?tab=automation', 'SETTINGS_MANAGE'],
+            ['/admin/settings?tab=channels', 'SETTINGS_MANAGE'],
+            ['/admin/settings?tab=advanced', 'SETTINGS_MANAGE'],
             ['/admin/panel-setup/new', 'PANELS_MANAGE'],
             ['/admin/payment-gateways/install', 'GATEWAYS_MANAGE'],
             ['/admin/plugins/upload', 'PLUGINS_MANAGE'],

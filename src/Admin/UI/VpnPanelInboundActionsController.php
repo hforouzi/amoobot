@@ -4,9 +4,6 @@ declare(strict_types=1);
 
 namespace App\Admin\UI;
 
-use App\Admin\UI\Crud\VpnInboundCrudController;
-use App\Admin\UI\Crud\VpnPanelCrudController;
-use App\Admin\UI\Crud\VpnServiceCrudController;
 use App\Entity\VpnInbound;
 use App\Entity\VpnPanel;
 use App\Entity\VpnService;
@@ -57,9 +54,8 @@ final class VpnPanelInboundActionsController extends AbstractController
     #[Route('/vpn-panel/{id}/inbounds', name: 'admin_vpn_panel_view_inbounds', methods: ['GET'])]
     public function viewPanelInbounds(VpnPanel $panel): RedirectResponse
     {
-        return $this->redirectToRoute('admin', [
-            'crudAction' => 'index',
-            'crudControllerFqcn' => VpnInboundCrudController::class,
+        // The pretty route: the old "?crudAction=..." query format only shows the dashboard with pretty URLs.
+        return $this->redirectToRoute('admin_vpn_inbound_index', [
             'filters' => [
                 'panel' => [
                     'comparison' => '=',
@@ -76,7 +72,7 @@ final class VpnPanelInboundActionsController extends AbstractController
         if ('sanaei_3xui' !== $panel->getType()) {
             $this->addFlash('danger', 'تست ساخت کلاینت فقط برای پنل sanaei_3xui فعال است.');
 
-            return $this->redirectToInbounds();
+            return $this->redirectToInbounds($inbound);
         }
 
         $driver = $driverRegistry->resolve($panel);
@@ -101,7 +97,7 @@ final class VpnPanelInboundActionsController extends AbstractController
             $this->addFlash('danger', sprintf('ساخت کلاینت تستی ناموفق بود: %s', $e->getMessage()));
         }
 
-        return $this->redirectToInbounds();
+        return $this->redirectToInbounds($inbound);
     }
 
     #[Route('/vpn-inbound/{id}/resync', name: 'admin_vpn_inbound_resync', methods: ['GET'])]
@@ -114,7 +110,7 @@ final class VpnPanelInboundActionsController extends AbstractController
             $this->addFlash('danger', $e->getMessage());
         }
 
-        return $this->redirectToInbounds();
+        return $this->redirectToInbounds($inbound);
     }
 
     #[Route('/vpn-inbound/{id}/sync-access-metadata', name: 'admin_vpn_inbound_sync_access_metadata', methods: ['GET'])]
@@ -127,7 +123,7 @@ final class VpnPanelInboundActionsController extends AbstractController
             $this->addFlash('danger', $e->getMessage());
         }
 
-        return $this->redirectToInbounds();
+        return $this->redirectToInbounds($inbound);
     }
 
     #[Route('/vpn-inbound/{id}/regenerate-service-configs', name: 'admin_vpn_inbound_regenerate_service_configs', methods: ['GET'])]
@@ -215,7 +211,7 @@ final class VpnPanelInboundActionsController extends AbstractController
             $this->addFlash('success', sprintf('کانفیگ %d سرویس بروزرسانی شد.', $updated));
         }
 
-        return $this->redirectToInbounds();
+        return $this->redirectToInbounds($inbound);
     }
 
     #[Route('/vpn-service/{id}/regenerate-config', name: 'admin_vpn_service_regenerate_config', methods: ['GET'])]
@@ -285,26 +281,18 @@ final class VpnPanelInboundActionsController extends AbstractController
 
     private function redirectToPanels(): RedirectResponse
     {
-        return $this->redirectToRoute('admin', [
-            'crudAction' => 'index',
-            'crudControllerFqcn' => VpnPanelCrudController::class,
-        ]);
+        return $this->redirectToRoute('admin_vpn_panel_index');
     }
 
-    private function redirectToInbounds(): RedirectResponse
+    /** Back to the inbound's panel list (inbounds are reached from their panel). */
+    private function redirectToInbounds(VpnInbound $inbound): RedirectResponse
     {
-        return $this->redirectToRoute('admin', [
-            'crudAction' => 'index',
-            'crudControllerFqcn' => VpnInboundCrudController::class,
-        ]);
+        return $this->redirectToRoute('admin_vpn_panel_view_inbounds', ['id' => $inbound->getPanel()->getId()]);
     }
 
     private function redirectToServices(): RedirectResponse
     {
-        return $this->redirectToRoute('admin', [
-            'crudAction' => 'index',
-            'crudControllerFqcn' => VpnServiceCrudController::class,
-        ]);
+        return $this->redirectToRoute('admin_vpn_service_index');
     }
 
     /**

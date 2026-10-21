@@ -1,0 +1,7 @@
+{# VPN panel detail, and below it the panel's inbounds (they are reached from their panel, not the menu). #}
+{% extends '@EasyAdmin/crud/detail.html.twig' %}
+
+{% block main %}
+    {{ parent() }}
+    {{ include('admin/vpn_panel/_inbounds.html.twig', {panel: entity.instance, inbounds: panel_inbounds}) }}
+{% endblock %}

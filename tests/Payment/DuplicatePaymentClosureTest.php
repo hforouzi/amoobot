@@ -133,13 +133,13 @@ final class DuplicatePaymentClosureTest extends IntegrationTestCase
         $client->disableReboot();
         $client->loginUser($admin, 'main');
 
-        $crawler = $client->request('GET', '/admin/payment-needs-review');
+        $crawler = $client->request('GET', '/admin/payment?tab=needs_review');
         $approve = $crawler->filter(sprintf('form[action*="/admin/payment/%d/confirm"]', $duplicate->getId()));
         $client->request('POST', (string) $approve->attr('action'));
         $client->followRedirect();
         self::assertStringContainsString('already fulfilled', (string) $client->getResponse()->getContent());
 
-        $crawler = $client->request('GET', '/admin/payment-needs-review');
+        $crawler = $client->request('GET', '/admin/payment?tab=needs_review');
         $form = $crawler->filter(sprintf('form[action*="/admin/payment/%d/reject"][action*="refunded=1"]', $duplicate->getId()));
         self::assertCount(1, $form, 'Reject (refunded) is offered');
         $client->request('POST', (string) $form->attr('action'));

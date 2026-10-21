@@ -1,0 +1,12 @@
+{# Tab strip of a consolidated admin page. tabs: list of {key, label, url, active, count (optional)}. #}
+{% trans_default_domain 'admin' %}
+{% if tabs is not empty %}
+    <nav class="admin-tabs nav nav-tabs" aria-label="{{ label|default('')|trans }}">
+        {% for tab in tabs %}
+            <a class="nav-link{{ tab.active ? ' active' }}" href="{{ tab.url }}" data-tab="{{ tab.key }}"{% if tab.active %} aria-current="page"{% endif %}>
+                {{- tab.label|trans -}}
+                {%- if tab.count is defined and tab.count is not null %} <span class="badge admin-tab-count">{{ tab.count }}</span>{% endif -%}
+            </a>
+        {% endfor %}
+    </nav>
+{% endif %}

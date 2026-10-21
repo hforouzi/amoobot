@@ -1,0 +1,29 @@
+{# Settings page, "advanced" tab: the raw Setting keys (as the old Setting list: keys, not values), collapsed. #}
+{% trans_default_domain 'admin' %}
+<section class="admin-embedded-section">
+    <div class="alert alert-warning admin-advanced-warning" role="alert">{{ 'settings_page.advanced_warning'|trans }}</div>
+
+    <details id="advanced-settings">
+        <summary>{{ 'settings_page.advanced_show'|trans }} ({{ settings|length }})</summary>
+        <table class="table datagrid">
+            <thead>
+                <tr>
+                    <th>{{ 'settings_page.key'|trans }}</th>
+                    <th>{{ 'settings_page.type'|trans }}</th>
+                    <th>{{ 'common.updated_at'|trans }}</th>
+                    <th>{{ 'common.actions'|trans }}</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for setting in settings %}
+                    <tr data-id="{{ setting.id }}">
+                        <td dir="ltr"><code>{{ setting.keyName }}</code></td>
+                        <td>{{ setting.type }}</td>
+                        <td>{{ setting.updatedAt ? setting.updatedAt|date('Y-m-d H:i') : '–' }}</td>
+                        <td><a class="btn btn-sm btn-link" href="{{ path('admin_setting_edit', {entityId: setting.id}) }}">{{ 'common.edit'|trans }}</a></td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </details>
+</section>

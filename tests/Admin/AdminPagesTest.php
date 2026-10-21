@@ -63,6 +63,11 @@ final class AdminPagesTest extends IntegrationTestCase
     {
         $index = $this->indexPath($controller);
         $crawler = $this->client->request('GET', $index);
+        // A list folded into another page (Telegram accounts, store payment methods, required channels, settings)
+        // redirects there; that page links to this controller's new/detail/edit pages.
+        if ($this->client->getResponse()->isRedirect()) {
+            $crawler = $this->client->followRedirect();
+        }
         self::assertSame(200, $this->client->getResponse()->getStatusCode(), $this->failure('GET '.$index));
 
         $linked = [];

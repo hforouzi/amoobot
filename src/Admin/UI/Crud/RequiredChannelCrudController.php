@@ -7,14 +7,22 @@ namespace App\Admin\UI\Crud;
 use App\Admin\Security\AdminCrudPermissions;
 use App\Entity\RequiredChannel;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Crud;
+use EasyCorp\Bundle\EasyAdminBundle\Context\AdminContext;
 use EasyCorp\Bundle\EasyAdminBundle\Controller\AbstractCrudController;
 use EasyCorp\Bundle\EasyAdminBundle\Field\BooleanField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\DateTimeField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\IdField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\IntegerField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\TextField;
+use Symfony\Component\HttpFoundation\Response;
 class RequiredChannelCrudController extends AbstractCrudController
 {
+    /** The list is the "required channels" tab of the settings page; create/edit/detail stay here. */
+    public function index(AdminContext $context): Response
+    {
+        return $this->redirectToRoute('admin_settings', ['tab' => 'channels']);
+    }
+
     public static function getEntityFqcn(): string
     {
         return RequiredChannel::class;

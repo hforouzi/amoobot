@@ -1,0 +1,15 @@
+{# EasyAdmin index that is one tab of a consolidated page: the tab strip above the title. #}
+{% extends '@EasyAdmin/crud/index.html.twig' %}
+
+{% block content_header_wrapper %}
+    {{ include('admin/_tabs.html.twig', {tabs: admin_tabs is defined ? admin_tabs : admin_tabs_for(ea.crud.controllerFqcn)}) }}
+    {{ parent() }}
+{% endblock %}
+
+{# A search keeps the tab it was made in. #}
+{% block search_form_filters %}
+    {{ parent() }}
+    {% if app.request.query.has('tab') %}
+        <input type="hidden" name="tab" value="{{ app.request.query.get('tab') }}">
+    {% endif %}
+{% endblock %}

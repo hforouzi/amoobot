@@ -4,96 +4,23 @@ declare(strict_types=1);
 
 namespace App\Admin\UI;
 
-use App\Entity\Setting;
-use App\Provisioning\Application\AutomationSettingsProvider;
-use App\Provisioning\Application\RenewalSettingsProvider;
-use App\Provisioning\Application\TrafficAddonSettingsProvider;
-use App\Shop\Application\IncompleteOrderSettingsProvider;
 use App\Shop\Application\PlanPriceAdjustmentService;
-use App\Shop\Application\SalesSettingsProvider;
 use App\Security\AdminAuditLogger;
-use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Attribute\Route;
 
+/**
+ * Bulk plan price adjustment (linked from the plans list). The renewal pricing and automation settings that used to
+ * live here are tabs of SettingsAdminController now; their old URLs redirect there (LegacyAdminRoutes).
+ */
 #[Route('/admin')]
 final class RenewalPricingAdminController extends AbstractController
 {
     public function __construct(
-        private readonly EntityManagerInterface $entityManager,
-        private readonly RenewalSettingsProvider $renewalSettingsProvider,
-        private readonly AutomationSettingsProvider $automationSettingsProvider,
-        private readonly TrafficAddonSettingsProvider $trafficAddonSettingsProvider,
-        private readonly IncompleteOrderSettingsProvider $incompleteOrderSettingsProvider,
         private readonly PlanPriceAdjustmentService $planPriceAdjustmentService,
-        private readonly SalesSettingsProvider $salesSettingsProvider,
     ) {
-    }
-    #[Route('/settings/renewal-pricing', name: 'admin_renewal_pricing_settings', methods: ['GET', 'POST'])]
-    public function renewalPricingSettings(Request $request, AdminAuditLogger $auditLogger): Response
-    {
-        if ($request->isMethod('POST')) {
-            $discountRaw = trim((string) $request->request->get('pricing_global_discount_percent', '0'));
-            $discountPercent = is_numeric($discountRaw) ? (float) $discountRaw : -1;
-            $trafficMinRaw = trim((string) $request->request->get('traffic_addon_min_gb', '1'));
-            $trafficMaxRaw = trim((string) $request->request->get('traffic_addon_max_gb', '100'));
-            $trafficPriceRaw = trim((string) $request->request->get('traffic_addon_price_per_gb', '0'));
-            $disabledMessage = trim((string) $request->request->get('sales_disabled_message', ''));
-            $trafficMinGb = is_numeric($trafficMinRaw) ? (int) floor((float) $trafficMinRaw) : 0;
-            $trafficMaxGb = is_numeric($trafficMaxRaw) ? (int) floor((float) $trafficMaxRaw) : 0;
-            $trafficPricePerGb = is_numeric($trafficPriceRaw) ? (int) floor((float) $trafficPriceRaw) : -1;
-
-            if ($discountPercent < 0 || $discountPercent > 100) {
-                $this->addFlash('danger', 'درصد تخفیف باید بین ۰ تا ۱۰۰ باشد.');
-            } elseif ('' === $disabledMessage) {
-                $this->addFlash('danger', 'پیام غیرفعال بودن فروش نمی‌تواند خالی باشد.');
-            } elseif ($trafficMinGb <= 0 || $trafficMaxGb <= 0 || $trafficMaxGb < $trafficMinGb) {
-                $this->addFlash('danger', 'حداقل و حداکثر حجم اضافه معتبر نیست.');
-            } elseif ($trafficPricePerGb < 0) {
-                $this->addFlash('danger', 'قیمت هر گیگ حجم اضافه معتبر نیست.');
-            } else {
-                $this->upsertSetting('renewal.carry_remaining_traffic', $request->request->has('renewal_carry_remaining_traffic') ? 'true' : 'false', 'boolean');
-                $this->upsertSetting('renewal.carry_remaining_days', $request->request->has('renewal_carry_remaining_days') ? 'true' : 'false', 'boolean');
-                $this->upsertSetting('renewal.expired_start_from_now', $request->request->has('renewal_expired_start_from_now') ? 'true' : 'false', 'boolean');
-                $this->upsertSetting('pricing.global_discount_percent', (string) floor($discountPercent), 'number');
-                $this->upsertSetting('traffic_addon.enabled', $request->request->has('traffic_addon_enabled') ? 'true' : 'false', 'boolean');
-                $this->upsertSetting('traffic_addon.min_gb', (string) $trafficMinGb, 'number');
-                $this->upsertSetting('traffic_addon.max_gb', (string) $trafficMaxGb, 'number');
-                $this->upsertSetting('traffic_addon.price_per_gb', (string) $trafficPricePerGb, 'number');
-                $this->upsertSetting(SalesSettingsProvider::NEW_ORDERS_ENABLED, $request->request->has('sales_new_orders_enabled') ? 'true' : 'false', 'boolean');
-                $this->upsertSetting(SalesSettingsProvider::RENEWALS_ENABLED, $request->request->has('sales_renewals_enabled') ? 'true' : 'false', 'boolean');
-                $this->upsertSetting(SalesSettingsProvider::ADD_TRAFFIC_ENABLED, $request->request->has('sales_add_traffic_enabled') ? 'true' : 'false', 'boolean');
-                $this->upsertSetting(SalesSettingsProvider::DISABLED_MESSAGE, $disabledMessage, 'text');
-                $this->entityManager->flush();
-                $auditLogger->record('settings.update', 'Setting', null, ['page' => 'renewal_pricing']);
-                $this->addFlash('success', 'تنظیمات تمدید و قیمتگذاری بروزرسانی شد.');
-            }
-        }
-
-        return $this->render('admin/renewal_pricing_settings.html.twig', [
-            'values' => [
-                'renewal_carry_remaining_traffic' => $this->renewalSettingsProvider->carryRemainingTraffic(),
-                'renewal_carry_remaining_days' => $this->renewalSettingsProvider->carryRemainingDays(),
-                'renewal_expired_start_from_now' => $this->renewalSettingsProvider->expiredStartFromNow(),
-                'pricing_global_discount_percent' => $this->renewalSettingsProvider->globalDiscountPercent(),
-                'traffic_addon_enabled' => $this->trafficAddonSettingsProvider->enabled(),
-                'traffic_addon_min_gb' => $this->trafficAddonSettingsProvider->minGb(),
-                'traffic_addon_max_gb' => $this->trafficAddonSettingsProvider->maxGb(),
-                'traffic_addon_price_per_gb' => $this->trafficAddonSettingsProvider->pricePerGb(),
-                'sales_new_orders_enabled' => $this->salesSettingsProvider->newOrdersEnabled(),
-                'sales_renewals_enabled' => $this->salesSettingsProvider->renewalsEnabled(),
-                'sales_add_traffic_enabled' => $this->salesSettingsProvider->addTrafficEnabled(),
-                'sales_disabled_message' => $this->salesSettingsProvider->disabledMessage(),
-            ],
-            'keys' => [
-                'sales_new_orders_enabled' => SalesSettingsProvider::NEW_ORDERS_ENABLED,
-                'sales_renewals_enabled' => SalesSettingsProvider::RENEWALS_ENABLED,
-                'sales_add_traffic_enabled' => SalesSettingsProvider::ADD_TRAFFIC_ENABLED,
-                'sales_disabled_message' => SalesSettingsProvider::DISABLED_MESSAGE,
-            ],
-        ]);
     }
 
     #[Route('/plans/bulk-adjust-prices', name: 'admin_bulk_plan_price_adjustment', methods: ['GET', 'POST'])]
@@ -146,59 +73,5 @@ final class RenewalPricingAdminController extends AbstractController
             'input' => $input,
             'changes' => $changes,
         ]);
-    }
-    #[Route('/settings/automation', name: 'admin_automation_settings', methods: ['GET', 'POST'])]
-    public function automationSettings(Request $request, AdminAuditLogger $auditLogger): Response
-    {
-        if ($request->isMethod('POST')) {
-            $batchLimitRaw = trim((string) $request->request->get('automation_batch_limit', '100'));
-            $expireHoursRaw = trim((string) $request->request->get('orders_incomplete_expire_hours', '24'));
-            $batchLimit = is_numeric($batchLimitRaw) ? (int) $batchLimitRaw : 0;
-            $expireHours = is_numeric($expireHoursRaw) ? (int) $expireHoursRaw : 0;
-            if ($batchLimit <= 0) {
-                $this->addFlash('danger', 'مقدار batch limit باید بزرگتر از صفر باشد.');
-            } elseif ($expireHours <= 0) {
-                $this->addFlash('danger', 'زمان انقضای سفارش ناقص باید بزرگتر از صفر باشد.');
-            } else {
-                $this->upsertSetting('automation.sync_usage_enabled', $request->request->has('automation_sync_usage_enabled') ? 'true' : 'false', 'boolean');
-                $this->upsertSetting('automation.check_expiry_enabled', $request->request->has('automation_check_expiry_enabled') ? 'true' : 'false', 'boolean');
-                $this->upsertSetting('automation.send_notifications_enabled', $request->request->has('automation_send_notifications_enabled') ? 'true' : 'false', 'boolean');
-                $this->upsertSetting('automation.auto_suspend_expired_enabled', $request->request->has('automation_auto_suspend_expired_enabled') ? 'true' : 'false', 'boolean');
-                $this->upsertSetting('automation.auto_suspend_traffic_exhausted_enabled', $request->request->has('automation_auto_suspend_traffic_exhausted_enabled') ? 'true' : 'false', 'boolean');
-                $this->upsertSetting('automation.expire_incomplete_orders_enabled', $request->request->has('automation_expire_incomplete_orders_enabled') ? 'true' : 'false', 'boolean');
-                $this->upsertSetting('automation.batch_limit', (string) $batchLimit, 'number');
-                $this->upsertSetting('orders.incomplete_expire_hours', (string) $expireHours, 'number');
-                $this->entityManager->flush();
-                $auditLogger->record('settings.update', 'Setting', null, ['page' => 'automation']);
-                $this->addFlash('success', 'تنظیمات اتوماسیون بروزرسانی شد.');
-            }
-        }
-
-        return $this->render('admin/automation_settings.html.twig', [
-            'values' => [
-                'automation_sync_usage_enabled' => $this->automationSettingsProvider->syncUsageEnabled(),
-                'automation_check_expiry_enabled' => $this->automationSettingsProvider->checkExpiryEnabled(),
-                'automation_send_notifications_enabled' => $this->automationSettingsProvider->sendNotificationsEnabled(),
-                'automation_auto_suspend_expired_enabled' => $this->automationSettingsProvider->autoSuspendExpiredEnabled(),
-                'automation_auto_suspend_traffic_exhausted_enabled' => $this->automationSettingsProvider->autoSuspendTrafficExhaustedEnabled(),
-                'automation_expire_incomplete_orders_enabled' => $this->automationSettingsProvider->expireIncompleteOrdersEnabled(),
-                'automation_batch_limit' => $this->automationSettingsProvider->batchLimit(),
-                'orders_incomplete_expire_hours' => $this->incompleteOrderSettingsProvider->expireHours(),
-            ],
-        ]);
-    }
-
-    private function upsertSetting(string $keyName, string $value, string $type): void
-    {
-        $setting = $this->entityManager->getRepository(Setting::class)->findOneBy(['keyName' => $keyName]);
-        if (!$setting instanceof Setting) {
-            $setting = (new Setting())->setKeyName($keyName);
-            $this->entityManager->persist($setting);
-        }
-
-        $setting
-            ->setValue($value)
-            ->setType($type)
-            ->setUpdatedAt(new \DateTimeImmutable());
     }
 }

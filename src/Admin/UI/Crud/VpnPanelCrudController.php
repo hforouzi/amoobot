@@ -6,8 +6,10 @@ namespace App\Admin\UI\Crud;
 
 use App\Admin\Security\AdminCrudPermissions;
 use App\Admin\UI\Field\JsonField;
+use App\Entity\VpnInbound;
 use App\Entity\VpnPanel;
 use App\Provisioning\Domain\SanaeiIntegrationMode;
+use Doctrine\ORM\EntityManagerInterface;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Action;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Actions;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Crud;
@@ -20,8 +22,16 @@ use EasyCorp\Bundle\EasyAdminBundle\Field\DateTimeField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\IdField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\TextField;
 use Symfony\Component\HttpFoundation\Response;
+/**
+ * VPN panels. A panel's inbounds are listed on its detail page (and on the panel setup page) instead of a menu
+ * entry of their own; the inbound list stays reachable from there, filtered on the panel.
+ */
 class VpnPanelCrudController extends AbstractCrudController
 {
+    public function __construct(private readonly EntityManagerInterface $entityManager)
+    {
+    }
+
     public static function getEntityFqcn(): string
     {
         return VpnPanel::class;
@@ -29,7 +39,27 @@ class VpnPanelCrudController extends AbstractCrudController
 
     public function configureCrud(Crud $crud): Crud
     {
-        return $crud->setEntityPermission(AdminCrudPermissions::view(self::class));
+        return $crud
+            ->setEntityPermission(AdminCrudPermissions::view(self::class))
+            ->overrideTemplate('crud/detail', 'admin/vpn_panel/detail.html.twig');
+    }
+
+    public function configureResponseParameters(KeyValueStore $responseParameters): KeyValueStore
+    {
+        $panel = $this->getContext()?->getEntity()->getInstance();
+        if (Crud::PAGE_DETAIL === $responseParameters->get('pageName') && $panel instanceof VpnPanel) {
+            $responseParameters->set('panel_inbounds', self::inbounds($this->entityManager, $panel));
+        }
+
+        return $responseParameters;
+    }
+
+    /**
+     * @return list<VpnInbound>
+     */
+    public static function inbounds(EntityManagerInterface $entityManager, VpnPanel $panel): array
+    {
+        return $entityManager->getRepository(VpnInbound::class)->findBy(['panel' => $panel], ['id' => 'ASC']);
     }
 
     public function configureActions(Actions $actions): Actions
@@ -46,10 +76,10 @@ class VpnPanelCrudController extends AbstractCrudController
             ->setCssClass('btn btn-primary')
             ->displayIf(fn (VpnPanel $panel): bool => 'sanaei_3xui' === $panel->getType() && !$panel->isModern());
 
+        // Every panel: its inbounds are not in the menu any more.
         $viewInbounds = Action::new('viewInbounds', 'مشاهده اینباندها')
             ->linkToRoute('admin_vpn_panel_view_inbounds', fn (VpnPanel $panel): array => ['id' => $panel->getId()])
-            ->setCssClass('btn btn-info')
-            ->displayIf(fn (VpnPanel $panel): bool => 'sanaei_3xui' === $panel->getType() && !$panel->isModern());
+            ->setCssClass('btn btn-info');
 
         return $actions
             ->update(Crud::PAGE_INDEX, Action::NEW, static fn (Action $action): Action => $action->linkToRoute('admin_panel_setup_new'))

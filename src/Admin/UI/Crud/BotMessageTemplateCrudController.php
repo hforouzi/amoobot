@@ -6,6 +6,7 @@ namespace App\Admin\UI\Crud;
 
 use App\Entity\BotMessageTemplate;
 use Doctrine\ORM\EntityManagerInterface;
+use EasyCorp\Bundle\EasyAdminBundle\Attribute\AdminRoute;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Crud;
 use EasyCorp\Bundle\EasyAdminBundle\Controller\AbstractCrudController;
 use EasyCorp\Bundle\EasyAdminBundle\Field\BooleanField;
@@ -15,6 +16,10 @@ use EasyCorp\Bundle\EasyAdminBundle\Field\IdField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\TextareaField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\TextField;
 
+/**
+ * Bot texts page, "message templates" tab (AdminTabs); was /admin/bot-message-template (redirects here).
+ */
+#[AdminRoute(path: '/bot-texts/messages', name: 'bot_texts_messages')]
 final class BotMessageTemplateCrudController extends AbstractCrudController
 {
     public static function getEntityFqcn(): string
@@ -27,7 +32,8 @@ final class BotMessageTemplateCrudController extends AbstractCrudController
         return $crud
             ->setEntityLabelInSingular('admin.bot_message_template')
             ->setEntityLabelInPlural('admin.bot_message_templates')
-            ->setDefaultSort(['updatedAt' => 'DESC', 'id' => 'DESC']);
+            ->setDefaultSort(['updatedAt' => 'DESC', 'id' => 'DESC'])
+            ->overrideTemplate('crud/index', 'admin/crud/index_tabs.html.twig');
     }
 
     public function configureFields(string $pageName): iterable
