@@ -443,7 +443,8 @@ final class PaymentGatewayCrudController extends AbstractCrudController
                     $options['constraints'] = [];
                 }
                 $builder->add($name, PasswordType::class, $options + [
-                    'always_empty' => false,
+                    // Never render a stored secret into the page; empty on submit keeps it.
+                    'always_empty' => true,
                     'empty_data' => '',
                 ]);
                 continue;
