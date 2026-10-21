@@ -17,9 +17,9 @@ use Symfony\Component\Validator\Constraints\Length;
 use Symfony\Component\Validator\Constraints\NotBlank;
 
 /**
- * Step 1 of the panel setup: name, URL, API token; proxy, TLS pin, forced mode and subscription settings are the
- * collapsed "advanced" part. No username/password: modern panels need only the token (old panels keep the classic
- * form).
+ * The one panel form (create and edit): name, URL, API token, active; proxy, TLS pin, forced mode, subscription
+ * settings and the fallback public host are the collapsed "advanced" part. The old username/password API settings
+ * are added only for a panel that is on the legacy API ("legacy_credentials" option).
  */
 final class PanelConnectionType extends AbstractType
 {
@@ -40,6 +40,7 @@ final class PanelConnectionType extends AbstractType
                 'always_empty' => true,
                 'attr' => ['dir' => 'ltr', 'autocomplete' => 'off'],
             ])
+            ->add('isActive', CheckboxType::class, ['label' => 'panel_connection.form.active', 'help' => 'panel_connection.form.active_help', 'required' => false])
             ->add('useProxy', CheckboxType::class, ['label' => 'panel_connection.form.use_proxy', 'help' => 'panel_connection.form.use_proxy_help', 'required' => false])
             ->add('tlsPin', TextType::class, [
                 'label' => 'panel_connection.form.tls_pin',
@@ -59,7 +60,24 @@ final class PanelConnectionType extends AbstractType
                 ],
             ])
             ->add('subscriptionBaseUrl', TextType::class, ['label' => 'panel_connection.form.subscription_base_url', 'help' => 'panel_connection.form.subscription_base_url_help', 'required' => false, 'attr' => ['dir' => 'ltr']])
-            ->add('subscriptionPathPrefix', TextType::class, ['label' => 'panel_connection.form.subscription_path_prefix', 'required' => false, 'attr' => ['dir' => 'ltr', 'placeholder' => '/sub']]);
+            ->add('subscriptionPathPrefix', TextType::class, ['label' => 'panel_connection.form.subscription_path_prefix', 'required' => false, 'attr' => ['dir' => 'ltr', 'placeholder' => '/sub']])
+            ->add('publicHost', TextType::class, ['label' => 'panel_connection.form.public_host', 'help' => 'panel_connection.form.public_host_help', 'required' => false, 'attr' => ['dir' => 'ltr']]);
+
+        if (true === $options['legacy_credentials']) {
+            $builder
+                ->add('username', TextType::class, ['label' => 'panel_connection.form.username', 'required' => false, 'attr' => ['dir' => 'ltr', 'autocomplete' => 'off']])
+                ->add('plainPassword', PasswordType::class, [
+                    'label' => 'panel_connection.form.password',
+                    'help' => 'panel_connection.form.password_help',
+                    'required' => false,
+                    'always_empty' => true,
+                    'attr' => ['dir' => 'ltr', 'autocomplete' => 'off'],
+                ])
+                ->add('apiVersion', ChoiceType::class, ['label' => 'panel_connection.form.api_version', 'choices' => ['legacy' => 'legacy', 'v3' => 'v3'], 'choice_translation_domain' => false])
+                ->add('authMode', ChoiceType::class, ['label' => 'panel_connection.form.auth_mode', 'choices' => ['cookie' => 'cookie', 'bearer' => 'bearer'], 'choice_translation_domain' => false])
+                ->add('clientApiMode', ChoiceType::class, ['label' => 'panel_connection.form.client_api_mode', 'choices' => ['inbound_legacy' => 'inbound_legacy', 'clients' => 'clients'], 'choice_translation_domain' => false])
+                ->add('basePath', TextType::class, ['label' => 'panel_connection.form.base_path', 'required' => false, 'attr' => ['dir' => 'ltr', 'placeholder' => '/xui']]);
+        }
     }
 
     public function configureOptions(OptionsResolver $resolver): void
@@ -68,6 +86,8 @@ final class PanelConnectionType extends AbstractType
             'data_class' => VpnPanel::class,
             'translation_domain' => 'admin',
             'csrf_token_id' => 'panel_connection',
+            'legacy_credentials' => false,
         ]);
+        $resolver->setAllowedTypes('legacy_credentials', 'bool');
     }
 }

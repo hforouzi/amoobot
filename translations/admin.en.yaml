@@ -3,8 +3,22 @@ admin:
   bot_button_labels: Button Labels
   bot_message_template: Message Template
   bot_message_templates: Message Templates
+  broadcasts: Broadcast
+  admin_users: Admin Users
+  required_channels: Required Channels
+  trial_plans: Trial Plans
+  trial_claims: Trial Claims
+  order_drafts: Order Drafts
+  payments_needs_review: Needs review
+  payments_provisioning_failed: Provisioning failed
   dashboard: Dashboard
   menu:
+    sales: Sales
+    catalog: Catalog
+    customers: Customers
+    messaging: Messaging
+    needs_attention: Needs attention
+    logs: Logs
     store: Store
     vpn: VPN
     users: Users
@@ -255,11 +269,26 @@ panel_connection:
     subscription_base_url: Subscription base URL
     subscription_base_url_help: The panel's subscription service URL, used for the customer's subscription link, e.g. https://sub.example.com:2096
     subscription_path_prefix: Subscription path
+    active: Active
+    active_help: An inactive panel takes no new purchases; existing services keep working.
+    public_host: Public host (fallback)
+    public_host_help: Host put in generated config links only when neither the panel nor the inbound provides one.
+    legacy_credentials: Legacy credentials (old 3x-ui API)
+    legacy_credentials_help: This panel uses the old username/password API. These settings are not needed for a panel on the API token.
+    username: Panel username
+    password: Panel password
+    password_help: Leave empty to keep the current password.
+    password_kept: A password is stored; it is kept unless you enter a new one.
+    api_version: API version
+    auth_mode: Authentication
+    client_api_mode: Client API
+    base_path: Base path
     save: Save
   validation:
     url_invalid: The panel URL is not valid; it must start with https:// and contain no password, "?" or "#".
     url_plain_http: 'http:// is allowed only for a panel on this server or a private network (127.0.0.1 or a private IP); otherwise the token would travel unencrypted over the internet. Use https://.'
     token_required: Enter the API token.
+    token_or_login_required: Enter the API token, or the panel username and password.
     tls_pin: The pin must be the base64 SHA-256 of the public key (44 characters ending in "=").
   flash:
     created: Panel saved. Now press "Test connection".

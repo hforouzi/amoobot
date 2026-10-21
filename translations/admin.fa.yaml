@@ -3,8 +3,22 @@ admin:
   bot_button_labels: متن دکمه‌ها
   bot_message_template: قالب پیام
   bot_message_templates: قالب پیام‌ها
+  broadcasts: ارسال پیام همگانی
+  admin_users: کاربران ادمین
+  required_channels: کانال‌های اجباری
+  trial_plans: پلن‌های تست
+  trial_claims: درخواست‌های تست
+  order_drafts: پیش‌نویس سفارش‌ها
+  payments_needs_review: نیازمند بررسی
+  payments_provisioning_failed: ساخت سرویس ناموفق
   dashboard: داشبورد
   menu:
+    sales: فروش
+    catalog: کاتالوگ
+    customers: مشتریان
+    messaging: پیام‌رسانی
+    needs_attention: نیازمند رسیدگی
+    logs: لاگ‌ها
     store: فروشگاه
     vpn: VPN
     users: کاربران
@@ -255,11 +269,26 @@ panel_connection:
     subscription_base_url: آدرس پایه اشتراک (subscription)
     subscription_base_url_help: آدرس سرویس اشتراک پنل برای ساخت لینک اشتراک مشتری؛ مثلاً https://sub.example.com:2096
     subscription_path_prefix: مسیر اشتراک
+    active: فعال
+    active_help: پنل غیرفعال خرید جدید نمی‌پذیرد؛ سرویس‌های موجود کار می‌کنند.
+    public_host: هاست عمومی (جایگزین)
+    public_host_help: فقط وقتی در لینک‌های کانفیگ ساخته‌شده قرار می‌گیرد که نه پنل و نه اینباند هاستی بدهند.
+    legacy_credentials: اطلاعات ورود قدیمی (API قدیمی 3x-ui)
+    legacy_credentials_help: این پنل از API قدیمی با نام کاربری و رمز عبور استفاده می‌کند. برای پنلی که با API Token کار می‌کند لازم نیست.
+    username: نام کاربری پنل
+    password: رمز عبور پنل
+    password_help: برای حفظ رمز فعلی خالی بگذارید.
+    password_kept: رمز عبور ذخیره شده است و تا رمز جدیدی وارد نکنید حفظ می‌شود.
+    api_version: نسخه API
+    auth_mode: روش احراز هویت
+    client_api_mode: API کلاینت
+    base_path: مسیر پایه
     save: ذخیره
   validation:
     url_invalid: 'آدرس پنل معتبر نیست؛ باید با https:// شروع شود و رمز، ? یا # نداشته باشد.'
     url_plain_http: 'http:// فقط برای پنلی روی همین سرور یا شبکه خصوصی (127.0.0.1 یا IP خصوصی) مجاز است؛ در غیر این صورت توکن بدون رمزنگاری در اینترنت ارسال می‌شود. از https:// استفاده کنید.'
     token_required: API Token را وارد کنید.
+    token_or_login_required: API Token یا نام کاربری و رمز عبور پنل را وارد کنید.
     tls_pin: 'پین باید هش SHA-256 کلید عمومی به‌صورت base64 باشد (۴۴ کاراکتر که با = تمام می‌شود).'
   flash:
     created: پنل ذخیره شد. حالا «تست اتصال» را بزنید.

@@ -4,19 +4,28 @@ declare(strict_types=1);
 
 namespace App\Admin\UI\Crud;
 
+use App\Entity\AdminUser;
 use App\Entity\RequiredChannel;
+use EasyCorp\Bundle\EasyAdminBundle\Config\Crud;
 use EasyCorp\Bundle\EasyAdminBundle\Controller\AbstractCrudController;
 use EasyCorp\Bundle\EasyAdminBundle\Field\BooleanField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\DateTimeField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\IdField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\IntegerField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\TextField;
+use Symfony\Component\Security\Http\Attribute\IsGranted;
 
+#[IsGranted('ROLE_SUPER_ADMIN')]
 class RequiredChannelCrudController extends AbstractCrudController
 {
     public static function getEntityFqcn(): string
     {
         return RequiredChannel::class;
+    }
+
+    public function configureCrud(Crud $crud): Crud
+    {
+        return $crud->setEntityPermission(AdminUser::ROLE_SUPER_ADMIN);
     }
 
     public function configureFields(string $pageName): iterable

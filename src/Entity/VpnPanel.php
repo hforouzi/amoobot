@@ -248,7 +248,9 @@ class VpnPanel
     {
         $value = trim((string) ($subscriptionBaseUrl ?? ''));
         $this->subscriptionBaseUrl = '' === $value ? null : $value;
-        $this->setConfigValue('subscription_base_url', $this->subscriptionBaseUrl);
+        // Stored in the column only. Older rows also have config.subscription_base_url, which the getter still falls
+        // back to; drop it on save so readers that look at the config key first cannot see a stale value.
+        $this->setConfigValue('subscription_base_url', null);
 
         return $this;
     }
