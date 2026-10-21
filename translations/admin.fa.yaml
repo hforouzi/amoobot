@@ -3,8 +3,22 @@ admin:
   bot_button_labels: متن دکمه‌ها
   bot_message_template: قالب پیام
   bot_message_templates: قالب پیام‌ها
+  broadcasts: ارسال پیام همگانی
+  admin_users: کاربران ادمین
+  required_channels: کانال‌های اجباری
+  trial_plans: پلن‌های تست
+  trial_claims: درخواست‌های تست
+  order_drafts: پیش‌نویس سفارش‌ها
+  payments_needs_review: نیازمند بررسی
+  payments_provisioning_failed: ساخت سرویس ناموفق
   dashboard: داشبورد
   menu:
+    sales: فروش
+    catalog: کاتالوگ
+    customers: مشتریان
+    messaging: پیام‌رسانی
+    needs_attention: نیازمند رسیدگی
+    logs: لاگ‌ها
     store: فروشگاه
     vpn: VPN
     users: کاربران

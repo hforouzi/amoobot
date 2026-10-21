@@ -4,9 +4,13 @@ declare(strict_types=1);
 
 namespace App\Admin\UI\Crud;
 
+use App\Admin\UI\DashboardController;
 use App\Entity\Plan;
 use App\Shop\Application\PlanPriceSanityChecker;
 use Doctrine\ORM\EntityManagerInterface;
+use EasyCorp\Bundle\EasyAdminBundle\Config\Action;
+use EasyCorp\Bundle\EasyAdminBundle\Config\Actions;
+use EasyCorp\Bundle\EasyAdminBundle\Config\Crud;
 use EasyCorp\Bundle\EasyAdminBundle\Controller\AbstractCrudController;
 use EasyCorp\Bundle\EasyAdminBundle\Field\AssociationField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\BooleanField;
@@ -15,18 +19,55 @@ use EasyCorp\Bundle\EasyAdminBundle\Field\IdField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\IntegerField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\TextareaField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\TextField;
+use EasyCorp\Bundle\EasyAdminBundle\Router\AdminUrlGeneratorInterface;
 
 class PlanCrudController extends AbstractCrudController
 {
     private const TOMAN_HELP = 'Toman (تومان). Not Rial, not thousands of Toman.';
 
-    public function __construct(private readonly PlanPriceSanityChecker $priceSanityChecker)
-    {
+    public function __construct(
+        private readonly PlanPriceSanityChecker $priceSanityChecker,
+        private readonly AdminUrlGeneratorInterface $adminUrlGenerator,
+    ) {
     }
 
     public static function getEntityFqcn(): string
     {
         return Plan::class;
+    }
+
+    /**
+     * Trial plans, trial claims and the bulk price adjustment are reached from here (not from the menu).
+     */
+    public function configureActions(Actions $actions): Actions
+    {
+        $trialPlans = Action::new('trialPlans', 'admin.trial_plans', 'fa fa-gift')
+            ->linkToUrl(fn (): string => $this->indexUrl(TrialPlanCrudController::class))
+            ->createAsGlobalAction();
+        $trialClaims = Action::new('trialClaims', 'admin.trial_claims', 'fa fa-check-square-o')
+            ->linkToUrl(fn (): string => $this->indexUrl(TrialClaimCrudController::class))
+            ->createAsGlobalAction();
+        $bulkPrices = Action::new('bulkPriceAdjustment', 'admin.bulk_plan_price_adjustment', 'fa fa-percent')
+            ->linkToRoute('admin_bulk_plan_price_adjustment')
+            ->createAsGlobalAction();
+
+        return $actions
+            ->add(Crud::PAGE_INDEX, $trialPlans)
+            ->add(Crud::PAGE_INDEX, $trialClaims)
+            ->add(Crud::PAGE_INDEX, $bulkPrices);
+    }
+
+    /**
+     * @param class-string $crudController
+     */
+    private function indexUrl(string $crudController): string
+    {
+        return $this->adminUrlGenerator
+            ->unsetAll()
+            ->setDashboard(DashboardController::class)
+            ->setController($crudController)
+            ->setAction(Action::INDEX)
+            ->generateUrl();
     }
 
     public function configureFields(string $pageName): iterable

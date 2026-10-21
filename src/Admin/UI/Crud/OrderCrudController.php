@@ -6,8 +6,11 @@ namespace App\Admin\UI\Crud;
 
 use App\Admin\UI\Support\AdminStatusBadge;
 use App\Admin\UI\Support\AdminJsonFormatter;
+use App\Admin\UI\DashboardController;
 use App\Entity\Order;
 use App\Shop\Domain\OrderStatus;
+use EasyCorp\Bundle\EasyAdminBundle\Config\Action;
+use EasyCorp\Bundle\EasyAdminBundle\Config\Actions;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Crud;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Filters;
 use EasyCorp\Bundle\EasyAdminBundle\Controller\AbstractCrudController;
@@ -20,9 +23,14 @@ use EasyCorp\Bundle\EasyAdminBundle\Field\TextareaField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\TextField;
 use EasyCorp\Bundle\EasyAdminBundle\Filter\ChoiceFilter;
 use EasyCorp\Bundle\EasyAdminBundle\Filter\EntityFilter;
+use EasyCorp\Bundle\EasyAdminBundle\Router\AdminUrlGeneratorInterface;
 
 class OrderCrudController extends AbstractCrudController
 {
+    public function __construct(private readonly AdminUrlGeneratorInterface $adminUrlGenerator)
+    {
+    }
+
     public static function getEntityFqcn(): string
     {
         return Order::class;
@@ -31,6 +39,23 @@ class OrderCrudController extends AbstractCrudController
     public function configureCrud(Crud $crud): Crud
     {
         return $crud->setDefaultSort(['id' => 'DESC']);
+    }
+
+    /**
+     * Order drafts (the bot's unfinished purchase flows) are reached from here, not from the menu.
+     */
+    public function configureActions(Actions $actions): Actions
+    {
+        $drafts = Action::new('orderDrafts', 'admin.order_drafts', 'fa fa-list-alt')
+            ->linkToUrl(fn (): string => $this->adminUrlGenerator
+                ->unsetAll()
+                ->setDashboard(DashboardController::class)
+                ->setController(OrderDraftCrudController::class)
+                ->setAction(Action::INDEX)
+                ->generateUrl())
+            ->createAsGlobalAction();
+
+        return $actions->add(Crud::PAGE_INDEX, $drafts);
     }
 
     public function configureFilters(Filters $filters): Filters

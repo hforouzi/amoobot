@@ -3,8 +3,22 @@ admin:
   bot_button_labels: Button Labels
   bot_message_template: Message Template
   bot_message_templates: Message Templates
+  broadcasts: Broadcast
+  admin_users: Admin Users
+  required_channels: Required Channels
+  trial_plans: Trial Plans
+  trial_claims: Trial Claims
+  order_drafts: Order Drafts
+  payments_needs_review: Needs review
+  payments_provisioning_failed: Provisioning failed
   dashboard: Dashboard
   menu:
+    sales: Sales
+    catalog: Catalog
+    customers: Customers
+    messaging: Messaging
+    needs_attention: Needs attention
+    logs: Logs
     store: Store
     vpn: VPN
     users: Users
