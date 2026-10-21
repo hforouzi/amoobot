@@ -4,12 +4,15 @@ declare(strict_types=1);
 
 namespace App\Tests\Admin;
 
+use App\Admin\UI\Crud\CustomApiPaymentGatewayCrudController;
+use App\Admin\UI\Crud\NowPaymentsPaymentGatewayCrudController;
 use App\Admin\UI\Crud\PaymentGatewayCrudController;
 use App\Admin\UI\Crud\PluginCrudController;
 use App\Admin\UI\Crud\SettingCrudController;
 use App\Admin\UI\Crud\StorePaymentMethodCrudController;
 use App\Admin\UI\Crud\VpnInboundCrudController;
 use App\Admin\UI\Crud\VpnPanelCrudController;
+use App\Admin\UI\Crud\ZibalPaymentGatewayCrudController;
 use App\Entity\AdminUser;
 use App\Entity\Plugin;
 use App\Entity\Setting;
@@ -35,6 +38,10 @@ final class SuperAdminGatingTest extends IntegrationTestCase
         VpnInboundCrudController::class,
         SettingCrudController::class,
         PluginCrudController::class,
+        // Not in the menu, but routable: the only editors for some Zibal / NOWPayments / custom API config keys.
+        ZibalPaymentGatewayCrudController::class,
+        NowPaymentsPaymentGatewayCrudController::class,
+        CustomApiPaymentGatewayCrudController::class,
     ];
 
     private KernelBrowser $client;
@@ -73,6 +80,9 @@ final class SuperAdminGatingTest extends IntegrationTestCase
             VpnInboundCrudController::class => (int) $inbound->getId(),
             SettingCrudController::class => (int) $setting->getId(),
             PluginCrudController::class => (int) $plugin->getId(),
+            ZibalPaymentGatewayCrudController::class => (int) $gateway->getId(),
+            NowPaymentsPaymentGatewayCrudController::class => (int) $gateway->getId(),
+            CustomApiPaymentGatewayCrudController::class => (int) $gateway->getId(),
         ];
 
         $this->client = new KernelBrowser(self::$kernel);
