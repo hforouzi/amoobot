@@ -22,7 +22,7 @@ use Doctrine\ORM\EntityManagerInterface;
  * Bot admin: pending / needs-attention payment lists, payment detail with receipt, approve (or retry provisioning),
  * reject. Permissions are checked by AdminBotHandler before these run.
  */
-final class AdminPaymentsHandler
+final class AdminPaymentsHandler implements AdminArea
 {
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
@@ -33,7 +33,68 @@ final class AdminPaymentsHandler
         private readonly AdminAuditLogger $auditLogger,
         private readonly AdminBotReplies $replies,
         private readonly AdminAccessPolicy $accessPolicy,
+        private readonly AdminScreen $screen,
     ) {
+    }
+
+    public function area(): string
+    {
+        return 'p';
+    }
+
+    /**
+     * pend:<page>, att:<page>, v:<id> (view); ap / rj / rf:<id> ask to approve / reject / reject as refunded,
+     * ak / rk / fk:<id> do it.
+     */
+    public function permissions(string $verb): array
+    {
+        return match ($verb) {
+            'pend', 'att', 'v' => [AdminPermission::PAYMENTS_VIEW],
+            'ap', 'rj', 'rf', 'ak', 'rk', 'fk' => [AdminPermission::PAYMENTS_MODERATE],
+            default => [],
+        };
+    }
+
+    public function handle(AdminRequest $request): void
+    {
+        $id = $request->intArg(0);
+        match ($request->verb) {
+            'pend' => $this->pending($request->chatId, $request->callbackId, $id),
+            'att' => $this->attention($request->chatId, $request->admin, $request->callbackId, $id),
+            'v' => $this->view($request->chatId, $id, $request->admin, $request->callbackId),
+            'ap', 'rj', 'rf' => $this->ask($request, $id),
+            'ak' => $this->confirm($request->chatId, $id, $request->callbackId, $request->admin),
+            'rk' => $this->reject($request->chatId, $id, $request->callbackId, $request->admin),
+            'fk' => $this->reject($request->chatId, $id, $request->callbackId, $request->admin, true),
+            default => null,
+        };
+    }
+
+    /** The confirmation step before approving / rejecting a payment. */
+    private function ask(AdminRequest $request, int $paymentId): void
+    {
+        $payment = $this->entityManager->getRepository(Payment::class)->find($paymentId);
+        if (!$payment instanceof Payment) {
+            $this->screen->notice($request, 'admin.not_found', [], 'admin.p:pend:0');
+
+            return;
+        }
+        $variables = ['id' => $paymentId, 'amount' => AdminScreen::money((int) ($payment->getPayableAmount() ?? $payment->getAmount())), 'user' => $this->replies->identity($payment->getOrder()->getUser()->getTelegramAccount())];
+        [$key, $confirm] = match ($request->verb) {
+            'ap' => [PaymentStatus::PROVISIONING_FAILED === $payment->getStatus() ? 'admin.payments.confirm_retry' : 'admin.payments.confirm_approve', 'admin.p:ak:'],
+            'rj' => ['admin.payments.confirm_reject', 'admin.p:rk:'],
+            default => ['admin.payments.confirm_refunded', 'admin.p:fk:'],
+        };
+        $this->screen->confirm($request, $this->screen->text($key, $variables), $confirm.$paymentId, 'admin.p:v:'.$paymentId);
+    }
+
+    public function promptPermission(string $kind): ?AdminPermission
+    {
+        return null;
+    }
+
+    public function answer(AdminRequest $request, string $kind, string $target, string $text): void
+    {
     }
 
     /** Approve / reject buttons only for admins who may use them (the callbacks are checked again). */
@@ -46,11 +107,11 @@ final class AdminPaymentsHandler
      * Payments that need a human: NEEDS_REVIEW (amount/currency mismatch, duplicate) and
      * PROVISIONING_FAILED (paid, service not created yet). One message per payment with its actions.
      */
-    public function attention(string $chatId, ?AdminActor $admin, ?string $callbackId = null): void
+    public function attention(string $chatId, ?AdminActor $admin, ?string $callbackId = null, int $page = 0): void
     {
-        $payments = $this->entityManager->getRepository(Payment::class)->findBy([
-            'status' => [PaymentStatus::NEEDS_REVIEW, PaymentStatus::PROVISIONING_FAILED],
-        ], ['id' => 'ASC'], 15);
+        $criteria = ['status' => [PaymentStatus::NEEDS_REVIEW, PaymentStatus::PROVISIONING_FAILED]];
+        [$page, $pages] = $this->screen->page($page, $this->entityManager->getRepository(Payment::class)->count($criteria));
+        $payments = $this->entityManager->getRepository(Payment::class)->findBy($criteria, ['id' => 'ASC'], AdminScreen::PAGE_SIZE, $page * AdminScreen::PAGE_SIZE);
 
         if ([] === $payments) {
             $this->replies->popup($chatId, $callbackId, 'پرداختی برای رسیدگی وجود ندارد.', 'popup_no_attention_payments');
@@ -74,13 +135,16 @@ final class AdminPaymentsHandler
             ]);
             $this->telegramApiClient->sendMessage($chatId, $text, $this->canModerate($admin) ? $this->keyboardFactory->adminPaymentAttentionActions((int) $payment->getId(), $payment->getStatus()) : $this->keyboardFactory->backToAdminMenu());
         }
+        if ($pages > 1) {
+            $this->telegramApiClient->sendMessage($chatId, $this->screen->pageInfo($page, $pages), $this->screen->listKeyboard([], $this->screen->pagerRow($page, $pages, 'admin.p:att:%d'), 'admin.menu'));
+        }
     }
 
-    public function pending(string $chatId, ?string $callbackId = null): void
+    public function pending(string $chatId, ?string $callbackId = null, int $page = 0): void
     {
-        $payments = $this->entityManager->getRepository(Payment::class)->findBy([
-            'status' => [PaymentStatus::SUBMITTED, PaymentStatus::PENDING],
-        ], ['id' => 'DESC'], 10);
+        $criteria = ['status' => [PaymentStatus::SUBMITTED, PaymentStatus::PENDING]];
+        [$page, $pages] = $this->screen->page($page, $this->entityManager->getRepository(Payment::class)->count($criteria));
+        $payments = $this->entityManager->getRepository(Payment::class)->findBy($criteria, ['id' => 'DESC'], AdminScreen::PAGE_SIZE, $page * AdminScreen::PAGE_SIZE);
 
         if ([] === $payments) {
             $this->replies->popup($chatId, $callbackId, 'پرداخت در انتظاری وجود ندارد.', 'popup_no_pending_payments');
@@ -135,7 +199,13 @@ final class AdminPaymentsHandler
         }
 
         $this->replies->ack($callbackId);
-        $this->telegramApiClient->sendMessage($chatId, implode("\n", $lines), $this->keyboardFactory->adminPendingPayments($paymentIds));
+        $keyboard = $this->keyboardFactory->adminPendingPayments($paymentIds);
+        $pager = $this->screen->pagerRow($page, $pages, 'admin.p:pend:%d');
+        if ([] !== $pager) {
+            array_splice($keyboard['inline_keyboard'], -1, 0, [$pager]);
+            $lines[] = $this->screen->pageInfo($page, $pages);
+        }
+        $this->telegramApiClient->sendMessage($chatId, implode("\n", $lines), $keyboard);
     }
 
     public function view(string $chatId, int $paymentId, ?AdminActor $admin, ?string $callbackId = null): void
@@ -232,7 +302,12 @@ final class AdminPaymentsHandler
                 $payment->getSubmittedAt()?->format('Y-m-d H:i:s') ?? '-'
             );
         }
-        $actions = $this->canModerate($admin) ? $this->keyboardFactory->adminPaymentActions((int) $payment->getId()) : $this->keyboardFactory->backToAdminMenu();
+        $attention = in_array($payment->getStatus(), [PaymentStatus::NEEDS_REVIEW, PaymentStatus::PROVISIONING_FAILED], true);
+        $actions = match (true) {
+            !$this->canModerate($admin) => $this->keyboardFactory->backToAdminMenu(),
+            $attention => $this->keyboardFactory->adminPaymentAttentionActions((int) $payment->getId(), $payment->getStatus()),
+            default => $this->keyboardFactory->adminPaymentActions((int) $payment->getId()),
+        };
         $this->telegramApiClient->sendMessage($chatId, $detail, $actions);
 
         $receiptFileId = (string) ($payment->getReceiptFileId() ?? '');
@@ -315,7 +390,7 @@ final class AdminPaymentsHandler
         $this->telegramApiClient->sendMessage($chatId, $this->botTextResolver->message('admin.payment_confirmed'));
     }
 
-    public function reject(string $chatId, int $paymentId, ?string $callbackId = null, ?AdminActor $admin = null): void
+    public function reject(string $chatId, int $paymentId, ?string $callbackId = null, ?AdminActor $admin = null, bool $refunded = false): void
     {
         $payment = $this->entityManager->getRepository(Payment::class)->find($paymentId);
         if (!$payment instanceof Payment) {
@@ -325,8 +400,8 @@ final class AdminPaymentsHandler
             return;
         }
 
-        $result = $this->paymentSettlementService->reject($payment, null, $admin?->adminUserId, $chatId, 'telegram_payment_reject');
-        $this->auditLogger->record('payment.reject', 'Payment', $paymentId, ['outcome' => $result->outcome->value], $admin);
+        $result = $this->paymentSettlementService->reject($payment, null, $admin?->adminUserId, $chatId, 'telegram_payment_reject', $refunded);
+        $this->auditLogger->record('payment.reject', 'Payment', $paymentId, ['outcome' => $result->outcome->value, 'refunded' => $refunded], $admin);
         $this->replies->log(sprintf(
             'admin_reject_result payment_id=%d outcome=%s message="%s"',
             $paymentId,
@@ -346,6 +421,6 @@ final class AdminPaymentsHandler
         }
 
         $this->replies->ack($callbackId);
-        $this->telegramApiClient->sendMessage($chatId, $this->botTextResolver->message('admin.payment_rejected'));
+        $this->telegramApiClient->sendMessage($chatId, $this->botTextResolver->message($refunded ? 'admin.payments.rejected_refunded' : 'admin.payment_rejected'));
     }
 }

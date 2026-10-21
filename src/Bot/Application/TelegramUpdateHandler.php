@@ -52,6 +52,7 @@ class TelegramUpdateHandler
     private const BUTTON_RESUME_ORDER = '▶️ ادامه سفارش قبلی';
     private const BUTTON_CANCEL_INCOMPLETE = '🗑 حذف سفارش ناتمام';
     private const BUTTON_TRACK_ORDER = '🔎 پیگیری سفارش';
+    private const REPLY_BUTTONS = [self::BUTTON_BUY_SERVICE, self::BUTTON_TRIAL_ACCOUNT, self::BUTTON_MY_SERVICES, self::BUTTON_SUPPORT, self::BUTTON_ADMIN_MENU, self::BUTTON_RESUME_ORDER, self::BUTTON_CANCEL_INCOMPLETE, self::BUTTON_TRACK_ORDER];
     private const STEP_WAITING_CUSTOM_USERNAME = 'waiting_custom_username';
     private const STEP_WAITING_CUSTOM_TRAFFIC = 'waiting_custom_traffic';
     private const STEP_WAITING_CUSTOM_DURATION = 'waiting_custom_duration';
@@ -120,6 +121,16 @@ class TelegramUpdateHandler
         $text = trim((string) ($message['text'] ?? ''));
         $isAdmin = null !== $this->accessPolicy->botActor($actorId);
         $replyButtonKey = $this->botButtonMatcher->matchReplyButton($text);
+
+        // An admin asked for a value (price, setting, search) answers with plain text; a command or a menu button
+        // leaves the prompt and is handled as usual. Customers never have a prompt.
+        if ('' !== $text) {
+            if (str_starts_with($text, '/') || null !== $replyButtonKey || in_array($text, self::REPLY_BUTTONS, true)) {
+                $this->adminBotHandler->dropPrompt($actorId);
+            } elseif ($this->adminBotHandler->answerPrompt($actorId, $chatId, $text)) {
+                return;
+            }
+        }
 
         if ('/start' === $text) {
             $this->handleStart($account, $chatId, $isAdmin);

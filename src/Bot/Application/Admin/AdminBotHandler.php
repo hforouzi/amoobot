@@ -15,12 +15,29 @@ use App\Security\AdminAuditLogger;
 use App\Security\AdminPermission;
 
 /**
- * The bot's admin area: every admin_* / admin.* callback. The acting admin comes from AdminAccessPolicy::botActor()
- * (linked AdminUser or TELEGRAM_ADMIN_CHAT_ID); each callback needs its permission. TelegramUpdateHandler only routes
+ * The bot's admin area: every admin_* / admin.* callback and the answers to admin prompts. The acting admin comes from
+ * AdminAccessPolicy::botActor() (linked AdminUser or TELEGRAM_ADMIN_CHAT_ID); each callback needs its permission
+ * (checked here, again when a change is confirmed, and used to build the keyboards). TelegramUpdateHandler only routes
  * here.
  */
 final class AdminBotHandler
 {
+    /** Callbacks from before the "admin.<area>:<verb>" scheme (alerts and older messages still carry them). */
+    private const LEGACY = [
+        'admin_pending_payments' => 'admin.p:pend:0',
+        'admin_attention_payments' => 'admin.p:att:0',
+        'admin_orders' => 'admin.o:l:0:a',
+        'admin_users' => 'admin.c:l:0',
+    ];
+    private const LEGACY_WITH_ID = [
+        'admin_view_payment:' => 'admin.p:v:',
+        'admin_confirm_payment:' => 'admin.p:ap:',
+        'admin_reject_payment:' => 'admin.p:rj:',
+    ];
+
+    /** @var array<string, AdminArea> */
+    private array $areas = [];
+
     public function __construct(
         private readonly AdminAccessPolicy $accessPolicy,
         private readonly AdminAuditLogger $auditLogger,
@@ -28,25 +45,39 @@ final class AdminBotHandler
         private readonly TelegramApiClient $telegramApiClient,
         private readonly BotTextResolver $botTextResolver,
         private readonly AdminBotReplies $replies,
-        private readonly AdminPaymentsHandler $payments,
-        private readonly AdminOrdersHandler $orders,
-        private readonly AdminCustomersHandler $customers,
-        private readonly AdminStoreLinks $store,
         private readonly AdminKeyboards $keyboards,
+        private readonly AdminScreen $screen,
+        private readonly AdminPromptStore $prompts,
+        AdminDashboardHandler $dashboard,
+        AdminOrdersHandler $orders,
+        AdminPaymentsHandler $payments,
+        AdminCustomersHandler $customers,
+        AdminPlansHandler $plans,
+        AdminDiscountsHandler $discounts,
+        AdminPaymentMethodsHandler $paymentMethods,
+        AdminSettingsHandler $settings,
+        AdminPanelsHandler $panels,
+        AdminBroadcastsHandler $broadcasts,
     ) {
+        foreach ([$dashboard, $orders, $payments, $customers, $plans, $discounts, $paymentMethods, $settings, $panels, $broadcasts] as $area) {
+            $this->areas[$area->area()] = $area;
+        }
+    }
+
+    public function supports(string $data): bool
+    {
+        return str_starts_with($data, 'admin_') || str_starts_with($data, 'admin.');
     }
 
     public function handle(TelegramAccount $account, string $actorId, string $chatId, string $callbackId, string $data): void
     {
         $admin = $this->accessPolicy->botActor($actorId);
-        $permission = $this->permissionFor($data);
-        if (null === $admin || (null !== $permission && !$this->accessPolicy->can($admin, $permission))) {
-            $this->replies->log(sprintf('admin_callback_unauthorized data="%s" actor_id="%s" chat_id="%s"', $data, $actorId, $chatId));
-            $this->telegramApiClient->answerCallbackQuery($callbackId, $this->botTextResolver->message('admin.unauthorized'), true);
+        if (null === $admin) {
+            $this->refuse($data, $actorId, $chatId, $callbackId);
 
             return;
         }
-
+        $data = $this->modernize($data);
         $this->replies->log(sprintf('admin_callback_execute data="%s" actor_id="%s"', $data, $actorId));
 
         if ('admin_menu' === $data || 'admin.menu' === $data) {
@@ -54,61 +85,39 @@ final class AdminBotHandler
 
             return;
         }
-
         if ('admin.store_menu' === $data) {
-            $this->store->menu($chatId, $admin, $callbackId);
+            $this->showStoreMenu($chatId, $admin, $callbackId);
 
             return;
         }
+        if ('admin.x' === $data) {
+            $this->prompts->clear($actorId);
+            $this->screen->send(new AdminRequest($admin, $chatId, $callbackId, '', []), $this->screen->text('admin.cancelled'), $this->keyboards->screenMenu($admin, [], 'admin.store_menu', 'button.admin.back'));
 
+            return;
+        }
         if (str_starts_with($data, 'admin.store.')) {
-            $this->store->action($chatId, $data, $callbackId);
+            // A "store management" button from before the in-bot screens: those pages are web only now.
+            $this->screen->notice(new AdminRequest($admin, $chatId, $callbackId, '', []), 'admin.web_only');
 
             return;
         }
 
-        if ('admin_pending_payments' === $data) {
-            $this->payments->pending($chatId, $callbackId);
+        $parsed = AdminRequest::parse($data);
+        if (null !== $parsed && isset($this->areas[$parsed[0]])) {
+            [$area, $verb, $args] = $parsed;
+            $permissions = $this->areas[$area]->permissions($verb);
+            if ([] === $permissions || !$this->accessPolicy->canAny($admin, $permissions)) {
+                $this->refuse($data, $actorId, $chatId, $callbackId);
+
+                return;
+            }
+            $this->areas[$area]->handle(new AdminRequest($admin, $chatId, $callbackId, $verb, $args));
 
             return;
         }
 
-        if ('admin_attention_payments' === $data) {
-            $this->payments->attention($chatId, $admin, $callbackId);
-
-            return;
-        }
-
-        if ('admin_users' === $data) {
-            $this->customers->recent($chatId, $callbackId);
-
-            return;
-        }
-
-        if ('admin_orders' === $data) {
-            $this->orders->recent($chatId, $callbackId);
-
-            return;
-        }
-
-        if (str_starts_with($data, 'admin_view_payment:')) {
-            $this->payments->view($chatId, (int) str_replace('admin_view_payment:', '', $data), $admin, $callbackId);
-
-            return;
-        }
-
-        if (str_starts_with($data, 'admin_confirm_payment:')) {
-            $this->payments->confirm($chatId, (int) str_replace('admin_confirm_payment:', '', $data), $callbackId, $admin);
-
-            return;
-        }
-
-        if (str_starts_with($data, 'admin_reject_payment:')) {
-            $this->payments->reject($chatId, (int) str_replace('admin_reject_payment:', '', $data), $callbackId, $admin);
-
-            return;
-        }
-
+        // Service and customer views (admin_services, admin_service_view:, admin_user_*): each action checks its own.
         if ($this->serviceActionResolver->dispatch(new ServiceActionContext(
             account: $account,
             actorId: $actorId,
@@ -124,8 +133,42 @@ final class AdminBotHandler
 
         $this->replies->ack($callbackId);
         $this->replies->log(sprintf('admin_callback_unknown data="%s"', $data));
+    }
 
-        return;
+    /**
+     * A typed message while the admin was asked for a value. False when there is no such prompt (or the admin may no
+     * longer answer it): the message is then handled as usual, never as an admin answer.
+     */
+    public function answerPrompt(string $actorId, string $chatId, string $text): bool
+    {
+        $prompt = $this->prompts->get($actorId);
+        if (null === $prompt) {
+            return false;
+        }
+        $admin = $this->accessPolicy->botActor($actorId);
+        $area = $this->areaForPrompt($prompt['kind']);
+        $permission = $area?->promptPermission($prompt['kind']);
+        if (null === $admin || null === $area || null === $permission || !$this->accessPolicy->can($admin, $permission)) {
+            $this->prompts->clear($actorId);
+
+            return false;
+        }
+        $request = new AdminRequest($admin, $chatId, null, '', []);
+        if ($prompt['expired']) {
+            $this->prompts->clear($actorId);
+            $this->screen->notice($request, 'admin.prompt_expired');
+
+            return true;
+        }
+        $area->answer($request, $prompt['kind'], $prompt['target'], $text);
+
+        return true;
+    }
+
+    /** Leaves a pending prompt (a command or a menu button was sent instead of a value). */
+    public function dropPrompt(string $actorId): void
+    {
+        $this->prompts->clear($actorId);
     }
 
     /**
@@ -134,30 +177,67 @@ final class AdminBotHandler
     public function showMenu(string $chatId, ?AdminActor $admin, ?string $callbackId = null): void
     {
         $this->replies->ack($callbackId);
-        $this->telegramApiClient->sendMessage($chatId, 'منوی مدیریت:', $this->keyboards->menu($admin, $this->store->menuItems()));
+        $this->telegramApiClient->sendMessage($chatId, $this->botTextResolver->message('admin.menu_title'), $this->keyboards->menu($admin, $this->storeItems()));
+    }
+
+    private function showStoreMenu(string $chatId, AdminActor $admin, ?string $callbackId): void
+    {
+        $this->replies->ack($callbackId);
+        $this->telegramApiClient->sendMessage($chatId, $this->botTextResolver->message('admin.store_title'), $this->keyboards->screenMenu($admin, $this->storeItems()));
     }
 
     /**
-     * The permission an admin callback needs; null = any admin (menus), or checked by the service action itself
-     * (admin_services, admin_service_view:, admin_user_*).
+     * The in-bot store screens as [label key, callback, any-of permissions].
+     *
+     * @return list<array{0: string, 1: string, 2: list<AdminPermission>}>
      */
-    private function permissionFor(string $data): ?AdminPermission
+    private function storeItems(): array
     {
-        if (str_starts_with($data, 'admin.store.')) {
-            return $this->store->sections()[$data]['permission'] ?? null;
-        }
-
-        return match (true) {
-            'admin_pending_payments' === $data, 'admin_attention_payments' === $data, str_starts_with($data, 'admin_view_payment:') => AdminPermission::PAYMENTS_VIEW,
-            str_starts_with($data, 'admin_confirm_payment:'), str_starts_with($data, 'admin_reject_payment:') => AdminPermission::PAYMENTS_MODERATE,
-            'admin_users' === $data => AdminPermission::CUSTOMERS_VIEW,
-            'admin_orders' === $data => AdminPermission::ORDERS_VIEW,
-            default => null,
-        };
+        return [
+            ['button.admin.dashboard', 'admin.dash', [AdminPermission::ORDERS_VIEW, AdminPermission::PAYMENTS_VIEW, AdminPermission::SERVICES_VIEW]],
+            ['button.admin.orders', 'admin.o:l:0:a', [AdminPermission::ORDERS_VIEW]],
+            ['button.admin.payments_pending', 'admin.p:pend:0', [AdminPermission::PAYMENTS_VIEW]],
+            ['button.admin.payments_attention', 'admin.p:att:0', [AdminPermission::PAYMENTS_VIEW]],
+            ['button.admin.customers', 'admin.c:l:0', [AdminPermission::CUSTOMERS_VIEW]],
+            ['button.admin.plans', 'admin.pl:l:0', [AdminPermission::PLANS_MANAGE]],
+            ['button.admin.trial_claims', 'admin.pl:tc:0', [AdminPermission::PLANS_MANAGE]],
+            ['button.admin.discounts', 'admin.d:l:0', [AdminPermission::DISCOUNTS_MANAGE]],
+            ['button.admin.payment_methods', 'admin.m:l', [AdminPermission::GATEWAYS_MANAGE]],
+            ['button.admin.gateways', 'admin.m:g', [AdminPermission::GATEWAYS_MANAGE]],
+            ['button.admin.settings', 'admin.s:l', [AdminPermission::SETTINGS_MANAGE]],
+            ['button.admin.panels', 'admin.pn:l', [AdminPermission::PANELS_MANAGE]],
+            ['button.admin.broadcasts', 'admin.b:l', [AdminPermission::BROADCAST_SEND]],
+        ];
     }
 
-    public function supports(string $data): bool
+    private function modernize(string $data): string
     {
-        return str_starts_with($data, 'admin_') || str_starts_with($data, 'admin.');
+        if (isset(self::LEGACY[$data])) {
+            return self::LEGACY[$data];
+        }
+        foreach (self::LEGACY_WITH_ID as $prefix => $modern) {
+            if (str_starts_with($data, $prefix)) {
+                return $modern.(int) substr($data, strlen($prefix));
+            }
+        }
+
+        return $data;
+    }
+
+    private function areaForPrompt(string $kind): ?AdminArea
+    {
+        foreach ($this->areas as $area) {
+            if (null !== $area->promptPermission($kind)) {
+                return $area;
+            }
+        }
+
+        return null;
+    }
+
+    private function refuse(string $data, string $actorId, string $chatId, string $callbackId): void
+    {
+        $this->replies->log(sprintf('admin_callback_unauthorized data="%s" actor_id="%s" chat_id="%s"', $data, $actorId, $chatId));
+        $this->telegramApiClient->answerCallbackQuery($callbackId, $this->botTextResolver->message('admin.unauthorized'), true);
     }
 }

@@ -437,6 +437,11 @@ class TelegramKeyboardFactory
                     'text' => '❌ رد پرداخت',
                     'callback_data' => 'admin_reject_payment:'.$paymentId,
                 ]],
+                // Closing a duplicate (or any reviewed payment) whose money was sent back (web: ?refunded=1).
+                [[
+                    'text' => $this->button('button.admin.reject_refunded'),
+                    'callback_data' => 'admin.p:rf:'.$paymentId,
+                ]],
                 [[
                     'text' => '🔙 پرداخت‌های نیازمند رسیدگی',
                     'callback_data' => 'admin_attention_payments',
@@ -476,18 +481,6 @@ class TelegramKeyboardFactory
         return [
             'inline_keyboard' => [[
                 ['text' => $this->button('button.admin.back_to_management'), 'callback_data' => 'admin.menu'],
-            ]],
-        ];
-    }
-
-    /**
-     * @return array<string, array<array<array<string, string>>>>
-     */
-    public function backToAdminStoreManagementMenu(): array
-    {
-        return [
-            'inline_keyboard' => [[
-                ['text' => $this->button('button.admin.back_to_management'), 'callback_data' => 'admin.store_menu'],
             ]],
         ];
     }
