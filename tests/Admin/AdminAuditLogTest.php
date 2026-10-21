@@ -119,6 +119,7 @@ final class AdminAuditLogTest extends IntegrationTestCase
         $order = $this->createOrder($this->createUser(), $this->createPlan(100000, $this->createTestInbound()));
         $payment = $this->createPayment($order, null, PaymentStatus::SUBMITTED);
         $this->press('8001', 'admin_confirm_payment:'.$payment->getId());
+        $this->press('8001', 'admin.p:ak:'.$payment->getId());
         $log = $this->assertLogged('payment.approve', 'Payment', (string) $payment->getId(), AdminAuditLog::SOURCE_BOT);
         self::assertSame($this->super->getId(), $log->getActorAdminUserId());
         self::assertSame('audit-super@shop.test', $log->getActorLabel());

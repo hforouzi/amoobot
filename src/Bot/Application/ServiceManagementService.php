@@ -40,6 +40,7 @@ use App\Shop\Application\OrderTrackingCodeService;
 use App\Shop\Domain\OrderDraftStatus;
 use App\Shop\Domain\OrderStatus;
 use App\Shop\Domain\OrderType;
+use App\Security\AdminPermission;
 use Doctrine\ORM\EntityManagerInterface;
 use Endroid\QrCode\QrCode;
 use Endroid\QrCode\Writer\PngWriter;
@@ -161,7 +162,10 @@ class ServiceManagementService
         $this->sendUserServiceDetail($chatId, $service, 'telegram_user_service_detail');
     }
 
-    public function showAdminServiceDetail(int $serviceId, string $chatId, ?string $callbackId): void
+    /**
+     * @param list<AdminPermission>|null $granted the admin's permissions, to show only the allowed buttons
+     */
+    public function showAdminServiceDetail(int $serviceId, string $chatId, ?string $callbackId, ?array $granted = null): void
     {
         $service = $this->entityManager->getRepository(VpnService::class)->find($serviceId);
         if (!$service instanceof VpnService) {
@@ -177,7 +181,7 @@ class ServiceManagementService
         $this->telegramApiClient->sendMessage(
             $chatId,
             $this->formatServiceDetailForAdmin($service),
-            $this->keyboardFactory->adminServiceDetail((int) $service->getId(), (int) $service->getUser()->getId())
+            $this->keyboardFactory->adminServiceDetail((int) $service->getId(), (int) $service->getUser()->getId(), $granted)
         );
     }
 
@@ -380,7 +384,10 @@ class ServiceManagementService
         $this->syncServiceUsage($account, $serviceId, $chatId, $callbackId, false);
     }
 
-    public function syncServiceUsage(TelegramAccount $account, int $serviceId, string $chatId, string $callbackId, bool $adminMode): void
+    /**
+     * @param list<AdminPermission>|null $granted the admin's permissions (admin mode), to show only the allowed buttons
+     */
+    public function syncServiceUsage(TelegramAccount $account, int $serviceId, string $chatId, string $callbackId, bool $adminMode, ?array $granted = null): void
     {
         $service = $this->entityManager->getRepository(VpnService::class)->find($serviceId);
         if (!$service instanceof VpnService) {
@@ -419,7 +426,7 @@ class ServiceManagementService
             $this->telegramApiClient->sendMessage(
                 $chatId,
                 $this->formatServiceDetailForAdmin($service),
-                $this->keyboardFactory->adminServiceDetail((int) $service->getId(), (int) $service->getUser()->getId())
+                $this->keyboardFactory->adminServiceDetail((int) $service->getId(), (int) $service->getUser()->getId(), $granted)
             );
 
             return;

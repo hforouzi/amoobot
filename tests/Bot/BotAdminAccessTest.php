@@ -68,6 +68,9 @@ final class BotAdminAccessTest extends IntegrationTestCase
             $payment = $this->submittedPayment();
             $this->http->reset();
             $this->pressButton((string) $telegramId, 'admin_confirm_payment:'.$payment->getId());
+            self::assertSame(PaymentStatus::SUBMITTED, $this->row('payment', (int) $payment->getId())['status'], 'the first press only asks for confirmation');
+            // The confirmation callback is checked again (a forged one from Support is refused too).
+            $this->pressButton((string) $telegramId, 'admin.p:ak:'.$payment->getId());
 
             self::assertSame(!$allowed, $this->refused(), 'confirm by '.$telegramId);
             self::assertSame($allowed, PaymentStatus::SUBMITTED !== $this->row('payment', (int) $payment->getId())['status'], 'payment changed by '.$telegramId);

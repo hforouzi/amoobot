@@ -33,6 +33,16 @@ final class ServiceActionContext
     }
 
     /**
+     * The admin's permissions, for keyboards that show only the allowed actions.
+     *
+     * @return list<AdminPermission>
+     */
+    public function granted(): array
+    {
+        return $this->policy->permissions($this->admin);
+    }
+
+    /**
      * Audit an admin action on a service (bot), by this context's admin.
      *
      * @param array<string, mixed> $details

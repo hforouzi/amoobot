@@ -136,6 +136,8 @@ final class AdminPaymentAttentionTest extends IntegrationTestCase
         self::assertNotEmpty(array_filter($this->http->telegramTexts(), static fn (string $t): bool => str_contains($t, 'خطای ساخت سرویس')));
 
         $handler->handle($this->callbackUpdate(self::ADMIN_CHAT, 'admin_confirm_payment:'.$payment->getId()));
+        self::assertSame(PaymentStatus::PROVISIONING_FAILED, $this->row('payment', (int) $payment->getId())['status'], 'asks for confirmation first');
+        $handler->handle($this->callbackUpdate(self::ADMIN_CHAT, 'admin.p:ak:'.$payment->getId()));
         $row = $this->row('payment', (int) $payment->getId());
         self::assertSame(PaymentStatus::CONFIRMED, $row['status']);
         self::assertSame(self::ADMIN_CHAT, $row['confirmed_by_telegram_id']);

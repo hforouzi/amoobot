@@ -4,13 +4,7 @@ declare(strict_types=1);
 
 namespace App\Bot\Application;
 
-use App\Admin\UI\Crud\DiscountCodeCrudController;
-use App\Admin\UI\Crud\OrderCrudController;
-use App\Admin\UI\Crud\PaymentGatewayCrudController;
-use App\Admin\UI\Crud\PlanCrudController;
-use App\Admin\UI\Crud\SettingCrudController;
-use App\Admin\UI\Crud\StorePaymentMethodCrudController;
-use App\Admin\UI\DashboardController;
+use App\Bot\Application\Admin\AdminBotHandler;
 use App\Bot\Application\ServiceAction\ServiceActionContext;
 use App\Bot\Application\ServiceAction\ServiceActionResolver;
 use App\Bot\Infrastructure\TelegramApiClient;
@@ -44,13 +38,9 @@ use App\Shop\Domain\OrderDraftStatus;
 use App\Shop\Domain\OrderStatus;
 use App\Shop\Domain\OrderType;
 use App\Security\AdminAccessPolicy;
-use App\Security\AdminActor;
 use App\Security\AdminAuditLogger;
 use App\Security\AdminPermission;
 use Doctrine\ORM\EntityManagerInterface;
-use EasyCorp\Bundle\EasyAdminBundle\Config\Action;
-use EasyCorp\Bundle\EasyAdminBundle\Router\AdminUrlGeneratorInterface;
-use Symfony\Component\HttpFoundation\RequestStack;
 
 class TelegramUpdateHandler
 {
@@ -62,6 +52,7 @@ class TelegramUpdateHandler
     private const BUTTON_RESUME_ORDER = '▶️ ادامه سفارش قبلی';
     private const BUTTON_CANCEL_INCOMPLETE = '🗑 حذف سفارش ناتمام';
     private const BUTTON_TRACK_ORDER = '🔎 پیگیری سفارش';
+    private const REPLY_BUTTONS = [self::BUTTON_BUY_SERVICE, self::BUTTON_TRIAL_ACCOUNT, self::BUTTON_MY_SERVICES, self::BUTTON_SUPPORT, self::BUTTON_ADMIN_MENU, self::BUTTON_RESUME_ORDER, self::BUTTON_CANCEL_INCOMPLETE, self::BUTTON_TRACK_ORDER];
     private const STEP_WAITING_CUSTOM_USERNAME = 'waiting_custom_username';
     private const STEP_WAITING_CUSTOM_TRAFFIC = 'waiting_custom_traffic';
     private const STEP_WAITING_CUSTOM_DURATION = 'waiting_custom_duration';
@@ -92,10 +83,9 @@ class TelegramUpdateHandler
         private readonly TelegramChannelMembershipGate $membershipGate,
         private readonly BotTextResolver $botTextResolver,
         private readonly BotButtonMatcher $botButtonMatcher,
-        private readonly AdminUrlGeneratorInterface $adminUrlGenerator,
-        private readonly RequestStack $requestStack,
         private readonly AdminAccessPolicy $accessPolicy,
         private readonly AdminAuditLogger $auditLogger,
+        private readonly AdminBotHandler $adminBotHandler,
         private readonly string $paymentCardNumber = '',
         private readonly string $paymentCardHolder = '',
         private readonly ?string $paymentDescription = null,
@@ -131,6 +121,16 @@ class TelegramUpdateHandler
         $text = trim((string) ($message['text'] ?? ''));
         $isAdmin = null !== $this->accessPolicy->botActor($actorId);
         $replyButtonKey = $this->botButtonMatcher->matchReplyButton($text);
+
+        // An admin asked for a value (price, setting, search) answers with plain text; a command or a menu button
+        // leaves the prompt and is handled as usual. Customers never have a prompt.
+        if ('' !== $text) {
+            if (str_starts_with($text, '/') || null !== $replyButtonKey || in_array($text, self::REPLY_BUTTONS, true)) {
+                $this->adminBotHandler->dropPrompt($actorId);
+            } elseif ($this->adminBotHandler->answerPrompt($actorId, $chatId, $text)) {
+                return;
+            }
+        }
 
         if ('/start' === $text) {
             $this->handleStart($account, $chatId, $isAdmin);
@@ -188,7 +188,7 @@ class TelegramUpdateHandler
                 return;
             }
 
-            $this->handleAdminMenu($chatId);
+            $this->adminBotHandler->showMenu($chatId, $this->accessPolicy->botActor($actorId));
 
             return;
         }
@@ -260,95 +260,11 @@ class TelegramUpdateHandler
 
         $account = $this->telegramUserResolver->resolveFromTelegramUser($telegramUser);
 
-        if ($this->isAdminCallback($data)) {
-            $admin = $this->accessPolicy->botActor($actorId);
-            $permission = $this->adminCallbackPermission($data);
-            if (null === $admin || (null !== $permission && !$this->accessPolicy->can($admin, $permission))) {
-                $this->debugLog(sprintf('admin_callback_unauthorized data="%s" actor_id="%s" chat_id="%s"', $data, $actorId, $chatId));
-                $this->telegramApiClient->answerCallbackQuery($callbackId, $this->botTextResolver->message('admin.unauthorized'), true);
-
-                return;
-            }
-
-            $this->debugLog(sprintf('admin_callback_execute data="%s" actor_id="%s"', $data, $actorId));
-
-            if ('admin_menu' === $data || 'admin.menu' === $data) {
-                $this->handleAdminMenu($chatId, $callbackId);
-
-                return;
-            }
-
-            if ('admin.store_menu' === $data) {
-                $this->handleAdminStoreMenu($chatId, $callbackId);
-
-                return;
-            }
-
-            if (str_starts_with($data, 'admin.store.')) {
-                $this->handleAdminStoreAction($chatId, $data, $callbackId);
-
-                return;
-            }
-
-            if ('admin_pending_payments' === $data) {
-                $this->handleAdminPendingPayments($chatId, $callbackId);
-
-                return;
-            }
-
-            if ('admin_attention_payments' === $data) {
-                $this->handleAdminAttentionPayments($chatId, $callbackId);
-
-                return;
-            }
-
-            if ('admin_users' === $data) {
-                $this->handleAdminUsers($chatId, $callbackId);
-
-                return;
-            }
-
-            if ('admin_orders' === $data) {
-                $this->handleAdminOrders($chatId, $callbackId);
-
-                return;
-            }
-
-            if (str_starts_with($data, 'admin_view_payment:')) {
-                $this->handleAdminViewPayment($chatId, (int) str_replace('admin_view_payment:', '', $data), $callbackId);
-
-                return;
-            }
-
-            if (str_starts_with($data, 'admin_confirm_payment:')) {
-                $this->handleAdminConfirmPayment($chatId, (int) str_replace('admin_confirm_payment:', '', $data), $callbackId, $admin);
-
-                return;
-            }
-
-            if (str_starts_with($data, 'admin_reject_payment:')) {
-                $this->handleAdminRejectPayment($chatId, (int) str_replace('admin_reject_payment:', '', $data), $callbackId, $admin);
-
-                return;
-            }
-
-            if ($this->serviceActionResolver->dispatch(new ServiceActionContext(
-                account: $account,
-                actorId: $actorId,
-                chatId: $chatId,
-                callbackId: $callbackId,
-                data: $data,
-                admin: $admin,
-                policy: $this->accessPolicy,
-                auditLogger: $this->auditLogger,
-            ))) {
-                return;
-            }
-
-            $this->acknowledgeCallback($callbackId);
-            $this->debugLog(sprintf('admin_callback_unknown data="%s"', $data));
+        if ($this->adminBotHandler->supports($data)) {
+            $this->adminBotHandler->handle($account, $actorId, $chatId, $callbackId, $data);
 
             return;
+
         }
 
         $admin = $this->accessPolicy->botActor($actorId);
@@ -2266,455 +2182,6 @@ class TelegramUpdateHandler
         $this->telegramApiClient->sendMessage($chatId, $this->botTextResolver->message('bot.support'), $this->keyboardFactory->backToMainMenu());
     }
 
-    private function handleAdminMenu(string $chatId, ?string $callbackId = null): void
-    {
-        $this->acknowledgeCallback($callbackId);
-        $this->telegramApiClient->sendMessage($chatId, 'منوی مدیریت:', $this->keyboardFactory->adminMenu());
-    }
-
-    private function handleAdminStoreMenu(string $chatId, ?string $callbackId = null): void
-    {
-        $this->acknowledgeCallback($callbackId);
-        $this->telegramApiClient->sendMessage($chatId, 'مدیریت فروشگاه:', $this->keyboardFactory->adminStoreManagementMenu());
-    }
-
-    private function handleAdminStoreAction(string $chatId, string $action, ?string $callbackId = null): void
-    {
-        $sections = $this->adminStoreSections();
-        if (!isset($sections[$action])) {
-            $this->acknowledgeCallback($callbackId);
-            $this->telegramApiClient->sendMessage($chatId, 'این بخش از پنل ادمین قابل مدیریت است.', $this->keyboardFactory->backToAdminStoreManagementMenu());
-
-            return;
-        }
-
-        $this->acknowledgeCallback($callbackId);
-
-        try {
-            $url = $this->adminCrudUrl($sections[$action]['controller']);
-        } catch (\Throwable $e) {
-            $this->debugLog(sprintf('admin_store_url_failed action="%s" message="%s"', $action, $e->getMessage()));
-            $url = $this->manualAdminCrudUrl($sections[$action]['controller']);
-        }
-
-        if (null === $url) {
-            $this->telegramApiClient->sendMessage($chatId, 'این بخش از پنل ادمین قابل مدیریت است.', $this->keyboardFactory->backToAdminStoreManagementMenu());
-
-            return;
-        }
-
-        $label = $this->botTextResolver->button($sections[$action]['button']);
-        $message = sprintf(
-            "%s:\n%s",
-            $this->html($label),
-            $this->formatAdminUrl($url)
-        );
-
-        $this->telegramApiClient->sendHtmlMessage($chatId, $message, $this->keyboardFactory->backToAdminStoreManagementMenu());
-    }
-
-    /**
-     * @return array<string, array{button:string, controller:class-string, permission:AdminPermission}>
-     */
-    private function adminStoreSections(): array
-    {
-        return [
-            'admin.store.settings' => [
-                'button' => 'button.admin.store.settings',
-                'controller' => SettingCrudController::class,
-                'permission' => AdminPermission::SETTINGS_MANAGE,
-            ],
-            'admin.store.plans' => [
-                'button' => 'button.admin.store.plans',
-                'controller' => PlanCrudController::class,
-                'permission' => AdminPermission::PLANS_MANAGE,
-            ],
-            'admin.store.discounts' => [
-                'button' => 'button.admin.store.discounts',
-                'controller' => DiscountCodeCrudController::class,
-                'permission' => AdminPermission::DISCOUNTS_MANAGE,
-            ],
-            'admin.store.payment_methods' => [
-                'button' => 'button.admin.store.payment_methods',
-                'controller' => StorePaymentMethodCrudController::class,
-                'permission' => AdminPermission::GATEWAYS_MANAGE,
-            ],
-            'admin.store.payment_gateways' => [
-                'button' => 'button.admin.store.payment_gateways',
-                'controller' => PaymentGatewayCrudController::class,
-                'permission' => AdminPermission::GATEWAYS_MANAGE,
-            ],
-            'admin.store.orders' => [
-                'button' => 'button.admin.store.orders',
-                'controller' => OrderCrudController::class,
-                'permission' => AdminPermission::ORDERS_VIEW,
-            ],
-        ];
-    }
-
-    /**
-     * @param class-string $crudController
-     */
-    private function adminCrudUrl(string $crudController): ?string
-    {
-        $relativeUrl = $this->adminUrlGenerator
-            ->unsetAll()
-            ->setDashboard(DashboardController::class)
-            ->setController($crudController)
-            ->setAction(Action::INDEX)
-            ->generateUrl();
-
-        $relativeUrl = trim($relativeUrl);
-        if ('' === $relativeUrl) {
-            return null;
-        }
-
-        if (str_starts_with($relativeUrl, 'http://') || str_starts_with($relativeUrl, 'https://')) {
-            return $relativeUrl;
-        }
-
-        $request = $this->requestStack->getCurrentRequest();
-        if (null === $request) {
-            return $relativeUrl;
-        }
-
-        return rtrim($request->getSchemeAndHttpHost(), '/').'/'.ltrim($relativeUrl, '/');
-    }
-
-    /**
-     * @param class-string $crudController
-     */
-    private function manualAdminCrudUrl(string $crudController): string
-    {
-        $path = '/admin?'.http_build_query([
-            'crudAction' => Action::INDEX,
-            'crudControllerFqcn' => $crudController,
-        ], '', '&', PHP_QUERY_RFC3986);
-
-        $request = $this->requestStack->getCurrentRequest();
-        if (null === $request) {
-            return $path;
-        }
-
-        return rtrim($request->getSchemeAndHttpHost(), '/').$path;
-    }
-
-    private function formatAdminUrl(string $url): string
-    {
-        $escaped = $this->html($url);
-        if (str_starts_with($url, 'http://') || str_starts_with($url, 'https://')) {
-            return sprintf('<a href="%s">%s</a>', $escaped, $escaped);
-        }
-
-        return sprintf('<code>%s</code>', $escaped);
-    }
-
-    /**
-     * Payments that need a human: NEEDS_REVIEW (amount/currency mismatch, duplicate) and
-     * PROVISIONING_FAILED (paid, service not created yet). One message per payment with its actions.
-     */
-    private function handleAdminAttentionPayments(string $chatId, ?string $callbackId = null): void
-    {
-        $payments = $this->entityManager->getRepository(Payment::class)->findBy([
-            'status' => [PaymentStatus::NEEDS_REVIEW, PaymentStatus::PROVISIONING_FAILED],
-        ], ['id' => 'ASC'], 15);
-
-        if ([] === $payments) {
-            $this->showPopupOrMessage($chatId, $callbackId, 'پرداختی برای رسیدگی وجود ندارد.', 'popup_no_attention_payments');
-
-            return;
-        }
-
-        $this->acknowledgeCallback($callbackId);
-        foreach ($payments as $payment) {
-            $order = $payment->getOrder();
-            $needsReview = PaymentStatus::NEEDS_REVIEW === $payment->getStatus();
-            $text = implode("
-", [
-                sprintf('%s پرداخت #%d | سفارش #%d (%s)', $needsReview ? '⚠️' : '🚨', $payment->getId() ?? 0, $order->getId() ?? 0, $this->translateOrderType($order->getType())),
-                sprintf('کاربر: %s', $this->formatTelegramIdentity($order->getUser()->getTelegramAccount())),
-                sprintf('مبلغ سفارش: %d تومان | درگاه: %s', $payment->getPayableAmount() ?? $payment->getAmount(), $payment->getGatewayType() ?? $payment->getMethod()),
-                sprintf('گزارش درگاه: %s %s', $payment->getVerifiedAmount() ?? '-', $payment->getVerifiedCurrency() ?? ''),
-                $needsReview
-                    ? 'علت بررسی: '.mb_substr((string) ($payment->getReviewReason() ?? '-'), 0, 500)
-                    : sprintf('خطای ساخت سرویس (%d تلاش): %s', $payment->getProvisioningAttempts(), mb_substr((string) ($payment->getProvisioningError() ?? '-'), 0, 500)),
-            ]);
-            $this->telegramApiClient->sendMessage($chatId, $text, $this->keyboardFactory->adminPaymentAttentionActions((int) $payment->getId(), $payment->getStatus()));
-        }
-    }
-
-    private function handleAdminPendingPayments(string $chatId, ?string $callbackId = null): void
-    {
-        $payments = $this->entityManager->getRepository(Payment::class)->findBy([
-            'status' => [PaymentStatus::SUBMITTED, PaymentStatus::PENDING],
-        ], ['id' => 'DESC'], 10);
-
-        if ([] === $payments) {
-            $this->showPopupOrMessage($chatId, $callbackId, 'پرداخت در انتظاری وجود ندارد.', 'popup_no_pending_payments');
-
-            return;
-        }
-
-        $lines = ["پرداختهای در انتظار:\n"];
-        $paymentIds = [];
-        foreach ($payments as $payment) {
-            $paymentIds[] = (int) $payment->getId();
-            $order = $payment->getOrder();
-            $telegramAccount = $order->getUser()->getTelegramAccount();
-            $tracking = $payment->getTrackingCode() ?: '-';
-            $meta = is_array($order->getMetadata()) ? $order->getMetadata() : [];
-            $isRenewal = OrderType::RENEWAL === $order->getType();
-            $isAddTraffic = OrderType::ADD_TRAFFIC === $order->getType();
-            $renewalSuffix = '';
-            if ($isRenewal) {
-                $duration = true === ($meta['unlimitedDuration'] ?? false)
-                    ? 'نامحدود'
-                    : ((string) ($meta['durationDays'] ?? '-').' روز');
-                $renewalSuffix = sprintf(
-                    "\nتمدید سرویس #%s | حجم: %sGB | مدت: %s",
-                    (string) ($meta['targetServiceId'] ?? ($order->getTargetService()?->getId() ?? '-')),
-                    (string) ($meta['trafficGb'] ?? '-'),
-                    $duration
-                );
-            }
-            $addTrafficSuffix = '';
-            if ($isAddTraffic) {
-                $addTrafficSuffix = sprintf(
-                    "\nپرداخت خرید حجم اضافه | سرویس #%s | حجم درخواستی: %sGB",
-                    (string) ($meta['targetServiceId'] ?? ($order->getTargetService()?->getId() ?? '-')),
-                    (string) ($meta['trafficGb'] ?? '-')
-                );
-            }
-            $lines[] = sprintf(
-                "#%d | سفارش #%d\nکد پیگیری سفارش: %s\nکاربر: %s\nنوع سفارش: %s\nپلن: %s\nمبلغ: %d\nوضعیت: %s\nکد پیگیری پرداخت: %s%s%s\n",
-                $payment->getId(),
-                $order->getId(),
-                (string) ($order->getTrackingCode() ?? '-'),
-                $this->formatTelegramIdentity($telegramAccount),
-                $order->getType(),
-                $order->getPlan()->getTitle(),
-                $payment->getAmount(),
-                $payment->getStatus(),
-                $tracking,
-                $renewalSuffix,
-                $addTrafficSuffix
-            );
-        }
-
-        $this->acknowledgeCallback($callbackId);
-        $this->telegramApiClient->sendMessage($chatId, implode("\n", $lines), $this->keyboardFactory->adminPendingPayments($paymentIds));
-    }
-
-    private function handleAdminViewPayment(string $chatId, int $paymentId, ?string $callbackId = null): void
-    {
-        $this->acknowledgeCallback($callbackId);
-        $payment = $this->entityManager->getRepository(Payment::class)->find($paymentId);
-        if (!$payment instanceof Payment) {
-            $this->acknowledgeCallback($callbackId);
-            $this->telegramApiClient->sendMessage($chatId, $this->botTextResolver->message('payment.failed'));
-
-            return;
-        }
-
-        $order = $payment->getOrder();
-        $telegramAccount = $order->getUser()->getTelegramAccount();
-        $customMeta = is_array($order->getMetadata()) ? $order->getMetadata() : [];
-        $isRenewal = OrderType::RENEWAL === $order->getType();
-        $isAddTraffic = OrderType::ADD_TRAFFIC === $order->getType();
-        $durationText = true === ($customMeta['unlimitedDuration'] ?? false)
-            ? 'نامحدود'
-            : (string) ($customMeta['durationDays'] ?? '-');
-        $customSummary = true === ($customMeta['custom'] ?? false)
-            ? sprintf(
-                "Custom: yes\nUsername: %s\nTraffic: %s GB\nDuration: %s\nCalculated amount: %s",
-                (string) ($customMeta['finalUsername'] ?? '-'),
-                (string) ($customMeta['trafficGb'] ?? '-'),
-                $durationText,
-                (string) ($customMeta['calculatedAmount'] ?? '-')
-            )
-            : "Custom: no";
-        $priceSnapshot = is_array($customMeta['priceSnapshot'] ?? null) ? $customMeta['priceSnapshot'] : [];
-        $snapshotLines = sprintf(
-            "Base amount: %s\nGlobal discount: %s\nDiscount code: %s\nDiscount code amount: %s\nFinal amount: %s",
-            (string) ($priceSnapshot['baseAmount'] ?? '-'),
-            (string) ($priceSnapshot['globalDiscountAmount'] ?? 0),
-            (string) ($priceSnapshot['discountCode'] ?? '-'),
-            (string) ($priceSnapshot['discountCodeAmount'] ?? 0),
-            (string) ($priceSnapshot['finalAmount'] ?? $payment->getAmount())
-        );
-        if ($isAddTraffic) {
-            $detail = sprintf(
-                "پرداخت خرید حجم اضافه\nOrder type: add_traffic\nPayment ID: %d\nOrder ID: %d\nOrder Tracking: %s\nService ID: %s\nUser: %s\nRequested traffic: %s GB\nAmount: %d تومان\n%s\nStatus: %s\nTracking: %s\nReceipt message: %s\nCreated: %s\nSubmitted: %s",
-                $payment->getId(),
-                $order->getId(),
-                (string) ($order->getTrackingCode() ?? '-'),
-                (string) ($customMeta['targetServiceId'] ?? ($order->getTargetService()?->getId() ?? '-')),
-                $this->formatTelegramIdentity($telegramAccount),
-                (string) ($customMeta['trafficGb'] ?? '-'),
-                $payment->getAmount(),
-                $snapshotLines,
-                $payment->getStatus(),
-                $payment->getTrackingCode() ?: '-',
-                $payment->getReceiptMessage() ?: '-',
-                $payment->getCreatedAt()->format('Y-m-d H:i:s'),
-                $payment->getSubmittedAt()?->format('Y-m-d H:i:s') ?? '-'
-            );
-        } elseif ($isRenewal) {
-            $renewalPolicy = is_array($customMeta['renewalPolicy'] ?? null) ? $customMeta['renewalPolicy'] : [];
-            $detail = sprintf(
-                "پرداخت تمدید سرویس\nOrder type: renewal\nPayment ID: %d\nOrder ID: %d\nOrder Tracking: %s\nService ID: %s\nUser: %s\nAmount: %d تومان\nDuration: %s\nTraffic: %s GB\nPolicy traffic carry: %s\nPolicy days carry: %s\nPrice source: %s\n%s\nStatus: %s\nTracking: %s\nReceipt message: %s\nCreated: %s\nSubmitted: %s",
-                $payment->getId(),
-                $order->getId(),
-                (string) ($order->getTrackingCode() ?? '-'),
-                (string) ($customMeta['targetServiceId'] ?? ($order->getTargetService()?->getId() ?? '-')),
-                $this->formatTelegramIdentity($telegramAccount),
-                $payment->getAmount(),
-                $durationText,
-                (string) ($customMeta['trafficGb'] ?? '-'),
-                true === ($renewalPolicy['carryRemainingTraffic'] ?? true) ? 'yes' : 'no',
-                true === ($renewalPolicy['carryRemainingDays'] ?? true) ? 'yes' : 'no',
-                (string) ($priceSnapshot['planPriceSource'] ?? 'current_plan'),
-                $snapshotLines,
-                $payment->getStatus(),
-                $payment->getTrackingCode() ?: '-',
-                $payment->getReceiptMessage() ?: '-',
-                $payment->getCreatedAt()->format('Y-m-d H:i:s'),
-                $payment->getSubmittedAt()?->format('Y-m-d H:i:s') ?? '-'
-            );
-        } else {
-            $detail = sprintf(
-                "Payment ID: %d\nOrder ID: %d\nOrder Tracking: %s\nUser: %s\nPlan: %s\nAmount: %d تومان\nStatus: %s\n%s\n%s\nTracking: %s\nReceipt message: %s\nCreated: %s\nSubmitted: %s",
-                $payment->getId(),
-                $order->getId(),
-                (string) ($order->getTrackingCode() ?? '-'),
-                $this->formatTelegramIdentity($telegramAccount),
-                $order->getPlan()->getTitle(),
-                $payment->getAmount(),
-                $payment->getStatus(),
-                $customSummary,
-                $snapshotLines,
-                $payment->getTrackingCode() ?: '-',
-                $payment->getReceiptMessage() ?: '-',
-                $payment->getCreatedAt()->format('Y-m-d H:i:s'),
-                $payment->getSubmittedAt()?->format('Y-m-d H:i:s') ?? '-'
-            );
-        }
-        $this->telegramApiClient->sendMessage($chatId, $detail, $this->keyboardFactory->adminPaymentActions((int) $payment->getId()));
-
-        $receiptFileId = (string) ($payment->getReceiptFileId() ?? '');
-        if ('' === $receiptFileId) {
-            $this->debugLog(sprintf('admin_view_payment_missing_receipt_file payment_id=%d', $paymentId));
-
-            return;
-        }
-
-        $caption = $isAddTraffic
-            ? sprintf(
-                "رسید پرداخت خرید حجم اضافه\nPayment ID: %d\nOrder ID: %d\nOrder Tracking: %s\nService ID: %s\nUser: %s\nRequested traffic: %s GB\nAmount: %d تومان",
-                $payment->getId(),
-                $order->getId(),
-                (string) ($order->getTrackingCode() ?? '-'),
-                (string) ($customMeta['targetServiceId'] ?? ($order->getTargetService()?->getId() ?? '-')),
-                $this->formatTelegramIdentity($telegramAccount),
-                (string) ($customMeta['trafficGb'] ?? '-'),
-                $payment->getAmount()
-            )
-            : ($isRenewal
-            ? sprintf(
-                "رسید پرداخت تمدید سرویس\nPayment ID: %d\nOrder ID: %d\nOrder Tracking: %s\nService ID: %s\nUser: %s\nAmount: %d تومان",
-                $payment->getId(),
-                $order->getId(),
-                (string) ($order->getTrackingCode() ?? '-'),
-                (string) ($customMeta['targetServiceId'] ?? ($order->getTargetService()?->getId() ?? '-')),
-                $this->formatTelegramIdentity($telegramAccount),
-                $payment->getAmount()
-            )
-            : sprintf(
-                "رسید پرداخت\nPayment ID: %d\nOrder ID: %d\nOrder Tracking: %s\nUser: %s\nPlan: %s\nAmount: %d تومان",
-                $payment->getId(),
-                $order->getId(),
-                (string) ($order->getTrackingCode() ?? '-'),
-                $this->formatTelegramIdentity($telegramAccount),
-                $order->getPlan()->getTitle(),
-                $payment->getAmount()
-            ));
-
-        $this->telegramApiClient->sendPhoto($chatId, $receiptFileId, $caption, $this->keyboardFactory->adminPaymentActions((int) $payment->getId()));
-        $this->debugLog(sprintf('admin_view_payment_sent_receipt_photo payment_id=%d', $paymentId));
-    }
-
-    private function handleAdminConfirmPayment(string $chatId, int $paymentId, ?string $callbackId = null, ?AdminActor $admin = null): void
-    {
-        $payment = $this->entityManager->getRepository(Payment::class)->find($paymentId);
-        if (!$payment instanceof Payment) {
-            $this->acknowledgeCallback($callbackId);
-            $this->telegramApiClient->sendMessage($chatId, $this->botTextResolver->message('payment.failed'));
-
-            return;
-        }
-
-        // On a PROVISIONING_FAILED payment "confirm" means: retry fulfilment (already verified).
-        $retry = PaymentStatus::PROVISIONING_FAILED === $payment->getStatus();
-        $result = $retry
-            ? $this->paymentSettlementService->retryProvisioning($payment, $admin?->adminUserId, $chatId, 'telegram_retry_provisioning')
-            : $this->paymentSettlementService->approveByAdmin($payment, $admin?->adminUserId, $chatId, 'telegram_payment_approval');
-        $this->auditLogger->record($retry ? 'payment.retry' : 'payment.approve', 'Payment', $paymentId, ['outcome' => $result->outcome->value], $admin);
-        $this->debugLog(sprintf(
-            'admin_confirm_result payment_id=%d outcome=%s message="%s"',
-            $paymentId,
-            $result->outcome->value,
-            $result->message
-        ));
-        if ($result->isAlreadyProcessed()) {
-            $this->showPopupOrMessage($chatId, $callbackId, 'این پرداخت قبلاً بررسی شده است.', 'popup_payment_already_processed_confirm');
-
-            return;
-        }
-
-        if (!$result->isConfirmed()) {
-            $this->showPopupOrMessage($chatId, $callbackId, $result->message, 'popup_payment_confirm_panel_failed');
-
-            return;
-        }
-
-        $this->acknowledgeCallback($callbackId);
-        $this->telegramApiClient->sendMessage($chatId, $this->botTextResolver->message('admin.payment_confirmed'));
-    }
-
-    private function handleAdminRejectPayment(string $chatId, int $paymentId, ?string $callbackId = null, ?AdminActor $admin = null): void
-    {
-        $payment = $this->entityManager->getRepository(Payment::class)->find($paymentId);
-        if (!$payment instanceof Payment) {
-            $this->acknowledgeCallback($callbackId);
-            $this->telegramApiClient->sendMessage($chatId, $this->botTextResolver->message('payment.failed'));
-
-            return;
-        }
-
-        $result = $this->paymentSettlementService->reject($payment, null, $admin?->adminUserId, $chatId, 'telegram_payment_reject');
-        $this->auditLogger->record('payment.reject', 'Payment', $paymentId, ['outcome' => $result->outcome->value], $admin);
-        $this->debugLog(sprintf(
-            'admin_reject_result payment_id=%d outcome=%s message="%s"',
-            $paymentId,
-            $result->outcome->value,
-            $result->message
-        ));
-        if ($result->isAlreadyProcessed()) {
-            $this->showPopupOrMessage($chatId, $callbackId, 'این پرداخت قبلاً بررسی شده است.', 'popup_payment_already_processed_reject');
-
-            return;
-        }
-
-        if (SettlementOutcome::REJECTED !== $result->outcome) {
-            $this->showPopupOrMessage($chatId, $callbackId, 'عملیات انجام نشد.', 'popup_payment_reject_failed');
-
-            return;
-        }
-
-        $this->acknowledgeCallback($callbackId);
-        $this->telegramApiClient->sendMessage($chatId, $this->botTextResolver->message('admin.payment_rejected'));
-    }
-
     private function handleReceiptPhoto(Payment $openPayment, array $message, string $chatId): void
     {
         $photos = $message['photo'];
@@ -2732,72 +2199,6 @@ class TelegramUpdateHandler
         $this->entityManager->flush();
         $this->notifyAdmin($openPayment, 'receipt_photo');
         $this->telegramApiClient->sendMessage($chatId, $this->botTextResolver->message('payment.receipt_received'));
-    }
-
-    private function handleAdminUsers(string $chatId, ?string $callbackId = null): void
-    {
-        $accounts = $this->entityManager->getRepository(TelegramAccount::class)->findBy([], ['id' => 'DESC'], 10);
-        if ([] === $accounts) {
-            $this->showPopupOrMessage($chatId, $callbackId, 'کاربری برای نمایش وجود ندارد.', 'popup_no_users');
-
-            return;
-        }
-
-        $lines = ["آخرین کاربران:\n"];
-        foreach ($accounts as $account) {
-            $lines[] = sprintf(
-                "User ID: %d\nTelegram ID: %s\nUsername: @%s\nFirst name: %s\nLast activity: %s\n",
-                $account->getUser()->getId(),
-                $account->getTelegramId(),
-                $account->getUsername() ?: '-',
-                $account->getFirstName() ?: '-',
-                $account->getLastActivityAt()?->format('Y-m-d H:i:s') ?? '-'
-            );
-        }
-
-        $this->acknowledgeCallback($callbackId);
-        $this->telegramApiClient->sendMessage($chatId, implode("\n", $lines), $this->keyboardFactory->backToAdminMenu());
-    }
-
-    private function handleAdminOrders(string $chatId, ?string $callbackId = null): void
-    {
-        $orders = $this->entityManager->getRepository(Order::class)->findBy([], ['id' => 'DESC'], 10);
-        if ([] === $orders) {
-            $this->showPopupOrMessage($chatId, $callbackId, 'سفارشی برای نمایش وجود ندارد.', 'popup_no_orders');
-
-            return;
-        }
-
-        $lines = ["آخرین سفارشها:\n"];
-        foreach ($orders as $order) {
-            $meta = is_array($order->getMetadata()) ? $order->getMetadata() : [];
-            $durationText = true === ($meta['unlimitedDuration'] ?? false)
-                ? 'نامحدود'
-                : (string) ($meta['durationDays'] ?? '-');
-            $customInfo = true === ($meta['custom'] ?? false)
-                ? sprintf(
-                    " | custom: yes | username: %s | traffic: %sGB | duration: %s | calc: %s",
-                    (string) ($meta['finalUsername'] ?? '-'),
-                    (string) ($meta['trafficGb'] ?? '-'),
-                    $durationText,
-                    (string) ($meta['calculatedAmount'] ?? '-')
-                )
-                : ' | custom: no';
-            $lines[] = sprintf(
-                "Order ID: %d\nTracking: %s\nUser: %s\nPlan: %s\nAmount: %d\nStatus: %s%s\nCreated at: %s\n",
-                $order->getId(),
-                (string) ($order->getTrackingCode() ?? '-'),
-                $this->formatTelegramIdentity($order->getUser()->getTelegramAccount()),
-                $order->getPlan()->getTitle(),
-                $order->getAmount(),
-                $order->getStatus(),
-                $customInfo,
-                $order->getCreatedAt()->format('Y-m-d H:i:s')
-            );
-        }
-
-        $this->acknowledgeCallback($callbackId);
-        $this->telegramApiClient->sendMessage($chatId, implode("\n", $lines), $this->keyboardFactory->backToAdminMenu());
     }
 
     private function handleReceiptText(Payment $openPayment, string $text, string $chatId): void
@@ -3996,30 +3397,6 @@ class TelegramUpdateHandler
         ));
     }
 
-    /**
-     * The permission an admin callback needs; null = any admin (menus), or checked by the service action itself
-     * (admin_services, admin_service_view:, admin_user_*).
-     */
-    private function adminCallbackPermission(string $data): ?AdminPermission
-    {
-        if (str_starts_with($data, 'admin.store.')) {
-            return $this->adminStoreSections()[$data]['permission'] ?? null;
-        }
-
-        return match (true) {
-            'admin_pending_payments' === $data, 'admin_attention_payments' === $data, str_starts_with($data, 'admin_view_payment:') => AdminPermission::PAYMENTS_VIEW,
-            str_starts_with($data, 'admin_confirm_payment:'), str_starts_with($data, 'admin_reject_payment:') => AdminPermission::PAYMENTS_MODERATE,
-            'admin_users' === $data => AdminPermission::CUSTOMERS_VIEW,
-            'admin_orders' === $data => AdminPermission::ORDERS_VIEW,
-            default => null,
-        };
-    }
-
-    private function isAdminCallback(string $data): bool
-    {
-        return str_starts_with($data, 'admin_') || str_starts_with($data, 'admin.');
-    }
-
     private function formatTelegramIdentity(?TelegramAccount $telegramAccount): string
     {
         if (!$telegramAccount instanceof TelegramAccount) {
@@ -4027,11 +3404,6 @@ class TelegramUpdateHandler
         }
 
         return sprintf('@%s / %s', $telegramAccount->getUsername() ?: '-', $telegramAccount->getTelegramId());
-    }
-
-    private function html(string $value): string
-    {
-        return htmlspecialchars($value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
     }
 
     private function debugLog(string $message): void

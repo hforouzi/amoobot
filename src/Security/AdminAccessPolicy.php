@@ -83,6 +83,16 @@ final class AdminAccessPolicy
     }
 
     /**
+     * Everything this actor may do (empty for nobody / a deactivated admin), e.g. to build a keyboard.
+     *
+     * @return list<AdminPermission>
+     */
+    public function permissions(?AdminActor $actor): array
+    {
+        return array_values(array_filter(AdminPermission::cases(), fn (AdminPermission $permission): bool => $this->can($actor, $permission)));
+    }
+
+    /**
      * @param list<AdminPermission> $permissions
      */
     public function canAny(?AdminActor $actor, array $permissions): bool
