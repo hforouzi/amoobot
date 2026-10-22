@@ -32,7 +32,7 @@ final class MiniAppShellController extends AbstractController
         return $this->fragments->render($request, 'miniapp/_nav.html.twig', ['sections' => $this->sections->navigation($user)]);
     }
 
-    #[Route('/app/view/admin', name: 'miniapp_admin', defaults: ['_miniapp_section' => 'admin'], methods: ['GET'])]
+    #[Route('/app/admin', name: 'miniapp_admin', defaults: ['_miniapp_section' => 'admin'], methods: ['GET'])]
     public function admin(Request $request, #[CurrentUser] MiniAppUser $user): Response
     {
         return $this->fragments->render($request, 'miniapp/view/admin.html.twig', ['areas' => $this->sections->children('admin', $user)]);

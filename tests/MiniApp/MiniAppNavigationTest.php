@@ -45,7 +45,7 @@ final class MiniAppNavigationTest extends IntegrationTestCase
 
         self::assertSame(['home', 'shop', 'services', 'apps', 'help'], $this->navKeys($session));
 
-        $this->appGet('/app/view/admin', $session);
+        $this->appGet('/app/admin', $session);
         self::assertSame(403, $this->httpStatus(), 'the server refuses it too, not only the menu');
     }
 
@@ -56,13 +56,13 @@ final class MiniAppNavigationTest extends IntegrationTestCase
 
         self::assertSame(['home', 'shop', 'services', 'apps', 'help', 'admin'], $this->navKeys($session));
 
-        $html = $this->appGet('/app/view/admin', $session);
+        $html = $this->appGet('/app/admin', $session);
         self::assertSame(200, $this->httpStatus());
         $areas = (new Crawler($html))->filter('[data-area]')->each(static fn (Crawler $c): string => (string) $c->attr('data-area'));
         self::assertSame(['admin.orders', 'admin.payments', 'admin.customers', 'admin.services'], $areas, 'support: read-only areas only');
         self::assertStringContainsString('data-coming-soon', $html);
 
-        $this->appGet('/app/view/admin', $this->authenticate(self::ENV_ADMIN));
+        $this->appGet('/app/admin', $this->authenticate(self::ENV_ADMIN));
         $areas = (new Crawler((string) $this->client->getResponse()->getContent()))->filter('[data-area]')->count();
         self::assertSame(8, $areas, 'super admin (TELEGRAM_ADMIN_CHAT_ID): every area');
     }
@@ -71,13 +71,13 @@ final class MiniAppNavigationTest extends IntegrationTestCase
     {
         $admin = $this->linkedAdmin('ops@example.test', AdminUser::ROLE_ADMIN, '8303');
         $session = $this->authenticate('8303');
-        $this->appGet('/app/view/admin', $session);
+        $this->appGet('/app/admin', $session);
         self::assertSame(200, $this->httpStatus());
 
         $this->em->getConnection()->executeStatement('UPDATE admin_user SET is_active = 0 WHERE id = ?', [$admin->getId()]);
 
         self::assertNotContains('admin', $this->navKeys($session));
-        $this->appGet('/app/view/admin', $session);
+        $this->appGet('/app/admin', $session);
         self::assertSame(403, $this->httpStatus());
     }
 
@@ -134,7 +134,7 @@ final class MiniAppNavigationTest extends IntegrationTestCase
         $session = $this->authenticate(self::ENV_ADMIN);
 
         foreach (['', '?lang=en'] as $query) {
-            foreach (['/app/view/nav', '/app/view/home', '/app/view/services', '/app/view/apps', '/app/view/help', '/app/view/admin'] as $path) {
+            foreach (['/app/view/nav', '/app/view/home', '/app/view/services', '/app/view/apps', '/app/view/help', '/app/admin'] as $path) {
                 $this->appGet($path.$query, $session);
                 self::assertSame(200, $this->httpStatus(), $path.$query);
                 self::assertStringContainsString('no-store', (string) $this->client->getResponse()->headers->get('Cache-Control'), $path);

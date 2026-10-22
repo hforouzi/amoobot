@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\MiniApp\UI;
 
+use App\MiniApp\Admin\AdminRouteAccess;
+use App\Security\AdminAccessPolicy;
 use App\Bot\Application\TelegramUserResolver;
 use App\MiniApp\Auth\InitDataRejected;
 use App\MiniApp\Auth\InitDataValidator;
@@ -40,6 +42,8 @@ final class MiniAppAuthController extends AbstractController
         private readonly RateLimiterFactory $ipLimiter,
         #[Autowire(service: 'limiter.miniapp_auth_user')]
         private readonly RateLimiterFactory $userLimiter,
+        private readonly AdminAccessPolicy $accessPolicy,
+        private readonly AdminRouteAccess $adminAccess,
     ) {
     }
 
@@ -72,7 +76,9 @@ final class MiniAppAuthController extends AbstractController
 
         // The same TelegramAccount/User the bot would create or update for this Telegram user.
         $account = $this->userResolver->resolveFromTelegramUser($data->user);
-        $response = $this->transport->deliver($this->sessions->issue($account->getTelegramId(), $request->headers->get('User-Agent')), []);
+        // An admin's session lasts only as long as admin rights may (AdminRouteAccess re-checks it on admin routes).
+        $ttl = [] !== $this->accessPolicy->permissions($this->accessPolicy->botActor($account->getTelegramId())) ? $this->adminAccess->sessionTtl() : null;
+        $response = $this->transport->deliver($this->sessions->issue($account->getTelegramId(), $request->headers->get('User-Agent'), $ttl), []);
         $response->headers->set('Cache-Control', 'no-store, private');
 
         return $response;

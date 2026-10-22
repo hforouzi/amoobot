@@ -7,14 +7,15 @@ namespace App\Security;
 use App\Entity\AdminUser;
 
 /**
- * Who is acting as an admin: a web AdminUser, the same AdminUser in the bot (linked by telegramUserId), or the bot
- * admin from TELEGRAM_ADMIN_CHAT_ID (a super admin without an AdminUser row).
+ * Who is acting as an admin: a web AdminUser, the same AdminUser in the bot or the Mini App (linked by
+ * telegramUserId), or the bot admin from TELEGRAM_ADMIN_CHAT_ID (a super admin without an AdminUser row).
  */
 final class AdminActor
 {
     public const SOURCE_WEB = 'web';
     public const SOURCE_BOT = 'bot';
     public const SOURCE_CLI = 'cli';
+    public const SOURCE_MINIAPP = 'miniapp';
 
     /**
      * @param list<string> $roles the assigned roles (not AdminUser::getRoles(), which always adds ROLE_ADMIN)
@@ -32,6 +33,12 @@ final class AdminActor
     public static function fromAdminUser(AdminUser $admin, string $source = self::SOURCE_WEB): self
     {
         return new self($admin->getId(), $admin->getEmail(), $admin->getAssignedRoles(), $admin->isActive(), $source, $admin->getTelegramUserId());
+    }
+
+    /** The same admin acting from another place (the Mini App resolves admins like the bot does). */
+    public function withSource(string $source): self
+    {
+        return new self($this->adminUserId, $this->label, $this->roles, $this->active, $source, $this->telegramUserId);
     }
 
     public static function environmentBotAdmin(string $telegramUserId): self

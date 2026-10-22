@@ -9,7 +9,8 @@
  *   a[data-nav]            opens another section (stack kept for Telegram's BackButton)
  *   a[data-open-link]      opens a page in Telegram's in-app browser (the subscription page)
  *   button[data-action]    POSTs to that URL (JSON body from data-body); the answer's redirect is opened, its
- *                          message shown; data-reload reloads the section
+ *                          message shown; data-reload reloads the section; data-confirm asks first (Telegram's
+ *                          confirm dialog)
  *   form[data-submit]      sends its fields as JSON to that URL, then follows the answer's redirect
  *   form[data-quote-url]   asks that URL for the server's price when [data-requote] fields change
  *   form[data-upload]      sends its file (multipart) to that URL
@@ -17,6 +18,8 @@
  *
  * Every action and submit carries an Idempotency-Key kept on its element, so a double tap or a retry is the same
  * request for the server; after an error the key is dropped and the next try is a new one.
+ * An admin money / destructive action is first answered 428 with {confirm: {token, message}}: the message is shown in
+ * Telegram's confirm dialog and only on OK the call is repeated with the token in X-Admin-Confirm (same key).
  *   button[data-copy]      copies its value
  *   button[data-close-app] closes the Mini App (back to the chat)
  *   .view-root[data-main-button-text][data-main-button-href|data-main-button-form]  Telegram's MainButton
@@ -143,6 +146,16 @@
         tg.MainButton.show();
     }
 
+    function confirmDialog(message) {
+        return new Promise(function (resolve) {
+            if (supports('6.2')) {
+                tg.showConfirm(message, function (ok) { resolve(!!ok); });
+            } else {
+                resolve(window.confirm(message));
+            }
+        });
+    }
+
     function openLink(href) {
         var url = new URL(href, window.location.href).toString();
         if (supports('6.1')) {
@@ -227,6 +240,9 @@
         }
         if (options.key) {
             headers['Idempotency-Key'] = options.key;
+        }
+        if (options.confirm) {
+            headers['X-Admin-Confirm'] = options.confirm;
         }
         if (options.json !== undefined) {
             headers['Content-Type'] = 'application/json';
@@ -351,7 +367,13 @@
     function runAction(button) {
         var json;
         try { json = JSON.parse(button.getAttribute('data-body') || '{}'); } catch (e) { json = {}; }
-        send(button, 'POST', button.getAttribute('data-action'), {json: json, key: keyOf(button)}, null);
+        var go = function () { send(button, 'POST', button.getAttribute('data-action'), {json: json, key: keyOf(button)}, null); };
+        var question = button.getAttribute('data-confirm');
+        if (question) {
+            confirmDialog(question).then(function (ok) { if (ok) { go(); } });
+        } else {
+            go();
+        }
     }
 
     /* One state-changing call from an element (button or form): busy while it runs, then the answer is applied. */
@@ -363,8 +385,18 @@
         if (errorBox) {
             errorBox.hidden = true;
         }
+        var again = null;
         api(method, url, options).then(function (response) {
             return response.json().catch(function () { return {}; }).then(function (data) {
+                if (response.status === 428 && data.confirm) {
+                    // The server's confirmation step: same call, same key, with its token, only after "OK".
+                    haptic('warning');
+                    return confirmDialog(data.confirm.message).then(function (ok) {
+                        if (ok) {
+                            again = function () { send(el, method, url, Object.assign({}, options, {confirm: data.confirm.token}), errorBox); };
+                        }
+                    });
+                }
                 if (!response.ok) {
                     el.removeAttribute('data-idempotency-key');
                     haptic('error');
@@ -388,12 +420,15 @@
             toast(body.getAttribute(navigator.onLine === false ? 'data-msg-offline' : 'data-msg-error'));
         }).then(function () {
             el.removeAttribute('aria-busy');
+            if (again) {
+                again();
+            }
         });
     }
 
     /* An error answer: its message, and the channels to join when membership is required. */
     function showError(data, errorBox) {
-        var message = data.message || body.getAttribute('data-msg-error');
+        var message = (data.message || body.getAttribute('data-msg-error')) + (data.detail ? '\n' + data.detail : '');
         if (!errorBox) {
             toast(message);
             return;
