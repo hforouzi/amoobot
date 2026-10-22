@@ -5,8 +5,16 @@ declare(strict_types=1);
 namespace App\Entity;
 
 use Doctrine\ORM\Mapping as ORM;
+use Symfony\Bridge\Doctrine\Validator\Constraints\UniqueEntity;
+use Symfony\Component\Validator\Constraints as Assert;
 
+/**
+ * A channel customers must join before buying or claiming a trial (TelegramChannelMembershipGate). The chat id is
+ * what getChatMember takes: @username or the numeric id (-100… for a channel); the invite link becomes a Telegram
+ * URL button, so only a t.me / telegram.me https link is accepted. The same rules for the web form and the Mini App.
+ */
 #[ORM\Entity]
+#[UniqueEntity(fields: ['chatId'], message: 'required_channel.chat_id.taken')]
 class RequiredChannel
 {
     #[ORM\Id]
@@ -15,12 +23,18 @@ class RequiredChannel
     private ?int $id = null;
 
     #[ORM\Column(length: 255)]
-    private string $title;
+    #[Assert\NotBlank]
+    #[Assert\Length(max: 255)]
+    private string $title = '';
 
     #[ORM\Column(length: 255)]
-    private string $chatId;
+    #[Assert\NotBlank]
+    #[Assert\Regex(pattern: '/^(@[A-Za-z][A-Za-z0-9_]{4,31}|-?\d{5,20})$/', message: 'required_channel.chat_id.invalid')]
+    private string $chatId = '';
 
     #[ORM\Column(length: 255, nullable: true)]
+    #[Assert\Length(max: 255)]
+    #[Assert\Regex(pattern: '#^https://(t\.me|telegram\.me|telegram\.dog)/[^\s"\'<>]+$#i', message: 'required_channel.invite_url.invalid')]
     private ?string $inviteUrl = null;
 
     #[ORM\Column]

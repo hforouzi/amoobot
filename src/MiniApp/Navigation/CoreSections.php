@@ -8,8 +8,8 @@ use App\Security\AdminPermission;
 
 /**
  * The sections of this release: the customer's (with the shop, and orders under My services), and the admin entry
- * with its areas, which are listed as
- * "coming soon" (route null) until their screens are built; each then only gets a route here.
+ * with its areas, each shown to the admins whose role has its permission. (A section without a route is listed as
+ * "coming soon".)
  */
 final class CoreSections implements MiniAppSectionProvider
 {
@@ -32,11 +32,10 @@ final class CoreSections implements MiniAppSectionProvider
             ['admin.discounts', '🎟', AdminPermission::DISCOUNTS_MANAGE, 'miniapp_admin_discounts'],
             ['admin.broadcast', '📣', AdminPermission::BROADCAST_SEND, 'miniapp_admin_broadcasts'],
             ['admin.panels', '🖥', AdminPermission::PANELS_MANAGE, 'miniapp_admin_panels'],
-            ['admin.settings', '⚙️', AdminPermission::SETTINGS_MANAGE],
+            ['admin.settings', '⚙️', AdminPermission::SETTINGS_MANAGE, 'miniapp_admin_settings'],
         ];
-        foreach ($areas as $position => $area) {
-            [$key, $icon, $permission] = $area;
-            yield new MiniAppSection($key, 'area.'.substr($key, 6), $icon, 10 * ($position + 1), MiniAppAudience::ADMIN, [$permission], parent: 'admin', route: $area[3] ?? null);
+        foreach ($areas as $position => [$key, $icon, $permission, $route]) {
+            yield new MiniAppSection($key, 'area.'.substr($key, 6), $icon, 10 * ($position + 1), MiniAppAudience::ADMIN, [$permission], parent: 'admin', route: $route);
         }
     }
 }

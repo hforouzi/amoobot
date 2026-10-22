@@ -113,6 +113,15 @@ final class AdminRoutePermissions
             'miniapp_admin_panel_test' => AdminPermission::PANELS_MANAGE,
             'miniapp_admin_panel_activate' => AdminPermission::PANELS_MANAGE,
             'miniapp_admin_panel_deactivate' => AdminPermission::PANELS_MANAGE,
+            // Settings and required channels: the super admin's, as on the web.
+            'miniapp_admin_settings' => AdminPermission::SETTINGS_MANAGE,
+            'miniapp_admin_settings_sales' => AdminPermission::SETTINGS_MANAGE,
+            'miniapp_admin_settings_automation' => AdminPermission::SETTINGS_MANAGE,
+            'miniapp_admin_channels' => AdminPermission::SETTINGS_MANAGE,
+            'miniapp_admin_channel_create' => AdminPermission::SETTINGS_MANAGE,
+            'miniapp_admin_channel_activate' => AdminPermission::SETTINGS_MANAGE,
+            'miniapp_admin_channel_deactivate' => AdminPermission::SETTINGS_MANAGE,
+            'miniapp_admin_channel_delete' => AdminPermission::SETTINGS_MANAGE,
         ];
     }
 

@@ -6,6 +6,7 @@ namespace App\Tests\MiniApp\Admin;
 
 use App\Entity\BroadcastMessage;
 use App\Entity\DiscountCode;
+use App\Entity\RequiredChannel;
 use App\Entity\TrialPlan;
 use App\MiniApp\Admin\AdminRoutePermissions;
 use App\Security\AdminAccessPolicy;
@@ -27,6 +28,7 @@ final class MiniAppAdminPermissionMatrixTest extends IntegrationTestCase
     private TrialPlan $trialPlan;
     private DiscountCode $discount;
     private BroadcastMessage $broadcast;
+    private RequiredChannel $channel;
 
     use BotAdminTestTrait;
     use MiniAppAdminFixtures;
@@ -52,6 +54,9 @@ final class MiniAppAdminPermissionMatrixTest extends IntegrationTestCase
         $this->em->getConnection()->executeStatement('DELETE FROM broadcast_message');
         $this->broadcast = (new BroadcastMessage())->setTitle('Matrix broadcast')->setBody('Hello');
         $this->em->persist($this->broadcast);
+        $this->em->getConnection()->executeStatement('DELETE FROM required_channel');
+        $this->channel = (new RequiredChannel())->setTitle('Matrix channel')->setChatId('@matrix_channel');
+        $this->em->persist($this->channel);
         $this->em->flush();
         $this->startMiniAppClient();
     }
@@ -122,6 +127,7 @@ final class MiniAppAdminPermissionMatrixTest extends IntegrationTestCase
             '/discounts/' => $this->discount->getId(),
             '/broadcasts/' => $this->broadcast->getId(),
             '/panels/' => $this->service->getPanel()?->getId(),
+            '/channels/' => $this->channel->getId(),
         ];
         $path = $route->getPath();
         foreach ($ids as $segment => $id) {

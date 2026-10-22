@@ -101,6 +101,26 @@ final class SettingsAdministration
     }
 
     /**
+     * The sales form's first problem, in the web page's order, or null when it can be saved.
+     *
+     * @param array<string, mixed> $form
+     *
+     * @return array{field: string, message: string}|null
+     */
+    public function salesProblem(array $form): ?array
+    {
+        [$discountPercent, $trafficMinGb, $trafficMaxGb, $trafficPricePerGb, $disabledMessage] = self::sales($form);
+
+        return match (true) {
+            $discountPercent < 0 || $discountPercent > 100 => ['field' => 'pricing_global_discount_percent', 'message' => 'flash.settings.discount_range'],
+            '' === $disabledMessage => ['field' => 'sales_disabled_message', 'message' => 'flash.settings.disabled_message_empty'],
+            $trafficMinGb <= 0 || $trafficMaxGb <= 0 || $trafficMaxGb < $trafficMinGb => ['field' => $trafficMinGb <= 0 ? 'traffic_addon_min_gb' : 'traffic_addon_max_gb', 'message' => 'flash.settings.traffic_range'],
+            $trafficPricePerGb < 0 => ['field' => 'traffic_addon_price_per_gb', 'message' => 'flash.settings.traffic_price'],
+            default => null,
+        };
+    }
+
+    /**
      * Was SettingsAdminController::saveSales().
      *
      * @param array<string, mixed> $form
@@ -109,26 +129,11 @@ final class SettingsAdministration
      */
     public function saveSales(array $form): ?array
     {
-        $discountRaw = self::text($form, 'pricing_global_discount_percent', '0');
-        $discountPercent = is_numeric($discountRaw) ? (float) $discountRaw : -1;
-        $trafficMinRaw = self::text($form, 'traffic_addon_min_gb', '1');
-        $trafficMaxRaw = self::text($form, 'traffic_addon_max_gb', '100');
-        $trafficPriceRaw = self::text($form, 'traffic_addon_price_per_gb', '0');
-        $disabledMessage = self::text($form, 'sales_disabled_message', '');
-        $trafficMinGb = is_numeric($trafficMinRaw) ? (int) floor((float) $trafficMinRaw) : 0;
-        $trafficMaxGb = is_numeric($trafficMaxRaw) ? (int) floor((float) $trafficMaxRaw) : 0;
-        $trafficPricePerGb = is_numeric($trafficPriceRaw) ? (int) floor((float) $trafficPriceRaw) : -1;
-
-        $problem = match (true) {
-            $discountPercent < 0 || $discountPercent > 100 => ['field' => 'pricing_global_discount_percent', 'message' => 'flash.settings.discount_range'],
-            '' === $disabledMessage => ['field' => 'sales_disabled_message', 'message' => 'flash.settings.disabled_message_empty'],
-            $trafficMinGb <= 0 || $trafficMaxGb <= 0 || $trafficMaxGb < $trafficMinGb => ['field' => $trafficMinGb <= 0 ? 'traffic_addon_min_gb' : 'traffic_addon_max_gb', 'message' => 'flash.settings.traffic_range'],
-            $trafficPricePerGb < 0 => ['field' => 'traffic_addon_price_per_gb', 'message' => 'flash.settings.traffic_price'],
-            default => null,
-        };
+        $problem = $this->salesProblem($form);
         if (null !== $problem) {
             return $problem;
         }
+        [$discountPercent, $trafficMinGb, $trafficMaxGb, $trafficPricePerGb, $disabledMessage] = self::sales($form);
 
         $this->set('renewal.carry_remaining_traffic', self::checked($form, 'renewal_carry_remaining_traffic'), 'boolean');
         $this->set('renewal.carry_remaining_days', self::checked($form, 'renewal_carry_remaining_days'), 'boolean');
@@ -148,6 +153,22 @@ final class SettingsAdministration
     }
 
     /**
+     * @param array<string, mixed> $form
+     *
+     * @return array{field: string, message: string}|null
+     */
+    public function automationProblem(array $form): ?array
+    {
+        [$batchLimit, $expireHours] = self::automation($form);
+
+        return match (true) {
+            $batchLimit <= 0 => ['field' => 'automation_batch_limit', 'message' => 'flash.settings.batch_limit'],
+            $expireHours <= 0 => ['field' => 'orders_incomplete_expire_hours', 'message' => 'flash.settings.expire_hours'],
+            default => null,
+        };
+    }
+
+    /**
      * Was SettingsAdminController::saveAutomation().
      *
      * @param array<string, mixed> $form
@@ -156,16 +177,11 @@ final class SettingsAdministration
      */
     public function saveAutomation(array $form): ?array
     {
-        $batchLimitRaw = self::text($form, 'automation_batch_limit', '100');
-        $expireHoursRaw = self::text($form, 'orders_incomplete_expire_hours', '24');
-        $batchLimit = is_numeric($batchLimitRaw) ? (int) $batchLimitRaw : 0;
-        $expireHours = is_numeric($expireHoursRaw) ? (int) $expireHoursRaw : 0;
-        if ($batchLimit <= 0) {
-            return ['field' => 'automation_batch_limit', 'message' => 'flash.settings.batch_limit'];
+        $problem = $this->automationProblem($form);
+        if (null !== $problem) {
+            return $problem;
         }
-        if ($expireHours <= 0) {
-            return ['field' => 'orders_incomplete_expire_hours', 'message' => 'flash.settings.expire_hours'];
-        }
+        [$batchLimit, $expireHours] = self::automation($form);
 
         $this->set('automation.sync_usage_enabled', self::checked($form, 'automation_sync_usage_enabled'), 'boolean');
         $this->set('automation.check_expiry_enabled', self::checked($form, 'automation_check_expiry_enabled'), 'boolean');
@@ -193,6 +209,42 @@ final class SettingsAdministration
             ->setValue($value)
             ->setType($type)
             ->setUpdatedAt(new \DateTimeImmutable());
+    }
+
+    /**
+     * The sales form read as the web page reads it: decimals floored, anything unreadable out of range.
+     *
+     * @param array<string, mixed> $form
+     *
+     * @return array{float, int, int, int, string}
+     */
+    private static function sales(array $form): array
+    {
+        $discountRaw = self::text($form, 'pricing_global_discount_percent', '0');
+        $trafficMinRaw = self::text($form, 'traffic_addon_min_gb', '1');
+        $trafficMaxRaw = self::text($form, 'traffic_addon_max_gb', '100');
+        $trafficPriceRaw = self::text($form, 'traffic_addon_price_per_gb', '0');
+
+        return [
+            is_numeric($discountRaw) ? (float) $discountRaw : -1,
+            is_numeric($trafficMinRaw) ? (int) floor((float) $trafficMinRaw) : 0,
+            is_numeric($trafficMaxRaw) ? (int) floor((float) $trafficMaxRaw) : 0,
+            is_numeric($trafficPriceRaw) ? (int) floor((float) $trafficPriceRaw) : -1,
+            self::text($form, 'sales_disabled_message', ''),
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $form
+     *
+     * @return array{int, int}
+     */
+    private static function automation(array $form): array
+    {
+        $batchLimitRaw = self::text($form, 'automation_batch_limit', '100');
+        $expireHoursRaw = self::text($form, 'orders_incomplete_expire_hours', '24');
+
+        return [is_numeric($batchLimitRaw) ? (int) $batchLimitRaw : 0, is_numeric($expireHoursRaw) ? (int) $expireHoursRaw : 0];
     }
 
     /**
