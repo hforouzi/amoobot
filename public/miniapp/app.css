@@ -265,3 +265,13 @@ body.keyboard .action-bar { position: static; }
 .badge.discount-inactive, .badge.claim-pending { background: var(--code); color: var(--muted); }
 .badge.discount-expired, .badge.discount-exhausted { background: var(--warn); color: #fff; }
 .badge.claim-failed { background: var(--bad); color: #fff; }
+
+/* Broadcasts (M3c): state badges, progress, the message preview. */
+.badge[class*="broadcast-"] { background: var(--code); color: var(--muted); }
+.badge.broadcast-prepared, .badge.broadcast-scheduled, .badge.broadcast-sending { background: var(--warn); color: #fff; }
+.badge.broadcast-sent { background: var(--ok); color: #fff; }
+.badge.broadcast-failed, .badge.broadcast-cancelled { background: var(--bad); color: #fff; }
+progress { width: 100%; height: 8px; accent-color: var(--accent); margin-top: 6px; }
+.preview-box { background: var(--code); border-radius: 10px; padding: 10px 12px; min-height: 2.5em; white-space: normal; overflow-wrap: anywhere; line-height: 1.7; }
+.preview-box .link { color: var(--accent); text-decoration: underline; }
+.preview-box pre, .preview-box code { font-family: ui-monospace, monospace; direction: ltr; unicode-bidi: embed; }

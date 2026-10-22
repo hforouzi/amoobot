@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\MiniApp\Admin;
 
+use App\Entity\BroadcastMessage;
 use App\Entity\DiscountCode;
 use App\Entity\TrialPlan;
 use App\MiniApp\Admin\AdminRoutePermissions;
@@ -25,6 +26,7 @@ final class MiniAppAdminPermissionMatrixTest extends IntegrationTestCase
 {
     private TrialPlan $trialPlan;
     private DiscountCode $discount;
+    private BroadcastMessage $broadcast;
 
     use BotAdminTestTrait;
     use MiniAppAdminFixtures;
@@ -45,6 +47,11 @@ final class MiniAppAdminPermissionMatrixTest extends IntegrationTestCase
         $this->discount = (new DiscountCode())->setCode('MATRIX10')->setType(DiscountCode::TYPE_PERCENT)->setValue(10);
         $this->em->persist($this->trialPlan);
         $this->em->persist($this->discount);
+        // The M3c records.
+        $this->em->getConnection()->executeStatement('DELETE FROM broadcast_delivery');
+        $this->em->getConnection()->executeStatement('DELETE FROM broadcast_message');
+        $this->broadcast = (new BroadcastMessage())->setTitle('Matrix broadcast')->setBody('Hello');
+        $this->em->persist($this->broadcast);
         $this->em->flush();
         $this->startMiniAppClient();
     }
@@ -113,6 +120,7 @@ final class MiniAppAdminPermissionMatrixTest extends IntegrationTestCase
             '/plans/' => $this->payment->getOrder()->getPlan()->getId(),
             '/trial-plans/' => $this->trialPlan->getId(),
             '/discounts/' => $this->discount->getId(),
+            '/broadcasts/' => $this->broadcast->getId(),
         ];
         $path = $route->getPath();
         foreach ($ids as $segment => $id) {

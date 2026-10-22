@@ -1,0 +1,122 @@
+{% extends 'miniapp/view/_base.html.twig' %}
+{% import 'miniapp/admin/catalog/_fields.html.twig' as f %}
+{% trans_default_domain 'miniapp' %}
+{# One broadcast. A draft: the compose form (checked live: errors, preview, character count, audience size), then test
+   send, prepare and send (the recipient count typed back, then confirmed). Once sending started: the delivery summary,
+   a sample of failures (reasons masked), cancel and retry; no form. #}
+{% set b = row.broadcast %}
+{% set editable = isNew or b.editable %}
+{% block section %}admin{% endblock %}
+{% block title %}{{ isNew ? 'admin.broadcast.new'|trans : b.title }}{% endblock %}
+{% block attributes %} data-back{% if editable %} data-main-button-text="{{ 'admin.form.save'|trans }}" data-main-button-form="broadcast-form"{% endif %}{% endblock %}
+{% block content %}
+    {% if not isNew %}
+        <section class="card" data-broadcast-status="{{ row.state }}">
+            <div class="head">
+                <h1>{{ b.title }}</h1>
+                <span class="badge broadcast-{{ row.state }}">{{ ('admin.broadcast.state.' ~ row.state)|trans }}</span>
+            </div>
+            <p class="muted">{{ ('broadcast.target.' ~ b.targetType)|trans({}, 'admin') }}</p>
+            <div class="stats">
+                <div class="stat"><span class="muted">{{ 'admin.broadcast.recipients'|trans }}</span><b data-recipients>{{ row.total }}</b></div>
+                <div class="stat"><span class="muted">{{ 'admin.broadcast.count.sent'|trans }}</span><b data-count="sent">{{ row.sent }}</b></div>
+                <div class="stat"><span class="muted">{{ 'admin.broadcast.count.failed'|trans }}</span><b data-count="failed">{{ row.failed }}</b></div>
+                <div class="stat"><span class="muted">{{ 'admin.broadcast.count.pending'|trans }}</span><b data-count="pending">{{ row.pending }}</b></div>
+            </div>
+            {% if row.total > 0 %}<progress max="100" value="{{ row.progress }}" aria-label="{{ 'admin.broadcast.progress'|trans }}">{{ row.progress }}%</progress>{% endif %}
+            {% if paused %}<p class="muted" data-paused>⏸ {{ 'admin.broadcast.paused'|trans }}</p>{% endif %}
+        </section>
+    {% endif %}
+
+    {% if editable %}
+        <form id="broadcast-form" class="form" novalidate
+              data-submit="{{ isNew ? path('miniapp_admin_broadcast_create') : path('miniapp_admin_broadcast_update', {id: b.id}) }}"
+              data-check-url="{{ path('miniapp_admin_broadcast_check') }}" data-dirty-guard="{{ 'admin.form.leave_unsaved'|trans }}" data-check-now{% if not isNew %} data-reload{% endif %}>
+            {{ f.section('message', true) }}{{ 'admin.broadcast.section.message'|trans }}</summary>
+                {{ f.text('title', values.title, true, null, 'maxlength="255"') }}
+                <label class="field" data-field="body">
+                    <span>{{ f.label('body', true) }}</span>
+                    <textarea class="input" name="body" rows="6" required>{{ values.body }}</textarea>
+                    <span class="muted small-print">{{ 'admin.broadcast.length'|trans }}: <b class="ltr" data-live="length">{{ length }} / {{ limit }}</b></span>
+                    {{ f.error('body') }}
+                </label>
+                {{ f.select('parseMode', values.parseMode, [{value: 'HTML', label: 'bot_text.parse_mode.html'|trans({}, 'admin')}, {value: 'MarkdownV2', label: 'bot_text.parse_mode.markdown_v2'|trans({}, 'admin')}], false, null) }}
+                {{ f.toggle('disableWebPagePreview', values.disableWebPagePreview, null) }}
+                <div class="field">
+                    <span>{{ 'admin.broadcast.preview'|trans }}</span>
+                    <div class="preview-box" data-preview>{{ preview|raw }}</div>
+                </div>
+            </details>
+            {{ f.section('audience', true) }}{{ 'admin.broadcast.section.audience'|trans }}</summary>
+                {{ f.select('targetType', values.targetType, targets|map(t => {value: t, label: ('broadcast.target.' ~ t)|trans({}, 'admin')}), true, null) }}
+                <label class="field" data-field="targetUserIds">
+                    <span>{{ f.label('targetUserIds', false) }}</span>
+                    <input class="input ltr" type="text" name="targetUserIds" value="{{ values.targetUserIds }}" inputmode="numeric" autocomplete="off">
+                    <span class="muted small-print">{{ 'admin.broadcast.user_ids_help'|trans }}</span>
+                    {{ f.error('targetUserIds') }}
+                </label>
+                <label class="field" data-field="expiringDays">
+                    <span>{{ 'admin.broadcast.expiring_days'|trans }}</span>
+                    <input class="input ltr" type="text" name="expiringDays" value="{{ values.expiringDays }}" inputmode="numeric" autocomplete="off" maxlength="3">
+                    <span class="muted small-print">{{ 'admin.broadcast.expiring_days_help'|trans }}</span>
+                    {{ f.error('expiringDays') }}
+                </label>
+                <p class="muted">{{ 'admin.broadcast.audience_now'|trans }}: <b data-live="audience">—</b></p>
+            </details>
+            <p class="field-error" data-form-error hidden></p>
+            <button type="submit" class="btn" data-save>{{ 'admin.form.save'|trans }}</button>
+        </form>
+    {% endif %}
+
+    {% if not isNew and editable %}
+        <section class="card" data-group="send">
+            <h2>{{ 'admin.broadcast.section.send'|trans }}</h2>
+            <p class="muted">{{ 'admin.broadcast.send_steps'|trans }}</p>
+            <div class="row">
+                <button type="button" class="btn secondary small" data-action="{{ path('miniapp_admin_broadcast_test', {id: b.id}) }}" data-admin-action="test">🧪 {{ 'admin.broadcast.test'|trans }}</button>
+                <button type="button" class="btn secondary small" data-action="{{ path('miniapp_admin_broadcast_prepare', {id: b.id}) }}" data-reload data-admin-action="prepare">👥 {{ row.total > 0 ? 'admin.broadcast.prepare_again'|trans : 'admin.broadcast.prepare'|trans }}</button>
+            </div>
+            {% if row.total > 0 %}
+                <form class="form" data-submit="{{ path('miniapp_admin_broadcast_send', {id: b.id}) }}" data-reload novalidate data-send-form>
+                    <label class="field" data-field="confirmCount">
+                        <span>{{ 'admin.broadcast.type_count'|trans({'%count%': row.total}) }}</span>
+                        <input class="input ltr" type="text" name="confirmCount" inputmode="numeric" autocomplete="off" placeholder="{{ row.total }}">
+                        {{ f.error('confirmCount') }}
+                    </label>
+                    <p class="field-error" data-form-error hidden></p>
+                    <button type="submit" class="btn small"{% if paused %} disabled{% endif %}>📣 {{ 'admin.broadcast.send'|trans({'%count%': row.total}) }}</button>
+                </form>
+            {% endif %}
+        </section>
+    {% endif %}
+
+    {% if not isNew %}
+        {% if failures is not empty %}
+            <section class="card" data-group="failures">
+                <h2>{{ 'admin.broadcast.failures'|trans }}</h2>
+                <ul class="list compact">
+                    {% for failure in failures %}
+                        <li class="list-item" data-failure>
+                            <span class="list-main">
+                                <span>{{ failure.name ?: '—' }}{% if failure.username %} · <span class="ltr">@{{ failure.username }}</span>{% elseif failure.telegramId %} · <span class="ltr">{{ failure.telegramId }}</span>{% endif %}</span>
+                                <span class="muted ltr">{{ failure.reason ?? '—' }}</span>
+                            </span>
+                        </li>
+                    {% endfor %}
+                </ul>
+            </section>
+        {% endif %}
+        {% if cancellable or (row.failed > 0 and b.status != 'cancelled') %}
+            <section class="card">
+                <div class="row">
+                    {% if row.failed > 0 and b.status != 'cancelled' %}
+                        <button type="button" class="btn secondary small" data-action="{{ path('miniapp_admin_broadcast_retry', {id: b.id}) }}" data-reload data-admin-action="retry"{% if paused %} disabled{% endif %}>🔁 {{ 'admin.broadcast.retry'|trans({'%count%': row.failed}) }}</button>
+                    {% endif %}
+                    {% if cancellable %}
+                        <button type="button" class="btn small danger-solid" data-action="{{ path('miniapp_admin_broadcast_cancel', {id: b.id}) }}" data-reload data-admin-action="cancel">⛔ {{ 'admin.broadcast.cancel'|trans }}</button>
+                    {% endif %}
+                </div>
+            </section>
+        {% endif %}
+    {% endif %}
+{% endblock %}

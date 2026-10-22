@@ -24,7 +24,9 @@
  *   form[data-search]      opens that URL with the form's non-empty fields as the query, in place
  *   img[data-auth-src]     loaded with the session token (a receipt), shown as a data: URL
  *   .view-root[data-main-button-action]  Telegram's MainButton runs the [data-main-action] button
- *   form[data-check-url]   checked live by the server as it is edited (errors by field, warnings), nothing saved
+ *   form[data-check-url]   checked live by the server as it is edited (errors by field, warnings), nothing saved;
+ *                          its answer's live values go into [data-live=name], its (server-escaped) preview into
+ *                          [data-preview]; with data-check-now also once when the section opens
  *   [data-error-for=name]  where a field's error goes (422 answers carry {errors: {field: [messages]}})
  *   form[data-dirty-guard] once edited, Telegram's BackButton asks (that text) before leaving it unsaved
  *   button[data-fill-from] fetches {code} from that URL into the form's field [name=data-fill-target]
@@ -319,6 +321,9 @@
             updateMainButton(root);
             startPolling(root);
             loadAuthImages(root);
+            if (root) {
+                root.querySelectorAll('form[data-check-now]').forEach(function (form) { check(form, 0); });
+            }
             if (!keepScroll) {
                 window.scrollTo(0, 0);
             }
@@ -613,6 +618,14 @@
                     return;
                 }
                 showFieldErrors(form, data.errors);
+                // Live values (character count, audience size) and the preview, rendered by the server (escaped).
+                Object.keys(data.live || {}).forEach(function (name) {
+                    form.querySelectorAll('[data-live="' + name + '"]').forEach(function (el) { el.textContent = data.live[name]; });
+                });
+                var preview = form.querySelector('[data-preview]');
+                if (preview && typeof data.preview === 'string') {
+                    preview.innerHTML = data.preview;
+                }
                 var box = form.querySelector('[data-warnings]');
                 var list = box && box.querySelector('[data-warning-list]');
                 if (list) {

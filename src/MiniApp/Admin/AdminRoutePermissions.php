@@ -9,8 +9,7 @@ use App\Security\AdminPermission;
 /**
  * Which permission each Mini App admin route needs (/app/admin/** pages, /app/api/admin/** calls), enforced on every
  * request by MiniAppAdminGuard. Fail-closed: an admin route missing here is refused to everyone (and a test fails),
- * as AdminCrudPermissions does for the web panel. Later areas (catalog, broadcast, panels, settings, logs) add their
- * routes here.
+ * as AdminCrudPermissions does for the web panel.
  *
  * Who has which permission: App\Security\AdminRolePermissions.
  */
@@ -95,6 +94,19 @@ final class AdminRoutePermissions
             'miniapp_admin_discount_activate' => AdminPermission::DISCOUNTS_MANAGE,
             'miniapp_admin_discount_deactivate' => AdminPermission::DISCOUNTS_MANAGE,
             'miniapp_admin_discount_delete' => AdminPermission::DISCOUNTS_MANAGE,
+
+            // Operations (M3c).
+            'miniapp_admin_broadcasts' => AdminPermission::BROADCAST_SEND,
+            'miniapp_admin_broadcast_new' => AdminPermission::BROADCAST_SEND,
+            'miniapp_admin_broadcast' => AdminPermission::BROADCAST_SEND,
+            'miniapp_admin_broadcast_create' => AdminPermission::BROADCAST_SEND,
+            'miniapp_admin_broadcast_update' => AdminPermission::BROADCAST_SEND,
+            'miniapp_admin_broadcast_check' => AdminPermission::BROADCAST_SEND,
+            'miniapp_admin_broadcast_test' => AdminPermission::BROADCAST_SEND,
+            'miniapp_admin_broadcast_prepare' => AdminPermission::BROADCAST_SEND,
+            'miniapp_admin_broadcast_send' => AdminPermission::BROADCAST_SEND,
+            'miniapp_admin_broadcast_cancel' => AdminPermission::BROADCAST_SEND,
+            'miniapp_admin_broadcast_retry' => AdminPermission::BROADCAST_SEND,
         ];
     }
 

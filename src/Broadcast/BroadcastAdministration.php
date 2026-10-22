@@ -4,13 +4,15 @@ declare(strict_types=1);
 
 namespace App\Broadcast;
 
+use App\Entity\BroadcastDelivery;
 use App\Entity\BroadcastMessage;
 use Doctrine\ORM\EntityManagerInterface;
 
 /**
  * An admin's broadcast actions (BROADCAST_SEND), for the web panel, the bot and the Mini App: send a draft now (its
- * recipients prepared and the first batch sent; BroadcastSender and app:broadcast:run deliver the rest), cancel, retry
- * the failed deliveries. Sending is BroadcastSender's (one batch at a time, paced for Telegram). The caller audits.
+ * recipients prepared and the first batch sent; BroadcastSender and app:broadcast:run deliver the rest), or prepare
+ * it first and send exactly the recipients prepared (the Mini App), cancel, retry the failed deliveries. Sending is
+ * BroadcastSender's (one batch at a time, paced for Telegram). The caller audits.
  */
 final class BroadcastAdministration
 {
@@ -22,7 +24,62 @@ final class BroadcastAdministration
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
         private readonly BroadcastSender $broadcastSender,
+        private readonly BroadcastRecipientResolver $recipientResolver,
     ) {
+    }
+
+    /** How many people the broadcast's audience reaches now (nothing is stored). */
+    public function audienceCount(BroadcastMessage $broadcast): int
+    {
+        return count($this->recipientResolver->resolveRecipients($broadcast));
+    }
+
+    /**
+     * Lists a draft's recipients (one delivery row each; people already listed are kept).
+     *
+     * @return BroadcastSummary|null null: not a draft, nothing done
+     */
+    public function prepare(BroadcastMessage $broadcast): ?BroadcastSummary
+    {
+        return $broadcast->isEditable() ? $this->broadcastSender->prepareDeliveries($broadcast) : null;
+    }
+
+    /**
+     * Sends a prepared draft to exactly the recipients listed (no one is added since the admin confirmed their count):
+     * the first batch now, the rest by app:broadcast:run.
+     *
+     * @return BroadcastSummary|null null: not a draft or not prepared, nothing done
+     */
+    public function sendPrepared(BroadcastMessage $broadcast): ?BroadcastSummary
+    {
+        if (!$broadcast->isEditable() || 0 === $this->broadcastSender->deliveryCount($broadcast)) {
+            return null;
+        }
+
+        $broadcast->setStatus(BroadcastMessage::STATUS_SENDING)->setSendAt(null);
+
+        return $this->broadcastSender->sendPending($broadcast, self::BATCH);
+    }
+
+    /**
+     * Forgets a draft's prepared recipients (after its text or audience changed it must be prepared again).
+     *
+     * @return int how many were dropped
+     */
+    public function dropRecipients(BroadcastMessage $broadcast): int
+    {
+        if (!$broadcast->isEditable()) {
+            return 0;
+        }
+
+        $dropped = (int) $this->entityManager->createQueryBuilder()->delete(BroadcastDelivery::class, 'd')
+            ->where('d.broadcast = :broadcast AND d.status = :pending')
+            ->setParameter('broadcast', $broadcast)->setParameter('pending', BroadcastDelivery::STATUS_PENDING)
+            ->getQuery()->execute();
+        $this->broadcastSender->refreshCounts($broadcast);
+        $this->entityManager->flush();
+
+        return $dropped;
     }
 
     public static function isCancellable(BroadcastMessage $broadcast): bool
