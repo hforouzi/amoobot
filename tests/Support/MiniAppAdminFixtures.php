@@ -39,7 +39,7 @@ trait MiniAppAdminFixtures
     protected function setUpAdminCast(): void
     {
         $connection = $this->em->getConnection();
-        foreach (['mini_app_session', 'checkout_request', 'admin_audit_log', 'admin_user'] as $table) {
+        foreach (['mini_app_session', 'checkout_request', 'admin_audit_log', 'admin_user', 'trial_claim', 'trial_plan'] as $table) {
             $connection->executeStatement('DELETE FROM '.$table);
         }
         $this->adminUser = $this->linkedAdmin('admin@example.test', AdminUser::ROLE_ADMIN, self::ADMIN);

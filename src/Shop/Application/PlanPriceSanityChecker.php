@@ -26,36 +26,40 @@ final class PlanPriceSanityChecker
      */
     public function warnings(Plan $plan): array
     {
+        $labels = ['price' => 'Price', 'pricePerGb' => 'Price per GB', 'pricePerDay' => 'Price per day'];
         $warnings = [];
-        $this->check($warnings, 'Price', $plan->getPrice(), self::PRICE_RANGE);
-        $this->check($warnings, 'Price per GB', $plan->getPricePerGb(), self::PRICE_PER_GB_RANGE);
-        $this->check($warnings, 'Price per day', $plan->getPricePerDay(), self::PRICE_PER_DAY_RANGE);
+        foreach ($this->issues($plan) as $issue) {
+            $label = $labels[$issue['field']];
+            $warnings[] = 'low' === $issue['kind']
+                ? sprintf(
+                    '%s %s %s looks too low (expected at least %s %s). Prices are in Toman, not thousands of Toman or USD.',
+                    $label, number_format($issue['value']), AmountNormalizer::SHOP_CURRENCY, number_format($issue['min']), AmountNormalizer::SHOP_CURRENCY
+                )
+                : sprintf(
+                    '%s %s %s looks too high (expected at most %s %s). Prices are in Toman; a Rial value is 10x too high (%s Toman?).',
+                    $label, number_format($issue['value']), AmountNormalizer::SHOP_CURRENCY, number_format($issue['max']), AmountNormalizer::SHOP_CURRENCY, number_format(intdiv($issue['value'], 10))
+                );
+        }
 
         return $warnings;
     }
 
     /**
-     * @param list<string>   $warnings
-     * @param array{int,int} $range
+     * The same findings as data, for pages that word them in their own language (the Mini App).
+     *
+     * @return list<array{field: 'price'|'pricePerGb'|'pricePerDay', kind: 'low'|'high', value: int, min: int, max: int}>
      */
-    private function check(array &$warnings, string $label, ?int $value, array $range): void
+    public function issues(Plan $plan): array
     {
-        // 0 / empty means free or not used.
-        if (null === $value || $value <= 0) {
-            return;
+        $issues = [];
+        foreach ([['price', $plan->getPrice(), self::PRICE_RANGE], ['pricePerGb', $plan->getPricePerGb(), self::PRICE_PER_GB_RANGE], ['pricePerDay', $plan->getPricePerDay(), self::PRICE_PER_DAY_RANGE]] as [$field, $value, [$min, $max]]) {
+            // 0 / empty means free or not used.
+            if (null === $value || $value <= 0 || ($value >= $min && $value <= $max)) {
+                continue;
+            }
+            $issues[] = ['field' => $field, 'kind' => $value < $min ? 'low' : 'high', 'value' => $value, 'min' => $min, 'max' => $max];
         }
 
-        [$min, $max] = $range;
-        if ($value < $min) {
-            $warnings[] = sprintf(
-                '%s %s %s looks too low (expected at least %s %s). Prices are in Toman, not thousands of Toman or USD.',
-                $label, number_format($value), AmountNormalizer::SHOP_CURRENCY, number_format($min), AmountNormalizer::SHOP_CURRENCY
-            );
-        } elseif ($value > $max) {
-            $warnings[] = sprintf(
-                '%s %s %s looks too high (expected at most %s %s). Prices are in Toman; a Rial value is 10x too high (%s Toman?).',
-                $label, number_format($value), AmountNormalizer::SHOP_CURRENCY, number_format($max), AmountNormalizer::SHOP_CURRENCY, number_format(intdiv($value, 10))
-            );
-        }
+        return $issues;
     }
 }

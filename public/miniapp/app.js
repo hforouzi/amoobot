@@ -24,6 +24,10 @@
  *   form[data-search]      opens that URL with the form's non-empty fields as the query, in place
  *   img[data-auth-src]     loaded with the session token (a receipt), shown as a data: URL
  *   .view-root[data-main-button-action]  Telegram's MainButton runs the [data-main-action] button
+ *   form[data-check-url]   checked live by the server as it is edited (errors by field, warnings), nothing saved
+ *   [data-error-for=name]  where a field's error goes (422 answers carry {errors: {field: [messages]}})
+ *   form[data-dirty-guard] once edited, Telegram's BackButton asks (that text) before leaving it unsaved
+ *   button[data-fill-from] fetches {code} from that URL into the form's field [name=data-fill-target]
  *   button[data-copy]      copies its value
  *   button[data-close-app] closes the Mini App (back to the chat)
  *   .view-root[data-main-button-text][data-main-button-href|data-main-button-form]  Telegram's MainButton
@@ -328,6 +332,20 @@
     }
 
     function back() {
+        var dirty = view.querySelector('form[data-dirty]');
+        if (dirty) {
+            confirmDialog(dirty.getAttribute('data-dirty-guard')).then(function (ok) {
+                if (ok) {
+                    dirty.removeAttribute('data-dirty');
+                    back();
+                }
+            });
+            return;
+        }
+        backNow();
+    }
+
+    function backNow() {
         if (stack.length > 1) {
             stack.pop();
             haptic('select');
@@ -455,6 +473,10 @@
                     return;
                 }
                 haptic('success');
+                if (el.tagName === 'FORM') {
+                    el.removeAttribute('data-dirty');
+                    showFieldErrors(el, null);
+                }
                 if (data.message) {
                     toast(data.message);
                 }
@@ -477,8 +499,42 @@
         });
     }
 
+    /* A form's inline errors: each field's messages under it ([data-error-for]), the field marked invalid. */
+    function showFieldErrors(form, errors) {
+        if (!form) {
+            return null;
+        }
+        var first = null;
+        form.querySelectorAll('[data-error-for]').forEach(function (box) {
+            var name = box.getAttribute('data-error-for');
+            var messages = errors && errors[name];
+            var input = form.querySelector('[name="' + name + '"]');
+            box.textContent = messages ? messages.join(' ') : '';
+            box.hidden = !messages;
+            if (input) {
+                if (messages) {
+                    input.setAttribute('aria-invalid', 'true');
+                } else {
+                    input.removeAttribute('aria-invalid');
+                }
+            }
+            if (messages && !first) {
+                first = box;
+                var section = box.closest('details');
+                if (section) {
+                    section.open = true;
+                }
+            }
+        });
+        return first;
+    }
+
     /* An error answer: its message, and the channels to join when membership is required. */
     function showError(data, errorBox) {
+        var fieldError = data.errors ? showFieldErrors(errorBox && errorBox.closest('form'), data.errors) : null;
+        if (fieldError) {
+            fieldError.scrollIntoView({block: 'center'});
+        }
         var message = (data.message || body.getAttribute('data-msg-error')) + (data.detail ? '\n' + data.detail : '');
         if (!errorBox) {
             toast(message);
@@ -504,7 +560,13 @@
     function fieldsOf(form) {
         var data = {};
         new FormData(form).forEach(function (value, name) {
-            if (typeof value === 'string' && value.trim() !== '') {
+            if (typeof value !== 'string' || value.trim() === '') {
+                return;
+            }
+            if (name.slice(-2) === '[]') {
+                name = name.slice(0, -2);
+                data[name] = (data[name] || []).concat([value.trim()]);
+            } else {
                 data[name] = value.trim();
             }
         });
@@ -529,6 +591,7 @@
             api('POST', form.getAttribute('data-quote-url'), {json: fieldsOf(form)}).then(function (response) {
                 return response.json().then(function (data) {
                     if (response.ok && target && data.html) {
+                        showFieldErrors(form, null);
                         target.innerHTML = data.html;
                     } else if (!response.ok) {
                         showError(data, form.querySelector('[data-form-error]'));
@@ -536,6 +599,53 @@
                 });
             }).catch(function () { /* the price stays as shown; the submit checks again */ });
         }, delay);
+    }
+
+    /* The server's verdict on the form as it is now (the same rules as saving; nothing is saved). */
+    var checkTimer = null;
+    function check(form, delay) {
+        clearTimeout(checkTimer);
+        checkTimer = setTimeout(function () {
+            api('POST', form.getAttribute('data-check-url'), {json: fieldsOf(form)}).then(function (response) {
+                return response.ok ? response.json() : null;
+            }).then(function (data) {
+                if (!data) {
+                    return;
+                }
+                showFieldErrors(form, data.errors);
+                var box = form.querySelector('[data-warnings]');
+                var list = box && box.querySelector('[data-warning-list]');
+                if (list) {
+                    list.innerHTML = '';
+                    (data.warnings || []).forEach(function (text) {
+                        var item = document.createElement('li');
+                        item.textContent = text;
+                        list.appendChild(item);
+                    });
+                    box.hidden = !(data.warnings || []).length;
+                }
+            }).catch(function () { /* the save checks again */ });
+        }, delay);
+    }
+
+    function fillFrom(button) {
+        var form = button.closest('form');
+        var input = form && form.querySelector('[name="' + button.getAttribute('data-fill-target') + '"]');
+        if (!input || button.getAttribute('aria-busy') === 'true') {
+            return;
+        }
+        button.setAttribute('aria-busy', 'true');
+        api('GET', button.getAttribute('data-fill-from')).then(function (response) {
+            return response.ok ? response.json() : null;
+        }).then(function (data) {
+            if (data && data.code) {
+                input.value = data.code;
+                input.dispatchEvent(new Event('input', {bubbles: true}));
+                haptic('select');
+            }
+        }).catch(function () { /* the admin types a code */ }).then(function () {
+            button.removeAttribute('aria-busy');
+        });
     }
 
     /* ---------- polling ---------- */
@@ -601,6 +711,25 @@
         }
     });
 
+    var markEdited = function (e) {
+        var form = e.target.closest && e.target.closest('form');
+        if (!form) {
+            return;
+        }
+        if (form.hasAttribute('data-dirty-guard')) {
+            form.setAttribute('data-dirty', '1');
+        }
+        if (form.hasAttribute('data-check-url')) {
+            check(form, 500);
+        }
+    };
+    document.addEventListener('input', markEdited);
+    document.addEventListener('change', function (e) {
+        if (e.target.matches && e.target.matches('input[type="checkbox"], input[type="radio"], select')) {
+            markEdited(e);
+        }
+    });
+
     document.addEventListener('input', function (e) {
         var form = e.target.closest('form[data-quote-url]');
         if (form && e.target.matches('[data-requote]')) {
@@ -628,6 +757,8 @@
             openLink(target.getAttribute('href'));
         } else if (target.matches('button[data-action]')) {
             runAction(target);
+        } else if (target.matches('button[data-fill-from]')) {
+            fillFrom(target);
         } else if (target.matches('button[data-copy]')) {
             copy(target.getAttribute('data-copy'));
         } else if (target.matches('button[data-close-app]')) {
