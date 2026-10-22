@@ -81,7 +81,7 @@ class WalletSettings
         }
         sort($amounts);
 
-        return array_slice(array_values($amounts), 0, 6);
+        return array_slice($amounts, 0, 6);
     }
 
     private function int(string $key, int $default): int

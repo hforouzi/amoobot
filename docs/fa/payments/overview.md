@@ -25,3 +25,5 @@ Order
 ```
 
 فعال بودن PaymentGateway کافی نیست. StorePaymentMethod هم باید فعال باشد، currency و min/max با سفارش سازگار باشد و driver درگاه بدون خطا load شود.
+
+همچنین ببینید: [کیف پول مشتری](wallet.md)
