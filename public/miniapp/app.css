@@ -83,6 +83,11 @@ body.keyboard .nav { display: none; }
 .badge { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: .8rem; font-weight: 600; color: #fff; white-space: nowrap; }
 .badge.active { background: var(--ok); } .badge.expired, .badge.limited { background: var(--bad); } .badge.suspended { background: var(--warn); }
 .badge.muted-badge { background: var(--code); color: var(--muted); }
+/* Order statuses: grey while open, green once paid or delivered, amber while being followed up, red when closed unpaid. */
+.badge[class*="order-"] { background: var(--code); color: var(--muted); }
+.badge.order-paid, .badge.order-processing, .badge.order-completed, .badge.order-provisioned { background: var(--ok); color: #fff; }
+.badge.order-provisioning_failed { background: var(--warn); color: #fff; }
+.badge.order-cancelled, .badge.order-expired, .badge.order-failed { background: var(--bad); color: #fff; }
 
 /* Components shared with the subscription page (templates/subscription/_status, _apps, _downloads). */
 .stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }

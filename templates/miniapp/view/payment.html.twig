@@ -3,7 +3,7 @@
 {# One payment. Until a final state the page polls /app/api/payments/{id}/status (read only) and reloads when the
    state changes. Card to card: the details, the exact amount and the receipt upload. Online/crypto: the gateway's
    page opens with Telegram's openLink; the gateway's own return page or webhook settles it, never this page. #}
-{% block section %}orders{% endblock %}
+{% block section %}services{% endblock %}
 {% block title %}{{ 'payment.title'|trans }}{% endblock %}
 {% block attributes %} data-back{% if not final %} data-poll-url="{{ path('miniapp_payment_status', {id: payment.id}) }}" data-poll-state="{{ state }}"{% endif %}{% if state == 'pending' and kind != 'manual_card' and payment.paymentUrl %} data-main-button-text="{{ ('payment.open_' ~ kind)|trans }}" data-main-button-href="{{ payment.paymentUrl }}" data-main-button-external{% endif %}{% endblock %}
 {% block content %}

@@ -17,7 +17,7 @@ final class CoreSections implements MiniAppSectionProvider
     {
         yield new MiniAppSection('home', 'nav.home', '🏠', 10, route: 'miniapp_home');
         yield new MiniAppSection('shop', 'nav.shop', '🛒', 15, route: 'miniapp_shop');
-        yield new MiniAppSection('services', 'nav.services', '📦', 20, route: 'miniapp_services');
+        yield new MiniAppSection('services', 'nav.services_tab', '📦', 20, route: 'miniapp_services');
         yield new MiniAppSection('orders', 'nav.orders', '🧾', 25, parent: 'services', route: 'miniapp_orders');
         yield new MiniAppSection('apps', 'nav.apps', '📲', 30, route: 'miniapp_apps');
         yield new MiniAppSection('help', 'nav.help', '💬', 40, route: 'miniapp_help');
