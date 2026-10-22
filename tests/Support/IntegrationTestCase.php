@@ -30,6 +30,8 @@ use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 abstract class IntegrationTestCase extends KernelTestCase
 {
     private const PURGED_TABLES = [
+        'wallet_transaction',
+        'wallet',
         'discount_usage',
         'discount_code',
         'service_notification_log',
