@@ -26,7 +26,9 @@
  *   .view-root[data-main-button-action]  Telegram's MainButton runs the [data-main-action] button
  *   form[data-check-url]   checked live by the server as it is edited (errors by field, warnings), nothing saved;
  *                          its answer's live values go into [data-live=name], its (server-escaped) preview into
- *                          [data-preview]; with data-check-now also once when the section opens
+ *                          [data-preview]; with data-check-now also once when the section opens; its answer's
+ *                          escape (a fixed text) shows [data-escape-offer], whose button[data-escape] puts it in
+ *                          the body field
  *   [data-error-for=name]  where a field's error goes (422 answers carry {errors: {field: [messages]}})
  *   form[data-dirty-guard] once edited, Telegram's BackButton asks (that text) before leaving it unsaved
  *   button[data-fill-from] fetches {code} from that URL into the form's field [name=data-fill-target]
@@ -626,6 +628,13 @@
                 if (preview && typeof data.preview === 'string') {
                     preview.innerHTML = data.preview;
                 }
+                // The server's one-click fix (MarkdownV2 escaping), offered only while it applies.
+                var offer = form.querySelector('[data-escape-offer]');
+                if (offer) {
+                    offer.escaped = typeof data.escape === 'string' ? data.escape : null;
+                    offer.hidden = offer.escaped === null;
+                    offer.querySelectorAll('[data-escape]').forEach(function (button) { button.hidden = offer.escaped === null; });
+                }
                 var box = form.querySelector('[data-warnings]');
                 var list = box && box.querySelector('[data-warning-list]');
                 if (list) {
@@ -753,6 +762,16 @@
     document.addEventListener('click', function (e) {
         var target = e.target.closest('a, button');
         if (!target) {
+            return;
+        }
+        if (target.matches('button[data-escape]')) {
+            var offer = target.closest('[data-escape-offer]');
+            var field = target.form && target.form.querySelector('[name="body"]');
+            if (offer && field && typeof offer.escaped === 'string') {
+                field.value = offer.escaped;
+                field.dispatchEvent(new Event('input', {bubbles: true}));
+                haptic('select');
+            }
             return;
         }
         if (target.matches('a[data-nav][data-replace]')) {

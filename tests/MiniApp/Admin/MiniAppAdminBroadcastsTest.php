@@ -63,7 +63,7 @@ final class MiniAppAdminBroadcastsTest extends IntegrationTestCase
         self::assertSame('4097 / 4096', $check['live']['length']);
 
         $check = $this->appPostJson(self::BASE.'/check', $session, ['title' => 'Promo', 'body' => '<b>سلام</b> <script>alert(1)</script><a href="javascript:x">لینک</a>', 'parseMode' => 'HTML', 'targetType' => 'users_with_active_service']);
-        self::assertSame([], (array) $check['errors']);
+        self::assertSame(['body'], array_keys((array) $check['errors']), 'Telegram has no <script> tag');
         self::assertStringContainsString('<b>سلام</b>', $check['preview']);
         self::assertStringNotContainsString('<script', $check['preview']);
         self::assertStringNotContainsString('javascript:', $check['preview']);
@@ -273,6 +273,119 @@ final class MiniAppAdminBroadcastsTest extends IntegrationTestCase
         self::assertSame('50', $row->filter('progress')->attr('value'), '(4 sent + 1 failed) of 10');
         self::assertSame('draft', $list->filter('[data-broadcast-id="'.$draft->getId().'"]')->attr('data-state'));
         self::assertSame(['Going out'], (new Crawler($this->appGet('/app/admin/broadcasts?tab=sending', $session)))->filter('[data-broadcast-id] .title')->each(static fn (Crawler $c): string => trim($c->text())));
+    }
+
+    public function testTheTextIsCheckedInItsFormatAndEscapingIsOffered(): void
+    {
+        $session = $this->authenticate(self::ADMIN);
+        $base = ['title' => 'Promo', 'targetType' => 'all'];
+
+        $check = $this->appPostJson(self::BASE.'/check?lang=en', $session, $base + ['body' => 'نسخه 2.5 آماده است', 'parseMode' => 'MarkdownV2']);
+        self::assertSame(['body'], array_keys((array) $check['errors']));
+        self::assertStringContainsString('“.” is a reserved character in MarkdownV2', $check['errors']['body'][0]);
+        self::assertSame('نسخه 2\.5 آماده است', $check['escape'], 'the one-click conversion');
+
+        $check = $this->appPostJson(self::BASE.'/check', $session, $base + ['body' => (string) $check['escape'], 'parseMode' => 'MarkdownV2']);
+        self::assertSame([], (array) $check['errors']);
+        self::assertNull($check['escape'], 'nothing to escape any more');
+        $check = $this->appPostJson(self::BASE.'/check', $session, $base + ['body' => 'نسخه 2.5 آماده است', 'parseMode' => '']);
+        self::assertSame([], (array) $check['errors'], 'plain text is sent as it is');
+        self::assertNull($check['escape']);
+        $check = $this->appPostJson(self::BASE.'/check?lang=en', $session, $base + ['body' => '<b><i>x</b></i>', 'parseMode' => 'HTML']);
+        self::assertSame(['body'], array_keys((array) $check['errors']));
+        self::assertNull($check['escape'], 'escaping is a MarkdownV2 helper');
+
+        $this->appPostJson(self::BASE, $session, $base + ['title' => 'Bad', 'body' => 'Hello!', 'parseMode' => 'MarkdownV2'], self::newKey());
+        self::assertSame(422, $this->httpStatus());
+        self::assertSame(0, $this->em->getRepository(BroadcastMessage::class)->count(['title' => 'Bad']));
+        $this->appPostJson(self::BASE, $session, $base + ['title' => 'Bad', 'body' => 'a<br>b', 'parseMode' => 'HTML'], self::newKey());
+        self::assertSame(422, $this->httpStatus());
+        $this->create($session, $base + ['title' => 'Good', 'body' => 'Hello\!', 'parseMode' => 'MarkdownV2']);
+    }
+
+    public function testTheFormatIsPlainByDefaultAndExplained(): void
+    {
+        $session = $this->authenticate(self::ADMIN);
+        foreach (['fa', 'en'] as $lang) {
+            $form = new Crawler($this->appGet('/app/admin/broadcasts/new?lang='.$lang, $session));
+            $select = $form->filter('select[name="parseMode"]');
+            self::assertSame(['', 'HTML', 'MarkdownV2'], $select->filter('option')->each(static fn (Crawler $c): string => (string) $c->attr('value')));
+            self::assertSame('', $select->filter('option[selected]')->attr('value'), 'plain text');
+            self::assertNotSame('', trim($form->filter('[data-field="parseMode"] .small-print')->text()), 'the help under the field');
+            self::assertCount(1, $form->filter('button[data-escape][hidden]'), 'escaping is offered only when needed');
+            self::assertDoesNotMatchRegularExpression(self::RAW_KEY, strip_tags($form->html()));
+        }
+        $broadcast = $this->create($session, ['title' => 'Default', 'body' => 'Version 2.5!', 'targetType' => 'all']);
+        self::assertNull($broadcast->getParseMode());
+    }
+
+    public function testATextThatDoesNotParseIsNotPreparedOrSent(): void
+    {
+        $session = $this->authenticate(self::ADMIN);
+        // Saved before this check existed.
+        $broadcast = (new BroadcastMessage())->setTitle('Old')->setBody('Version 2.5')->setParseMode('MarkdownV2')->setTargetType('users_with_active_service');
+        $this->em->persist($broadcast);
+        $this->em->flush();
+
+        $answer = $this->appPostJson(self::BASE.'/'.$broadcast->getId().'/prepare?lang=en', $session, [], self::newKey());
+        self::assertSame(422, $this->httpStatus());
+        self::assertStringContainsString('MarkdownV2', $answer['errors']['body'][0]);
+        self::assertSame(0, $this->deliveries($broadcast));
+        $this->appPostJson(self::BASE.'/'.$broadcast->getId().'/test', $session, [], self::newKey());
+        self::assertSame(422, $this->httpStatus(), 'not even to the admin');
+        self::assertCount(0, $this->http->requests('/sendMessage'));
+    }
+
+    public function testRepeatedParseErrorsStopTheSendAndTheBroadcastIsDuplicatedNotRetried(): void
+    {
+        foreach (['840603', '840604'] as $telegramId) {
+            $this->createActiveService($this->createUser($telegramId), $this->service->getInbound());
+        }
+        $this->em->flush();
+        $session = $this->authenticate(self::ADMIN);
+        $customers = [self::BUYER, '840601', '840602', '840603', '840604'];
+        // A text this check accepts but Telegram does not (its rules may change).
+        $this->http->on('/sendMessage', static function (string $method, string $url, array $options) use ($customers): MockResponse {
+            $chat = (string) (json_decode((string) ($options['body'] ?? '{}'), true)['chat_id'] ?? '');
+
+            return in_array($chat, $customers, true)
+                ? new MockResponse('{"ok":false,"error_code":400,"description":"Bad Request: can\'t parse entities: Can\'t find end of Bold entity at byte offset 0"}', ['http_code' => 400, 'response_headers' => ['content-type' => 'application/json']])
+                : new MockResponse('{"ok":true,"result":{"message_id":7}}', ['response_headers' => ['content-type' => 'application/json']]);
+        });
+        $broadcast = $this->create($session, ['title' => 'Promo', 'body' => '*Sale*', 'parseMode' => 'MarkdownV2', 'targetType' => 'users_with_active_service', 'disableWebPagePreview' => '1']);
+        $this->appPostJson(self::BASE.'/'.$broadcast->getId().'/prepare', $session, [], self::newKey());
+        $this->confirmedPost(self::BASE.'/'.$broadcast->getId().'/send', $session, ['confirmCount' => '5']);
+        self::assertSame(200, $this->httpStatus());
+
+        self::assertCount(3, array_filter($this->http->requests('/sendMessage'), fn (array $r): bool => in_array((string) ($this->requestBody($r)['chat_id'] ?? ''), $customers, true)), 'stopped after three, two never tried');
+        $alerts = array_filter($this->http->requests('/sendMessage'), fn (array $r): bool => self::ADMIN === (string) ($this->requestBody($r)['chat_id'] ?? ''));
+        self::assertCount(1, $alerts, 'the admin is told once');
+        $page = new Crawler($this->appGet('/app/admin/broadcasts/'.$broadcast->getId().'?lang=en', $session));
+        self::assertSame('stopped', $page->filter('[data-broadcast-status]')->attr('data-broadcast-status'));
+        self::assertStringContainsString("Can't find end of Bold entity", $page->filter('[data-stop-reason]')->text());
+        self::assertSame(['3', '2'], [trim($page->filter('[data-count="failed"]')->text()), trim($page->filter('[data-count="pending"]')->text())]);
+        self::assertCount(0, $page->filter('[data-admin-action="retry"]'), 'no retry offered for a format error');
+        self::assertCount(1, $page->filter('[data-admin-action="duplicate"]'));
+        self::assertDoesNotMatchRegularExpression(self::RAW_KEY, strip_tags($page->html()));
+
+        $this->http->reset();
+        $answer = $this->appPostJson(self::BASE.'/'.$broadcast->getId().'/retry?lang=en', $session, [], self::newKey());
+        self::assertSame(409, $this->httpStatus(), 'refused before the confirmation');
+        self::assertSame('broadcast_format_error', $answer['error']);
+        self::assertStringContainsString('duplicate', strtolower((string) $answer['message']));
+        self::assertCount(0, $this->http->requests('/sendMessage'));
+
+        $answer = $this->appPostJson(self::BASE.'/'.$broadcast->getId().'/duplicate', $session, [], self::newKey());
+        self::assertSame(200, $this->httpStatus(), json_encode($answer, JSON_UNESCAPED_UNICODE));
+        $copy = $this->em->getRepository(BroadcastMessage::class)->findOneBy(['status' => BroadcastMessage::STATUS_DRAFT, 'title' => 'Promo']);
+        self::assertInstanceOf(BroadcastMessage::class, $copy);
+        self::assertNotSame($broadcast->getId(), $copy->getId());
+        self::assertStringEndsWith('/app/admin/broadcasts/'.$copy->getId(), (string) $answer['redirect']);
+        self::assertSame(['*Sale*', 'MarkdownV2', 'users_with_active_service', 0], [$copy->getBody(), $copy->getParseMode(), $copy->getTargetType(), $this->deliveries($copy)]);
+        self::assertContains('broadcast.duplicate', array_column(array_filter($this->auditRows(), static fn (array $r): bool => 'miniapp' === $r['source']), 'action'));
+
+        $this->appPostJson(self::BASE.'/'.$copy->getId().'/duplicate', $session, [], self::newKey());
+        self::assertSame(409, $this->httpStatus(), 'a draft is edited, not duplicated');
     }
 
     /**

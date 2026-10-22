@@ -123,6 +123,9 @@ final class AdminBotTexts
             'admin.broadcasts.confirm_cancel' => $m('Admin confirm cancel broadcast', 'لغو ارسال پیام همگانی #{{ id }} «{{ title }}»', ['id', 'title']),
             'admin.broadcasts.confirm_retry' => $m('Admin confirm retry broadcast', 'ارسال مجدد {{ failed }} پیام ناموفق از #{{ id }} «{{ title }}»', ['id', 'title', 'failed']),
             'admin.broadcasts.retry_done' => $m('Admin broadcast retry done', 'ارسال مجدد: {{ sent }} موفق، {{ failed }} ناموفق، {{ pending }} در صف.', ['sent', 'failed', 'pending']),
+            'admin.broadcasts.retry_format_blocked' => $m('Admin broadcast retry refused (format error)', "⚠️ ارسال مجدد #{{ id }} انجام نشد: تلگرام متن این پیام را در قالب انتخاب‌شده نپذیرفته است و ارسال دوباره همان متن هم ناموفق می‌شود.\nبا دکمه «📄 کپی» یک پیش‌نویس جدید از آن بسازید، متن را در پنل وب یا مینی‌اپ اصلاح کنید و دوباره ارسال کنید.", ['id']),
+            'admin.broadcasts.duplicated' => $m('Admin broadcast duplicated as draft', "📄 پیش‌نویس جدید #{{ id }} «{{ title }}» با همان متن، قالب و مخاطبان ساخته شد.\nآن را در پنل وب یا مینی‌اپ اصلاح و ارسال کنید.", ['id', 'title']),
+            'admin.broadcasts.stopped_format' => $m('Admin alert: broadcast stopped (format error)', "⛔️ ارسال پیام همگانی #{{ id }} «{{ title }}» خودکار متوقف شد: تلگرام متن را در قالب {{ parse_mode }} نپذیرفت.\nعلت: {{ reason }}\n{{ failed }} ارسال ناموفق؛ برای {{ pending }} نفر دیگر ارسال نشد.\nیک کپی پیش‌نویس از آن بسازید، متن را اصلاح کنید (یا قالب را «متن ساده» کنید) و دوباره ارسال کنید.", ['id', 'title', 'parse_mode', 'reason', 'failed', 'pending']),
         ];
     }
 

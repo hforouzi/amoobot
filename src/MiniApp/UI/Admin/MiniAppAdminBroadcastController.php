@@ -6,6 +6,10 @@ namespace App\MiniApp\UI\Admin;
 
 use App\Bot\Infrastructure\TelegramApiClient;
 use App\Broadcast\BroadcastAdministration;
+use App\Broadcast\BroadcastFormat;
+use App\Broadcast\BroadcastFormatException;
+use App\Broadcast\BroadcastFormatProblem;
+use App\Broadcast\BroadcastSender;
 use App\Entity\AdminUser;
 use App\Entity\BroadcastDelivery;
 use App\Entity\BroadcastMessage;
@@ -38,8 +42,11 @@ use Symfony\Contracts\Translation\TranslatorInterface;
  * compose (the web form's fields and rules, a live preview, the character count and how many people the audience
  * reaches), a test send to the admin's own chat, prepare (the recipient list is fixed and counted), send (the admin
  * types the recipient count back, then confirms), cancel, retry the failed deliveries, and the delivery summary with
- * a sample of failures (reasons masked). A broadcast is edited only while it is a draft; editing a prepared draft
- * drops its recipient list. Sending and retrying need the automation switch automation.broadcasts_enabled, because
+ * a sample of failures (reasons masked), duplicate a finished one as a new draft. A broadcast is edited only while
+ * it is a draft; editing a prepared draft drops its recipient list. The text must parse in its format (BroadcastFormat,
+ * the web's rule): the check offers MarkdownV2 escaping, and an unparsable text is not test-sent, prepared or sent.
+ * Failures because Telegram could not parse the text are not retried (the broadcast stopped itself; it is duplicated
+ * and corrected instead). Sending and retrying need the automation switch automation.broadcasts_enabled, because
  * app:broadcast:run delivers everything after the first batch. Sending is BroadcastSender's, paced for Telegram.
  */
 #[IsGranted(MiniAppUser::ROLE)]
@@ -164,6 +171,8 @@ final class MiniAppAdminBroadcastController extends AbstractController
             'errors' => (object) $errors,
             'warnings' => [],
             'preview' => BroadcastForm::preview($broadcast->getBody(), $broadcast->getParseMode()),
+            // The one-click "escape automatically" (MarkdownV2 that does not parse), else null.
+            'escape' => BroadcastFormat::canEscape($broadcast->getBody(), $broadcast->getParseMode()) ? BroadcastFormat::escapeMarkdownV2($broadcast->getBody()) : null,
             'live' => [
                 'length' => BroadcastForm::length($broadcast->getBody()).' / '.BroadcastMessage::TELEGRAM_MESSAGE_LIMIT,
                 'audience' => $audienceKnown ? (string) $this->broadcasts->audienceCount($broadcast) : '—',
@@ -178,6 +187,9 @@ final class MiniAppAdminBroadcastController extends AbstractController
         $broadcast = $this->broadcast($id);
         if (!$broadcast->isEditable()) {
             return $this->conflict($request, 'broadcast_locked');
+        }
+        if (null !== $problem = $this->broadcasts->formatProblem($broadcast)) {
+            return $this->formatInvalid($request, $problem);
         }
 
         return $this->actions->run($request, $user, $id, null, function () use ($request, $user, $broadcast): array {
@@ -200,8 +212,17 @@ final class MiniAppAdminBroadcastController extends AbstractController
             return $this->conflict($request, 'broadcast_locked');
         }
 
+        if (null !== $problem = $this->broadcasts->formatProblem($broadcast)) {
+            return $this->formatInvalid($request, $problem);
+        }
+
         return $this->actions->run($request, $user, $id, null, function () use ($request, $user, $broadcast): array {
-            if (null === $this->broadcasts->prepare($broadcast)) {
+            try {
+                $summary = $this->broadcasts->prepare($broadcast);
+            } catch (BroadcastFormatException) {
+                return $this->conflictAnswer($request, 'broadcast_state_changed');
+            }
+            if (null === $summary) {
                 return $this->conflictAnswer($request, 'broadcast_locked');
             }
             $recipients = $broadcast->getTotalRecipients();
@@ -228,6 +249,9 @@ final class MiniAppAdminBroadcastController extends AbstractController
         if (null !== $refusal) {
             return $this->conflict($request, $refusal);
         }
+        if (null !== $problem = $this->broadcasts->formatProblem($broadcast)) {
+            return $this->formatInvalid($request, $problem);
+        }
         $recipients = $broadcast->getTotalRecipients();
         if (AdminText::integer(AdminForms::body($request)['confirmCount'] ?? null) !== $recipients) {
             return $this->editor->invalid($request, ['confirmCount' => [$this->message($request, 'admin.broadcast.count_mismatch')]]);
@@ -238,7 +262,11 @@ final class MiniAppAdminBroadcastController extends AbstractController
             if (!$this->automation->broadcastsEnabled() || $broadcast->getTotalRecipients() !== $recipients) {
                 return $this->conflictAnswer($request, 'broadcast_state_changed');
             }
-            $summary = $this->broadcasts->sendPrepared($broadcast);
+            try {
+                $summary = $this->broadcasts->sendPrepared($broadcast);
+            } catch (BroadcastFormatException) {
+                $summary = null;
+            }
             if (null === $summary) {
                 return $this->conflictAnswer($request, 'broadcast_state_changed');
             }
@@ -273,6 +301,9 @@ final class MiniAppAdminBroadcastController extends AbstractController
         if (!$this->automation->broadcastsEnabled()) {
             return $this->conflict($request, 'broadcasts_paused');
         }
+        if ($this->broadcasts->retryBlocked($broadcast)) {
+            return $this->conflict($request, 'broadcast_format_error');
+        }
         $confirm = $this->message($request, 'admin.broadcast.confirm.retry', ['%count%' => $broadcast->getFailedCount(), '%title%' => $broadcast->getTitle()]);
 
         return $this->actions->run($request, $user, $id, $confirm, function () use ($request, $user, $broadcast): array {
@@ -280,9 +311,33 @@ final class MiniAppAdminBroadcastController extends AbstractController
                 return $this->conflictAnswer($request, 'broadcast_nothing_to_retry');
             }
             $summary = $this->broadcasts->retryFailed($broadcast);
+            if (null === $summary) {
+                return $this->conflictAnswer($request, 'broadcast_format_error');
+            }
             $this->auditLogger->record('broadcast.retry_failed', 'BroadcastMessage', $broadcast->getId(), ['sent' => $summary->sent, 'failed' => $summary->failed, 'pending' => $summary->pending], $user->admin);
 
             return ['message' => $this->message($request, 'admin.broadcast.retried', ['%sent%' => $summary->sent, '%failed%' => $summary->failed])];
+        });
+    }
+
+    /** A finished broadcast (sent, failed, stopped, cancelled) as a new draft with its text, format and audience. */
+    #[Route('/app/api/admin/broadcasts/{id}/duplicate', name: 'miniapp_admin_broadcast_duplicate', requirements: ['id' => '\d+'], defaults: ['_miniapp_section' => 'admin.broadcast'], methods: ['POST'])]
+    public function duplicate(Request $request, #[CurrentUser] MiniAppUser $user, int $id): JsonResponse
+    {
+        $broadcast = $this->broadcast($id);
+        if (!BroadcastAdministration::isDuplicable($broadcast)) {
+            return $this->conflict($request, 'broadcast_not_duplicable');
+        }
+
+        return $this->actions->run($request, $user, $id, null, function () use ($request, $user, $broadcast): array {
+            $adminUserId = $user->admin?->adminUserId;
+            $copy = $this->broadcasts->duplicate($broadcast, null === $adminUserId ? null : $this->entityManager->find(AdminUser::class, $adminUserId));
+            if (null === $copy) {
+                return $this->conflictAnswer($request, 'broadcast_not_duplicable');
+            }
+            $this->auditLogger->record('broadcast.duplicate', 'BroadcastMessage', $copy->getId(), ['from' => $broadcast->getId(), 'title' => $copy->getTitle()], $user->admin);
+
+            return ['message' => $this->message($request, 'admin.broadcast.duplicated'), 'redirect' => $this->generateUrl('miniapp_admin_broadcast', ['id' => $copy->getId()])];
         });
     }
 
@@ -340,6 +395,10 @@ final class MiniAppAdminBroadcastController extends AbstractController
             'parseModes' => BroadcastMessage::PARSE_MODES,
             'failures' => $failures,
             'cancellable' => BroadcastAdministration::isCancellable($broadcast),
+            'duplicable' => BroadcastAdministration::isDuplicable($broadcast),
+            'retryBlocked' => null !== $broadcast->getId() && $broadcast->getFailedCount() > 0 && $this->broadcasts->retryBlocked($broadcast),
+            'stopReason' => AdminText::safe(is_string($broadcast->getMetadata()['formatError']['error'] ?? null) ? $broadcast->getMetadata()['formatError']['error'] : null, 300),
+            'stopAfter' => BroadcastSender::FORMAT_ERROR_STOP_AFTER,
             'paused' => !$this->automation->broadcastsEnabled(),
         ]);
     }
@@ -380,12 +439,18 @@ final class MiniAppAdminBroadcastController extends AbstractController
         $statuses = match ($tab) {
             'draft' => [BroadcastMessage::STATUS_DRAFT, BroadcastMessage::STATUS_SCHEDULED],
             'sending' => [BroadcastMessage::STATUS_SENDING],
-            'done' => [BroadcastMessage::STATUS_SENT, BroadcastMessage::STATUS_FAILED],
+            'done' => [BroadcastMessage::STATUS_SENT, BroadcastMessage::STATUS_FAILED, BroadcastMessage::STATUS_STOPPED],
             'cancelled' => [BroadcastMessage::STATUS_CANCELLED],
             default => null,
         };
 
         return null === $statuses ? $qb : $qb->andWhere('b.status IN (:statuses)')->setParameter('statuses', $statuses);
+    }
+
+    /** The text does not parse in its format: the body field's error (the web's message), 422. */
+    private function formatInvalid(Request $request, BroadcastFormatProblem $problem): JsonResponse
+    {
+        return $this->editor->invalid($request, ['body' => [$this->translator->trans($problem->message, $problem->parameters, 'validators', MiniAppLocale::fromRequest($request))]]);
     }
 
     private function conflict(Request $request, string $error): JsonResponse

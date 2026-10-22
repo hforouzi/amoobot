@@ -4,20 +4,26 @@ declare(strict_types=1);
 
 namespace App\Admin\UI\Crud;
 
+use App\Admin\UI\BroadcastActionsController;
 use App\Admin\UI\TranslatedFlashes;
 use App\Admin\UI\Field\JsonField;
+use App\Admin\UI\Support\PlainTextHelp;
 use App\Broadcast\BroadcastAdministration;
-use App\Broadcast\BroadcastSender;
+use App\Broadcast\BroadcastFormat;
+use App\Broadcast\BroadcastFormatException;
 use App\Entity\AdminUser;
 use App\Entity\BroadcastDelivery;
 use App\Entity\BroadcastMessage;
 use App\Security\AdminAuditLogger;
+use App\Security\AdminPermission;
 use Doctrine\ORM\EntityManagerInterface;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Action;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Actions;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Crud;
+use EasyCorp\Bundle\EasyAdminBundle\Config\KeyValueStore;
 use EasyCorp\Bundle\EasyAdminBundle\Context\AdminContext;
 use EasyCorp\Bundle\EasyAdminBundle\Controller\AbstractCrudController;
+use EasyCorp\Bundle\EasyAdminBundle\Dto\EntityDto;
 use EasyCorp\Bundle\EasyAdminBundle\Field\AssociationField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\BooleanField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\ChoiceField;
@@ -27,17 +33,33 @@ use EasyCorp\Bundle\EasyAdminBundle\Field\IntegerField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\TextareaField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\TextField;
 use EasyCorp\Bundle\EasyAdminBundle\Router\AdminUrlGeneratorInterface;
+use Symfony\Component\Form\Extension\Core\Type\CheckboxType;
+use Symfony\Component\Form\FormBuilderInterface;
+use Symfony\Component\Form\FormEvent;
+use Symfony\Component\Form\FormEvents;
 use Symfony\Component\HttpFoundation\RedirectResponse;
 use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\Security\Csrf\CsrfTokenManagerInterface;
+use Symfony\Contracts\Translation\TranslatorInterface;
 
+/**
+ * Broadcasts on the web. The text must parse in its format (BroadcastMessage::validateFormat, the shared
+ * BroadcastFormat); plain text is the default, the format has help, and the form's "escape automatically" box makes
+ * MarkdownV2 that does not parse plain text on save. Duplicate (a finished one as a new draft) and retry failed are
+ * POST actions of BroadcastActionsController.
+ */
 final class BroadcastMessageCrudController extends AbstractCrudController
 {
     use TranslatedFlashes;
 
+    /** The form's unmapped "escape automatically" box. */
+    public const ESCAPE_FIELD = 'escapeMarkdownV2';
+
     public function __construct(
         private readonly BroadcastAdministration $broadcastAdministration,
-        private readonly BroadcastSender $broadcastSender,
         private readonly AdminUrlGeneratorInterface $adminUrlGenerator,
+        private readonly CsrfTokenManagerInterface $csrfTokenManager,
+        private readonly TranslatorInterface $translator,
     ) {
     }
 
@@ -56,6 +78,22 @@ final class BroadcastMessageCrudController extends AbstractCrudController
 
     public function configureActions(Actions $actions): Actions
     {
+        // POST forms to BroadcastActionsController with a per-broadcast CSRF token.
+        $duplicate = Action::new('duplicateBroadcast', 'action.duplicate_broadcast', 'fa fa-copy')
+            ->linkToUrl(fn (BroadcastMessage $broadcast): string => $this->generateUrl('admin_broadcast_duplicate', $this->actionParameters($broadcast)))
+            ->renderAsForm()
+            ->setCssClass('btn btn-secondary')
+            ->displayIf(static fn (BroadcastMessage $broadcast): bool => BroadcastAdministration::isDuplicable($broadcast));
+        $retry = Action::new('retryFailedBroadcast', 'action.retry_failed_broadcast', 'fa fa-redo')
+            ->linkToUrl(fn (BroadcastMessage $broadcast): string => $this->generateUrl('admin_broadcast_retry_failed', $this->actionParameters($broadcast)))
+            ->renderAsForm()
+            ->setCssClass('btn btn-secondary')
+            ->displayIf(static fn (BroadcastMessage $broadcast): bool => $broadcast->getFailedCount() > 0 && BroadcastMessage::STATUS_CANCELLED !== $broadcast->getStatus());
+        foreach ([$duplicate, $retry] as $action) {
+            $actions->add(Crud::PAGE_INDEX, $action)->add(Crud::PAGE_DETAIL, $action)
+                ->setPermission($action->getAsDto()->getName(), AdminPermission::BROADCAST_SEND->value);
+        }
+
         return $actions
             ->add(Crud::PAGE_INDEX, Action::DETAIL)
             ->update(
@@ -104,6 +142,7 @@ final class BroadcastMessageCrudController extends AbstractCrudController
                 'broadcast.status.sent' => BroadcastMessage::STATUS_SENT,
                 'broadcast.status.failed' => BroadcastMessage::STATUS_FAILED,
                 'broadcast.status.cancelled' => BroadcastMessage::STATUS_CANCELLED,
+                'broadcast.status.stopped' => BroadcastMessage::STATUS_STOPPED,
             ])
             ->hideOnForm();
 
@@ -124,7 +163,9 @@ final class BroadcastMessageCrudController extends AbstractCrudController
                 'bot_text.parse_mode.plain' => '',
                 'bot_text.parse_mode.html' => 'HTML',
                 'bot_text.parse_mode.markdown_v2' => 'MarkdownV2',
-            ]);
+            ])
+            // Shown as text: the help has tags as examples.
+            ->setHelp(new PlainTextHelp('broadcast.parse_mode_help'));
 
         yield BooleanField::new('disableWebPagePreview');
 
@@ -179,6 +220,44 @@ final class BroadcastMessageCrudController extends AbstractCrudController
         parent::updateEntity($entityManager, $entityInstance);
     }
 
+    public function createNewFormBuilder(EntityDto $entityDto, KeyValueStore $formOptions, AdminContext $context): FormBuilderInterface
+    {
+        return $this->withEscape(parent::createNewFormBuilder($entityDto, $formOptions, $context));
+    }
+
+    public function createEditFormBuilder(EntityDto $entityDto, KeyValueStore $formOptions, AdminContext $context): FormBuilderInterface
+    {
+        return $this->withEscape(parent::createEditFormBuilder($entityDto, $formOptions, $context));
+    }
+
+    /**
+     * "Escape automatically": a ticked box escapes MarkdownV2 that would not parse (BroadcastFormat::canEscape) before
+     * the form is validated, so it is saved and sent exactly as written.
+     */
+    private function withEscape(FormBuilderInterface $builder): FormBuilderInterface
+    {
+        $builder->add(self::ESCAPE_FIELD, CheckboxType::class, [
+            'mapped' => false,
+            'required' => false,
+            'label' => 'broadcast.escape_markdown',
+            'help' => 'broadcast.escape_markdown_help',
+            'translation_domain' => 'admin',
+        ]);
+        $builder->addEventListener(FormEvents::PRE_SUBMIT, static function (FormEvent $event): void {
+            $data = $event->getData();
+            if (!is_array($data) || empty($data[self::ESCAPE_FIELD]) || !is_string($data['body'] ?? null)) {
+                return;
+            }
+            $parseMode = is_string($data['parseMode'] ?? null) ? $data['parseMode'] : null;
+            if (BroadcastFormat::canEscape($data['body'], $parseMode)) {
+                $data['body'] = BroadcastFormat::escapeMarkdownV2($data['body']);
+                $event->setData($data);
+            }
+        });
+
+        return $builder;
+    }
+
     public function preview(AdminContext $context): Response
     {
         $broadcast = $this->getBroadcast($context);
@@ -201,7 +280,16 @@ final class BroadcastMessageCrudController extends AbstractCrudController
     public function prepareRecipients(AdminContext $context): RedirectResponse
     {
         $broadcast = $this->requireBroadcast($context);
-        $summary = $this->broadcastSender->prepareDeliveries($broadcast);
+        try {
+            $summary = $this->broadcastAdministration->prepare($broadcast);
+        } catch (BroadcastFormatException $e) {
+            return $this->formatRefused($broadcast, $e);
+        }
+        if (null === $summary) {
+            $this->flash('danger', 'flash.broadcast.only_draft_editable');
+
+            return $this->redirect($this->detailUrl($broadcast));
+        }
 
         $this->flash('success', 'flash.broadcast.recipients_prepared', ['%new%' => $summary->prepared, '%duplicates%' => $summary->duplicates]);
 
@@ -211,7 +299,11 @@ final class BroadcastMessageCrudController extends AbstractCrudController
     public function sendNow(AdminContext $context, AdminAuditLogger $auditLogger): RedirectResponse
     {
         $broadcast = $this->requireBroadcast($context);
-        $summary = $this->broadcastAdministration->sendNow($broadcast);
+        try {
+            $summary = $this->broadcastAdministration->sendNow($broadcast);
+        } catch (BroadcastFormatException $e) {
+            return $this->formatRefused($broadcast, $e);
+        }
 
         if (null === $summary) {
             $this->flash('danger', 'flash.broadcast.only_draft_sendable');
@@ -249,6 +341,11 @@ final class BroadcastMessageCrudController extends AbstractCrudController
     {
         $broadcast = $this->requireBroadcast($context);
         $summary = $this->broadcastAdministration->retryFailed($broadcast);
+        if (null === $summary) {
+            $this->flash('danger', 'flash.broadcast.retry_format_blocked');
+
+            return $this->redirect($this->detailUrl($broadcast));
+        }
 
         $this->flash('success', 'flash.broadcast.retry_sent', ['%sent%' => $summary->sent, '%failed%' => $summary->failed]);
 
@@ -283,6 +380,24 @@ final class BroadcastMessageCrudController extends AbstractCrudController
         ) {
             $broadcast->setStatus(BroadcastMessage::STATUS_SCHEDULED);
         }
+    }
+
+    private function formatRefused(BroadcastMessage $broadcast, BroadcastFormatException $e): RedirectResponse
+    {
+        $this->flash('danger', 'flash.broadcast.format_invalid', ['%problem%' => $this->translator->trans($e->problem->message, $e->problem->parameters, 'validators')]);
+
+        return $this->redirect($this->detailUrl($broadcast));
+    }
+
+    /**
+     * @return array{id: int|null, _token: string}
+     */
+    private function actionParameters(BroadcastMessage $broadcast): array
+    {
+        return [
+            'id' => $broadcast->getId(),
+            '_token' => $this->csrfTokenManager->getToken(BroadcastActionsController::CSRF_PREFIX.$broadcast->getId())->getValue(),
+        ];
     }
 
     private function getBroadcast(AdminContext $context): ?BroadcastMessage

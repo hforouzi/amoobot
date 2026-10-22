@@ -2,8 +2,9 @@
 {% import 'miniapp/admin/catalog/_fields.html.twig' as f %}
 {% trans_default_domain 'miniapp' %}
 {# One broadcast. A draft: the compose form (checked live: errors, preview, character count, audience size), then test
-   send, prepare and send (the recipient count typed back, then confirmed). Once sending started: the delivery summary,
-   a sample of failures (reasons masked), cancel and retry; no form. #}
+   send, prepare and send (the recipient count typed back, then confirmed); MarkdownV2 that does not parse offers
+   "escape automatically". Once sending started: the delivery summary, a sample of failures (reasons masked), why it
+   stopped (a format error), cancel, retry (not for a format error) and duplicate as a new draft; no form. #}
 {% set b = row.broadcast %}
 {% set editable = isNew or b.editable %}
 {% block section %}admin{% endblock %}
@@ -25,6 +26,12 @@
             </div>
             {% if row.total > 0 %}<progress max="100" value="{{ row.progress }}" aria-label="{{ 'admin.broadcast.progress'|trans }}">{{ row.progress }}%</progress>{% endif %}
             {% if paused %}<p class="muted" data-paused>⏸ {{ 'admin.broadcast.paused'|trans }}</p>{% endif %}
+            {% if b.status == 'stopped' %}
+                <div class="notice-line bad" data-stopped>
+                    <p>{{ 'admin.broadcast.stopped_help'|trans({'%count%': stopAfter}) }}</p>
+                    {% if stopReason %}<p class="muted">{{ 'admin.broadcast.stopped_reason'|trans }}: <span class="ltr" data-stop-reason>{{ stopReason }}</span></p>{% endif %}
+                </div>
+            {% endif %}
         </section>
     {% endif %}
 
@@ -40,7 +47,12 @@
                     <span class="muted small-print">{{ 'admin.broadcast.length'|trans }}: <b class="ltr" data-live="length">{{ length }} / {{ limit }}</b></span>
                     {{ f.error('body') }}
                 </label>
-                {{ f.select('parseMode', values.parseMode, [{value: 'HTML', label: 'bot_text.parse_mode.html'|trans({}, 'admin')}, {value: 'MarkdownV2', label: 'bot_text.parse_mode.markdown_v2'|trans({}, 'admin')}], false, null) }}
+                {# Shown by app.js when the check answers with the escaped text (MarkdownV2 that does not parse). #}
+                <div class="field" data-escape-offer hidden>
+                    <span class="muted small-print">{{ 'admin.broadcast.escape_help'|trans }}</span>
+                    <button type="button" class="btn secondary small fit" data-escape hidden>🛡 {{ 'admin.broadcast.escape'|trans }}</button>
+                </div>
+                {{ f.select('parseMode', values.parseMode, [{value: '', label: 'bot_text.parse_mode.plain'|trans({}, 'admin')}, {value: 'HTML', label: 'bot_text.parse_mode.html'|trans({}, 'admin')}, {value: 'MarkdownV2', label: 'bot_text.parse_mode.markdown_v2'|trans({}, 'admin')}], true, 'broadcast.parse_mode_help') }}
                 {{ f.toggle('disableWebPagePreview', values.disableWebPagePreview, null) }}
                 <div class="field">
                     <span>{{ 'admin.broadcast.preview'|trans }}</span>
@@ -106,10 +118,14 @@
                 </ul>
             </section>
         {% endif %}
-        {% if cancellable or (row.failed > 0 and b.status != 'cancelled') %}
+        {% set retryable = row.failed > 0 and b.status != 'cancelled' and not retryBlocked %}
+        {% if cancellable or retryable or duplicable %}
             <section class="card">
                 <div class="row">
-                    {% if row.failed > 0 and b.status != 'cancelled' %}
+                    {% if duplicable %}
+                        <button type="button" class="btn secondary small" data-action="{{ path('miniapp_admin_broadcast_duplicate', {id: b.id}) }}" data-admin-action="duplicate">📄 {{ 'admin.broadcast.duplicate'|trans }}</button>
+                    {% endif %}
+                    {% if retryable %}
                         <button type="button" class="btn secondary small" data-action="{{ path('miniapp_admin_broadcast_retry', {id: b.id}) }}" data-reload data-admin-action="retry"{% if paused %} disabled{% endif %}>🔁 {{ 'admin.broadcast.retry'|trans({'%count%': row.failed}) }}</button>
                     {% endif %}
                     {% if cancellable %}

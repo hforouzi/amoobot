@@ -6,6 +6,7 @@ namespace App\Tests\Bot;
 
 use App\Entity\AdminAuditLog;
 use App\Entity\AdminUser;
+use App\Entity\BroadcastDelivery;
 use App\Entity\BroadcastMessage;
 use App\Entity\DiscountCode;
 use App\Entity\DiscountUsage;
@@ -212,6 +213,45 @@ final class BotAdminStoreTest extends IntegrationTestCase
         $this->em->clear();
         self::assertSame(BroadcastMessage::STATUS_CANCELLED, $this->em->find(BroadcastMessage::class, $broadcast->getId())?->getStatus());
         $this->assertAudited('broadcast.cancel', 'BroadcastMessage', (string) $broadcast->getId());
+    }
+
+    public function testAStoppedBroadcastIsDuplicatedNotRetried(): void
+    {
+        $stopped = (new BroadcastMessage())->setTitle('Stopped')->setBody('Version 2.5')->setParseMode('MarkdownV2')->setTargetType(BroadcastMessage::TARGET_ALL)
+            ->setStatus(BroadcastMessage::STATUS_STOPPED)->setTotalRecipients(5)->setFailedCount(3);
+        $this->em->persist($stopped);
+        foreach (['1', '2', '3'] as $chat) {
+            $this->em->persist((new BroadcastDelivery())->setBroadcast($stopped)->setChatId('9200'.$chat)->setStatus(BroadcastDelivery::STATUS_FAILED)->setErrorMessage("Bad Request: can't parse entities: Character '.' is reserved"));
+        }
+        $this->em->flush();
+        $id = (int) $stopped->getId();
+
+        $this->http->reset();
+        $this->pressButton(self::ADMIN, 'admin.b:l');
+        self::assertContains('admin.b:d:'.$id, $this->sentCallbacks(), 'duplicate as a new draft');
+        self::assertNotContains('admin.b:r:'.$id, $this->sentCallbacks(), 'no retry for a format error');
+
+        // A retry button from an older list is refused with the reason.
+        $this->http->reset();
+        $this->pressButton(self::ADMIN, 'admin.b:r:'.$id);
+        self::assertTrue($this->sentTextContains($this->botText('admin.broadcasts.retry_format_blocked', ['id' => $id])));
+        $this->pressButton(self::ADMIN, 'admin.b:rk:'.$id);
+        self::assertSame(3, $this->em->getRepository(BroadcastDelivery::class)->count(['broadcast' => $id, 'status' => BroadcastDelivery::STATUS_FAILED]));
+        self::assertSame([], array_filter($this->http->requests('/sendMessage'), fn (array $r): bool => str_starts_with((string) ($this->requestBody($r)['chat_id'] ?? ''), '9200')));
+
+        $this->pressButton(self::SUPPORT, 'admin.b:d:'.$id);
+        self::assertTrue($this->refused());
+
+        $this->pressButton(self::ADMIN, 'admin.b:d:'.$id);
+        $this->em->clear();
+        $copy = $this->em->getRepository(BroadcastMessage::class)->findOneBy(['title' => 'Stopped', 'status' => BroadcastMessage::STATUS_DRAFT]);
+        self::assertInstanceOf(BroadcastMessage::class, $copy);
+        self::assertSame(['Version 2.5', 'MarkdownV2'], [$copy->getBody(), $copy->getParseMode()]);
+        self::assertTrue($this->sentTextContains($this->botText('admin.broadcasts.duplicated', ['id' => $copy->getId(), 'title' => 'Stopped'])));
+        $this->assertAudited('broadcast.duplicate', 'BroadcastMessage', (string) $copy->getId());
+
+        $this->pressButton(self::ADMIN, 'admin.b:d:'.$copy->getId());
+        self::assertSame(1, $this->em->getRepository(BroadcastMessage::class)->count(['title' => 'Stopped', 'status' => BroadcastMessage::STATUS_DRAFT]), 'a draft is not duplicated');
     }
 
     public function testRejectAsRefunded(): void
