@@ -6,11 +6,10 @@ namespace App\Admin\UI;
 
 use App\Entity\AdminUser;
 use App\Entity\Payment;
-use App\Payment\Application\Settlement\PaymentSettlementService;
+use App\Payment\Application\PaymentModeration;
 use App\Payment\Application\Settlement\SettlementOutcome;
 use App\Payment\Application\Settlement\SettlementResult;
-use App\Payment\Domain\PaymentStatus;
-use App\Security\AdminAuditLogger;
+use App\Security\AdminActor;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\RedirectResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -32,37 +31,27 @@ class PaymentModerationController extends AbstractController
      * this retries fulfilment (the payment was already verified).
      */
     #[Route('/{id}/confirm', name: 'admin_payment_confirm', methods: ['POST'])]
-    public function confirm(Payment $payment, Request $request, PaymentSettlementService $settlement, AdminAuditLogger $auditLogger): RedirectResponse
+    public function confirm(Payment $payment, Request $request, PaymentModeration $moderation): RedirectResponse
     {
         if (!$this->validToken($payment, $request)) {
             return $this->invalidToken($request);
         }
 
-        $adminId = $this->currentAdminId();
-        $retry = PaymentStatus::PROVISIONING_FAILED === $payment->getStatus();
-        $result = $retry
-            ? $settlement->retryProvisioning($payment, $adminId, null, 'easyadmin_retry_provisioning')
-            : $settlement->approveByAdmin($payment, $adminId, null, 'easyadmin_payment_approval');
-        $auditLogger->record($retry ? 'payment.retry' : 'payment.approve', 'Payment', $payment->getId(), ['outcome' => $result->outcome->value]);
-
-        return $this->back($request, $result);
+        return $this->back($request, $moderation->approve($payment, $this->currentAdmin(), null, PaymentModeration::CHANNEL_WEB));
     }
 
     #[Route('/{id}/retry', name: 'admin_payment_retry', methods: ['POST'])]
-    public function retry(Payment $payment, Request $request, PaymentSettlementService $settlement, AdminAuditLogger $auditLogger): RedirectResponse
+    public function retry(Payment $payment, Request $request, PaymentModeration $moderation): RedirectResponse
     {
         if (!$this->validToken($payment, $request)) {
             return $this->invalidToken($request);
         }
 
-        $result = $settlement->retryProvisioning($payment, $this->currentAdminId(), null, 'easyadmin_retry_provisioning');
-        $auditLogger->record('payment.retry', 'Payment', $payment->getId(), ['outcome' => $result->outcome->value]);
-
-        return $this->back($request, $result);
+        return $this->back($request, $moderation->retry($payment, $this->currentAdmin(), null, PaymentModeration::CHANNEL_WEB));
     }
 
     #[Route('/{id}/reject', name: 'admin_payment_reject', methods: ['POST'])]
-    public function reject(Payment $payment, Request $request, PaymentSettlementService $settlement, AdminAuditLogger $auditLogger): RedirectResponse
+    public function reject(Payment $payment, Request $request, PaymentModeration $moderation): RedirectResponse
     {
         if (!$this->validToken($payment, $request)) {
             return $this->invalidToken($request);
@@ -70,10 +59,8 @@ class PaymentModerationController extends AbstractController
 
         $note = $request->request->get('note');
         $refunded = '1' === (string) ($request->query->get('refunded') ?? $request->request->get('refunded') ?? '');
-        $result = $settlement->reject($payment, is_string($note) ? $note : null, $this->currentAdminId(), null, 'easyadmin_payment_reject', $refunded);
-        $auditLogger->record('payment.reject', 'Payment', $payment->getId(), ['outcome' => $result->outcome->value, 'refunded' => $refunded]);
 
-        return $this->back($request, $result);
+        return $this->back($request, $moderation->reject($payment, is_string($note) ? $note : null, $refunded, $this->currentAdmin(), null, PaymentModeration::CHANNEL_WEB));
     }
 
     private function validToken(Payment $payment, Request $request): bool
@@ -90,11 +77,11 @@ class PaymentModerationController extends AbstractController
         return $this->redirectBack($request);
     }
 
-    private function currentAdminId(): ?int
+    private function currentAdmin(): ?AdminActor
     {
         $user = $this->getUser();
 
-        return $user instanceof AdminUser ? $user->getId() : null;
+        return $user instanceof AdminUser ? AdminActor::fromAdminUser($user) : null;
     }
 
     private function back(Request $request, SettlementResult $result): RedirectResponse

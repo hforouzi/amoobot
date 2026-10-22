@@ -1,0 +1,39 @@
+{# Pieces of the admin pages: filter chips, the search box, the pager, a customer line. #}
+{% macro chips(route, current, keys, counts, labelPrefix, params) %}
+    {% trans_default_domain 'miniapp' %}
+    <nav class="chips" aria-label="{{ 'admin.filter'|trans }}">
+        {% for key in keys %}
+            <a class="chip{{ key == current ? ' active' : '' }}" href="{{ path(route, (params ?? {})|merge(key == 'all' ? {} : {tab: key})) }}" data-nav data-replace data-chip="{{ key }}"{% if key == current %} aria-current="true"{% endif %}>
+                {{ (labelPrefix ~ key)|trans }}{% if counts[key] is defined %} <span class="chip-count">{{ counts[key]|number_format }}</span>{% endif %}
+            </a>
+        {% endfor %}
+    </nav>
+{% endmacro %}
+
+{% macro search(route, query, placeholder, hidden) %}
+    {% trans_default_domain 'miniapp' %}
+    <form class="search" data-search="{{ path(route) }}" role="search">
+        {% for name, value in hidden ?? {} %}{% if value is not null and value != 'all' %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endif %}{% endfor %}
+        <input type="search" name="q" value="{{ query }}" placeholder="{{ placeholder|trans }}" aria-label="{{ placeholder|trans }}" enterkeyhint="search" autocomplete="off" maxlength="64">
+        <button type="submit" class="btn small fit" aria-label="{{ 'admin.search'|trans }}">🔍</button>
+    </form>
+{% endmacro %}
+
+{% macro pager(route, list, params) %}
+    {% trans_default_domain 'miniapp' %}
+    {% if list.page > 0 or list.hasNext %}
+        <nav class="row pager">
+            {% if list.page > 0 %}<a class="btn secondary small" href="{{ path(route, (params ?? {})|merge({page: list.page - 1})) }}" data-nav data-replace data-previous-page>{{ 'orders.previous'|trans }}</a>{% else %}<span></span>{% endif %}
+            {% if list.hasNext %}<a class="btn secondary small" href="{{ path(route, (params ?? {})|merge({page: list.page + 1})) }}" data-nav data-replace data-next-page>{{ 'orders.next'|trans }}</a>{% endif %}
+        </nav>
+    {% endif %}
+{% endmacro %}
+
+{% macro who(c) %}{% apply spaceless %}
+    {{ c.name ?: '—' }}{% if c.username %} · <span class="ltr">@{{ c.username }}</span>{% elseif c.telegramId %} · <span class="ltr">{{ c.telegramId }}</span>{% endif %}
+{% endapply %}{% endmacro %}
+
+{% macro empty(key) %}
+    {% trans_default_domain 'miniapp' %}
+    <section class="card empty" data-empty><span class="empty-icon" aria-hidden="true">🗂</span><p class="muted">{{ key|trans }}</p></section>
+{% endmacro %}

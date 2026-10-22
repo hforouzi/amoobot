@@ -9,7 +9,8 @@
  *   a[data-nav]            opens another section (stack kept for Telegram's BackButton)
  *   a[data-open-link]      opens a page in Telegram's in-app browser (the subscription page)
  *   button[data-action]    POSTs to that URL (JSON body from data-body); the answer's redirect is opened, its
- *                          message shown; data-reload reloads the section
+ *                          message shown; data-reload reloads the section; data-confirm asks first (Telegram's
+ *                          confirm dialog)
  *   form[data-submit]      sends its fields as JSON to that URL, then follows the answer's redirect
  *   form[data-quote-url]   asks that URL for the server's price when [data-requote] fields change
  *   form[data-upload]      sends its file (multipart) to that URL
@@ -17,6 +18,12 @@
  *
  * Every action and submit carries an Idempotency-Key kept on its element, so a double tap or a retry is the same
  * request for the server; after an error the key is dropped and the next try is a new one.
+ * An admin money / destructive action is first answered 428 with {confirm: {token, message}}: the message is shown in
+ * Telegram's confirm dialog and only on OK the call is repeated with the token in X-Admin-Confirm (same key).
+ *   a[data-replace]        (filter chips, pager) opens in place of the current section (BackButton skips it)
+ *   form[data-search]      opens that URL with the form's non-empty fields as the query, in place
+ *   img[data-auth-src]     loaded with the session token (a receipt), shown as a data: URL
+ *   .view-root[data-main-button-action]  Telegram's MainButton runs the [data-main-action] button
  *   button[data-copy]      copies its value
  *   button[data-close-app] closes the Mini App (back to the chat)
  *   .view-root[data-main-button-text][data-main-button-href|data-main-button-form]  Telegram's MainButton
@@ -123,6 +130,20 @@
         var text = root && root.getAttribute('data-main-button-text');
         var href = root && root.getAttribute('data-main-button-href');
         var formId = root && root.getAttribute('data-main-button-form');
+        var action = root && root.getAttribute('data-main-button-action');
+        if (text && action) {
+            mainButtonHandler = function () {
+                var button = root.querySelector('[data-main-action="' + action + '"]');
+                if (button) {
+                    haptic('select');
+                    runAction(button);
+                }
+            };
+            tg.MainButton.setText(text);
+            tg.MainButton.onClick(mainButtonHandler);
+            tg.MainButton.show();
+            return;
+        }
         if (!text || (!href && !formId)) {
             tg.MainButton.hide();
             return;
@@ -141,6 +162,16 @@
         tg.MainButton.setText(text);
         tg.MainButton.onClick(mainButtonHandler);
         tg.MainButton.show();
+    }
+
+    function confirmDialog(message) {
+        return new Promise(function (resolve) {
+            if (supports('6.2')) {
+                tg.showConfirm(message, function (ok) { resolve(!!ok); });
+            } else {
+                resolve(window.confirm(message));
+            }
+        });
     }
 
     function openLink(href) {
@@ -228,6 +259,9 @@
         if (options.key) {
             headers['Idempotency-Key'] = options.key;
         }
+        if (options.confirm) {
+            headers['X-Admin-Confirm'] = options.confirm;
+        }
         if (options.json !== undefined) {
             headers['Content-Type'] = 'application/json';
             payload = JSON.stringify(options.json);
@@ -280,6 +314,7 @@
             updateBackButton();
             updateMainButton(root);
             startPolling(root);
+            loadAuthImages(root);
             if (!keepScroll) {
                 window.scrollTo(0, 0);
             }
@@ -324,6 +359,38 @@
         });
     }
 
+    function loadAuthImages(root) {
+        if (!root) {
+            return;
+        }
+        root.querySelectorAll('img[data-auth-src]').forEach(function (img) {
+            var failed = function () {
+                var note = document.createElement('p');
+                note.className = 'muted';
+                note.textContent = img.getAttribute('data-failed-text') || body.getAttribute('data-msg-error');
+                img.replaceWith(note);
+            };
+            api('GET', img.getAttribute('data-auth-src')).then(function (response) {
+                if (!response.ok) {
+                    throw new Error('image');
+                }
+                return response.blob();
+            }).then(function (blob) {
+                var reader = new FileReader();
+                reader.onload = function () { img.src = reader.result; };
+                reader.onerror = failed;
+                reader.readAsDataURL(blob);
+            }).catch(failed);
+        });
+    }
+
+    /* Opens a URL in place of the current section (filters, pages, searches): Back goes to where the list came from. */
+    function replaceWith(url) {
+        haptic('select');
+        stack.pop();
+        navigate(url, true);
+    }
+
     /* ---------- actions ---------- */
 
     function copy(text) {
@@ -351,7 +418,13 @@
     function runAction(button) {
         var json;
         try { json = JSON.parse(button.getAttribute('data-body') || '{}'); } catch (e) { json = {}; }
-        send(button, 'POST', button.getAttribute('data-action'), {json: json, key: keyOf(button)}, null);
+        var go = function () { send(button, 'POST', button.getAttribute('data-action'), {json: json, key: keyOf(button)}, null); };
+        var question = button.getAttribute('data-confirm');
+        if (question) {
+            confirmDialog(question).then(function (ok) { if (ok) { go(); } });
+        } else {
+            go();
+        }
     }
 
     /* One state-changing call from an element (button or form): busy while it runs, then the answer is applied. */
@@ -363,8 +436,18 @@
         if (errorBox) {
             errorBox.hidden = true;
         }
+        var again = null;
         api(method, url, options).then(function (response) {
             return response.json().catch(function () { return {}; }).then(function (data) {
+                if (response.status === 428 && data.confirm) {
+                    // The server's confirmation step: same call, same key, with its token, only after "OK".
+                    haptic('warning');
+                    return confirmDialog(data.confirm.message).then(function (ok) {
+                        if (ok) {
+                            again = function () { send(el, method, url, Object.assign({}, options, {confirm: data.confirm.token}), errorBox); };
+                        }
+                    });
+                }
                 if (!response.ok) {
                     el.removeAttribute('data-idempotency-key');
                     haptic('error');
@@ -388,12 +471,15 @@
             toast(body.getAttribute(navigator.onLine === false ? 'data-msg-offline' : 'data-msg-error'));
         }).then(function () {
             el.removeAttribute('aria-busy');
+            if (again) {
+                again();
+            }
         });
     }
 
     /* An error answer: its message, and the channels to join when membership is required. */
     function showError(data, errorBox) {
-        var message = data.message || body.getAttribute('data-msg-error');
+        var message = (data.message || body.getAttribute('data-msg-error')) + (data.detail ? '\n' + data.detail : '');
         if (!errorBox) {
             toast(message);
             return;
@@ -506,6 +592,12 @@
         if (form.matches('form[data-submit], form[data-upload]')) {
             e.preventDefault();
             submitForm(form);
+        } else if (form.matches('form[data-search]')) {
+            e.preventDefault();
+            var query = new URLSearchParams();
+            Object.keys(fieldsOf(form)).forEach(function (name) { query.set(name, fieldsOf(form)[name]); });
+            var search = query.toString();
+            replaceWith(form.getAttribute('data-search') + (search ? '?' + search : ''));
         }
     });
 
@@ -521,7 +613,10 @@
         if (!target) {
             return;
         }
-        if (target.matches('a[data-nav]')) {
+        if (target.matches('a[data-nav][data-replace]')) {
+            e.preventDefault();
+            replaceWith(target.getAttribute('href'));
+        } else if (target.matches('a[data-nav]')) {
             e.preventDefault();
             haptic('select');
             if (nav.contains(target)) {

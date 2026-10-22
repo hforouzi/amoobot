@@ -1,0 +1,111 @@
+{% extends 'miniapp/view/_base.html.twig' %}
+{% import 'miniapp/admin/_macros.html.twig' as ui %}
+{% trans_default_domain 'miniapp' %}
+{# One service for an admin: usage, plan, panel, the customer's subscription page; then only the actions this admin
+   may run: assist (resend config, sync usage), manage (suspend / activate, extend, add traffic, reset usage,
+   regenerate config) and, apart, delete with the name typed back. #}
+{% set id = s.id %}
+{% set manage = not s.deleted %}
+{% block section %}admin{% endblock %}
+{% block title %}{{ s.name }}{% endblock %}
+{% block attributes %} data-back data-service-id="{{ s.id }}"{% endblock %}
+{% block content %}
+    <section class="card">
+        <div class="head">
+            <h1 class="ltr">{{ s.name }}</h1>
+            <span class="badge {{ s.status }}" data-status="{{ s.status }}">{{ ('admin.service.status.' ~ s.status)|trans }}</span>
+        </div>
+        {% if s.limit %}
+            <span class="bar{{ s.percent >= 100 ? ' full' : (s.percent >= 90 ? ' high' : '') }}" role="progressbar" aria-valuenow="{{ s.percent }}" aria-valuemin="0" aria-valuemax="100"><span style="width: {{ s.percent }}%"></span></span>
+            <p class="muted ltr-numbers">{{ 'admin.service.usage'|trans({'%used%': s.used|sub_bytes, '%limit%': s.limit|sub_bytes, '%percent%': s.percent}) }}</p>
+        {% else %}
+            <p class="muted">{{ 'admin.service.unlimited'|trans({'%used%': s.used|sub_bytes}) }}</p>
+        {% endif %}
+        <dl class="facts">
+            <div><dt>{{ 'admin.service.number'|trans }}</dt><dd class="ltr">#{{ s.id }}</dd></div>
+            {% if s.plan %}<div><dt>{{ 'admin.service.plan'|trans }}</dt><dd>{{ s.plan }}</dd></div>{% endif %}
+            {% if s.panel %}<div><dt>{{ 'admin.service.panel'|trans }}</dt><dd>{{ s.panel }}{% if s.inbound %} <span class="muted">· {{ s.inbound }}</span>{% endif %}</dd></div>{% endif %}
+            <div><dt>{{ 'admin.service.expires'|trans }}</dt><dd>{% if s.expiresAt %}{{ s.expiresAt|sub_date(lang) }} <span class="muted">({{ 'admin.service.days_left'|trans({'%days%': s.daysLeft}) }})</span>{% else %}{{ 'admin.service.no_expiry'|trans }}{% endif %}</dd></div>
+            {% if s.lastSync %}<div><dt>{{ 'admin.service.last_sync'|trans }}</dt><dd>{{ s.lastSync|sub_date(lang) }} {{ s.lastSync|date('H:i') }}</dd></div>{% endif %}
+        </dl>
+    </section>
+
+    <section class="card">
+        <h2>{{ 'admin.customer'|trans }}</h2>
+        {% if can.miniapp_admin_customer %}<a class="list-item" href="{{ path('miniapp_admin_customer', {id: s.customer.id}) }}" data-nav><span class="list-main">{{ ui.who(s.customer) }}</span><span class="chevron" aria-hidden="true">›</span></a>
+        {% else %}<p>{{ ui.who(s.customer) }}</p>{% endif %}
+        {% if s.pageUrl %}
+            <div class="row">
+                <a class="btn secondary small" href="{{ s.pageUrl }}" data-open-link data-page-link>🌐 {{ 'admin.service.open_page'|trans }}</a>
+                <button type="button" class="btn secondary small" data-copy="{{ s.pageUrl }}">📋 {{ 'service.copy_page_link'|trans }}</button>
+            </div>
+        {% endif %}
+    </section>
+
+    {% if manage and (can.miniapp_admin_service_resend_config or can.miniapp_admin_service_sync_usage) %}
+        <section class="card" data-group="assist">
+            <h2>{{ 'admin.service.assist'|trans }}</h2>
+            <div class="row">
+                {% if can.miniapp_admin_service_resend_config %}<button type="button" class="btn secondary small" data-action="{{ path('miniapp_admin_service_resend_config', {id: id}) }}" data-confirm="{{ 'admin.service.confirm.resend_config'|trans({'%name%': s.name}) }}" data-admin-action="resend_config">📄 {{ 'admin.service.resend_config'|trans }}</button>{% endif %}
+                {% if can.miniapp_admin_service_sync_usage %}<button type="button" class="btn secondary small" data-action="{{ path('miniapp_admin_service_sync_usage', {id: id}) }}" data-reload data-admin-action="sync_usage">🔄 {{ 'admin.service.sync_usage'|trans }}</button>{% endif %}
+            </div>
+        </section>
+    {% endif %}
+
+    {% if manage and (can.miniapp_admin_service_extend or can.miniapp_admin_service_add_traffic) %}
+        {% if can.miniapp_admin_service_extend %}
+            <section class="card" data-group="extend">
+                <h2>{{ 'admin.service.extend'|trans }}</h2>
+                <div class="presets">
+                    {% for days in extendPresets %}<button type="button" class="chip" data-action="{{ path('miniapp_admin_service_extend', {id: id}) }}" data-body='{"days":{{ days }}}' data-reload data-admin-action="extend">{{ 'admin.service.days'|trans({'%days%': days}) }}</button>{% endfor %}
+                </div>
+                <form class="form spaced" data-submit="{{ path('miniapp_admin_service_extend', {id: id}) }}" data-reload novalidate>
+                    <div class="inline-field">
+                        <input class="input" type="text" name="days" inputmode="numeric" maxlength="5" placeholder="{{ 'admin.service.custom_days'|trans({'%max%': maxDays}) }}" aria-label="{{ 'admin.service.custom_days'|trans({'%max%': maxDays}) }}">
+                        <button type="submit" class="btn small fit">{{ 'admin.service.apply'|trans }}</button>
+                    </div>
+                    <p class="field-error" data-form-error hidden></p>
+                </form>
+            </section>
+        {% endif %}
+        {% if can.miniapp_admin_service_add_traffic %}
+            <section class="card" data-group="add_traffic">
+                <h2>{{ 'admin.service.add_traffic'|trans }}</h2>
+                <div class="presets">
+                    {% for gb in trafficPresets %}<button type="button" class="chip" data-action="{{ path('miniapp_admin_service_add_traffic', {id: id}) }}" data-body='{"trafficGb":{{ gb }}}' data-reload data-admin-action="add_traffic">{{ 'admin.service.gb'|trans({'%gb%': gb}) }}</button>{% endfor %}
+                </div>
+                <form class="form spaced" data-submit="{{ path('miniapp_admin_service_add_traffic', {id: id}) }}" data-reload novalidate>
+                    <div class="inline-field">
+                        <input class="input" type="text" name="trafficGb" inputmode="numeric" maxlength="6" placeholder="{{ 'admin.service.custom_gb'|trans({'%max%': maxTrafficGb}) }}" aria-label="{{ 'admin.service.custom_gb'|trans({'%max%': maxTrafficGb}) }}">
+                        <button type="submit" class="btn small fit">{{ 'admin.service.apply'|trans }}</button>
+                    </div>
+                    <p class="field-error" data-form-error hidden></p>
+                </form>
+            </section>
+        {% endif %}
+    {% endif %}
+
+    {% if manage and (can.miniapp_admin_service_suspend or can.miniapp_admin_service_activate or can.miniapp_admin_service_reset_usage or can.miniapp_admin_service_regenerate_config) %}
+        <div class="action-bar" data-action-bar>
+            {% if s.status == 'suspended' %}
+                {% if can.miniapp_admin_service_activate %}<button type="button" class="btn small" data-action="{{ path('miniapp_admin_service_activate', {id: id}) }}" data-reload data-admin-action="activate">▶️ {{ 'admin.service.activate'|trans }}</button>{% endif %}
+            {% elseif can.miniapp_admin_service_suspend %}
+                <button type="button" class="btn small secondary danger" data-action="{{ path('miniapp_admin_service_suspend', {id: id}) }}" data-reload data-admin-action="suspend">⏸ {{ 'admin.service.suspend'|trans }}</button>
+            {% endif %}
+            {% if can.miniapp_admin_service_reset_usage %}<button type="button" class="btn small secondary" data-action="{{ path('miniapp_admin_service_reset_usage', {id: id}) }}" data-reload data-admin-action="reset_usage">♻️ {{ 'admin.service.reset_usage'|trans }}</button>{% endif %}
+            {% if can.miniapp_admin_service_regenerate_config %}<button type="button" class="btn small secondary" data-action="{{ path('miniapp_admin_service_regenerate_config', {id: id}) }}" data-reload data-admin-action="regenerate_config">🛠 {{ 'admin.service.regenerate_config'|trans }}</button>{% endif %}
+        </div>
+    {% endif %}
+
+    {% if manage and can.miniapp_admin_service_delete %}
+        <section class="card danger-zone" data-group="delete">
+            <h2>{{ 'admin.service.delete'|trans }}</h2>
+            <p class="muted">{{ 'admin.service.delete_hint'|trans({'%name%': s.name}) }}</p>
+            <form class="form" data-submit="{{ path('miniapp_admin_service_delete', {id: id}) }}" data-reload novalidate>
+                <input class="input" type="text" name="confirmName" autocomplete="off" spellcheck="false" dir="ltr" placeholder="{{ s.name }}" aria-label="{{ 'admin.service.delete_type'|trans }}">
+                <p class="field-error" data-form-error hidden></p>
+                <button type="submit" class="btn small danger-solid">🗑 {{ 'admin.service.delete'|trans }}</button>
+            </form>
+        </section>
+    {% endif %}
+{% endblock %}

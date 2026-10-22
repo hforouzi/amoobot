@@ -8,6 +8,7 @@ use App\Entity\TelegramAccount;
 use App\MiniApp\Session\MiniAppSessionManager;
 use App\MiniApp\Session\SessionTokenTransport;
 use App\Security\AdminAccessPolicy;
+use App\Security\AdminActor;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -61,7 +62,7 @@ final class MiniAppAuthenticator extends AbstractAuthenticator implements Authen
                 throw new BadCredentialsException('Unknown Telegram account.');
             }
 
-            return new MiniAppUser($account, $session, $this->accessPolicy->botActor($telegramUserId));
+            return new MiniAppUser($account, $session, $this->accessPolicy->botActor($telegramUserId)?->withSource(AdminActor::SOURCE_MINIAPP));
         }));
     }
 

@@ -8,7 +8,7 @@ use Doctrine\DBAL\Types\Types;
 use Doctrine\ORM\Mapping as ORM;
 
 /**
- * One admin action (web, bot or CLI): who, what, on which record, and masked details. Written by AdminAuditLogger;
+ * One admin action (web, bot, Mini App or CLI): who, what, on which record, and masked details. Written by AdminAuditLogger;
  * read-only in the admin (LOGS_VIEW).
  */
 #[ORM\Entity]
@@ -20,6 +20,8 @@ class AdminAuditLog
     public const SOURCE_WEB = 'web';
     public const SOURCE_BOT = 'bot';
     public const SOURCE_CLI = 'cli';
+    public const SOURCE_MINIAPP = 'miniapp';
+    public const SOURCES = [self::SOURCE_WEB, self::SOURCE_BOT, self::SOURCE_CLI, self::SOURCE_MINIAPP];
 
     #[ORM\Id]
     #[ORM\GeneratedValue]
@@ -58,6 +60,9 @@ class AdminAuditLog
     public function __construct(?int $actorAdminUserId, string $actorLabel, string $source, string $action, ?string $targetType, ?string $targetId, ?array $details)
     {
         $this->actorAdminUserId = $actorAdminUserId;
+        if (!in_array($source, self::SOURCES, true)) {
+            throw new \InvalidArgumentException(sprintf('Unknown admin audit source "%s".', $source));
+        }
         $this->actorLabel = mb_substr($actorLabel, 0, 190);
         $this->source = $source;
         $this->action = mb_substr($action, 0, 64);

@@ -1,0 +1,31 @@
+{% extends 'miniapp/view/_base.html.twig' %}
+{% import 'miniapp/admin/_macros.html.twig' as ui %}
+{% trans_default_domain 'miniapp' %}
+{% block section %}admin{% endblock %}
+{% block title %}{{ 'area.customers'|trans }}{% endblock %}
+{% block attributes %} data-back{% endblock %}
+{% block content %}
+    <section class="card">
+        <h1>{{ 'area.customers'|trans }}</h1>
+        {{ ui.search('miniapp_admin_customers', query, 'admin.customers.search', {}) }}
+        {% if tooShort %}<p class="field-error" data-too-short>{{ 'admin.customers.too_short'|trans }}</p>{% endif %}
+    </section>
+    {% if list.items is empty %}
+        {{ ui.empty(query ? 'admin.no_results' : 'admin.customers.none') }}
+    {% else %}
+        <div class="list">
+            {% for account in list.items %}
+                {% set user = account.user %}
+                <a class="list-item admin-row" href="{{ path('miniapp_admin_customer', {id: user.id}) }}" data-nav data-customer-id="{{ user.id }}">
+                    <span class="list-icon" aria-hidden="true">👤</span>
+                    <span class="list-main">
+                        <strong>{{ (account.firstName ~ ' ' ~ account.lastName)|trim ?: (user.name ?: '—') }}</strong>
+                        <span class="muted">{% if account.username %}<span class="ltr">@{{ account.username }}</span> · {% endif %}<span class="ltr">{{ account.telegramId }}</span>{% if user.mobile %} · <span class="ltr">{{ user.mobile }}</span>{% endif %}</span>
+                    </span>
+                    <span class="chevron" aria-hidden="true">›</span>
+                </a>
+            {% endfor %}
+        </div>
+    {% endif %}
+    {{ ui.pager('miniapp_admin_customers', list, {q: query}) }}
+{% endblock %}

@@ -1,0 +1,83 @@
+{% extends 'miniapp/view/_base.html.twig' %}
+{% trans_default_domain 'miniapp' %}
+{# Admin home: the web dashboard's sections this admin may see (DashboardOverview), each card opening the filtered
+   list, then the admin areas. #}
+{% block section %}admin{% endblock %}
+{% block title %}{{ 'nav.admin'|trans }}{% endblock %}
+{% block content %}
+    <section class="card">
+        <h1>{{ 'admin.title'|trans }}</h1>
+        <p class="muted">{{ 'admin.home_intro'|trans }}</p>
+    </section>
+
+    {% if overview.attention is not null %}
+        <section class="card" data-card="attention">
+            <h2>{{ 'admin.home.attention'|trans }}</h2>
+            <div class="tiles">
+                {% for card in overview.attention %}
+                    <a class="tile{{ card.count > 0 ? ' hot' : '' }}" href="{{ path('miniapp_admin_payments', {tab: card.key}) }}" data-nav data-tile="{{ card.key }}">
+                        <b>{{ card.count|number_format }}</b><span>{{ ('admin.payments.tab.' ~ card.key)|trans }}</span>
+                    </a>
+                {% endfor %}
+            </div>
+        </section>
+    {% endif %}
+
+    {% if overview.today is not null %}
+        <section class="card" data-card="today">
+            <h2>{{ 'admin.home.today'|trans }}</h2>
+            <div class="stats">
+                {% if overview.today.orders is not null %}<a class="stat" href="{{ path('miniapp_admin_orders') }}" data-nav><span class="muted">{{ 'admin.home.orders'|trans }}</span><b>{{ overview.today.orders|number_format }}</b></a>{% endif %}
+                {% if overview.today.payments is not null %}<a class="stat" href="{{ path('miniapp_admin_payments', {tab: 'confirmed'}) }}" data-nav><span class="muted">{{ 'admin.home.payments'|trans }}</span><b>{{ overview.today.payments|number_format }}</b></a>{% endif %}
+                {% if overview.today.revenue is not null %}<div class="stat"><span class="muted">{{ 'admin.home.revenue'|trans }}</span><b>{{ 'money.toman'|trans({'%amount%': overview.today.revenue|number_format}) }}</b></div>{% endif %}
+                {% if overview.today.customers is not null %}<a class="stat" href="{{ path('miniapp_admin_customers') }}" data-nav><span class="muted">{{ 'admin.home.customers'|trans }}</span><b>{{ overview.today.customers|number_format }}</b></a>{% endif %}
+            </div>
+        </section>
+    {% endif %}
+
+    {% if overview.services is not null %}
+        <section class="card" data-card="services">
+            <h2>{{ 'admin.home.services'|trans }}</h2>
+            <div class="tiles">
+                {% for card in overview.services %}
+                    <a class="tile{{ card.key == 'expiring' and card.count > 0 ? ' hot' : '' }}" href="{{ path('miniapp_admin_services', {tab: card.key}) }}" data-nav data-tile="{{ card.key }}">
+                        <b>{{ card.count|number_format }}</b><span>{{ ('admin.services.tab.' ~ card.key)|trans }}</span>
+                    </a>
+                {% endfor %}
+            </div>
+        </section>
+    {% endif %}
+
+    {% if overview.panels is not null %}
+        <section class="card" data-card="panels">
+            <h2>{{ 'admin.home.panels'|trans }}</h2>
+            {% if overview.panels is empty %}<p class="muted">{{ 'admin.home.no_panels'|trans }}</p>{% endif %}
+            <ul class="list compact">
+                {% for panel in overview.panels %}
+                    <li class="list-item" data-panel-state="{{ panel.state }}">
+                        <span class="list-main">{{ panel.title }}</span>
+                        <span class="badge health-{{ panel.state }}">{{ ('admin.home.panel_state.' ~ panel.state)|trans }}</span>
+                    </li>
+                {% endfor %}
+            </ul>
+        </section>
+    {% endif %}
+
+    <ul class="list">
+        {% for area in areas %}
+            {% if area.route is null %}
+                <li class="list-item" data-area="{{ area.key }}" data-coming-soon>
+                    <span class="list-icon" aria-hidden="true">{{ area.icon }}</span>
+                    <span class="list-main">{{ area.label|trans }}</span>
+                    <span class="badge muted-badge">{{ 'admin.coming_soon'|trans }}</span>
+                </li>
+            {% else %}
+                <li><a class="list-item" href="{{ path(area.route) }}" data-nav data-area="{{ area.key }}">
+                    <span class="list-icon" aria-hidden="true">{{ area.icon }}</span>
+                    <span class="list-main">{{ area.label|trans }}</span>
+                    <span class="chevron" aria-hidden="true">›</span>
+                </a></li>
+            {% endif %}
+        {% endfor %}
+    </ul>
+{% endblock %}

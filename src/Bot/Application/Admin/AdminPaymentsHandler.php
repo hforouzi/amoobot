@@ -8,12 +8,11 @@ use App\Bot\Application\BotTextResolver;
 use App\Bot\Application\TelegramKeyboardFactory;
 use App\Bot\Infrastructure\TelegramApiClient;
 use App\Entity\Payment;
-use App\Payment\Application\Settlement\PaymentSettlementService;
+use App\Payment\Application\PaymentModeration;
 use App\Payment\Application\Settlement\SettlementOutcome;
 use App\Payment\Domain\PaymentStatus;
 use App\Security\AdminAccessPolicy;
 use App\Security\AdminActor;
-use App\Security\AdminAuditLogger;
 use App\Security\AdminPermission;
 use App\Shop\Domain\OrderType;
 use Doctrine\ORM\EntityManagerInterface;
@@ -29,8 +28,7 @@ final class AdminPaymentsHandler implements AdminArea
         private readonly TelegramApiClient $telegramApiClient,
         private readonly TelegramKeyboardFactory $keyboardFactory,
         private readonly BotTextResolver $botTextResolver,
-        private readonly PaymentSettlementService $paymentSettlementService,
-        private readonly AdminAuditLogger $auditLogger,
+        private readonly PaymentModeration $moderation,
         private readonly AdminBotReplies $replies,
         private readonly AdminAccessPolicy $accessPolicy,
         private readonly AdminScreen $screen,
@@ -363,11 +361,7 @@ final class AdminPaymentsHandler implements AdminArea
         }
 
         // On a PROVISIONING_FAILED payment "confirm" means: retry fulfilment (already verified).
-        $retry = PaymentStatus::PROVISIONING_FAILED === $payment->getStatus();
-        $result = $retry
-            ? $this->paymentSettlementService->retryProvisioning($payment, $admin?->adminUserId, $chatId, 'telegram_retry_provisioning')
-            : $this->paymentSettlementService->approveByAdmin($payment, $admin?->adminUserId, $chatId, 'telegram_payment_approval');
-        $this->auditLogger->record($retry ? 'payment.retry' : 'payment.approve', 'Payment', $paymentId, ['outcome' => $result->outcome->value], $admin);
+        $result = $this->moderation->approve($payment, $admin, $chatId, PaymentModeration::CHANNEL_BOT);
         $this->replies->log(sprintf(
             'admin_confirm_result payment_id=%d outcome=%s message="%s"',
             $paymentId,
@@ -400,8 +394,7 @@ final class AdminPaymentsHandler implements AdminArea
             return;
         }
 
-        $result = $this->paymentSettlementService->reject($payment, null, $admin?->adminUserId, $chatId, 'telegram_payment_reject', $refunded);
-        $this->auditLogger->record('payment.reject', 'Payment', $paymentId, ['outcome' => $result->outcome->value, 'refunded' => $refunded], $admin);
+        $result = $this->moderation->reject($payment, null, $refunded, $admin, $chatId, PaymentModeration::CHANNEL_BOT);
         $this->replies->log(sprintf(
             'admin_reject_result payment_id=%d outcome=%s message="%s"',
             $paymentId,

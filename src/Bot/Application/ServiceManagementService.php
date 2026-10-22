@@ -26,11 +26,10 @@ use App\Provisioning\Application\TrafficAddonSettingsProvider;
 use App\Provisioning\Application\CustomerAccessGuard;
 use App\Provisioning\Application\CustomerServiceFinder;
 use App\Provisioning\Application\FinalConfigLinkProvider;
+use App\Provisioning\Application\ServiceAdminOutcome;
+use App\Provisioning\Application\ServiceAdministration;
 use App\Provisioning\Application\VpnConfigLinkSetResult;
-use App\Provisioning\Domain\ServiceActivationDriverInterface;
-use App\Provisioning\Domain\Dto\RenewVpnServiceRequest;
 use App\Provisioning\Domain\VpnServiceStatus;
-use App\Provisioning\Infrastructure\VpnPanelDriverRegistry;
 use App\Shared\Infrastructure\SettingValueProvider;
 use App\Shop\Application\PlanPricingService;
 use App\Shop\Application\RenewalPriceResult;
@@ -59,10 +58,10 @@ class ServiceManagementService
 
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
+        private readonly ServiceAdministration $serviceAdministration,
         private readonly TelegramApiClient $telegramApiClient,
         private readonly TelegramKeyboardFactory $keyboardFactory,
         private readonly BotTextResolver $botTextResolver,
-        private readonly VpnPanelDriverRegistry $driverRegistry,
         private readonly ServiceUsageSyncService $serviceUsageSyncService,
         private readonly TrafficAddonSettingsProvider $trafficAddonSettingsProvider,
         private readonly FinalConfigLinkProvider $finalConfigLinkProvider,
@@ -1170,34 +1169,9 @@ class ServiceManagementService
             return;
         }
 
-        if (VpnServiceStatus::SUSPENDED === $service->getStatus()) {
-            $this->showPopupOrMessage($chatId, $callbackId, 'سرویس قبلاً غیرفعال شده است.', 'already_suspended');
-
+        if (!$this->presentAdminOutcome($this->serviceAdministration->suspend($service), 'suspend', $chatId, $callbackId)) {
             return;
         }
-
-        if (VpnServiceStatus::DELETED === $service->getStatus()) {
-            $this->showPopupOrMessage($chatId, $callbackId, 'عملیات نامعتبر است.', 'invalid_suspend_deleted');
-
-            return;
-        }
-
-        if ($this->shouldSyncWithPanel($service)) {
-            try {
-                $driver = $this->driverRegistry->resolve($service->getPanel());
-                $driver->suspendService((string) $service->getRemoteId(), $service->getPanel());
-            } catch (\Throwable $e) {
-                $this->debugLog(sprintf('service_sync_failure action=suspend service_id=%d message="%s"', $serviceId, $e->getMessage()));
-                $this->showPopupOrMessage($chatId, $callbackId, 'عملیات روی پنل انجام نشد. لاگ را بررسی کنید.', 'panel_suspend_failed');
-
-                return;
-            }
-        }
-
-        $service
-            ->setStatus(VpnServiceStatus::SUSPENDED)
-            ->setUpdatedAt(new \DateTimeImmutable());
-        $this->entityManager->flush();
 
         $this->telegramApiClient->answerCallbackQuery($callbackId, 'سرویس غیرفعال شد.', true);
         $this->debugLog(sprintf('admin_service_suspend service_id=%d', $serviceId));
@@ -1211,42 +1185,9 @@ class ServiceManagementService
             return;
         }
 
-        if (VpnServiceStatus::ACTIVE === $service->getStatus()) {
-            $this->showPopupOrMessage($chatId, $callbackId, 'سرویس قبلاً فعال است.', 'already_active');
-
+        if (!$this->presentAdminOutcome($this->serviceAdministration->activate($service), 'activate', $chatId, $callbackId)) {
             return;
         }
-
-        if (VpnServiceStatus::DELETED === $service->getStatus()) {
-            $this->showPopupOrMessage($chatId, $callbackId, 'عملیات نامعتبر است.', 'invalid_activate_deleted');
-
-            return;
-        }
-
-        if ($this->shouldSyncWithPanel($service)) {
-            try {
-                $driver = $this->driverRegistry->resolve($service->getPanel());
-                if ($driver instanceof ServiceActivationDriverInterface) {
-                    $driver->activateService((string) $service->getRemoteId(), $service->getPanel());
-                } else {
-                    $driver->renewService((string) $service->getRemoteId(), new RenewVpnServiceRequest(
-                        durationDays: 0,
-                        trafficLimitGb: $service->getTrafficLimitGb(),
-                        serviceId: (int) ($service->getId() ?? 0),
-                    ), $service->getPanel());
-                }
-            } catch (\Throwable $e) {
-                $this->debugLog(sprintf('service_sync_failure action=activate service_id=%d message="%s"', $serviceId, $e->getMessage()));
-                $this->showPopupOrMessage($chatId, $callbackId, 'عملیات روی پنل انجام نشد. لاگ را بررسی کنید.', 'panel_activate_failed');
-
-                return;
-            }
-        }
-
-        $service
-            ->setStatus(VpnServiceStatus::ACTIVE)
-            ->setUpdatedAt(new \DateTimeImmutable());
-        $this->entityManager->flush();
 
         $this->telegramApiClient->answerCallbackQuery($callbackId, 'سرویس فعال شد.', true);
         $this->debugLog(sprintf('admin_service_activate service_id=%d', $serviceId));
@@ -1263,29 +1204,13 @@ class ServiceManagementService
             return;
         }
 
-        if (VpnServiceStatus::DELETED === $service->getStatus()) {
-            $this->showPopupOrMessage($chatId, $callbackId, 'سرویس قبلاً حذف شده است.', 'already_deleted');
+        $outcome = $this->serviceAdministration->delete($service);
+        if (ServiceAdminOutcome::ALREADY_DELETED === $outcome) {
             $this->debugLog(sprintf('admin_service_delete_already_deleted service_id=%d', $serviceId));
-
+        }
+        if (!$this->presentAdminOutcome($outcome, 'delete', $chatId, $callbackId)) {
             return;
         }
-
-        if ($this->shouldSyncWithPanel($service)) {
-            try {
-                $driver = $this->driverRegistry->resolve($service->getPanel());
-                $driver->deleteService((string) $service->getRemoteId(), $service->getPanel());
-            } catch (\Throwable $e) {
-                $this->debugLog(sprintf('service_sync_failure action=delete service_id=%d message="%s"', $serviceId, $e->getMessage()));
-                $this->showPopupOrMessage($chatId, $callbackId, 'عملیات روی پنل انجام نشد. لاگ را بررسی کنید.', 'panel_delete_failed');
-
-                return;
-            }
-        }
-
-        $service
-            ->setStatus(VpnServiceStatus::DELETED)
-            ->setUpdatedAt(new \DateTimeImmutable());
-        $this->entityManager->flush();
 
         $this->telegramApiClient->answerCallbackQuery($callbackId, 'سرویس حذف شد.', true);
         $this->debugLog(sprintf('admin_service_delete service_id=%d', $serviceId));
@@ -1299,23 +1224,9 @@ class ServiceManagementService
             return;
         }
 
-        if ($this->shouldSyncWithPanel($service)) {
-            try {
-                $driver = $this->driverRegistry->resolve($service->getPanel());
-                $driver->resetUsage((string) $service->getRemoteId(), $service->getPanel());
-            } catch (\Throwable $e) {
-                $this->debugLog(sprintf('service_sync_failure action=reset_usage service_id=%d message="%s"', $serviceId, $e->getMessage()));
-                $this->showPopupOrMessage($chatId, $callbackId, 'عملیات روی پنل انجام نشد. لاگ را بررسی کنید.', 'panel_reset_usage_failed');
-
-                return;
-            }
+        if (!$this->presentAdminOutcome($this->serviceAdministration->resetUsage($service), 'reset_usage', $chatId, $callbackId)) {
+            return;
         }
-
-        $service
-            ->setTrafficUsedGb(0)
-            ->setTrafficUsedBytes(0)
-            ->setUpdatedAt(new \DateTimeImmutable());
-        $this->entityManager->flush();
 
         $this->telegramApiClient->answerCallbackQuery($callbackId, 'مصرف سرویس ریست شد.', true);
         $this->debugLog(sprintf('admin_service_reset_usage service_id=%d', $serviceId));
@@ -1346,16 +1257,9 @@ class ServiceManagementService
             return;
         }
 
-        $base = $service->getExpiresAt();
-        $now = new \DateTimeImmutable();
-        if (!$base instanceof \DateTimeImmutable || $base < $now) {
-            $base = $now;
+        if (!$this->presentAdminOutcome($this->serviceAdministration->extend($service, $days), 'extend', $chatId, $callbackId)) {
+            return;
         }
-
-        $service
-            ->setExpiresAt($base->modify(sprintf('+%d days', $days)))
-            ->setUpdatedAt(new \DateTimeImmutable());
-        $this->entityManager->flush();
 
         $this->telegramApiClient->answerCallbackQuery($callbackId, 'تمدید انجام شد.', true);
         $this->debugLog(sprintf('admin_service_extend service_id=%d days=%d', $serviceId, $days));
@@ -1386,23 +1290,32 @@ class ServiceManagementService
             return;
         }
 
-        $currentLimit = $service->getTrafficLimitGb() ?? 0;
-        $newLimitGb = $currentLimit + $trafficGb;
-        $maxSafeGbForBytes = intdiv(PHP_INT_MAX, self::BYTES_PER_GB);
-        if ($newLimitGb > $maxSafeGbForBytes) {
-            $this->showPopupOrMessage($chatId, $callbackId, 'حداکثر حجم پشتیبانی‌شده عبور کرده است.', 'traffic_limit_overflow');
-
+        if (!$this->presentAdminOutcome($this->serviceAdministration->addTraffic($service, $trafficGb), 'add_traffic', $chatId, $callbackId)) {
             return;
         }
-        $service
-            ->setTrafficLimitGb($newLimitGb)
-            ->setTrafficLimitBytes($newLimitGb * self::BYTES_PER_GB)
-            ->setUpdatedAt(new \DateTimeImmutable());
-        $this->entityManager->flush();
 
         $this->telegramApiClient->answerCallbackQuery($callbackId, 'افزایش حجم انجام شد.', true);
         $this->debugLog(sprintf('admin_service_add_traffic service_id=%d traffic_gb=%d', $serviceId, $trafficGb));
         $this->showAdminServiceDetail($serviceId, $chatId, null);
+    }
+
+    /**
+     * The bot's answer to an outcome of ServiceAdministration other than DONE; true when it is DONE.
+     */
+    private function presentAdminOutcome(ServiceAdminOutcome $outcome, string $action, string $chatId, string $callbackId): bool
+    {
+        match ($outcome) {
+            ServiceAdminOutcome::DONE => null,
+            ServiceAdminOutcome::ALREADY_SUSPENDED => $this->showPopupOrMessage($chatId, $callbackId, 'سرویس قبلاً غیرفعال شده است.', 'already_suspended'),
+            ServiceAdminOutcome::ALREADY_ACTIVE => $this->showPopupOrMessage($chatId, $callbackId, 'سرویس قبلاً فعال است.', 'already_active'),
+            ServiceAdminOutcome::ALREADY_DELETED => $this->showPopupOrMessage($chatId, $callbackId, 'سرویس قبلاً حذف شده است.', 'already_deleted'),
+            ServiceAdminOutcome::NOT_ALLOWED => $this->showPopupOrMessage($chatId, $callbackId, 'عملیات نامعتبر است.', 'invalid_'.$action.'_deleted'),
+            ServiceAdminOutcome::PANEL_FAILED => $this->showPopupOrMessage($chatId, $callbackId, 'عملیات روی پنل انجام نشد. لاگ را بررسی کنید.', 'panel_'.$action.'_failed'),
+            ServiceAdminOutcome::LIMIT_OVERFLOW => $this->showPopupOrMessage($chatId, $callbackId, 'حداکثر حجم پشتیبانی‌شده عبور کرده است.', 'traffic_limit_overflow'),
+            ServiceAdminOutcome::INVALID_AMOUNT => $this->showPopupOrMessage($chatId, $callbackId, 'عملیات نامعتبر است.', 'invalid_'.$action.'_amount'),
+        };
+
+        return $outcome->isDone();
     }
 
     public function showAdminUserDetail(int $userId, string $chatId, string $callbackId, ?int $backServiceId = null): void
@@ -1688,13 +1601,6 @@ class ServiceManagementService
     private function debugLog(string $message): void
     {
         error_log('[ServiceManagementService] '.$message);
-    }
-
-    private function shouldSyncWithPanel(VpnService $service): bool
-    {
-        $panel = $service->getPanel();
-
-        return null !== $panel && 'sanaei_3xui' === $panel->getType();
     }
 
     private function parsePositiveInt(string $text): ?int

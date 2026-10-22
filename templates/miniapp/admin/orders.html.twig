@@ -1,0 +1,41 @@
+{% extends 'miniapp/view/_base.html.twig' %}
+{% import 'miniapp/admin/_macros.html.twig' as ui %}
+{% trans_default_domain 'miniapp' %}
+{% block section %}admin{% endblock %}
+{% block title %}{{ 'area.orders'|trans }}{% endblock %}
+{% block attributes %} data-back{% endblock %}
+{% block content %}
+    <section class="card">
+        <h1>{{ 'area.orders'|trans }}</h1>
+        {{ ui.search('miniapp_admin_orders', query, 'admin.orders.search', {status: status}) }}
+    </section>
+    <nav class="chips" aria-label="{{ 'admin.filter'|trans }}">
+        <a class="chip{{ status is null ? ' active' : '' }}" href="{{ path('miniapp_admin_orders') }}" data-nav data-replace data-chip="all">{{ 'admin.all'|trans }}</a>
+        {% for s in statuses %}
+            <a class="chip{{ s == status ? ' active' : '' }}" href="{{ path('miniapp_admin_orders', {status: s}) }}" data-nav data-replace data-chip="{{ s }}">{{ ('order.status.' ~ s)|trans }}</a>
+        {% endfor %}
+    </nav>
+    {% if list.items is empty %}
+        {{ ui.empty(query ? 'admin.no_results' : 'orders.none') }}
+    {% else %}
+        <div class="list">
+            {% for order in list.items %}
+                <a class="list-item admin-row" href="{{ path('miniapp_admin_order', {id: order.id}) }}" data-nav data-order-id="{{ order.id }}" data-status="{{ order.status }}">
+                    <span class="list-main">
+                        <span class="head">
+                            <strong>{{ ('order.type.' ~ order.type)|trans }} · {{ order.plan.title }}</strong>
+                            <span class="badge order-{{ order.status }}">{{ ('order.status.' ~ order.status)|trans }}</span>
+                        </span>
+                        <span class="muted">{{ ui.who({name: (order.user.telegramAccount.firstName ?? order.user.name ?? ''), username: order.user.telegramAccount.username ?? null, telegramId: order.user.telegramAccount.telegramId ?? null}) }}</span>
+                        <span class="muted">
+                            {{ 'money.toman'|trans({'%amount%': order.amount|number_format}) }}
+                            · <time datetime="{{ order.createdAt|date('c') }}">{{ order.createdAt|sub_date(lang) }}</time>
+                            {% if order.trackingCode %} · <span class="ltr">{{ order.trackingCode }}</span>{% endif %}
+                        </span>
+                    </span>
+                </a>
+            {% endfor %}
+        </div>
+    {% endif %}
+    {{ ui.pager('miniapp_admin_orders', list, {status: status, q: query}) }}
+{% endblock %}

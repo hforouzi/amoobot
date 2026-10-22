@@ -29,3 +29,8 @@ framework:
             policy: sliding_window
             limit: 10
             interval: '10 minutes'
+        # Mini App admin actions (approve, suspend, ...), per admin (AdminActions).
+        miniapp_admin_action:
+            policy: sliding_window
+            limit: 30
+            interval: '1 minute'

@@ -10,7 +10,7 @@ use Psr\Clock\ClockInterface;
 
 /**
  * Server-side Mini App sessions: a 256-bit random token handed to the client once (only its SHA-256 is stored), valid
- * for 12 hours, only for the Telegram user it was issued to and the user agent that asked for it, revocable.
+ * for 12 hours (less for admins, MiniAppAuthController), only for the Telegram user it was issued to and the user agent that asked for it, revocable.
  * The CSRF token is derived from the session token, so it needs no storage and dies with the session.
  */
 final class MiniAppSessionManager
@@ -28,11 +28,14 @@ final class MiniAppSessionManager
     ) {
     }
 
-    public function issue(string $telegramUserId, ?string $userAgent): IssuedSession
+    /**
+     * @param int|null $ttlSeconds a shorter lifetime than TTL_SECONDS (admins), null for the default
+     */
+    public function issue(string $telegramUserId, ?string $userAgent, ?int $ttlSeconds = null): IssuedSession
     {
         $token = rtrim(strtr(base64_encode(random_bytes(32)), '+/', '-_'), '=');
         $now = $this->clock->now();
-        $session = new MiniAppSession(self::hash($token), $telegramUserId, self::hash((string) $userAgent), $now, $now->modify(sprintf('+%d seconds', self::TTL_SECONDS)));
+        $session = new MiniAppSession(self::hash($token), $telegramUserId, self::hash((string) $userAgent), $now, $now->modify(sprintf('+%d seconds', min(self::TTL_SECONDS, $ttlSeconds ?? self::TTL_SECONDS))));
         $this->entityManager->persist($session);
         $this->entityManager->flush();
 

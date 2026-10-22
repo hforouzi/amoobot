@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Bot\Application\Admin;
 
+use App\Admin\Application\CustomerSearch;
 use App\Entity\TelegramAccount;
 use App\Security\AdminPermission;
 use Doctrine\ORM\EntityManagerInterface;
@@ -19,6 +20,7 @@ final class AdminCustomersHandler implements AdminArea
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
         private readonly AdminScreen $screen,
+        private readonly CustomerSearch $customerSearch,
     ) {
     }
 
@@ -56,25 +58,14 @@ final class AdminCustomersHandler implements AdminArea
     public function answer(AdminRequest $request, string $kind, string $target, string $text): void
     {
         $query = trim($text);
-        if (mb_strlen($query) < 2 || mb_strlen($query) > 64) {
+        if (!CustomerSearch::isValidQuery($query)) {
             $this->screen->send($request, $this->screen->text('admin.customers.search_prompt'));
 
             return;
         }
         $this->screen->endPrompt($request);
 
-        $like = '%'.addcslashes(ltrim($query, '@'), '%_\\').'%';
-        $builder = $this->entityManager->getRepository(TelegramAccount::class)->createQueryBuilder('t')->join('t.user', 'u');
-        if (1 === preg_match('/^\d{5,20}$/', $query)) {
-            $builder->where('t.telegramId = :exact OR u.mobile LIKE :like');
-            $builder->setParameter('exact', $query);
-        } elseif (str_starts_with($query, '@')) {
-            $builder->where('t.username LIKE :like');
-        } else {
-            $builder->where('t.username LIKE :like OR t.firstName LIKE :like OR t.lastName LIKE :like OR u.name LIKE :like OR u.mobile LIKE :like');
-        }
-        /** @var list<TelegramAccount> $accounts */
-        $accounts = $builder->setParameter('like', $like)->orderBy('t.id', 'DESC')->setMaxResults(AdminScreen::PAGE_SIZE)->getQuery()->getResult();
+        $accounts = $this->customerSearch->search($query, AdminScreen::PAGE_SIZE);
 
         $title = [] === $accounts
             ? $this->screen->text('admin.customers.search_empty', ['query' => $query])
