@@ -1,0 +1,145 @@
+{% trans_default_domain 'subscription' %}
+{# Progressive enhancement only: the page works without it (links, a selectable URL, the QR code).
+   - Copy buttons, with a fallback for browsers without the Clipboard API.
+   - Import deep links are plain links the user taps (never an automatic redirect). If the page is still visible a
+     moment later, the app probably did not open (in-app browsers, iOS Telegram especially, block custom schemes):
+     that app's fallback appears (open in the real browser, or copy the link).
+   - Inside Telegram: as a Mini App (web_app button) the launch parameters are in the URL fragment; only then is
+     telegram-web-app.js loaded, its theme applied, and "open in browser" uses Telegram.WebApp.openLink. In
+     Telegram's plain in-app browser there is no API, so the instruction is shown instead. No cookies, no initData
+     validation here (public page). #}
+<script>
+(function () {
+    'use strict';
+    var T = {
+        copied: {{ 'js.copied'|trans|json_encode|raw }},
+        copyFailed: {{ 'js.copy_failed'|trans|json_encode|raw }}
+    };
+    var doc = document;
+
+    function toast(text) {
+        var el = doc.getElementById('toast');
+        if (!el) { return; }
+        el.textContent = text;
+        el.classList.add('show');
+        clearTimeout(el._t);
+        el._t = setTimeout(function () { el.classList.remove('show'); }, 2200);
+    }
+
+    function legacyCopy(text) {
+        var area = doc.createElement('textarea');
+        area.value = text;
+        area.setAttribute('readonly', '');
+        area.style.position = 'fixed';
+        area.style.opacity = '0';
+        doc.body.appendChild(area);
+        area.select();
+        area.setSelectionRange(0, text.length);
+        var ok = false;
+        try { ok = doc.execCommand('copy'); } catch (e) { ok = false; }
+        doc.body.removeChild(area);
+        return ok;
+    }
+
+    function copy(text) {
+        if (navigator.clipboard && window.isSecureContext) {
+            navigator.clipboard.writeText(text).then(function () { toast(T.copied); }, function () {
+                toast(legacyCopy(text) ? T.copied : T.copyFailed);
+            });
+            return;
+        }
+        toast(legacyCopy(text) ? T.copied : T.copyFailed);
+    }
+
+    function pageUrl() {
+        // Without the fragment: it may carry Mini App launch data.
+        return window.location.origin + window.location.pathname + window.location.search;
+    }
+
+    var tg = null;
+    function webApp() {
+        return tg || (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initData !== undefined ? window.Telegram.WebApp : null);
+    }
+
+    function openExternal(button) {
+        var app = webApp();
+        if (app && typeof app.openLink === 'function') {
+            app.openLink(pageUrl(), { try_instant_view: false });
+            return;
+        }
+        var box = button.closest('[data-fallback], #in-app-hint') || doc;
+        var hint = box.querySelector('[data-external-hint]');
+        if (hint) { hint.hidden = false; }
+    }
+
+    doc.addEventListener('click', function (event) {
+        var target = event.target.closest('[data-copy], [data-open-external], [data-deeplink]');
+        if (!target) { return; }
+        if (target.hasAttribute('data-copy')) {
+            event.preventDefault();
+            copy(target.getAttribute('data-copy'));
+        } else if (target.hasAttribute('data-open-external')) {
+            event.preventDefault();
+            openExternal(target);
+        } else if (target.hasAttribute('data-deeplink')) {
+            var card = target.closest('[data-app]');
+            setTimeout(function () {
+                if (doc.visibilityState === 'visible' && card) {
+                    var fallback = card.querySelector('[data-fallback]');
+                    if (fallback) { fallback.classList.add('show'); }
+                }
+            }, 1600);
+        }
+    });
+
+    doc.addEventListener('focusin', function (event) {
+        if (event.target.hasAttribute && event.target.hasAttribute('data-select-all')) { event.target.select(); }
+    });
+
+    // --- Telegram ---
+    var hash = window.location.hash || '';
+    var isMiniApp = /tgWebApp(Data|Version|Platform)=/.test(hash);
+    var inTelegram = isMiniApp || !!(window.TelegramWebviewProxy || window.TelegramWebview) || /Telegram/i.test(navigator.userAgent);
+
+    function applyTheme(theme) {
+        if (!theme) { return; }
+        var map = {
+            bg_color: ['--card'], secondary_bg_color: ['--bg', '--code'], section_bg_color: ['--card'],
+            text_color: ['--fg'], hint_color: ['--muted'], button_color: ['--accent'], button_text_color: ['--accent-fg']
+        };
+        Object.keys(map).forEach(function (key) {
+            var value = theme[key];
+            if (typeof value === 'string' && /^#[0-9a-f]{3,8}$/i.test(value)) {
+                map[key].forEach(function (name) { doc.documentElement.style.setProperty(name, value); });
+            }
+        });
+    }
+
+    if (isMiniApp) {
+        // The theme is in the launch parameters already: apply it before the script loads (or if it cannot).
+        try {
+            var params = new URLSearchParams(hash.slice(1));
+            var raw = params.get('tgWebAppThemeParams');
+            if (raw) { applyTheme(JSON.parse(raw)); }
+        } catch (e) { /* ignore */ }
+
+        var script = doc.createElement('script');
+        script.src = 'https://telegram.org/js/telegram-web-app.js';
+        script.async = true;
+        script.onload = function () {
+            if (!window.Telegram || !window.Telegram.WebApp) { return; }
+            tg = window.Telegram.WebApp;
+            applyTheme(tg.themeParams);
+            if (typeof tg.onEvent === 'function') { tg.onEvent('themeChanged', function () { applyTheme(tg.themeParams); }); }
+            if (typeof tg.ready === 'function') { tg.ready(); }
+            if (typeof tg.expand === 'function') { tg.expand(); }
+        };
+        doc.head.appendChild(script);
+    }
+
+    if (inTelegram) {
+        var hint = doc.getElementById('in-app-hint');
+        if (hint) { hint.classList.add('show'); }
+    }
+})();
+</script>

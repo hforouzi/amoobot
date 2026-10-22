@@ -1,0 +1,12 @@
+framework:
+    rate_limiter:
+        # Public subscription page /s/{token}: per client IP, wrong tokens included (no free guessing).
+        subscription_page:
+            policy: sliding_window
+            limit: 30
+            interval: '1 minute'
+        # App downloads /d/{id}: per client IP (large files; Range requests of one download count once each).
+        app_download:
+            policy: sliding_window
+            limit: 60
+            interval: '1 minute'

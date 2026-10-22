@@ -1,0 +1,7 @@
+# Validation messages of the app's own constraints (entities: ClientApp, AppDownload).
+client_app.template.no_scheme: "لینک باید با یک scheme مثل hiddify:// شروع شود."
+client_app.template.forbidden_scheme: "این scheme مجاز نیست."
+client_app.template.invalid_characters: "لینک نباید فاصله، نقل‌قول یا < > داشته باشد."
+client_app.template.no_url: "لینک باید یکی از {url}، {url_encoded} یا {url_base64} را داشته باشد."
+client_app.platforms.required: "حداقل یک سیستم‌عامل انتخاب کنید."
+app_download.external_url.required: "برای نوع «لینک خارجی» آدرس را وارد کنید."

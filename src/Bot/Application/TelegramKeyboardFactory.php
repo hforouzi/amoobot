@@ -11,12 +11,14 @@ use App\Entity\Plan;
 use App\Entity\TrialPlan;
 use App\Shop\Application\SalesSettingsProvider;
 use App\Security\AdminPermission;
+use App\Subscription\Application\AppDownloadCatalog;
 
 class TelegramKeyboardFactory
 {
     public function __construct(
         private readonly BotTextResolver $botTextResolver,
         private readonly SalesSettingsProvider $salesSettingsProvider,
+        private readonly AppDownloadCatalog $appDownloads,
     )
     {
     }
@@ -50,6 +52,9 @@ class TelegramKeyboardFactory
         $keyboard[] = $mainRow;
 
         $supportRow = [['text' => $this->button('button.main.support')]];
+        if ($this->appDownloads->hasActive()) {
+            $supportRow[] = ['text' => $this->button('button.main.downloads')];
+        }
         if ($isAdmin) {
             $supportRow[] = ['text' => $this->button('button.main.admin')];
         }
@@ -511,9 +516,14 @@ class TelegramKeyboardFactory
     /**
      * @return array<string, array<array<array<string, string>>>>
      */
-    public function userServiceDetail(int $serviceId, bool $canRenew = true, bool $canAddTraffic = true): array
+    public function userServiceDetail(int $serviceId, bool $canRenew = true, bool $canAddTraffic = true, ?string $subscriptionPageUrl = null): array
     {
+        $rows = [];
+        if (null !== $subscriptionPageUrl) {
+            $rows[] = [['text' => $this->button('button.service.page'), 'url' => $subscriptionPageUrl]];
+        }
         $rows = [
+            ...$rows,
             [
                 ['text' => $this->button('button.service.subscription'), 'callback_data' => 'service_subscription:'.$serviceId],
                 ['text' => $this->button('button.service.qr'), 'callback_data' => 'service_subscription_qr:'.$serviceId],
@@ -959,6 +969,35 @@ class TelegramKeyboardFactory
             'text' => $this->button('button.common.cancel'),
             'callback_data' => 'payment_cancel:'.$paymentId,
         ]];
+
+        return ['inline_keyboard' => $rows];
+    }
+
+    /**
+     * "Open subscription page" under a message about a service (after a purchase, a trial), when the shop has a public
+     * address for it (SubscriptionPageUrl::forTelegram).
+     *
+     * @return array{inline_keyboard: list<list<array{text: string, url: string}>>}|null
+     */
+    public function subscriptionPage(?string $subscriptionPageUrl): ?array
+    {
+        return null === $subscriptionPageUrl ? null : ['inline_keyboard' => [[['text' => $this->button('button.service.page'), 'url' => $subscriptionPageUrl]]]];
+    }
+
+    /**
+     * Active app downloads as URL buttons (through /d/{id}, which counts them), the platform before each title.
+     *
+     * @param list<array{title: string, platform: string, url: string}> $downloads
+     *
+     * @return array{inline_keyboard: list<list<array{text: string, url: string}>>}
+     */
+    public function appDownloads(array $downloads): array
+    {
+        $icons = ['android' => '🤖', 'ios' => '🍏', 'windows' => '🪟', 'macos' => '💻', 'linux' => '🐧'];
+        $rows = [];
+        foreach ($downloads as $download) {
+            $rows[] = [['text' => ($icons[$download['platform']] ?? '⬇️').' '.$download['title'], 'url' => $download['url']]];
+        }
 
         return ['inline_keyboard' => $rows];
     }

@@ -1,0 +1,12 @@
+{% extends 'subscription/_layout.html.twig' %}
+{% trans_default_domain 'subscription' %}
+{# Same page for a wrong, rotated or deleted link (and when rate limited): it tells nothing about any service. #}
+
+{% block title %}{{ 'not_found.title'|trans }}{% endblock %}
+
+{% block body %}
+    <section class="card">
+        <h1>{{ 'not_found.title'|trans }}</h1>
+        <p style="margin-top:8px">{{ 'not_found.body'|trans }}</p>
+    </section>
+{% endblock %}

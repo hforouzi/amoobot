@@ -71,6 +71,7 @@ final class BotContentRegistry
             'button.main.buy_service',
             'button.main.my_services',
             'button.main.support',
+            'button.main.downloads',
             'button.main.track_order',
             'button.main.continue_order',
             'button.main.cancel_incomplete_order',
@@ -135,6 +136,8 @@ final class BotContentRegistry
             'service.add_traffic_done' => ['title' => 'Traffic added', 'body' => '✅ حجم اضافه با موفقیت به سرویس شما اضافه شد.', 'category' => 'services'],
             'service.configs' => ['title' => 'Service configs', 'body' => "کانفیگهای سرویس #{{ service.id }}:\n{{ service.configs }}", 'category' => 'services', 'variables' => ['service.id', 'service.configs']],
             'service.subscription_link_missing' => ['title' => 'Missing subscription link', 'body' => 'لینک اشتراک برای این سرویس موجود نیست.', 'category' => 'services'],
+            'downloads.list' => ['title' => 'App downloads', 'body' => "📥 برنامه‌های اتصال\nبرنامه مناسب دستگاه خود را دانلود و نصب کنید، سپس لینک اشتراک را در آن اضافه کنید.", 'category' => 'services'],
+            'downloads.empty' => ['title' => 'No app downloads', 'body' => 'در حال حاضر فایلی برای دانلود موجود نیست.', 'category' => 'services'],
             'discount.ask' => ['title' => 'Ask discount', 'body' => 'در صورت داشتن کد تخفیف، آن را وارد کنید.', 'category' => 'discounts'],
             'discount.applied' => ['title' => 'Discount applied', 'body' => "✅ کد تخفیف اعمال شد.\n\nکد تخفیف: {{ discount.code }} ({{ discount.amount }} تومان)", 'category' => 'discounts', 'variables' => ['discount.code', 'discount.amount']],
             'discount.invalid' => ['title' => 'Discount invalid', 'body' => "❌ کد تخفیف معتبر نیست یا قابل استفاده نمی‌باشد.\n{{ discount.reason }}", 'category' => 'discounts', 'variables' => ['discount.reason']],
@@ -166,6 +169,8 @@ final class BotContentRegistry
             'service.list_empty' => 'You do not have any services yet.',
             'service.renewed' => '✅ Your service was renewed successfully.',
             'service.add_traffic_done' => '✅ Extra traffic was added to your service.',
+            'downloads.list' => "📥 Connection apps\nDownload and install the app for your device, then add your subscription link in it.",
+            'downloads.empty' => 'There is nothing to download right now.',
         ];
         foreach ($overrides as $key => $body) {
             if (isset($messages[$key])) {
@@ -183,6 +188,7 @@ final class BotContentRegistry
             'button.main.trial_account' => ['label' => '🎁 اکانت تست', 'buttonType' => 'reply_keyboard', 'category' => 'main'],
             'button.main.my_services' => ['label' => '📦 سرویسهای من', 'buttonType' => 'reply_keyboard', 'category' => 'main'],
             'button.main.support' => ['label' => '🎧 پشتیبانی', 'buttonType' => 'reply_keyboard', 'category' => 'main'],
+            'button.main.downloads' => ['label' => '📥 دانلود برنامه‌ها', 'buttonType' => 'reply_keyboard', 'category' => 'main'],
             'button.main.track_order' => ['label' => '🔎 پیگیری سفارش', 'buttonType' => 'reply_keyboard', 'category' => 'main'],
             'button.main.continue_order' => ['label' => '▶️ ادامه سفارش قبلی', 'buttonType' => 'reply_keyboard', 'category' => 'main'],
             'button.main.cancel_incomplete_order' => ['label' => '🗑 حذف سفارش ناتمام', 'buttonType' => 'reply_keyboard', 'category' => 'main'],
@@ -222,6 +228,7 @@ final class BotContentRegistry
             'button.service.renew' => ['label' => '🔄 تمدید سرویس', 'buttonType' => 'inline', 'category' => 'service'],
             'button.service.add_traffic' => ['label' => '➕ خرید حجم اضافه', 'buttonType' => 'inline', 'category' => 'service'],
             'button.service.refresh_usage' => ['label' => '🔄 بروزرسانی مصرف', 'buttonType' => 'inline', 'category' => 'service'],
+            'button.service.page' => ['label' => '🌐 صفحه اشتراک', 'buttonType' => 'inline', 'category' => 'service'],
         ] + Admin\AdminBotTexts::buttons();
     }
 
@@ -233,6 +240,7 @@ final class BotContentRegistry
             'button.main.trial_account' => '🎁 Trial account',
             'button.main.my_services' => '📦 My services',
             'button.main.support' => '🎧 Support',
+            'button.main.downloads' => '📥 Download apps',
             'button.main.track_order' => '🔎 Track order',
             'button.main.continue_order' => '▶️ Continue order',
             'button.main.cancel_incomplete_order' => '🗑 Delete incomplete order',
@@ -272,6 +280,7 @@ final class BotContentRegistry
             'button.service.renew' => '🔄 Renew service',
             'button.service.add_traffic' => '➕ Buy extra traffic',
             'button.service.refresh_usage' => '🔄 Refresh usage',
+            'button.service.page' => '🌐 Open subscription page',
         ];
         foreach ($labels as $key => $label) {
             $buttons[$key]['label'] = $label;

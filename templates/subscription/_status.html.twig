@@ -1,0 +1,38 @@
+{% trans_default_domain 'subscription' %}
+{% set lang = app.request.locale == 'en' ? 'en' : 'fa' %}
+<section class="card" data-status="{{ view.status }}">
+    <div class="head">
+        <h1>{{ view.planName ?? 'page.title'|trans }}</h1>
+        <span class="badge {{ view.status }}">{{ ('status.' ~ view.status)|trans }}</span>
+    </div>
+    <div class="stats">
+        <div class="stat">
+            <span class="muted">{{ 'stat.expires'|trans }}</span>
+            {% if view.expiresAt %}
+                <b><time datetime="{{ view.expiresAt|date('Y-m-d') }}">{{ view.expiresAt|sub_date(lang) }}</time></b>
+                <span class="muted ltr-num">{{ view.expiresAt|date('Y-m-d') }}</span>
+            {% else %}
+                <b>{{ 'stat.unlimited'|trans }}</b>
+            {% endif %}
+        </div>
+        <div class="stat" data-days-left="{{ view.daysLeft ?? '' }}">
+            <span class="muted">{{ 'stat.days_left'|trans }}</span>
+            <b>{{ view.daysLeft is null ? 'stat.unlimited'|trans : 'stat.days'|trans({'%count%': view.daysLeft}) }}</b>
+        </div>
+        <div class="stat">
+            <span class="muted">{{ 'stat.used'|trans }}</span>
+            <b class="ltr">{{ view.trafficUsedBytes|sub_bytes }}</b>
+        </div>
+        <div class="stat">
+            <span class="muted">{{ 'stat.remaining'|trans }}</span>
+            <b class="ltr">{{ view.trafficRemainingBytes is null ? 'stat.unlimited'|trans : view.trafficRemainingBytes|sub_bytes }}</b>
+        </div>
+    </div>
+    {% if view.usedPercent is not null %}
+        <div class="bar{{ view.usedPercent >= 100 ? ' full' : (view.usedPercent >= 80 ? ' high' : '') }}" data-used-percent="{{ view.usedPercent }}"
+             role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ view.usedPercent }}" aria-label="{{ 'stat.used'|trans }}">
+            <span style="width: {{ view.usedPercent }}%"></span>
+        </div>
+        <p class="muted" style="margin-top:6px">{{ 'stat.used_of'|trans({'%used%': view.trafficUsedBytes|sub_bytes, '%total%': view.trafficLimitBytes|sub_bytes, '%percent%': view.usedPercent}) }}</p>
+    {% endif %}
+</section>

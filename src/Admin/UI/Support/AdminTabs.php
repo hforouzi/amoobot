@@ -25,6 +25,10 @@ final class AdminTabs
             'messages' => [Crud\BotMessageTemplateCrudController::class, 'admin_bot_texts_messages_index', 'admin.bot_message_templates'],
             'buttons' => [Crud\BotButtonLabelCrudController::class, 'admin_bot_texts_buttons_index', 'admin.bot_button_labels'],
         ],
+        'apps' => [
+            'downloads' => [Crud\AppDownloadCrudController::class, 'admin_apps_downloads_index', 'admin.app_downloads'],
+            'clients' => [Crud\ClientAppCrudController::class, 'admin_apps_clients_index', 'admin.client_apps'],
+        ],
         'logs' => [
             'audit' => [Crud\AdminAuditLogCrudController::class, 'admin_logs_audit_index', 'admin.audit_log'],
             'notifications' => [Crud\ServiceNotificationLogCrudController::class, 'admin_logs_notifications_index', 'admin.notifications'],

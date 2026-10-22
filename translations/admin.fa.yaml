@@ -1,4 +1,9 @@
 admin:
+  client_apps: "برنامه‌های اتصال"
+  client_app: "برنامه اتصال"
+  app_downloads: "دانلودها"
+  app_download: "فایل دانلود"
+  apps: "برنامه‌ها"
   bot_button_label: متن دکمه
   bot_button_labels: متن دکمه‌ها
   bot_message_template: قالب پیام
@@ -132,6 +137,15 @@ payment:
     custom_api: درگاه API سفارشی
 
 help:
+  client_app.notes: "فقط برای ادمین‌ها: منبع تأیید لینک یا دلیل غیرفعال بودن."
+  client_app.store_url: "صفحه نصب (Play Store، App Store یا GitHub). اگر فایل دانلودی به این برنامه وصل باشد، آن فایل اولویت دارد."
+  client_app.template: "جای‌گذاری‌ها: {url} لینک اشتراک، {url_encoded} لینک کدشده برای پارامتر، {url_base64} لینک به base64، {name} نام پروفایل (کدشده). خالی: بدون دکمه افزودن (کپی لینک)."
+  client_app.icon: "اختیاری: یک ایموجی کوتاه."
+  client_app.index: "برنامه‌هایی که در صفحه اشتراک مشتری با دکمه «افزودن اشتراک» نمایش داده می‌شوند. برنامه‌هایی که لینکشان تأیید نشده غیرفعال هستند؛ قبل از فعال کردن روی گوشی امتحان کنید."
+  app_download.client_app: "اختیاری: دکمه «نصب برنامه» این برنامه در صفحه اشتراک به این فایل می‌رود."
+  app_download.external_url: "فقط برای نوع «لینک خارجی»؛ فقط http یا https."
+  app_download.file: "پسوندهای مجاز: %allowed% — حداکثر %max% مگابایت. با انتخاب فایل جدید، فایل قبلی جایگزین می‌شود."
+  app_download.upload: "فایل نصب برنامه را آپلود کنید یا لینک صفحه دانلود را بدهید. مشتری‌ها آن را در صفحه اشتراک و دکمه «دانلود برنامه‌ها» ربات می‌بینند."
   payment_gateway_store_method: PaymentGateway اطلاعات اتصال و اعتبارنامه درگاه را نگهداری می‌کند. StorePaymentMethod تعیین می‌کند کاربر در بات چه روش‌هایی ببیند.
   plan_custom_pricing: در صورت فعال بودن، قیمت سفارشی بر اساس حجم و مدت محاسبه می‌شود.
   nowpayments_rate: نرخ تبدیل را بر اساس amount unit انتخاب‌شده (toman یا rial) تنظیم کنید.
@@ -508,6 +522,8 @@ panel_inbounds:
   last_synced: آخرین همگام‌سازی
 
 action:
+  rotate_page_link_confirm: "لینک فعلی صفحه اشتراک این سرویس از کار می‌افتد و مشتری باید لینک جدید را از ربات بگیرد. ادامه می‌دهید؟"
+  rotate_page_link: "لینک جدید صفحه اشتراک"
   confirm_payment: "تأیید"
   retry_provisioning: "تلاش دوباره برای ساخت سرویس"
   reject_payment: "رد"
@@ -575,6 +591,10 @@ discount:
   type.percent: "درصدی"
 
 entity:
+  client_app.plural: "برنامه‌های اتصال"
+  client_app.singular: "برنامه اتصال"
+  app_download.plural: "دانلودها"
+  app_download.singular: "فایل دانلود"
   admin_user.singular: "کاربر ادمین"
   bot_message_log.singular: "پیام بات"
   bot_message_log.plural: "لاگ پیام‌های بات"
@@ -627,6 +647,25 @@ entity:
   bot_message_template.plural: "قالب پیام‌ها"
 
 field:
+  name: "نام"
+  version: "نسخه"
+  size: "حجم"
+  sha256: "SHA-256"
+  mime_type: "نوع فایل"
+  original_name: "نام فایل"
+  download_count: "تعداد دانلود"
+  client_app: "برنامه اتصال"
+  external_url: "لینک خارجی"
+  notes: "یادداشت"
+  icon: "نماد"
+  store_url: "لینک صفحه نصب"
+  platform: "سیستم‌عامل"
+  platforms: "سیستم‌عامل‌ها"
+  import_url_template: "قالب لینک افزودن اشتراک"
+  import_example: "نمونه لینک افزودن"
+  public_link: "لینک دانلود"
+  uploaded_file: "فایل"
+  subscription_page: "صفحه اشتراک مشتری"
   admin_note: "یادداشت ادمین"
   allow_custom_username: "اجازه نام کاربری دلخواه"
   alpn: "ALPN"
@@ -855,6 +894,8 @@ field:
   zibal_sandbox: "حالت آزمایشی (Sandbox)"
 
 flash:
+  service.page_link_csrf: "درخواست نامعتبر بود (توکن امنیتی). صفحه را تازه کنید و دوباره امتحان کنید."
+  service.page_link_rotated: "لینک صفحه اشتراک سرویس #%id% عوض شد؛ لینک قبلی دیگر کار نمی‌کند."
   error: "خطا: %error%"
   csrf_expired: "توکن امنیتی نامعتبر یا منقضی است. صفحه را دوباره بارگذاری کنید و دوباره تلاش کنید."
   settings.discount_range: "درصد تخفیف باید بین ۰ تا ۱۰۰ باشد."
@@ -957,3 +998,25 @@ service:
 locale:
   fa: "فارسی"
   en: "انگلیسی"
+platform:
+  android: "اندروید"
+  ios: "iOS"
+  windows: "ویندوز"
+  macos: "مک"
+  linux: "لینوکس"
+app_download:
+  type.file: "فایل آپلودشده"
+  type.url: "لینک خارجی"
+  upload.required: "برای نوع «فایل آپلودشده» یک فایل انتخاب کنید."
+  upload.failed: "آپلود انجام نشد. اگر فایل بزرگ است، محدودیت آپلود سرور (nginx و PHP) باید حداقل %max% مگابایت باشد."
+  upload.extension: "این نوع فایل مجاز نیست. پسوندهای مجاز: %allowed%"
+  upload.empty: "فایل خالی است."
+  upload.too_large: "فایل بزرگ‌تر از حد مجاز (%max% مگابایت) است."
+  upload.content_type: "محتوای فایل با پسوند آن جور نیست (تشخیص داده‌شده: %type%)."
+  external_url.required: "برای نوع «لینک خارجی» آدرس را وارد کنید."
+client_app:
+  template.no_scheme: "لینک باید با یک scheme مثل hiddify:// شروع شود."
+  template.forbidden_scheme: "این scheme مجاز نیست."
+  template.invalid_characters: "لینک نباید فاصله، نقل‌قول یا < > داشته باشد."
+  template.no_url: "لینک باید یکی از {url}، {url_encoded} یا {url_base64} را داشته باشد."
+  platforms.required: "حداقل یک سیستم‌عامل انتخاب کنید."

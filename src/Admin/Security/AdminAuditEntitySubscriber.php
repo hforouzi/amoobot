@@ -35,6 +35,8 @@ final class AdminAuditEntitySubscriber implements EventSubscriberInterface
         Entity\VpnService::class => 'service',
         Entity\Order::class => 'order',
         Entity\Payment::class => 'payment',
+        Entity\AppDownload::class => 'app_download',
+        Entity\ClientApp::class => 'client_app',
     ];
 
     /** @var \WeakMap<object, list<string>> changed fields, between the before/after update events */

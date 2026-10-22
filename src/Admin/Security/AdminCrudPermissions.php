@@ -51,6 +51,9 @@ final class AdminCrudPermissions
             Crud\DiscountCodeCrudController::class => $p(AdminPermission::DISCOUNTS_MANAGE),
             Crud\DiscountUsageCrudController::class => $p(AdminPermission::DISCOUNTS_MANAGE),
             Crud\PlanCrudController::class => $p(AdminPermission::PLANS_MANAGE),
+            // Apps page: downloads and client apps (two tabs, AdminTabs).
+            Crud\AppDownloadCrudController::class => $p(AdminPermission::APPS_MANAGE),
+            Crud\ClientAppCrudController::class => $p(AdminPermission::APPS_MANAGE),
             Crud\TrialPlanCrudController::class => $p(AdminPermission::PLANS_MANAGE),
             Crud\TrialClaimCrudController::class => $p(AdminPermission::PLANS_MANAGE),
             // Only the bulk price adjustment is left here (PLANS_MANAGE, ROUTES); settings moved to SettingsAdminController.
@@ -58,6 +61,8 @@ final class AdminCrudPermissions
             Crud\UserCrudController::class => $p(AdminPermission::CUSTOMERS_VIEW, AdminPermission::CUSTOMERS_MANAGE),
             Crud\TelegramAccountCrudController::class => $p(AdminPermission::CUSTOMERS_VIEW, AdminPermission::CUSTOMERS_MANAGE),
             Crud\VpnServiceCrudController::class => $p(AdminPermission::SERVICES_VIEW, AdminPermission::SERVICES_MANAGE, AdminPermission::SERVICES_DELETE),
+            // "New subscription page link" of a service.
+            \App\Admin\UI\SubscriptionPageLinkController::class => $p(AdminPermission::SERVICES_MANAGE),
             Crud\BroadcastMessageCrudController::class => $p(AdminPermission::BROADCAST_SEND),
             Crud\BroadcastDeliveryCrudController::class => $p(AdminPermission::BROADCAST_SEND),
             Crud\BotMessageTemplateCrudController::class => $p(AdminPermission::BOT_TEXTS_MANAGE),

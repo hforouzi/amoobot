@@ -4,11 +4,13 @@ declare(strict_types=1);
 
 namespace App\Admin\UI\Crud;
 
+use App\Admin\UI\SubscriptionPageLinkController;
 use App\Admin\UI\Support\AdminFormat;
 use App\Entity\VpnService;
 use App\Provisioning\Application\FinalConfigLinkProvider;
 use App\Provisioning\Domain\VpnServiceStatus;
 use App\Security\AdminPermission;
+use App\Subscription\Application\SubscriptionPageUrl;
 use Doctrine\Common\Collections\ArrayCollection;
 use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\ORM\Query\Parameter;
@@ -33,6 +35,7 @@ use EasyCorp\Bundle\EasyAdminBundle\Field\TextareaField;
 use EasyCorp\Bundle\EasyAdminBundle\Filter\EntityFilter;
 use Psr\Clock\ClockInterface;
 use Symfony\Component\HttpFoundation\RequestStack;
+use Symfony\Component\Security\Csrf\CsrfTokenManagerInterface;
 
 /**
  * VPN services, with tabs (?tab=): all, active, expiring within 3 days, expired, suspended (the dashboard links here).
@@ -48,6 +51,8 @@ class VpnServiceCrudController extends AbstractCrudController
         private readonly EntityManagerInterface $entityManager,
         private readonly RequestStack $requestStack,
         private readonly ClockInterface $clock,
+        private readonly SubscriptionPageUrl $pageUrl,
+        private readonly CsrfTokenManagerInterface $csrfTokenManager,
     ) {
     }
 
@@ -121,11 +126,24 @@ class VpnServiceCrudController extends AbstractCrudController
             ->linkToRoute('admin_vpn_service_regenerate_config', fn (VpnService $service): array => ['id' => $service->getId()])
             ->setCssClass('btn btn-info');
 
+        // A POST with a CSRF token; the old link of the customer's subscription page stops working.
+        $rotatePageLink = Action::new('rotatePageLink', 'action.rotate_page_link', 'fa fa-refresh')
+            ->linkToUrl(fn (VpnService $service): string => $this->generateUrl('admin_vpn_service_rotate_page_link', [
+                'id' => $service->getId(),
+                'token' => $this->csrfTokenManager->getToken(SubscriptionPageLinkController::CSRF_ID.'-'.$service->getId())->getValue(),
+            ]))
+            ->renderAsForm()
+            ->askConfirmation('action.rotate_page_link_confirm')
+            ->setCssClass('btn btn-warning');
+
         return $actions
             ->add(Action::INDEX, $regenerateConfig)
             ->add(Action::DETAIL, $regenerateConfig)
+            ->add(Action::DETAIL, $rotatePageLink)
             // Its route lives in VpnPanelInboundActionsController (PANELS_MANAGE).
-            ->setPermission('regenerateConfig', AdminPermission::PANELS_MANAGE->value);
+            ->setPermission('regenerateConfig', AdminPermission::PANELS_MANAGE->value)
+            // SubscriptionPageLinkController (SERVICES_MANAGE).
+            ->setPermission('rotatePageLink', AdminPermission::SERVICES_MANAGE->value);
     }
 
     /** By customer: the Customers page links each customer's services here. */
@@ -162,6 +180,8 @@ class VpnServiceCrudController extends AbstractCrudController
             TextField::new('subId')->hideOnIndex(),
             IntegerField::new('ipLimit')->hideOnIndex(),
             TextareaField::new('subscriptionUrl')->hideOnIndex(),
+            // The customer's public page (/s/{token}); "New subscription page link" replaces it.
+            AdminFormat::field('subscriptionPage', fn (mixed $v, ?VpnService $s): string => null === $s ? '' : $f->copyable($this->pageUrl->forService($s), 64), 'field.subscription_page')->onlyOnDetail(),
             TextareaField::new('configText')
                 ->formatValue(function (mixed $value, ?VpnService $service): string {
                     if (!$service instanceof VpnService) {

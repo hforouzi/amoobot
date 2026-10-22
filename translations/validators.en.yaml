@@ -1,0 +1,7 @@
+# Validation messages of the app's own constraints (entities: ClientApp, AppDownload).
+client_app.template.no_scheme: "The link must start with a scheme such as hiddify://."
+client_app.template.forbidden_scheme: "This scheme is not allowed."
+client_app.template.invalid_characters: "The link must not contain spaces, quotes or < >."
+client_app.template.no_url: "The link must contain {url}, {url_encoded} or {url_base64}."
+client_app.platforms.required: "Choose at least one platform."
+app_download.external_url.required: "Enter the URL of an \"external link\" download."

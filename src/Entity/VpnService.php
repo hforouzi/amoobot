@@ -8,6 +8,7 @@ use App\Provisioning\Domain\VpnServiceStatus;
 use Doctrine\ORM\Mapping as ORM;
 
 #[ORM\Entity]
+#[ORM\UniqueConstraint(name: 'uniq_vpn_service_public_token', columns: ['public_token'])]
 class VpnService
 {
     #[ORM\Id]
@@ -94,9 +95,35 @@ class VpnService
     #[ORM\Column(nullable: true)]
     private ?\DateTimeImmutable $updatedAt = null;
 
+    /**
+     * Opens the customer's public subscription page (/s/{token}). Random and unrelated to the panel's subId, so it
+     * can be rotated (the old page link stops working) without touching the panel or the subscription URL.
+     */
+    #[ORM\Column(length: 64)]
+    private string $publicToken;
+
     public function __construct()
     {
         $this->createdAt = new \DateTimeImmutable();
+        $this->publicToken = self::generatePublicToken();
+    }
+
+    public static function generatePublicToken(): string
+    {
+        // 32 random bytes, base64url without padding: 43 characters.
+        return rtrim(strtr(base64_encode(random_bytes(32)), '+/', '-_'), '=');
+    }
+
+    public function getPublicToken(): string
+    {
+        return $this->publicToken;
+    }
+
+    public function rotatePublicToken(): self
+    {
+        $this->publicToken = self::generatePublicToken();
+
+        return $this;
     }
 
     public function getId(): ?int

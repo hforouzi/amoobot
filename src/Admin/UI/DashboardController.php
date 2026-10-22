@@ -7,6 +7,7 @@ namespace App\Admin\UI;
 use App\Admin\Security\AdminCrudPermissions;
 use App\Admin\UI\Crud\AdminAuditLogCrudController;
 use App\Admin\UI\Crud\AdminUserCrudController;
+use App\Admin\UI\Crud\AppDownloadCrudController;
 use App\Admin\UI\Crud\BroadcastMessageCrudController;
 use App\Admin\UI\Crud\BotMessageTemplateCrudController;
 use App\Admin\UI\Crud\DiscountCodeCrudController;
@@ -101,8 +102,8 @@ class DashboardController extends AbstractDashboardController
      * Groups only; one entry per page. Pages reached from another page are linked from there instead of the menu:
      * order drafts (orders), discount usages (discount codes), trial plans and claims and bulk price adjustment
      * (plans), broadcast deliveries (a broadcast), the payment status tabs (payments), Telegram accounts (customers),
-     * store payment methods (payment gateways), inbounds (their panel), and the tabs of Bot texts, Settings and
-     * Logs. Each entry needs the permission of its page (AdminCrudPermissions, enforced server-side); a group is
+     * store payment methods (payment gateways), inbounds (their panel), and the tabs of Bot texts, Apps, Settings
+     * and Logs. Each entry needs the permission of its page (AdminCrudPermissions, enforced server-side); a group is
      * shown when at least one entry is.
      */
     public function configureMenuItems(): iterable
@@ -117,6 +118,8 @@ class DashboardController extends AbstractDashboardController
             ]],
             ['admin.menu.catalog', 'fa fa-list', [
                 $this->crudLink(PlanCrudController::class, 'admin.plans', 'fa fa-list'),
+                // App downloads and client apps: two tabs of one page (AdminTabs).
+                $this->crudLink(AppDownloadCrudController::class, 'admin.apps', 'fa fa-mobile'),
             ]],
             ['admin.menu.customers', 'fa fa-users', [
                 $this->crudLink(UserCrudController::class, 'admin.customers', 'fa fa-users'),
