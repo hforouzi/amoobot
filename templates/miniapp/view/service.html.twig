@@ -19,7 +19,8 @@
     <section class="card">
         <h2>{{ 'service.subscription'|trans }}</h2>
         <p class="muted">{{ 'service.page_hint'|trans }}</p>
-        <a class="btn" href="{{ pageUrl }}" data-open-link>🌐 {{ 'service.open_page'|trans }}</a>
+        <a class="btn" href="{{ path('miniapp_subscription', {id: service.id}) }}" data-nav data-subscription-view>🔗 {{ 'service.view_subscription'|trans }}</a>
+        <a class="btn secondary small" style="margin-top:10px" href="{{ pageUrl }}" data-open-link>🌐 {{ 'service.open_page'|trans }}</a>
         <button type="button" class="btn secondary small" style="margin-top:10px" data-copy="{{ pageUrl }}">📋 {{ 'service.copy_page_link'|trans }}</button>
     </section>
     <section class="card">

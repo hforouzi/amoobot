@@ -292,7 +292,7 @@ final class MiniAppPurchaseTest extends IntegrationTestCase
         self::assertSame(200, $this->httpStatus(), json_encode($answer, JSON_UNESCAPED_UNICODE) ?: '');
         $service = $this->em->getRepository(VpnService::class)->findOneBy(['user' => $this->user]);
         self::assertInstanceOf(VpnService::class, $service);
-        self::assertSame('/app/view/services/'.$service->getId(), $answer['redirect']);
+        self::assertSame('/app/view/services/'.$service->getId().'/subscription', $answer['redirect']);
 
         $answer = $this->appPostJson('/app/api/trial/'.$trial->getId(), $session, [], self::newKey());
         self::assertSame(422, $this->httpStatus());

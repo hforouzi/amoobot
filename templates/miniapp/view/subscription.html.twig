@@ -1,0 +1,24 @@
+{% extends 'miniapp/view/_base.html.twig' %}
+{% trans_default_domain 'miniapp' %}
+{# The owner's subscription inside the Mini App: the public page's components (status, link + QR + configs, client
+   apps through the import bridge, downloads), so both stay in sync. #}
+{% block section %}services{% endblock %}
+{% block title %}{{ 'service.subscription'|trans }}{% endblock %}
+{% block attributes %} data-back{% endblock %}
+{% block content %}
+    {{ include('subscription/_status.html.twig', {view: view}) }}
+    {% if view.isUsable %}
+        {{ include('subscription/_link.html.twig', {view: view}) }}
+        {% if view.apps is not empty %}
+            {{ include('subscription/_apps.html.twig', {view: view, platforms: platforms, bridge_token: service.publicToken, service_id: service.id}) }}
+        {% endif %}
+    {% else %}
+        <section class="card notice">
+            <p>{{ ('notice.' ~ view.status)|trans({}, 'subscription') }}</p>
+            <p class="muted">{{ 'notice.renew_in_bot'|trans({}, 'subscription') }}</p>
+        </section>
+    {% endif %}
+    {% if view.downloads is not empty %}
+        {{ include('subscription/_downloads.html.twig', {view: view, in_app: true}) }}
+    {% endif %}
+{% endblock %}

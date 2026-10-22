@@ -142,3 +142,11 @@ body.keyboard .nav { display: none; }
 .small-print { font-size: .82rem; margin-top: 8px; }
 .pager { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .order-row .list-main { display: grid; gap: 2px; }
+
+/* The subscription view's shared components (templates/subscription/_link, _apps). */
+.qr { display: block; width: min(280px, 100%); height: auto; margin: 14px auto 4px; background: #fff; border-radius: 10px; }
+.url { margin-top: 10px; width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--code); color: var(--fg); font: .85rem ui-monospace, Menlo, Consolas, monospace; direction: ltr; text-align: left; }
+details { margin-top: 12px; } summary { cursor: pointer; color: var(--accent); font-weight: 600; }
+ol.configs { padding-inline-start: 18px; margin: 10px 0 0; }
+ol.configs li { margin-bottom: 10px; }
+code { display: block; background: var(--code); border-radius: 8px; padding: 8px; font-size: .8rem; direction: ltr; text-align: left; overflow-wrap: anywhere; white-space: pre-wrap; }

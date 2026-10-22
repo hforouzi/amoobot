@@ -149,7 +149,7 @@ final class MiniAppPaymentTest extends IntegrationTestCase
 
         $page = new Crawler($this->appGet('/app/view/payments/'.$payment->getId(), $session));
         self::assertSame('paid', $page->filter('[data-payment-state]')->attr('data-payment-state'));
-        self::assertSame('/app/view/services/'.$service->getId(), $page->filter('a[data-nav][data-go-service]')->attr('href'));
+        self::assertSame('/app/view/services/'.$service->getId().'/subscription', $page->filter('a[data-nav][data-go-service]')->attr('href'), 'straight to the subscription');
         self::assertNull($page->filter('.view-root')->attr('data-poll-url'), 'no polling on a final state');
     }
 

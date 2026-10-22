@@ -89,6 +89,28 @@ final class MiniAppCustomerController extends AbstractController
         ]);
     }
 
+    /**
+     * The subscription page inside the Mini App, for the signed-in owner only (not the public /s/{token} link): the
+     * same SubscriptionPageViewFactory::build() and partials, so it carries the customer's own subscription link,
+     * QR code and configs. The only /app response that does; one-tap imports go through the https bridge.
+     */
+    #[Route('/app/view/services/{id}/subscription', name: 'miniapp_subscription', requirements: ['id' => '\d+'], defaults: ['_miniapp_section' => 'services'], methods: ['GET'])]
+    public function subscription(Request $request, #[CurrentUser] MiniAppUser $user, int $id): Response
+    {
+        $service = $this->customerServices->ownedBy($user->customer(), $id);
+        $platform = ClientPlatform::tryFrom((string) $request->query->get('platform')) ?? ClientPlatform::fromUserAgent($request->headers->get('User-Agent'));
+        $view = null !== $service ? $this->viewFactory->build($service, $platform) : null;
+        if (null === $service || null === $view) {
+            throw new NotFoundHttpException();
+        }
+
+        return $this->fragments->render($request, 'miniapp/view/subscription.html.twig', [
+            'service' => $service,
+            'view' => $view,
+            'platforms' => ClientPlatform::cases(),
+        ]);
+    }
+
     /** The subscription page's client apps and downloads, through the same partials (in_app mode). */
     #[Route('/app/view/apps', name: 'miniapp_apps', defaults: ['_miniapp_section' => 'apps'], methods: ['GET'])]
     public function apps(Request $request): Response

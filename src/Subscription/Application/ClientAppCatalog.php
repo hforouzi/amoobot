@@ -61,6 +61,7 @@ final class ClientAppCatalog
                 importUrl: $importUrl($app),
                 installUrl: null !== $download ? $this->downloads->path($download) : $app->getStoreUrl(),
                 matchesPlatform: $matches,
+                id: $app->getId(),
             );
         }
 

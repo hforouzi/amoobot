@@ -141,7 +141,7 @@ final class MiniAppCheckoutController extends AbstractController
         return $this->creating($request, $user, 'trial:'.$id, function () use ($user, $id): array {
             $service = $this->checkout->claimTrial($user, $id);
 
-            return ['redirect' => $this->generateUrl('miniapp_service', ['id' => $service->getId()])];
+            return ['redirect' => $this->generateUrl('miniapp_subscription', ['id' => $service->getId()])];
         });
     }
 
