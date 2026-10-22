@@ -83,6 +83,14 @@ final class OrderLifecycle
         return $order;
     }
 
+    /** The customer's own order of this id in any status, else null. */
+    public function ownedOrder(User $user, int $orderId): ?Order
+    {
+        $order = $orderId > 0 ? $this->entityManager->getRepository(Order::class)->find($orderId) : null;
+
+        return $order instanceof Order && $order->getUser()->getId() === $user->getId() ? $order : null;
+    }
+
     /** The customer's incomplete order (not a draft), if any. */
     public function incompleteOrder(User $user): ?Order
     {

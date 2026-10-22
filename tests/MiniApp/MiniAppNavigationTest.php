@@ -43,7 +43,7 @@ final class MiniAppNavigationTest extends IntegrationTestCase
     {
         $session = $this->authenticate('8301');
 
-        self::assertSame(['home', 'services', 'apps', 'help'], $this->navKeys($session));
+        self::assertSame(['home', 'shop', 'services', 'apps', 'help'], $this->navKeys($session));
 
         $this->appGet('/app/view/admin', $session);
         self::assertSame(403, $this->httpStatus(), 'the server refuses it too, not only the menu');
@@ -54,7 +54,7 @@ final class MiniAppNavigationTest extends IntegrationTestCase
         $this->linkedAdmin('support@example.test', AdminUser::ROLE_SUPPORT, '8302');
         $session = $this->authenticate('8302');
 
-        self::assertSame(['home', 'services', 'apps', 'help', 'admin'], $this->navKeys($session));
+        self::assertSame(['home', 'shop', 'services', 'apps', 'help', 'admin'], $this->navKeys($session));
 
         $html = $this->appGet('/app/view/admin', $session);
         self::assertSame(200, $this->httpStatus());
@@ -122,7 +122,7 @@ final class MiniAppNavigationTest extends IntegrationTestCase
         $super = $this->miniAppUser('8305');
 
         self::assertNotContains('reports', $this->keys($sections->navigation($admin)), 'ROLE_ADMIN has no LOGS_VIEW');
-        self::assertSame(['home', 'services', 'reports', 'apps', 'help', 'admin'], $this->keys($sections->navigation($super)), 'ordered by position');
+        self::assertSame(['home', 'shop', 'services', 'reports', 'apps', 'help', 'admin'], $this->keys($sections->navigation($super)), 'ordered by position');
         self::assertContains('admin.reports', $this->keys($sections->children('admin', $super)));
         self::assertFalse($sections->isAllowed('reports', $admin));
     }

@@ -94,13 +94,14 @@ final class NewServiceCheckout
      * Starts the draft for this plan, or restarts the customer's pending draft of the same plan with every choice
      * cleared. Persisted, not flushed (the caller records its own step first).
      *
-     * @param string $step the first step to record
+     * @param string $step         the first step to record
+     * @param bool   $reusePending false: always a new draft (the Mini App, which never takes over a bot conversation)
      */
-    public function startDraft(User $user, Plan $plan, string $step): OrderDraft
+    public function startDraft(User $user, Plan $plan, string $step, bool $reusePending = true): OrderDraft
     {
         $this->expireDrafts($user);
 
-        $draft = $this->activeDraft($user);
+        $draft = $reusePending ? $this->activeDraft($user) : null;
         if (!$draft instanceof OrderDraft || $draft->getPlan()->getId() !== $plan->getId()) {
             $draft = (new OrderDraft())
                 ->setUser($user)

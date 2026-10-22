@@ -79,6 +79,36 @@ trait MiniAppTestTrait
         return (string) $this->client->getResponse()->getContent();
     }
 
+    /**
+     * A JSON POST as app.js sends it: session, CSRF token, and the Idempotency-Key of the form or button.
+     *
+     * @param array{token: string, csrf: string} $session
+     * @param array<string, mixed>               $body
+     *
+     * @return array<string, mixed>
+     */
+    protected function appPostJson(string $path, array $session, array $body = [], ?string $idempotencyKey = null, ?string $csrf = null): array
+    {
+        $server = ['HTTP_AUTHORIZATION' => 'Bearer '.$session['token'], 'HTTP_X_CSRF_TOKEN' => $csrf ?? $session['csrf'], 'CONTENT_TYPE' => 'application/json'];
+        if (null !== $idempotencyKey) {
+            $server['HTTP_IDEMPOTENCY_KEY'] = $idempotencyKey;
+        }
+        $this->client->request('POST', $path, [], [], $server, json_encode($body, JSON_THROW_ON_ERROR));
+        $data = json_decode((string) $this->client->getResponse()->getContent(), true);
+
+        return is_array($data) ? $data : [];
+    }
+
+    protected static function newKey(): string
+    {
+        return bin2hex(random_bytes(16));
+    }
+
+    /**
+     * The status of the latest response (changes with every request).
+     *
+     * @phpstan-impure
+     */
     protected function httpStatus(): int
     {
         return $this->client->getResponse()->getStatusCode();

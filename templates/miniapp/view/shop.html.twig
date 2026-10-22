@@ -1,0 +1,62 @@
+{% extends 'miniapp/view/_base.html.twig' %}
+{% trans_default_domain 'miniapp' %}
+{# The shop: plans for sale (price from the server), the incomplete order, trial plans. #}
+{% block section %}shop{% endblock %}
+{% block title %}{{ 'nav.shop'|trans }}{% endblock %}
+{% block content %}
+    {% if incomplete %}
+        <section class="card notice" data-incomplete-order="{{ incomplete.order.id }}">
+            <h2>{{ 'shop.incomplete_title'|trans }}</h2>
+            <p class="muted">{{ 'shop.incomplete_text'|trans({'%plan%': incomplete.order.plan.title, '%amount%': incomplete.order.amount|number_format}) }}</p>
+            <div class="row">
+                <a class="btn small" href="{{ incomplete.href }}" data-nav>{{ 'shop.resume'|trans }}</a>
+                <button type="button" class="btn secondary small" data-action="{{ path('miniapp_order_cancel', {id: incomplete.order.id}) }}" data-reload>{{ 'shop.cancel_order'|trans }}</button>
+            </div>
+        </section>
+    {% endif %}
+
+    {% if not salesOpen %}
+        <section class="card notice" data-sales-closed>
+            <h2>{{ 'shop.closed_title'|trans }}</h2>
+            <p class="pre-line">{{ disabledMessage }}</p>
+        </section>
+    {% elseif plans is empty %}
+        <section class="card" data-no-plans>
+            <h2>{{ 'shop.no_plans'|trans }}</h2>
+            <p class="muted">{{ 'shop.no_plans_hint'|trans }}</p>
+        </section>
+    {% else %}
+        <section class="card">
+            <h1>{{ 'shop.title'|trans }}</h1>
+            <p class="muted">{{ 'shop.intro'|trans }}</p>
+        </section>
+        <div class="list">
+            {% for item in plans %}
+                <div class="list-item plan-card" data-plan-id="{{ item.plan.id }}">
+                    <span class="list-main">
+                        <strong>{{ item.plan.title }}</strong>
+                        <span class="muted">
+                            {{ item.plan.trafficGb ? 'plan.traffic'|trans({'%gb%': item.plan.trafficGb}) : 'plan.traffic_unlimited'|trans }}
+                            · {{ item.plan.unlimitedDuration ? 'plan.duration_unlimited'|trans : 'plan.duration'|trans({'%days%': item.plan.durationDays}) }}
+                        </span>
+                        <span class="price">{{ item.customizable ? 'plan.price_from'|trans({'%amount%': item.price|number_format}) : 'money.toman'|trans({'%amount%': item.price|number_format}) }}</span>
+                    </span>
+                    <a class="btn small fit" href="{{ path('miniapp_plan', {id: item.plan.id}) }}" data-nav>{{ 'shop.choose'|trans }}</a>
+                </div>
+            {% endfor %}
+        </div>
+    {% endif %}
+
+    {% if trialPlans is not empty %}
+        <section class="card">
+            <h2>{{ 'shop.trial_title'|trans }}</h2>
+            <p class="muted">{{ 'shop.trial_text'|trans }}</p>
+            {% for trial in trialPlans %}
+                <div class="trial" data-trial-plan="{{ trial.id }}">
+                    <span>🎁 {{ trial.title }}</span>
+                    <button type="button" class="btn secondary small" data-action="{{ path('miniapp_trial_claim', {id: trial.id}) }}">{{ 'shop.trial_claim'|trans }}</button>
+                </div>
+            {% endfor %}
+        </section>
+    {% endif %}
+{% endblock %}

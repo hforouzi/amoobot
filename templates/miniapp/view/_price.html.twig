@@ -1,0 +1,15 @@
+{# A price computed by the server (CheckoutQuote): base, global discount, discount code, total. #}
+{% trans_default_domain 'miniapp' %}
+<dl class="price-lines" data-final-amount="{{ quote.finalAmount }}">
+    <div><dt>{{ 'price.base'|trans }}</dt><dd>{{ 'money.toman'|trans({'%amount%': quote.baseAmount|number_format}) }}</dd></div>
+    {% if quote.globalDiscountAmount > 0 %}
+        <div><dt>{{ 'price.global_discount'|trans }}</dt><dd>− {{ 'money.toman'|trans({'%amount%': quote.globalDiscountAmount|number_format}) }}</dd></div>
+    {% endif %}
+    {% if quote.discountApplied %}
+        <div data-discount-applied><dt>{{ 'price.discount_code'|trans({'%code%': quote.discountCode}) }}</dt><dd>− {{ 'money.toman'|trans({'%amount%': quote.discountAmount|number_format}) }}</dd></div>
+    {% endif %}
+    <div class="total"><dt>{{ 'price.total'|trans }}</dt><dd>{{ 'money.toman'|trans({'%amount%': quote.finalAmount|number_format}) }}</dd></div>
+</dl>
+{% if quote.discountCode and not quote.discountApplied %}
+    <p class="field-error" data-discount-error>{{ quote.discountMessage ?: 'price.discount_invalid'|trans }}</p>
+{% endif %}
