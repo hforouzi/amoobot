@@ -25,6 +25,12 @@ final class WalletActor
         return new self(self::SOURCE_SYSTEM, null, null);
     }
 
+    /** The system, acting on an admin's decision (e.g. a payment rejection); the admin id is kept on the row. */
+    public static function systemFor(?int $adminId): self
+    {
+        return new self(self::SOURCE_SYSTEM, $adminId, null);
+    }
+
     public static function admin(AdminActor $admin): self
     {
         return new self($admin->source, $admin->adminUserId, mb_substr($admin->label, 0, 190));

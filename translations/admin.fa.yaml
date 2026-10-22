@@ -258,6 +258,21 @@ automation_settings:
     batch_limit: محدودیت پردازش در هر اجرا
     incomplete_expire_hours: انقضای سفارش ناقص پس از چند ساعت
 
+wallet_settings:
+  subtitle: "کیف پول مشتری: شارژ با روش‌های پرداخت فروشگاه و پرداخت سفارش‌ها از موجودی. مبالغ به تومان است."
+  sections:
+    switches: کیف پول
+    topup: شارژ
+  fields:
+    enabled: فعال بودن کیف پول
+    payment_enabled: امکان پرداخت سفارش با کیف پول
+    topup_min: حداقل مبلغ شارژ (تومان)
+    topup_max: حداکثر مبلغ شارژ (تومان)
+    quick_amounts: مبالغ سریع (تومان)
+  help:
+    payment: "وقتی کیف پول خاموش است، مشتری چیزی از آن نمی‌بیند و نمی‌تواند شارژ یا پرداخت کند؛ موجودی‌ها حفظ می‌شوند."
+    quick_amounts: "دکمه‌های پیشنهادی شارژ، جدا شده با ویرگول، مثلاً 50000,100000,200000. هر کدام باید در بازه مجاز باشد."
+
 renewal_pricing_settings:
   title: تنظیمات تمدید و قیمت‌گذاری
   sections:
@@ -470,6 +485,7 @@ settings_page:
   tabs:
     sales: فروش و قیمت تمدید
     automation: اتوماسیون
+    wallet: کیف پول
     channels: کانال‌های اجباری
     advanced: پیشرفته
   channels_intro: کانال‌هایی که مشتری باید پیش از خرید یا دریافت اکانت تست عضو آن‌ها باشد.
@@ -912,6 +928,9 @@ flash:
   settings.batch_limit: "مقدار batch limit باید بزرگتر از صفر باشد."
   settings.expire_hours: "زمان انقضای سفارش ناقص باید بزرگتر از صفر باشد."
   settings.automation_saved: "تنظیمات اتوماسیون بروزرسانی شد."
+  settings.wallet_saved: "تنظیمات کیف پول ذخیره شد."
+  settings.wallet_range: "حداقل شارژ باید دست‌کم ۱ و حداکثر شارژ دست‌کم برابر حداقل باشد."
+  settings.wallet_quick_amounts: "مبالغ سریع باید عددهای صحیح در بازه مجاز شارژ باشند و با ویرگول جدا شوند."
   bulk_price.invalid: "مقادیر فرم معتبر نیست."
   bulk_price.positive: "مقدار باید عدد مثبت باشد."
   bulk_price.confirm: "برای اعمال، تایید نهایی را فعال کنید."

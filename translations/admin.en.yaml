@@ -258,6 +258,21 @@ automation_settings:
     batch_limit: Batch limit
     incomplete_expire_hours: Incomplete order expiry hours
 
+wallet_settings:
+  subtitle: "The customer wallet: top-ups through the store payment methods and paying orders from the balance. Amounts are in Toman."
+  sections:
+    switches: Wallet
+    topup: Top-up
+  fields:
+    enabled: Enable the wallet
+    payment_enabled: Allow paying orders from the wallet
+    topup_min: Minimum top-up (Toman)
+    topup_max: Maximum top-up (Toman)
+    quick_amounts: Quick amounts (Toman)
+  help:
+    payment: "With the wallet off, customers see nothing of it and cannot top up or pay with it; balances are kept."
+    quick_amounts: "Buttons offered for a top-up, comma separated, e.g. 50000,100000,200000. Each must be within the range."
+
 renewal_pricing_settings:
   title: Renewal & Pricing Settings
   sections:
@@ -470,6 +485,7 @@ settings_page:
   tabs:
     sales: Sales & renewal pricing
     automation: Automation
+    wallet: Wallet
     channels: Required channels
     advanced: Advanced
   channels_intro: Channels a customer must join before buying or claiming a trial.
@@ -912,6 +928,9 @@ flash:
   settings.batch_limit: "The batch limit must be greater than zero."
   settings.expire_hours: "The incomplete-order expiry must be greater than zero."
   settings.automation_saved: "Automation settings saved."
+  settings.wallet_saved: "Wallet settings saved."
+  settings.wallet_range: "The top-up minimum must be at least 1 and the maximum at least the minimum."
+  settings.wallet_quick_amounts: "Quick amounts must be whole numbers within the top-up range, separated by commas."
   bulk_price.invalid: "The form values are not valid."
   bulk_price.positive: "The value must be a positive number."
   bulk_price.confirm: "Tick the final confirmation to apply."

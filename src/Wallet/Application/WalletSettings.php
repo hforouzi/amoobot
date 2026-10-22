@@ -35,7 +35,19 @@ class WalletSettings
     /** Paying orders from the wallet (default on once the wallet is enabled). */
     public function paymentEnabled(): bool
     {
-        return $this->enabled() && $this->settings->getBool(self::PAYMENT_ENABLED, true);
+        return $this->enabled() && $this->paymentSwitch();
+    }
+
+    /** The "allow wallet payment" switch itself (the settings form shows it even while the wallet is off). */
+    public function paymentSwitch(): bool
+    {
+        return $this->settings->getBool(self::PAYMENT_ENABLED, true);
+    }
+
+    /** The quick amounts as stored (for the settings form). */
+    public function quickAmountsText(): string
+    {
+        return (string) $this->settings->get(self::QUICK_AMOUNTS, self::DEFAULT_QUICK_AMOUNTS);
     }
 
     public function topUpMin(): int

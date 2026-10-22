@@ -18,6 +18,7 @@ use App\Provisioning\Application\FinalConfigLinkProvider;
 use App\Provisioning\Application\ServiceConfigDeliveryRefresher;
 use App\Provisioning\Application\ServiceConfigRefreshOutcome;
 use App\Wallet\Application\WalletService;
+use App\Wallet\Domain\WalletKeys;
 use Psr\Log\LoggerInterface;
 
 /**
@@ -79,6 +80,15 @@ class PaymentCustomerNotifier
 
     public function rejected(Payment $payment): void
     {
+        $reversal = $payment->isWalletPayment() ? $this->walletService->findTransaction(WalletKeys::purchaseReversal((int) $payment->getId())) : null;
+        if (null !== $reversal) {
+            $this->deliver($payment, 'wallet_reversed', fn (): array => [$this->botTextResolver->message('wallet.reversed', ['wallet' => [
+                'amount' => number_format($reversal->getAmount()),
+                'balance' => number_format($this->walletService->find($payment->getOrder()->getUser())?->getBalance() ?? 0),
+            ]])]);
+
+            return;
+        }
         $key = null !== $payment->getRefundedAt() ? 'payment.rejected_refunded' : 'payment.rejected';
         $this->deliver($payment, 'rejected', fn (): array => [$this->botTextResolver->message($key)]);
     }

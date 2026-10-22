@@ -21,3 +21,7 @@ services:
     App\Wallet\Application\WalletTopUp:
         autowire: true
         public: true
+
+    App\Wallet\Application\WalletPayment:
+        autowire: true
+        public: true

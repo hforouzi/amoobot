@@ -17,7 +17,7 @@ use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
- * One settings page (SETTINGS_MANAGE) with tabs, ?tab=...: sales & renewal pricing, automation, required channels
+ * One settings page (SETTINGS_MANAGE) with tabs, ?tab=...: sales & renewal pricing, automation, wallet, required channels
  * (the RequiredChannel list; create/edit stay on its CRUD pages) and advanced (the raw Setting keys, behind a
  * warning). Each form tab saves only its own keys and validates as the separate pages did; the old pages redirect
  * here (LegacyAdminRoutes, and the RequiredChannel / Setting CRUD index()). The two forms are SettingsAdministration's
@@ -46,6 +46,7 @@ final class SettingsAdminController extends AbstractController
             match ($tab) {
                 'sales' => $this->saveSales($request, $auditLogger),
                 'automation' => $this->saveAutomation($request, $auditLogger),
+                'wallet' => $this->saveWallet($request, $auditLogger),
                 // The lists have no form of their own (their rows are edited on the CRUD pages).
                 default => null,
             };
@@ -57,6 +58,7 @@ final class SettingsAdminController extends AbstractController
         ] + match ($tab) {
             'sales' => $this->salesParameters(),
             'automation' => ['values' => $this->settings->automationValues()],
+            'wallet' => ['values' => $this->settings->walletValues()],
             'channels' => ['channels' => $this->entityManager->getRepository(RequiredChannel::class)->findBy([], ['sortOrder' => 'ASC', 'id' => 'ASC'])],
             'advanced' => ['settings' => $this->entityManager->getRepository(Setting::class)->findBy([], ['keyName' => 'ASC'])],
         });
@@ -88,6 +90,18 @@ final class SettingsAdminController extends AbstractController
                 'sales_disabled_message' => SalesSettingsProvider::DISABLED_MESSAGE,
             ],
         ];
+    }
+
+    private function saveWallet(Request $request, AdminAuditLogger $auditLogger): void
+    {
+        $problem = $this->settings->saveWallet($request->request->all());
+        if (null !== $problem) {
+            $this->flash('danger', $problem['message']);
+
+            return;
+        }
+        $auditLogger->record('settings.update', 'Setting', null, ['page' => 'wallet'] + $this->settings->walletValues());
+        $this->flash('success', 'flash.settings.wallet_saved');
     }
 
     private function saveAutomation(Request $request, AdminAuditLogger $auditLogger): void

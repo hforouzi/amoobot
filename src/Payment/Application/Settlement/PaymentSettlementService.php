@@ -22,6 +22,7 @@ use App\Shop\Domain\OrderStatus;
 use App\Shop\Domain\OrderType;
 use App\Wallet\Application\WalletActor;
 use App\Wallet\Application\WalletService;
+use App\Wallet\Domain\WalletKeys;
 use App\Wallet\Domain\WalletReferenceType;
 use App\Wallet\Domain\WalletTransactionType;
 use Doctrine\DBAL\LockMode;
@@ -46,6 +47,10 @@ use Psr\Log\LoggerInterface;
  *      has nothing to provision, so its failure is rolled back and reported like one before fulfilment (ERROR,
  *      nothing changed, the next verification settles it)
  *   6. after commit: customer messages and admin alerts (never inside the transaction)
+ *
+ * A payment of method "wallet" (WalletPayment) is settled like a gateway payment; its debit was written before. Every
+ * path that rejects such a payment (admin reject, customer cancel, gateway failure; the expiry job too) gives the
+ * debit back in the same transaction, once (releaseWalletDebit()).
  */
 class PaymentSettlementService
 {
@@ -141,6 +146,7 @@ class PaymentSettlementService
                         ->setAdminNote(Payment::NOTE_CUSTOMER_CANCEL)
                         // A late "paid" for this payment goes to NEEDS_REVIEW (parkLatePayment).
                         ->setConfirmationSource($source);
+                    $this->releaseWalletDebit($payment, null, 'order cancelled by the customer');
                 }
             }
             $order->setStatus(OrderStatus::CANCELLED);
@@ -182,6 +188,7 @@ class PaymentSettlementService
                 ->setConfirmationSource($source)
                 ->setConfirmedBy($adminId, $adminTelegramId)
                 ->setRefundedAt($refunded ? new \DateTimeImmutable() : null);
+            $this->releaseWalletDebit($payment, $adminId, 'payment rejected by an admin');
             // A duplicate payment of a fulfilled order: close the payment, never touch the order.
             if (!$this->isOrderFulfilled($order)) {
                 $order->setStatus(OrderStatus::FAILED);
@@ -265,6 +272,7 @@ class PaymentSettlementService
                 ->setStatus(PaymentStatus::REJECTED)
                 ->setFailedAt($payment->getFailedAt() ?? new \DateTimeImmutable())
                 ->setConfirmationSource($source);
+            $this->releaseWalletDebit($payment, null, 'payment failed');
             $this->entityManager->flush();
             $connection->commit();
         } catch (\Throwable $e) {
@@ -418,7 +426,7 @@ class PaymentSettlementService
         if (OrderType::WALLET_TOPUP === $order->getType()) {
             // Nothing to provision: the ordered amount goes to the customer's wallet, inside this transaction and
             // once per payment (the payment id is the ledger idempotency key).
-            $this->walletService->credit($order->getUser(), $order->getAmount(), WalletTransactionType::TOPUP, 'topup:payment:'.($payment->getId() ?? 0), WalletActor::system(), WalletReferenceType::PAYMENT, (string) ($payment->getId() ?? 0));
+            $this->walletService->credit($order->getUser(), $order->getAmount(), WalletTransactionType::TOPUP, WalletKeys::topUp((int) $payment->getId()), WalletActor::system(), WalletReferenceType::PAYMENT, (string) $payment->getId());
 
             return null;
         }
@@ -463,6 +471,18 @@ class PaymentSettlementService
             // the next webhook/retry must not create a second one. Safe: the UUID is derived from the order.
             adoptExisting: true,
         );
+    }
+
+    /**
+     * A rejected wallet payment gives its debit back (a REVERSAL), inside the caller's transaction and at most once;
+     * nothing for any other payment, or when nothing was debited.
+     */
+    private function releaseWalletDebit(Payment $payment, ?int $adminId, string $note): void
+    {
+        if (!$payment->isWalletPayment()) {
+            return;
+        }
+        $this->walletService->reverse(WalletKeys::purchase((int) $payment->getId()), WalletKeys::purchaseReversal((int) $payment->getId()), WalletActor::systemFor($adminId), $note);
     }
 
     private function parkLatePayment(Payment $payment, Order $order, VerifiedPayment $verified, string $source): SettlementResult

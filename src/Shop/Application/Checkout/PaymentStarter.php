@@ -168,7 +168,8 @@ final class PaymentStarter
         };
     }
 
-    private function payableAmount(Order $order): int
+    /** What paying the order costs: its own amount, for a new service its price snapshot's final amount. */
+    public function payableAmount(Order $order): int
     {
         if (OrderType::NEW_SERVICE !== $order->getType()) {
             return $order->getAmount();
