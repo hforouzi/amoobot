@@ -256,6 +256,10 @@ final class BotCheckoutCharacterizationTest extends IntegrationTestCase
     private function snapshot(string $name, ?Order $order = null, ?Payment $payment = null, ?VpnService $service = null): void
     {
         $replace = [];
+        $ids = [
+            'PLAN' => [(int) $this->plan->getId() => 'PLAN'],
+            'PAYMENT_METHOD' => [(int) $this->card->getId() => 'CARD_METHOD', (int) $this->zibal->getId() => 'ZIBAL_METHOD'],
+        ];
         if (null !== $order) {
             $order = $this->em->find(Order::class, $order->getId()) ?? $order;
             $replace[(string) $order->getTrackingCode()] = 'TRACKING';
@@ -263,35 +267,26 @@ final class BotCheckoutCharacterizationTest extends IntegrationTestCase
             if ('' !== $username) {
                 $replace[$username] = 'FINAL_USERNAME';
             }
-            $replace[':'.$order->getId()] = ':ORDER';
-            $replace['#'.$order->getId()] = '#ORDER';
-            $replace['Order ID: '.$order->getId()] = 'Order ID: ORDER';
+            $ids['ORDER'][(int) $order->getId()] = 'ORDER';
             $draftId = (int) ($order->getMetadata()['orderDraftId'] ?? 0);
             if ($draftId > 0) {
-                $replace[':'.$draftId] = ':DRAFT';
+                $ids['DRAFT'][$draftId] = 'DRAFT';
             }
         }
         foreach ($this->em->getRepository(OrderDraft::class)->findBy(['user' => $this->user]) as $draft) {
-            $replace[':'.$draft->getId()] = ':DRAFT';
+            $ids['DRAFT'][(int) $draft->getId()] = 'DRAFT';
         }
         if (null !== $payment) {
-            $replace[':'.$payment->getId()] = ':PAYMENT';
-            $replace['Payment ID: '.$payment->getId()] = 'Payment ID: PAYMENT';
+            $ids['PAYMENT'][(int) $payment->getId()] = 'PAYMENT';
         }
         if (null !== $service) {
-            $replace[':'.$service->getId()] = ':SERVICE';
-            $replace['#'.$service->getId()] = '#SERVICE';
-            $replace['Service ID: '.$service->getId()] = 'Service ID: SERVICE';
-            $replace['شناسه سرویس: '.$service->getId()] = 'شناسه سرویس: SERVICE';
+            $ids['SERVICE'][(int) $service->getId()] = 'SERVICE';
             foreach (array_filter([(string) $service->getUsername(), (string) $service->getRemoteId(), (string) $service->getSubscriptionUrl(), (string) $service->getClientUuid(), (string) $service->getPublicToken()]) as $value) {
                 $replace[$value] = 'SERVICE_VALUE';
             }
         }
-        $replace[':'.$this->plan->getId()] = ':PLAN';
-        $replace[':'.$this->card->getId()] = ':CARD_METHOD';
-        $replace[':'.$this->zibal->getId()] = ':ZIBAL_METHOD';
 
-        BotTranscript::assertMatchesSnapshot('checkout-'.$name, BotTranscript::lines($this->http->requests(), $replace));
+        BotTranscript::assertMatchesSnapshot('checkout-'.$name, BotTranscript::lines($this->http->requests(), $replace, $ids));
     }
 
     private function sendPhoto(string $telegramId, string $fileId): void
