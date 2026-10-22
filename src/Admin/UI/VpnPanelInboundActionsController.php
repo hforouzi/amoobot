@@ -9,6 +9,8 @@ use App\Entity\VpnPanel;
 use App\Entity\VpnService;
 use App\Provisioning\Application\FinalConfigLinkProvider;
 use App\Provisioning\Application\ServiceConfigDeliveryRefresher;
+use App\Provisioning\Application\ServiceConfigRegeneration;
+use App\Provisioning\Application\ServiceConfigRegenerator;
 use App\Provisioning\Application\VpnAccessLinkGenerator;
 use App\Provisioning\Application\VpnInboundSyncService;
 use App\Provisioning\Application\VpnServiceConfigRefreshService;
@@ -208,65 +210,15 @@ final class VpnPanelInboundActionsController extends AbstractController
     }
 
     #[Route('/vpn-service/{id}/regenerate-config', name: 'admin_vpn_service_regenerate_config', methods: ['GET'])]
-    public function regenerateServiceConfig(VpnService $service): RedirectResponse
+    public function regenerateServiceConfig(VpnService $service, ServiceConfigRegenerator $regenerator): RedirectResponse
     {
-        $uuid = $service->getClientUuid();
-        $subId = $service->getSubId();
-        $isLegacySanaei = $this->configRefreshService->isSanaeiLegacyService($service);
-        $email = trim((string) ($service->getClientEmail() ?? $service->getUsername() ?? ''));
-
-        if ((!$isLegacySanaei && (null === $uuid || '' === $uuid || null === $subId || '' === $subId)) || ($isLegacySanaei && (null === $uuid || '' === $uuid) && '' === $email)) {
-            $this->flash('danger', 'flash.service.no_uuid');
-
-            return $this->redirectToServices();
-        }
-
-        try {
-            if ($isLegacySanaei) {
-                $refresh = $this->deliveryRefresher->refreshBeforeDelivery($service, 'admin_service_regenerate_config');
-                if (!$refresh->succeeded) {
-                    $this->log(sprintf(
-                        'admin_regenerate_config_refresh_failed service_id=%d reason="%s"',
-                        $service->getId() ?? 0,
-                        (string) ($refresh->reason ?? 'unknown')
-                    ));
-                    $this->flash('danger', 'flash.service.regenerate_failed', ['%error%' => (string) ($refresh->reason ?? 'unknown')]);
-
-                    return $this->redirectToServices();
-                }
-
-                $this->entityManager->flush();
-                $this->log(sprintf('admin_regenerate_config_refresh_success service_id=%d', $service->getId() ?? 0));
-                $this->flash('success', 'flash.service.refreshed_from_panel', ['%id%' => $service->getId() ?? 0, '%count%' => $refresh->refreshedLinkCount]);
-
-                return $this->redirectToServices();
-            }
-
-            $rawLinks = $this->normalizedLinks($service->getConfigLinks() ?? []);
-            $links = $this->vpnAccessLinkGenerator->generate($service);
-            $generatedLinks = $this->normalizedLinks((array) ($links['configLinks'] ?? []));
-            $finalLinkSet = $this->finalConfigLinkProvider->deduplicateAndPreferFormattedForService(
-                $service,
-                $rawLinks,
-                $generatedLinks,
-                'admin_service_regenerate_config'
-            );
-            $configLinks = $finalLinkSet->finalLinks;
-            $subscriptionUrl = $links['subscriptionUrl'] ?? null;
-            $finalConfigText = [] !== $configLinks ? implode("\n", $configLinks) : null;
-
-            $service
-                ->setConfigLinks($configLinks)
-                ->setConfigText($finalConfigText)
-                ->setSubscriptionUrl($subscriptionUrl ?? $service->getSubscriptionUrl())
-                ->setLastAccessInfoSyncedAt(new \DateTimeImmutable());
-
-            $this->entityManager->flush();
-
-            $this->flash('success', 'flash.service.regenerated', ['%id%' => $service->getId() ?? 0, '%count%' => count($configLinks)]);
-        } catch (\Throwable $e) {
-            $this->flash('danger', 'flash.service.regenerate_failed', ['%error%' => $e->getMessage()]);
-        }
+        $result = $regenerator->regenerate($service, 'admin_service_regenerate_config');
+        match ($result->outcome) {
+            ServiceConfigRegeneration::NO_IDENTITY => $this->flash('danger', 'flash.service.no_uuid'),
+            ServiceConfigRegeneration::REFRESHED_FROM_PANEL => $this->flash('success', 'flash.service.refreshed_from_panel', ['%id%' => $service->getId() ?? 0, '%count%' => $result->linkCount]),
+            ServiceConfigRegeneration::REGENERATED => $this->flash('success', 'flash.service.regenerated', ['%id%' => $service->getId() ?? 0, '%count%' => $result->linkCount]),
+            default => $this->flash('danger', 'flash.service.regenerate_failed', ['%error%' => (string) $result->error]),
+        };
 
         return $this->redirectToServices();
     }
