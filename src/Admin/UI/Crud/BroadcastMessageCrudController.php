@@ -6,6 +6,7 @@ namespace App\Admin\UI\Crud;
 
 use App\Admin\UI\TranslatedFlashes;
 use App\Admin\UI\Field\JsonField;
+use App\Broadcast\BroadcastAdministration;
 use App\Broadcast\BroadcastSender;
 use App\Entity\AdminUser;
 use App\Entity\BroadcastDelivery;
@@ -34,9 +35,9 @@ final class BroadcastMessageCrudController extends AbstractCrudController
     use TranslatedFlashes;
 
     public function __construct(
+        private readonly BroadcastAdministration $broadcastAdministration,
         private readonly BroadcastSender $broadcastSender,
         private readonly AdminUrlGeneratorInterface $adminUrlGenerator,
-        private readonly EntityManagerInterface $entityManager,
     ) {
     }
 
@@ -210,17 +211,14 @@ final class BroadcastMessageCrudController extends AbstractCrudController
     public function sendNow(AdminContext $context, AdminAuditLogger $auditLogger): RedirectResponse
     {
         $broadcast = $this->requireBroadcast($context);
+        $summary = $this->broadcastAdministration->sendNow($broadcast);
 
-        if (BroadcastMessage::STATUS_DRAFT !== $broadcast->getStatus()) {
+        if (null === $summary) {
             $this->flash('danger', 'flash.broadcast.only_draft_sendable');
 
             return $this->redirect($this->detailUrl($broadcast));
         }
 
-        $broadcast->setStatus(BroadcastMessage::STATUS_SENDING)->setSendAt(null);
-
-        $this->broadcastSender->prepareDeliveries($broadcast);
-        $summary = $this->broadcastSender->sendPending($broadcast, 50);
         $auditLogger->record('broadcast.send', 'BroadcastMessage', $broadcast->getId(), ['target' => $broadcast->getTargetType(), 'sent' => $summary->sent, 'failed' => $summary->failed, 'pending' => $summary->pending]);
 
         if ($summary->pending > 0) {
@@ -236,22 +234,11 @@ final class BroadcastMessageCrudController extends AbstractCrudController
     {
         $broadcast = $this->requireBroadcast($context);
 
-        if (!in_array($broadcast->getStatus(), [
-            BroadcastMessage::STATUS_DRAFT,
-            BroadcastMessage::STATUS_SCHEDULED,
-            BroadcastMessage::STATUS_SENDING,
-        ], true)) {
+        if (!$this->broadcastAdministration->cancel($broadcast)) {
             $this->flash('danger', 'flash.broadcast.not_cancellable');
 
             return $this->redirect($this->detailUrl($broadcast));
         }
-
-        $broadcast
-            ->setStatus(BroadcastMessage::STATUS_CANCELLED)
-            ->setFinishedAt(new \DateTimeImmutable())
-            ->setUpdatedAt(new \DateTimeImmutable());
-
-        $this->entityManager->flush();
 
         $this->flash('success', 'flash.broadcast.cancelled');
 
@@ -261,7 +248,7 @@ final class BroadcastMessageCrudController extends AbstractCrudController
     public function retryFailed(AdminContext $context): RedirectResponse
     {
         $broadcast = $this->requireBroadcast($context);
-        $summary = $this->broadcastSender->retryFailed($broadcast, 50);
+        $summary = $this->broadcastAdministration->retryFailed($broadcast);
 
         $this->flash('success', 'flash.broadcast.retry_sent', ['%sent%' => $summary->sent, '%failed%' => $summary->failed]);
 

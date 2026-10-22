@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Bot\Application\Admin;
 
-use App\Broadcast\BroadcastSender;
+use App\Broadcast\BroadcastAdministration;
 use App\Entity\BroadcastMessage;
 use App\Security\AdminPermission;
 use Doctrine\ORM\EntityManagerInterface;
@@ -15,11 +15,9 @@ use Doctrine\ORM\EntityManagerInterface;
  */
 final class AdminBroadcastsHandler implements AdminArea
 {
-    private const CANCELLABLE = [BroadcastMessage::STATUS_DRAFT, BroadcastMessage::STATUS_SCHEDULED, BroadcastMessage::STATUS_SENDING];
-
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
-        private readonly BroadcastSender $broadcastSender,
+        private readonly BroadcastAdministration $broadcastAdministration,
         private readonly AdminScreen $screen,
     ) {
     }
@@ -62,7 +60,7 @@ final class AdminBroadcastsHandler implements AdminArea
                 'skipped' => $broadcast->getSkippedCount(),
             ]);
             $row = [];
-            if (in_array($broadcast->getStatus(), self::CANCELLABLE, true)) {
+            if (BroadcastAdministration::isCancellable($broadcast)) {
                 $row[] = $this->screen->rawButton('⛔ #'.$broadcast->getId(), 'admin.b:c:'.$broadcast->getId());
             }
             if ($broadcast->getFailedCount() > 0) {
@@ -96,13 +94,11 @@ final class AdminBroadcastsHandler implements AdminArea
     private function cancel(AdminRequest $request, int $id): void
     {
         $broadcast = $this->entityManager->getRepository(BroadcastMessage::class)->find($id);
-        if (!$broadcast instanceof BroadcastMessage || !in_array($broadcast->getStatus(), self::CANCELLABLE, true)) {
+        if (!$broadcast instanceof BroadcastMessage || !$this->broadcastAdministration->cancel($broadcast)) {
             $this->screen->notice($request, $broadcast instanceof BroadcastMessage ? 'admin.state_changed' : 'admin.not_found', [], 'admin.b:l');
 
             return;
         }
-        $broadcast->setStatus(BroadcastMessage::STATUS_CANCELLED)->setFinishedAt(new \DateTimeImmutable())->setUpdatedAt(new \DateTimeImmutable());
-        $this->entityManager->flush();
         $this->screen->audit($request, 'broadcast.cancel', 'BroadcastMessage', $id, ['title' => $broadcast->getTitle()]);
         $this->screen->notice($request, 'admin.done', [], 'admin.b:l');
     }
@@ -115,7 +111,7 @@ final class AdminBroadcastsHandler implements AdminArea
 
             return;
         }
-        $summary = $this->broadcastSender->retryFailed($broadcast, 50);
+        $summary = $this->broadcastAdministration->retryFailed($broadcast);
         $this->screen->audit($request, 'broadcast.retry_failed', 'BroadcastMessage', $id, ['sent' => $summary->sent, 'failed' => $summary->failed, 'pending' => $summary->pending]);
         $this->screen->notice($request, 'admin.broadcasts.retry_done', ['sent' => $summary->sent, 'failed' => $summary->failed, 'pending' => $summary->pending], 'admin.b:l');
     }

@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace App\Bot\Application\Admin;
 
 use App\Entity\VpnPanel;
-use App\Provisioning\Application\PanelConnectionTester;
+use App\Provisioning\Application\PanelAdministration;
 use App\Security\AdminPermission;
 use Doctrine\ORM\EntityManagerInterface;
 
@@ -18,7 +18,7 @@ final class AdminPanelsHandler implements AdminArea
 {
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
-        private readonly PanelConnectionTester $tester,
+        private readonly PanelAdministration $panels,
         private readonly AdminScreen $screen,
     ) {
     }
@@ -78,8 +78,7 @@ final class AdminPanelsHandler implements AdminArea
 
             return;
         }
-        $report = $this->tester->test($panel);
-        $this->entityManager->flush();
+        $report = $this->panels->test($panel);
         $this->screen->audit($request, 'vpn_panel.test', 'VpnPanel', $id, ['ok' => $report->isOk(), 'failure' => $report->failureKey()]);
 
         $yesNo = fn (?bool $value): string => null === $value ? '—' : ($value ? '✅' : '❌');
@@ -115,13 +114,11 @@ final class AdminPanelsHandler implements AdminArea
 
             return;
         }
-        if ($panel->isActive() === $active) {
+        if (!$this->panels->setActive($panel, $active)) {
             $this->screen->notice($request, 'admin.state_changed', [], 'admin.pn:l');
 
             return;
         }
-        $panel->setIsActive($active)->setUpdatedAt(new \DateTimeImmutable());
-        $this->entityManager->flush();
         $this->screen->audit($request, $active ? 'vpn_panel.activate' : 'vpn_panel.deactivate', 'VpnPanel', $id, ['title' => $panel->getTitle()]);
         $this->screen->notice($request, 'admin.done', [], 'admin.pn:l');
     }

@@ -10,7 +10,7 @@ use App\Entity\Plan;
 use App\Entity\VpnInbound;
 use App\Entity\VpnPanel;
 use App\Provisioning\Application\ModernModeGuard;
-use App\Provisioning\Application\PanelConnectionTester;
+use App\Provisioning\Application\PanelAdministration;
 use App\Provisioning\Application\PanelSubscriptionUrlCheck;
 use App\Provisioning\Domain\SanaeiIntegrationMode;
 use App\Provisioning\Infrastructure\PanelCredentials;
@@ -39,7 +39,7 @@ final class PanelSetupController extends AbstractController
 
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
-        private readonly PanelConnectionTester $tester,
+        private readonly PanelAdministration $panels,
         private readonly ModernModeGuard $modernModeGuard,
         private readonly ModernClientsApi $clientsApi,
         private readonly PanelCredentials $credentials,
@@ -101,8 +101,7 @@ final class PanelSetupController extends AbstractController
 
             return $this->redirectToRoute('admin_panel_setup_show', ['id' => $panel->getId()]);
         }
-        $report = $this->tester->test($panel);
-        $this->entityManager->flush();
+        $report = $this->panels->test($panel);
 
         return $this->renderShow($panel, $report);
     }
