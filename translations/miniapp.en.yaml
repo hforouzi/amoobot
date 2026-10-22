@@ -1,0 +1,13 @@
+# Telegram Mini App (/app), templates/miniapp/ and public/miniapp/app.js (strings passed as data attributes).
+app.title: "App"
+state.loading: "Loading…"
+state.outside_title: "Open this page from Telegram"
+state.outside_text: "This app only works inside Telegram. Open the bot in Telegram and tap “Open app” or the bot's menu button."
+state.auth_failed: "Sign-in failed. Please close the app and open it again from the bot."
+state.expired: "This page has expired. Please close the app and open it again from the bot."
+state.rate_limited: "Too many attempts. Please try again in a few minutes."
+state.error: "Something went wrong. Please try again."
+state.retry: "Try again"
+state.offline: "No connection."
+toast.copied: "Copied"
+toast.copy_failed: "Could not copy; please copy it manually."

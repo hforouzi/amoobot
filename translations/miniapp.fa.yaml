@@ -1,0 +1,13 @@
+# Telegram Mini App (/app), templates/miniapp/ and public/miniapp/app.js (strings passed as data attributes).
+app.title: "اپلیکیشن"
+state.loading: "در حال بارگذاری…"
+state.outside_title: "این صفحه را از تلگرام باز کنید"
+state.outside_text: "این اپلیکیشن فقط داخل تلگرام کار می‌کند. ربات را در تلگرام باز کنید و دکمه «باز کردن اپ» یا دکمه منوی ربات را بزنید."
+state.auth_failed: "ورود انجام نشد. لطفاً اپ را ببندید و دوباره از ربات باز کنید."
+state.expired: "زمان این صفحه تمام شده است. لطفاً اپ را ببندید و دوباره از ربات باز کنید."
+state.rate_limited: "تعداد تلاش‌ها زیاد بود. چند دقیقه دیگر دوباره امتحان کنید."
+state.error: "مشکلی پیش آمد. دوباره تلاش کنید."
+state.retry: "تلاش دوباره"
+state.offline: "اتصال برقرار نیست."
+toast.copied: "کپی شد"
+toast.copy_failed: "کپی نشد؛ لطفاً دستی کپی کنید."
