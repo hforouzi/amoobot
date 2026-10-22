@@ -25,6 +25,25 @@ class ModernClientsApi
     /** Fields the panel computes or returns for reading only: never sent back in an update. */
     private const READ_ONLY_FIELDS = ['traffic', 'up', 'down', 'allTime', 'lastOnline', 'createdAt', 'updatedAt', 'inboundIds', 'uuid', 'dbId', 'clientStats'];
 
+    /**
+     * The JSON types of 3x-ui's model.Client, which clients/add and clients/update unmarshal the client into
+     * (MHSanaei/3x-ui internal/database/model/model.go). GET answers with the database record (model.ClientRecord)
+     * instead, where allowedIPs and reverse are strings: sent back unchanged, Go refuses the whole body
+     * ("json: cannot unmarshal string into Go struct field .allowedIPs of type []string"). limitHwid exists only in the
+     * record; it is sent as a number and ignored by Go like any unknown field. Fields not listed pass through as they are.
+     */
+    private const CLIENT_FIELD_TYPES = [
+        'id' => 'string', 'security' => 'string', 'password' => 'string', 'flow' => 'string', 'auth' => 'string', 'privateKey' => 'string',
+        'publicKey' => 'string', 'preSharedKey' => 'string', 'forwardedPorts' => 'string', 'secret' => 'string', 'adTag' => 'string',
+        'email' => 'string', 'subId' => 'string', 'group' => 'string', 'comment' => 'string', 'trafficReset' => 'string',
+        'limitIp' => 'int', 'limitHwid' => 'int', 'totalGB' => 'int', 'expiryTime' => 'int', 'tgId' => 'int', 'reset' => 'int', 'resetDay' => 'int',
+        'resetWeekday' => 'int', 'resetMax' => 'int', 'trafficResetDay' => 'int', 'keepAlive' => 'int',
+        'enable' => 'bool',
+        'allowedIPs' => 'list',
+        'allowedIPsByInbound' => 'map',
+        'reverse' => 'object',
+    ];
+
     public function __construct(private readonly ModernPanelHttpClient $http)
     {
     }
@@ -112,7 +131,11 @@ class ModernClientsApi
      */
     public function addClient(VpnPanel $panel, array $client, array $inboundIds): PanelResponse
     {
-        return $this->http->post($panel, 'panel/api/clients/add', ['client' => $client, 'inboundIds' => $inboundIds]);
+        try {
+            return $this->http->post($panel, 'panel/api/clients/add', ['client' => self::toClientModel($client), 'inboundIds' => $inboundIds]);
+        } catch (PanelApiException $e) {
+            throw self::withFieldTypeHint($e, 'POST panel/api/clients/add');
+        }
     }
 
     /**
@@ -123,7 +146,11 @@ class ModernClientsApi
      */
     public function updateClient(VpnPanel $panel, string $email, array $fullClient): PanelResponse
     {
-        return $this->http->post($panel, 'panel/api/clients/update/'.rawurlencode($email), $fullClient);
+        try {
+            return $this->http->post($panel, 'panel/api/clients/update/'.rawurlencode($email), self::toClientModel($fullClient));
+        } catch (PanelApiException $e) {
+            throw self::withFieldTypeHint($e, 'POST panel/api/clients/update/'.$email);
+        }
     }
 
     /**
@@ -235,7 +262,8 @@ class ModernClientsApi
 
     /**
      * Full update body: everything the panel returned (so fields the bot does not know survive the row replacement),
-     * minus read-only fields, with the UUID under "id", and $changes applied on top.
+     * minus read-only fields, with the UUID under "id", and $changes applied on top, every field in the type the
+     * update endpoint expects (toClientModel). Every update of an existing client goes through here (updateAndVerify).
      *
      * @param array<string, mixed> $current a normalised client from getClient()
      * @param array<string, mixed> $changes
@@ -244,7 +272,97 @@ class ModernClientsApi
      */
     public static function mergeForUpdate(array $current, array $changes): array
     {
-        return array_replace(array_diff_key($current, array_flip(self::READ_ONLY_FIELDS)), $changes);
+        return self::toClientModel(array_replace(array_diff_key($current, array_flip(self::READ_ONLY_FIELDS)), $changes));
+    }
+
+    /**
+     * The client in the JSON types of model.Client (CLIENT_FIELD_TYPES), so a row read with GET can always be written
+     * back: allowedIPs "" / null -> [], "a, b" or '["a","b"]' -> ["a", "b"]; numbers given as strings -> int; "true" / 1 ->
+     * true; numbers in string fields -> strings; reverse as JSON text -> object, "" -> left out (omitempty). A value
+     * that cannot be converted is left as it is: the panel's answer then names the field (withFieldTypeHint).
+     *
+     * @param array<string, mixed> $client
+     *
+     * @return array<string, mixed>
+     */
+    public static function toClientModel(array $client): array
+    {
+        foreach (self::CLIENT_FIELD_TYPES as $field => $type) {
+            if (!array_key_exists($field, $client)) {
+                continue;
+            }
+            $value = $client[$field];
+            if ('list' === $type) {
+                $client[$field] = self::stringList($value);
+                continue;
+            }
+            if (null === $value) {
+                continue; // Go accepts null for every type (zero value / nil)
+            }
+            if ('object' === $type || 'map' === $type) {
+                $decoded = is_string($value) ? json_decode($value, true) : $value;
+                if (is_array($decoded) && ([] === $decoded || !array_is_list($decoded))) {
+                    $client[$field] = $decoded;
+                } elseif ('' === $value || [] === $value || (is_string($value) && 'null' === strtolower(trim($value)))) {
+                    unset($client[$field]); // nothing set: the field is omitempty
+                }
+                continue;
+            }
+            $client[$field] = match ($type) {
+                'string' => is_scalar($value) ? (is_bool($value) ? ($value ? 'true' : '') : (string) $value) : $value,
+                'int' => match (true) {
+                    is_int($value) => $value,
+                    is_bool($value) => (int) $value,
+                    is_float($value) && floor($value) === $value => (int) $value,
+                    is_string($value) && '' === trim($value) => 0,
+                    is_string($value) && 1 === preg_match('/^\s*-?\d+(\.0+)?\s*$/', $value) => (int) $value,
+                    default => $value,
+                },
+                'bool' => match (true) {
+                    is_bool($value) => $value,
+                    is_int($value), is_float($value) => 0 != $value,
+                    is_string($value) => in_array(strtolower(trim($value)), ['1', 'true', 'on', 'yes'], true),
+                    default => $value,
+                },
+            };
+        }
+
+        return $client;
+    }
+
+    /**
+     * When the panel refused a body because of a JSON type (Go: "cannot unmarshal X into Go struct field .F of type T"),
+     * the same failure with the field, the expected and the received type up front. Other failures are returned as they are.
+     */
+    public static function withFieldTypeHint(PanelApiException $e, string $what): PanelApiException
+    {
+        if (PanelFailure::PANEL_REJECTED !== $e->failure
+            || 1 !== preg_match('/cannot unmarshal (\w+)(?: [^ ]+)? into Go (?:struct field|value of type) ([\w.]*?)\.?(\w+) of type (\S+)/', (string) $e->panelMessage, $m)) {
+            return $e;
+        }
+
+        return new PanelApiException(
+            $e->failure,
+            sprintf('%s: the panel rejected client field "%s": it expects %s, got %s (panel: %s)', $what, $m[3], $m[4], $m[1], $e->panelMessage),
+            $e->httpStatus,
+            $e->panelMessage,
+        );
+    }
+
+    /**
+     * @return list<string>
+     */
+    private static function stringList(mixed $value): array
+    {
+        if (is_string($value)) {
+            $decoded = str_starts_with(trim($value), '[') ? json_decode($value, true) : null;
+            $value = is_array($decoded) ? $decoded : explode(',', $value);
+        }
+        if (!is_array($value)) {
+            return [];
+        }
+
+        return array_values(array_filter(array_map(static fn (mixed $v): string => is_scalar($v) ? trim((string) $v) : '', $value), static fn (string $v): bool => '' !== $v));
     }
 
     /**
