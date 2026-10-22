@@ -1,0 +1,20 @@
+{% extends 'miniapp/view/_base.html.twig' %}
+{% trans_default_domain 'miniapp' %}
+{% block section %}admin{% endblock %}
+{% block title %}{{ 'nav.admin'|trans }}{% endblock %}
+{% block content %}
+    <section class="card">
+        <h1>{{ 'admin.title'|trans }}</h1>
+        <p class="muted">{{ 'admin.intro'|trans }}</p>
+    </section>
+    <ul class="list">
+        {% for area in areas %}
+            <li class="list-item" data-area="{{ area.key }}"{% if area.route is null %} data-coming-soon{% endif %}>
+                <span class="list-icon" aria-hidden="true">{{ area.icon }}</span>
+                <span class="list-main">{{ area.label|trans }}</span>
+                {% if area.route is null %}<span class="badge muted-badge">{{ 'admin.coming_soon'|trans }}</span>{% endif %}
+            </li>
+        {% endfor %}
+    </ul>
+    <p class="muted">{{ 'admin.use_panel'|trans }}</p>
+{% endblock %}

@@ -11,6 +11,7 @@ use App\Entity\Plan;
 use App\Entity\TrialPlan;
 use App\Shop\Application\SalesSettingsProvider;
 use App\Security\AdminPermission;
+use App\MiniApp\Application\MiniAppLinks;
 use App\Subscription\Application\AppDownloadCatalog;
 
 class TelegramKeyboardFactory
@@ -19,6 +20,7 @@ class TelegramKeyboardFactory
         private readonly BotTextResolver $botTextResolver,
         private readonly SalesSettingsProvider $salesSettingsProvider,
         private readonly AppDownloadCatalog $appDownloads,
+        private readonly MiniAppLinks $miniAppLinks,
     )
     {
     }
@@ -52,6 +54,11 @@ class TelegramKeyboardFactory
         $keyboard[] = $mainRow;
 
         $supportRow = [['text' => $this->button('button.main.support')]];
+        // A text button: the bot answers with an inline web_app button (miniAppOpen), because a Mini App opened from a
+        // reply keyboard button gets no initData to sign in with.
+        if (null !== $this->miniAppLinks->forTelegram()) {
+            $supportRow[] = ['text' => $this->button('button.main.miniapp')];
+        }
         if ($this->appDownloads->hasActive()) {
             $supportRow[] = ['text' => $this->button('button.main.downloads')];
         }
@@ -533,6 +540,10 @@ class TelegramKeyboardFactory
                 ['text' => $this->button('button.service.refresh_usage'), 'callback_data' => 'service_sync_usage:'.$serviceId],
             ],
         ];
+        $miniAppUrl = $this->miniAppLinks->forTelegram($serviceId);
+        if (null !== $miniAppUrl) {
+            $rows[] = [['text' => $this->button('button.service.miniapp'), 'web_app' => ['url' => $miniAppUrl]]];
+        }
 
         $actionButtons = [];
         if ($canRenew) {
@@ -982,6 +993,18 @@ class TelegramKeyboardFactory
     public function subscriptionPage(?string $subscriptionPageUrl): ?array
     {
         return null === $subscriptionPageUrl ? null : ['inline_keyboard' => [[['text' => $this->button('button.service.page'), 'url' => $subscriptionPageUrl]]]];
+    }
+
+    /**
+     * "Open app" as an inline web_app button (the Mini App gets initData from it), or null when the app is off.
+     *
+     * @return array{inline_keyboard: list<list<array{text: string, web_app: array{url: string}}>>}|null
+     */
+    public function miniAppOpen(): ?array
+    {
+        $url = $this->miniAppLinks->forTelegram();
+
+        return null === $url ? null : ['inline_keyboard' => [[['text' => $this->button('button.miniapp.open'), 'web_app' => ['url' => $url]]]]];
     }
 
     /**

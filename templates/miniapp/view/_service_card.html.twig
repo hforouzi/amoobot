@@ -1,0 +1,17 @@
+{# One service in a list: plan, status, days left and traffic (a SubscriptionPageView summary, no links). #}
+{% trans_default_domain 'miniapp' %}
+<a class="list-item service-card" href="{{ path('miniapp_service', {id: card.service.id}) }}" data-nav data-service-id="{{ card.service.id }}">
+    <span class="list-main">
+        <span class="head">
+            <strong>{{ card.view.planName ?? 'service.number'|trans({'%id%': card.service.id}) }}</strong>
+            <span class="badge {{ card.view.status }}">{{ ('status.' ~ card.view.status)|trans({}, 'subscription') }}</span>
+        </span>
+        <span class="muted">
+            {{ card.view.daysLeft is null ? 'service.no_expiry'|trans : 'service.days_left'|trans({'%count%': card.view.daysLeft}) }}
+            {% if card.view.trafficRemainingBytes is not null %} · {{ 'service.traffic_left'|trans({'%amount%': card.view.trafficRemainingBytes|sub_bytes}) }}{% endif %}
+        </span>
+        {% if card.view.usedPercent is not null %}
+            <span class="bar thin{{ card.view.usedPercent >= 100 ? ' full' : (card.view.usedPercent >= 80 ? ' high' : '') }}"><span style="width: {{ card.view.usedPercent }}%"></span></span>
+        {% endif %}
+    </span>
+</a>

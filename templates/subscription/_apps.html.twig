@@ -1,13 +1,25 @@
 {% trans_default_domain 'subscription' %}
+{# Client apps. Shared by the subscription page and the Mini App's apps page (in_app: true): there is no subscription,
+   so only install links (opened with Telegram's openLink) and a hint to add the subscription from its page; the
+   platform switch stays inside the app. #}
 {% set lang = app.request.locale == 'en' ? 'en' : 'fa' %}
+{% set in_app = in_app|default(false) %}
 <section class="card">
-    <h2>{{ 'apps.title'|trans }}</h2>
+    <h2>{{ (in_app ? 'apps.install_title' : 'apps.title')|trans }}</h2>
     <nav class="platforms" aria-label="{{ 'apps.platform'|trans }}">
         {% for p in platforms|default([]) %}
-            <a href="?{{ {platform: p.value}|merge(lang == 'en' ? {lang: 'en'} : {})|url_encode }}" class="{{ view.platform == p ? 'current' }}">{{ ('platform.' ~ p.value)|trans }}</a>
+            {% if in_app %}
+                <a href="{{ path('miniapp_apps', {platform: p.value}) }}" data-nav class="{{ view.platform == p ? 'current' }}">{{ ('platform.' ~ p.value)|trans }}</a>
+            {% else %}
+                <a href="?{{ {platform: p.value}|merge(lang == 'en' ? {lang: 'en'} : {})|url_encode }}" class="{{ view.platform == p ? 'current' }}">{{ ('platform.' ~ p.value)|trans }}</a>
+            {% endif %}
         {% endfor %}
     </nav>
-    <p class="muted">{{ 'apps.steps'|trans }}</p>
+    {% if in_app %}
+        <p class="muted" data-apps-import-hint>{{ 'apps.import_from_page'|trans }}</p>
+    {% else %}
+        <p class="muted">{{ 'apps.steps'|trans }}</p>
+    {% endif %}
     <div class="apps">
         {% for app in view.apps %}
             {% if not app.matchesPlatform and view.platform and (loop.first or view.apps[loop.index0 - 1].matchesPlatform) %}
@@ -20,9 +32,15 @@
                 </div>
                 <div class="row">
                     {% if app.installUrl %}
-                        <a class="btn secondary small" href="{{ app.installUrl }}" rel="noopener noreferrer" target="_blank">⬇️ {{ 'apps.install'|trans }}</a>
+                        {% if in_app %}
+                            <a class="btn secondary small" href="{{ app.installUrl }}" data-open-link>⬇️ {{ 'apps.install'|trans }}</a>
+                        {% else %}
+                            <a class="btn secondary small" href="{{ app.installUrl }}" rel="noopener noreferrer" target="_blank">⬇️ {{ 'apps.install'|trans }}</a>
+                        {% endif %}
                     {% endif %}
-                    {% if app.importUrl %}
+                    {% if in_app %}
+                        {# No subscription here: adding it happens on the subscription page. #}
+                    {% elseif app.importUrl %}
                         {# A plain link the user taps: no automatic redirect. If the in-app browser blocks the app's
                            scheme, the fallback below is shown (_script.html.twig). #}
                         <a class="btn small" href="{{ app.importUrl }}" data-deeplink>➕ {{ 'apps.add'|trans }}</a>
@@ -30,20 +48,24 @@
                         <button type="button" class="btn small" data-copy="{{ view.subscriptionUrl }}">📋 {{ 'apps.copy_and_paste'|trans }}</button>
                     {% endif %}
                 </div>
-                <div class="hint" data-fallback>
-                    <p>{{ 'apps.blocked'|trans }}</p>
-                    <div class="row">
-                        <button type="button" class="btn secondary small" data-open-external>🌐 {{ 'apps.open_in_browser'|trans }}</button>
-                        <button type="button" class="btn secondary small" data-copy="{{ view.subscriptionUrl }}">📋 {{ 'link.copy'|trans }}</button>
+                {% if not in_app %}
+                    <div class="hint" data-fallback>
+                        <p>{{ 'apps.blocked'|trans }}</p>
+                        <div class="row">
+                            <button type="button" class="btn secondary small" data-open-external>🌐 {{ 'apps.open_in_browser'|trans }}</button>
+                            <button type="button" class="btn secondary small" data-copy="{{ view.subscriptionUrl }}">📋 {{ 'link.copy'|trans }}</button>
+                        </div>
+                        <p class="muted" data-external-hint hidden style="margin-top:8px">{{ 'apps.open_in_browser_hint'|trans }}</p>
                     </div>
-                    <p class="muted" data-external-hint hidden style="margin-top:8px">{{ 'apps.open_in_browser_hint'|trans }}</p>
-                </div>
+                {% endif %}
             </article>
         {% endfor %}
     </div>
-    <div class="hint" id="in-app-hint">
-        <p>{{ 'apps.in_app_browser'|trans }}</p>
-        <button type="button" class="btn secondary small" data-open-external>🌐 {{ 'apps.open_in_browser'|trans }}</button>
-        <p class="muted" data-external-hint hidden style="margin-top:8px">{{ 'apps.open_in_browser_hint'|trans }}</p>
-    </div>
+    {% if not in_app %}
+        <div class="hint" id="in-app-hint">
+            <p>{{ 'apps.in_app_browser'|trans }}</p>
+            <button type="button" class="btn secondary small" data-open-external>🌐 {{ 'apps.open_in_browser'|trans }}</button>
+            <p class="muted" data-external-hint hidden style="margin-top:8px">{{ 'apps.open_in_browser_hint'|trans }}</p>
+        </div>
+    {% endif %}
 </section>

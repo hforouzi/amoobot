@@ -26,6 +26,26 @@ final class ClientAppCatalog
      */
     public function forPage(string $subscriptionUrl, string $profileName, ?ClientPlatform $platform): array
     {
+        return $this->views($platform, static fn (ClientApp $app): ?string => ImportLinkTemplate::build($app->getImportUrlTemplate(), $subscriptionUrl, $profileName));
+    }
+
+    /**
+     * The same apps without import links (no subscription involved): what to install, e.g. on the Mini App's apps page.
+     *
+     * @return list<ClientAppView>
+     */
+    public function forCatalog(?ClientPlatform $platform): array
+    {
+        return $this->views($platform, static fn (): ?string => null);
+    }
+
+    /**
+     * @param callable(ClientApp): ?string $importUrl
+     *
+     * @return list<ClientAppView>
+     */
+    private function views(?ClientPlatform $platform, callable $importUrl): array
+    {
         /** @var list<ClientApp> $apps */
         $apps = $this->entityManager->getRepository(ClientApp::class)->findBy(['isActive' => true], ['sortOrder' => 'ASC', 'name' => 'ASC', 'id' => 'ASC']);
         $activeDownloads = $this->downloads->active($platform);
@@ -38,7 +58,7 @@ final class ClientAppCatalog
                 name: $app->getName(),
                 icon: $app->getIcon(),
                 platforms: $app->getPlatforms(),
-                importUrl: ImportLinkTemplate::build($app->getImportUrlTemplate(), $subscriptionUrl, $profileName),
+                importUrl: $importUrl($app),
                 installUrl: null !== $download ? $this->downloads->path($download) : $app->getStoreUrl(),
                 matchesPlatform: $matches,
             );

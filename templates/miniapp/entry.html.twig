@@ -1,0 +1,54 @@
+{# The Telegram Mini App shell (/app). No data in it: public/miniapp/app.js signs in with initData and loads each
+   section (templates/miniapp/view/) into #view with the session token. Outside Telegram only the notice shows. #}
+{% trans_default_domain 'miniapp' %}
+<!DOCTYPE html>
+<html lang="{{ lang }}" dir="{{ lang == 'fa' ? 'rtl' : 'ltr' }}">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+    <meta name="robots" content="noindex, nofollow">
+    <meta name="referrer" content="no-referrer">
+    <meta name="color-scheme" content="light dark">
+    <meta name="format-detection" content="telephone=no">
+    <title>{{ 'app.title'|trans }}</title>
+    <link rel="stylesheet" href="/miniapp/app.css?v={{ assetVersion }}">
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="/miniapp/app.js?v={{ assetVersion }}" defer></script>
+</head>
+<body data-lang="{{ lang }}"
+      data-msg-copied="{{ 'toast.copied'|trans }}"
+      data-msg-copy-failed="{{ 'toast.copy_failed'|trans }}"
+      data-msg-error="{{ 'state.error'|trans }}"
+      data-msg-offline="{{ 'state.offline'|trans }}">
+<div class="app">
+    <main id="view" class="view">
+        <section class="state" data-state="loading" role="status">
+            <span class="spinner" aria-hidden="true"></span>
+            <p>{{ 'state.loading'|trans }}</p>
+        </section>
+        <section class="state" data-state="outside" data-outside-telegram hidden>
+            <p class="state-icon" aria-hidden="true">📱</p>
+            <h1>{{ 'state.outside_title'|trans }}</h1>
+            <p class="muted">{{ 'state.outside_text'|trans }}</p>
+        </section>
+        <section class="state" data-state="failed" hidden>
+            <p class="state-icon" aria-hidden="true">⚠️</p>
+            <p data-state-message
+               data-invalid="{{ 'state.auth_failed'|trans }}"
+               data-expired="{{ 'state.expired'|trans }}"
+               data-rate-limited="{{ 'state.rate_limited'|trans }}"
+               data-error="{{ 'state.error'|trans }}">{{ 'state.auth_failed'|trans }}</p>
+            <button type="button" class="btn secondary" data-retry>{{ 'state.retry'|trans }}</button>
+        </section>
+    </main>
+    <nav id="nav" class="nav" hidden></nav>
+</div>
+<noscript>
+    <section class="state">
+        <h1>{{ 'state.outside_title'|trans }}</h1>
+        <p>{{ 'state.outside_text'|trans }}</p>
+    </section>
+</noscript>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+</body>
+</html>

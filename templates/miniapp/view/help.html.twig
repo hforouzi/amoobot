@@ -1,0 +1,15 @@
+{% extends 'miniapp/view/_base.html.twig' %}
+{% trans_default_domain 'miniapp' %}
+{% block section %}help{% endblock %}
+{% block title %}{{ 'nav.help'|trans }}{% endblock %}
+{% block content %}
+    <section class="card">
+        <h1>{{ 'help.title'|trans }}</h1>
+        <p class="pre-line">{{ supportText }}</p>
+    </section>
+    <section class="card">
+        <h2>{{ 'help.bot_title'|trans }}</h2>
+        <p class="muted">{{ 'help.bot_text'|trans }}</p>
+        <button type="button" class="btn secondary" data-close-app>{{ 'help.back_to_bot'|trans }}</button>
+    </section>
+{% endblock %}

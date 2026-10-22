@@ -31,6 +31,20 @@ final class SubscriptionPageViewFactory
 
     public function build(VpnService $service, ?ClientPlatform $platform): ?SubscriptionPageView
     {
+        return $this->create($service, $platform, true);
+    }
+
+    /**
+     * Status, plan, expiry and traffic only: no subscription URL, QR, configs, apps or downloads, so nothing the
+     * access guard has to check is even read (the Mini App, which opens the subscription page for the rest).
+     */
+    public function summary(VpnService $service): ?SubscriptionPageView
+    {
+        return $this->create($service, null, false);
+    }
+
+    private function create(VpnService $service, ?ClientPlatform $platform, bool $withAccess): ?SubscriptionPageView
+    {
         if (VpnServiceStatus::DELETED === $service->getStatus()) {
             return null;
         }
@@ -45,7 +59,7 @@ final class SubscriptionPageViewFactory
         $subscriptionUrl = null;
         $configLinks = [];
         $withheld = false;
-        if ($usable) {
+        if ($usable && $withAccess) {
             // Only what a client can reach (CustomerAccessGuard alerts the admins about the rest).
             $subscriptionUrl = $this->accessGuard->subscriptionUrl($service);
             $configLinks = $this->accessGuard->configLinks($service, $this->finalConfigLinkProvider->getFinalLinksForService($service, 'subscription_page'));
@@ -67,7 +81,7 @@ final class SubscriptionPageViewFactory
             accessWithheld: $withheld,
             platform: $platform,
             apps: $usable && null !== $subscriptionUrl ? $this->clientApps->forPage($subscriptionUrl, $this->profileName($service), $platform) : [],
-            downloads: $this->downloads->forPage($platform),
+            downloads: $withAccess ? $this->downloads->forPage($platform) : [],
         );
     }
 

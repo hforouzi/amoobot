@@ -1,0 +1,33 @@
+{% extends 'miniapp/view/_base.html.twig' %}
+{% trans_default_domain 'miniapp' %}
+{# One service: the subscription page's status component, then the owner's actions. The link, QR and configs are on
+   the subscription page (opened with Telegram's openLink) or sent into the chat by the bot, never in this page. #}
+{% block section %}services{% endblock %}
+{% block title %}{{ view.planName ?? 'service.number'|trans({'%id%': service.id}) }}{% endblock %}
+{% block attributes %} data-back data-main-button-text="{{ 'service.open_page'|trans }}" data-main-button-href="{{ pageUrl }}" data-main-button-external{% endblock %}
+{% block content %}
+    {{ include('subscription/_status.html.twig', {view: view}) }}
+    <section class="card">
+        <h2>{{ 'service.subscription'|trans }}</h2>
+        <p class="muted">{{ 'service.page_hint'|trans }}</p>
+        <a class="btn" href="{{ pageUrl }}" data-open-link>🌐 {{ 'service.open_page'|trans }}</a>
+        <button type="button" class="btn secondary small" style="margin-top:10px" data-copy="{{ pageUrl }}">📋 {{ 'service.copy_page_link'|trans }}</button>
+    </section>
+    <section class="card">
+        <h2>{{ 'service.to_chat'|trans }}</h2>
+        {% if view.isUsable %}
+            <p class="muted">{{ 'service.to_chat_hint'|trans }}</p>
+            <div class="row">
+                <button type="button" class="btn secondary small" data-action="{{ path('miniapp_service_action', {id: service.id, action: 'send-link'}) }}">🔗 {{ 'service.send_link'|trans }}</button>
+                <button type="button" class="btn secondary small" data-action="{{ path('miniapp_service_action', {id: service.id, action: 'send-qr'}) }}">🔳 {{ 'service.send_qr'|trans }}</button>
+                <button type="button" class="btn secondary small" data-action="{{ path('miniapp_service_action', {id: service.id, action: 'resend-config'}) }}">📄 {{ 'service.resend_config'|trans }}</button>
+            </div>
+        {% else %}
+            <p>{{ ('notice.' ~ view.status)|trans({}, 'subscription') }}</p>
+            <p class="muted">{{ 'notice.renew_in_bot'|trans({}, 'subscription') }}</p>
+        {% endif %}
+    </section>
+    <section class="card">
+        <button type="button" class="btn secondary small" data-action="{{ path('miniapp_service_action', {id: service.id, action: 'refresh'}) }}" data-reload>🔄 {{ 'service.refresh'|trans }}</button>
+    </section>
+{% endblock %}

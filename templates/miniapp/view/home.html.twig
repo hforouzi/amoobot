@@ -1,0 +1,49 @@
+{% extends 'miniapp/view/_base.html.twig' %}
+{% trans_default_domain 'miniapp' %}
+{% block section %}home{% endblock %}
+{% block title %}{{ 'nav.home'|trans }}{% endblock %}
+{% block content %}
+    <section class="card">
+        <h1>{{ firstName is not empty ? 'home.greeting'|trans({'%name%': firstName}) : 'home.greeting_anonymous'|trans }}</h1>
+        <p class="muted">{{ 'home.intro'|trans }}</p>
+    </section>
+    <section class="card" data-summary data-active-count="{{ activeCount }}" data-nearest-days="{{ nearest ? nearest.view.daysLeft : '' }}">
+        {% if activeCount == 0 %}
+            <div data-no-services>
+                <h2>{{ 'home.no_services'|trans }}</h2>
+                <p class="muted">{{ 'home.buy_in_bot'|trans }}</p>
+            </div>
+        {% else %}
+            <div class="stats">
+                <div class="stat">
+                    <span class="muted">{{ 'home.active_services'|trans }}</span>
+                    <b>{{ activeCount }}</b>
+                </div>
+                <div class="stat">
+                    <span class="muted">{{ 'home.nearest_expiry'|trans }}</span>
+                    <b>{{ nearest ? 'service.days_left'|trans({'%count%': nearest.view.daysLeft}) : 'service.no_expiry'|trans }}</b>
+                </div>
+            </div>
+            {% if nearest %}
+                <a class="btn secondary small" style="margin-top:12px" href="{{ path('miniapp_service', {id: nearest.service.id}) }}" data-nav>
+                    {{ 'home.open_nearest'|trans({'%name%': nearest.view.planName ?? 'service.number'|trans({'%id%': nearest.service.id})}) }}
+                </a>
+            {% endif %}
+        {% endif %}
+    </section>
+    {% for card in lowTraffic %}
+        <section class="card notice" data-low-traffic="{{ card.service.id }}">
+            <p>⚠️ {{ 'home.low_traffic'|trans({'%name%': card.view.planName ?? 'service.number'|trans({'%id%': card.service.id}), '%percent%': card.view.usedPercent}) }}</p>
+            <p class="muted">{{ 'home.add_traffic_in_bot'|trans }}</p>
+        </section>
+    {% endfor %}
+    <section class="card">
+        <h2>{{ 'home.quick_actions'|trans }}</h2>
+        <div class="row">
+            <a class="btn small" href="{{ path('miniapp_services') }}" data-nav>📦 {{ 'nav.services'|trans }}</a>
+            <a class="btn secondary small" href="{{ path('miniapp_apps') }}" data-nav>📲 {{ 'nav.apps'|trans }}</a>
+            <a class="btn secondary small" href="{{ path('miniapp_help') }}" data-nav>💬 {{ 'nav.help'|trans }}</a>
+            <button type="button" class="btn secondary small" data-close-app>🤖 {{ 'help.back_to_bot'|trans }}</button>
+        </div>
+    </section>
+{% endblock %}

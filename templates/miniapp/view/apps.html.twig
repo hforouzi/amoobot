@@ -1,0 +1,16 @@
+{% extends 'miniapp/view/_base.html.twig' %}
+{% trans_default_domain 'miniapp' %}
+{# The subscription page's client apps and downloads (the same partials in in_app mode: install links only). #}
+{% block section %}apps{% endblock %}
+{% block title %}{{ 'nav.apps'|trans }}{% endblock %}
+{% block content %}
+    {% if view.apps is not empty %}
+        {{ include('subscription/_apps.html.twig', {view: view, platforms: platforms, in_app: true}) }}
+    {% endif %}
+    {% if view.downloads is not empty %}
+        {{ include('subscription/_downloads.html.twig', {view: view, in_app: true}) }}
+    {% endif %}
+    {% if view.apps is empty and view.downloads is empty %}
+        <section class="card"><p class="muted">{{ 'apps.none'|trans }}</p></section>
+    {% endif %}
+{% endblock %}

@@ -15,6 +15,14 @@ security:
         dev:
             pattern: ^/(_profiler|_wdt|assets|build)/
             security: false
+        # Telegram Mini App (/app): stateless, a session token per request (MiniAppAuthenticator), no PHP session.
+        miniapp:
+            pattern: ^/app(/|$)
+            stateless: true
+            lazy: true
+            custom_authenticators:
+                - App\MiniApp\Security\MiniAppAuthenticator
+            entry_point: App\MiniApp\Security\MiniAppAuthenticator
         main:
             lazy: true
             provider: admin_users
@@ -47,5 +55,8 @@ security:
         - { path: ^/payment/webhook, roles: PUBLIC_ACCESS }
         - { path: ^/payment/success$, roles: PUBLIC_ACCESS }
         - { path: ^/payment/cancel$, roles: PUBLIC_ACCESS }
+        - { path: ^/app$, roles: PUBLIC_ACCESS }
+        - { path: ^/app/auth$, roles: PUBLIC_ACCESS }
+        - { path: ^/app/, roles: ROLE_MINIAPP_USER }
         - { path: ^/admin/logout$, roles: ROLE_ADMIN }
         - { path: ^/admin, roles: ROLE_ADMIN }
