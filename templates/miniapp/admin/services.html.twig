@@ -1,0 +1,40 @@
+{% extends 'miniapp/view/_base.html.twig' %}
+{% import 'miniapp/admin/_macros.html.twig' as ui %}
+{% trans_default_domain 'miniapp' %}
+{% block section %}admin{% endblock %}
+{% block title %}{{ 'area.services'|trans }}{% endblock %}
+{% block attributes %} data-back{% endblock %}
+{% block content %}
+    <section class="card">
+        <h1>{{ 'area.services'|trans }}</h1>
+        {{ ui.search('miniapp_admin_services', query, 'admin.services.search', {tab: tab}) }}
+    </section>
+    {{ ui.chips('miniapp_admin_services', tab, tabs, counts, 'admin.services.tab.', {}) }}
+    {% if list.items is empty %}
+        {{ ui.empty(query ? 'admin.no_results' : 'admin.services.none') }}
+    {% else %}
+        <div class="list">
+            {% for service in list.items %}
+                {% set limit = service.trafficLimitBytes %}
+                {% set used = service.trafficUsedBytes ?? 0 %}
+                {% set percent = limit and limit > 0 ? min(100, (used * 100 / limit)|round) : null %}
+                <a class="list-item admin-row" href="{{ path('miniapp_admin_service', {id: service.id}) }}" data-nav data-service-id="{{ service.id }}" data-status="{{ service.status }}">
+                    <span class="list-main">
+                        <span class="head">
+                            <strong class="ltr">{{ service.username ?: ('#' ~ service.id) }}</strong>
+                            <span class="badge {{ service.status }}">{{ ('admin.service.status.' ~ service.status)|trans }}</span>
+                        </span>
+                        <span class="muted">{{ ui.who({name: (service.user.telegramAccount.firstName ?? service.user.name ?? ''), username: service.user.telegramAccount.username ?? null, telegramId: service.user.telegramAccount.telegramId ?? null}) }}</span>
+                        <span class="muted">
+                            {{ service.order.plan.title ?? '' }}
+                            {% if service.expiresAt %} · {{ 'admin.service.until'|trans({'%date%': service.expiresAt|sub_date(lang)}) }}{% endif %}
+                            {% if limit %} · <span class="ltr">{{ used|sub_bytes }} / {{ limit|sub_bytes }}</span>{% endif %}
+                        </span>
+                        {% if percent is not null %}<span class="bar thin{{ percent >= 100 ? ' full' : (percent >= 90 ? ' high' : '') }}"><span style="width: {{ percent }}%"></span></span>{% endif %}
+                    </span>
+                </a>
+            {% endfor %}
+        </div>
+    {% endif %}
+    {{ ui.pager('miniapp_admin_services', list, {tab: tab, q: query}) }}
+{% endblock %}

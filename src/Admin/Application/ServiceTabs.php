@@ -13,12 +13,15 @@ use Doctrine\ORM\QueryBuilder;
 
 /**
  * The service list's tabs, shared by the web list (VpnServiceCrudController), the dashboards and the Mini App.
- * Deleted services are never listed.
+ * Deleted services are never listed. LOW_TRAFFIC is an extra filter (Mini App): active, with a limit, and at most
+ * LOW_TRAFFIC_PERCENT of it left.
  */
 final class ServiceTabs
 {
     public const TABS = ['all', 'active', 'expiring', 'expired', 'suspended'];
+    public const LOW_TRAFFIC = 'low_traffic';
     public const EXPIRING_DAYS = 3;
+    public const LOW_TRAFFIC_PERCENT = 10;
 
     /**
      * @param list<string> $allowed
@@ -40,6 +43,7 @@ final class ServiceTabs
             'expiring' => $qb->andWhere("$e.status = :tabStatus AND $e.expiresAt > :tabNow AND $e.expiresAt <= :tabSoon")->setParameter('tabStatus', VpnServiceStatus::ACTIVE)->setParameter('tabNow', $now)->setParameter('tabSoon', $now->modify('+'.self::EXPIRING_DAYS.' days')),
             'expired' => $qb->andWhere("$e.status = :tabStatus")->setParameter('tabStatus', VpnServiceStatus::EXPIRED),
             'suspended' => $qb->andWhere("$e.status = :tabStatus")->setParameter('tabStatus', VpnServiceStatus::SUSPENDED),
+            self::LOW_TRAFFIC => $qb->andWhere("$e.status = :tabStatus AND $e.trafficLimitBytes > 0 AND ($e.trafficLimitBytes - COALESCE($e.trafficUsedBytes, 0)) * 100 <= $e.trafficLimitBytes * :lowPercent")->setParameter('tabStatus', VpnServiceStatus::ACTIVE)->setParameter('lowPercent', self::LOW_TRAFFIC_PERCENT),
             default => null,
         };
 

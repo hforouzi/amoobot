@@ -1,0 +1,57 @@
+{% extends 'miniapp/view/_base.html.twig' %}
+{% trans_default_domain 'miniapp' %}
+{% block section %}admin{% endblock %}
+{% block title %}{{ c.name ?: 'admin.customer'|trans }}{% endblock %}
+{% block attributes %} data-back data-customer-id="{{ c.id }}"{% endblock %}
+{% block content %}
+    <section class="card">
+        <div class="head">
+            <h1>{{ c.name ?: '—' }}</h1>
+            <span class="badge {{ c.status == 'active' ? 'active' : 'suspended' }}">{{ (c.status == 'active' ? 'admin.customer_status.active' : 'admin.customer_status.other')|trans }}</span>
+        </div>
+        <dl class="facts">
+            <div><dt>{{ 'admin.customer.number'|trans }}</dt><dd class="ltr">#{{ c.id }}</dd></div>
+            {% if c.telegramId %}<div><dt>{{ 'admin.customer.telegram_id'|trans }}</dt><dd class="ltr">{{ c.telegramId }} <button type="button" class="copy-mini" data-copy="{{ c.telegramId }}" aria-label="{{ 'admin.copy'|trans }}">📋</button></dd></div>{% endif %}
+            {% if c.username %}<div><dt>{{ 'admin.customer.username'|trans }}</dt><dd class="ltr">@{{ c.username }}</dd></div>{% endif %}
+            {% if c.mobile %}<div><dt>{{ 'admin.customer.mobile'|trans }}</dt><dd class="ltr">{{ c.mobile }}</dd></div>{% endif %}
+            {% if c.language %}<div><dt>{{ 'admin.customer.language'|trans }}</dt><dd class="ltr">{{ c.language }}</dd></div>{% endif %}
+            <div><dt>{{ 'admin.customer.joined'|trans }}</dt><dd>{{ createdAt|sub_date(lang) }}</dd></div>
+            {% if c.lastActivity %}<div><dt>{{ 'admin.customer.last_seen'|trans }}</dt><dd>{{ c.lastActivity|sub_date(lang) }}</dd></div>{% endif %}
+        </dl>
+        {% if c.username %}<a class="btn secondary small spaced" href="https://t.me/{{ c.username }}" data-open-link>💬 {{ 'admin.customer.open_chat'|trans }}</a>{% endif %}
+    </section>
+
+    <section class="card" data-payments-summary>
+        <h2>{{ 'admin.customer.payments'|trans }}</h2>
+        <div class="stats">
+            <div class="stat"><span class="muted">{{ 'admin.customer.payments_confirmed'|trans }}</span><b>{{ payments.confirmed|number_format }}</b></div>
+            <div class="stat"><span class="muted">{{ 'admin.customer.payments_total'|trans }}</span><b>{{ 'money.toman'|trans({'%amount%': payments.confirmedAmount|number_format}) }}</b></div>
+            <div class="stat"><span class="muted">{{ 'admin.customer.payments_open'|trans }}</span><b>{{ payments.open|number_format }}</b></div>
+            <div class="stat"><span class="muted">{{ 'admin.customer.payments_all'|trans }}</span><b>{{ payments.count|number_format }}</b></div>
+        </div>
+    </section>
+
+    <section class="card">
+        <h2>{{ 'area.services'|trans }}</h2>
+        {% if services is empty %}<p class="muted">{{ 'admin.customer.no_services'|trans }}</p>{% endif %}
+        <div class="list">
+            {% for service in services %}
+                {% set line %}<span class="list-main">{{ service.username ?: ('service.number'|trans({'%id%': service.id})) }}{% if service.expiresAt %} <span class="muted">· {{ service.expiresAt|sub_date(lang) }}</span>{% endif %}</span><span class="badge {{ service.status }}">{{ ('admin.service.status.' ~ service.status)|trans }}</span>{% endset %}
+                {% if can.miniapp_admin_service %}<a class="list-item" href="{{ path('miniapp_admin_service', {id: service.id}) }}" data-nav data-service-id="{{ service.id }}">{{ line }}</a>
+                {% else %}<div class="list-item" data-service-id="{{ service.id }}">{{ line }}</div>{% endif %}
+            {% endfor %}
+        </div>
+    </section>
+
+    <section class="card">
+        <h2>{{ 'area.orders'|trans }}</h2>
+        {% if orders is empty %}<p class="muted">{{ 'orders.none'|trans }}</p>{% endif %}
+        <div class="list">
+            {% for order in orders %}
+                {% set line %}<span class="list-main">{{ ('order.type.' ~ order.type)|trans }} · {{ 'money.toman'|trans({'%amount%': order.amount|number_format}) }} <span class="muted">· {{ order.createdAt|sub_date(lang) }}</span></span><span class="badge order-{{ order.status }}">{{ ('order.status.' ~ order.status)|trans }}</span>{% endset %}
+                {% if can.miniapp_admin_order %}<a class="list-item" href="{{ path('miniapp_admin_order', {id: order.id}) }}" data-nav data-order-id="{{ order.id }}">{{ line }}</a>
+                {% else %}<div class="list-item" data-order-id="{{ order.id }}">{{ line }}</div>{% endif %}
+            {% endfor %}
+        </div>
+    </section>
+{% endblock %}

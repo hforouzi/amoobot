@@ -26,8 +26,8 @@ final class CoreSections implements MiniAppSectionProvider
         $areas = [
             ['admin.orders', '🧾', AdminPermission::ORDERS_VIEW, 'miniapp_admin_orders'],
             ['admin.payments', '💳', AdminPermission::PAYMENTS_VIEW, 'miniapp_admin_payments'],
-            ['admin.customers', '👥', AdminPermission::CUSTOMERS_VIEW],
-            ['admin.services', '📦', AdminPermission::SERVICES_VIEW],
+            ['admin.customers', '👥', AdminPermission::CUSTOMERS_VIEW, 'miniapp_admin_customers'],
+            ['admin.services', '📦', AdminPermission::SERVICES_VIEW, 'miniapp_admin_services'],
             ['admin.plans', '🏷', AdminPermission::PLANS_MANAGE],
             ['admin.discounts', '🎟', AdminPermission::DISCOUNTS_MANAGE],
             ['admin.broadcast', '📣', AdminPermission::BROADCAST_SEND],

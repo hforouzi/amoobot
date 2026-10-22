@@ -42,6 +42,22 @@ final class AdminRoutePermissions
 
             'miniapp_admin_orders' => AdminPermission::ORDERS_VIEW,
             'miniapp_admin_order' => AdminPermission::ORDERS_VIEW,
+
+            'miniapp_admin_customers' => AdminPermission::CUSTOMERS_VIEW,
+            'miniapp_admin_customer' => AdminPermission::CUSTOMERS_VIEW,
+
+            'miniapp_admin_services' => AdminPermission::SERVICES_VIEW,
+            'miniapp_admin_service' => AdminPermission::SERVICES_VIEW,
+            'miniapp_admin_service_resend_config' => AdminPermission::SERVICES_ASSIST,
+            'miniapp_admin_service_sync_usage' => AdminPermission::SERVICES_ASSIST,
+            'miniapp_admin_service_suspend' => AdminPermission::SERVICES_MANAGE,
+            'miniapp_admin_service_activate' => AdminPermission::SERVICES_MANAGE,
+            'miniapp_admin_service_extend' => AdminPermission::SERVICES_MANAGE,
+            'miniapp_admin_service_add_traffic' => AdminPermission::SERVICES_MANAGE,
+            'miniapp_admin_service_reset_usage' => AdminPermission::SERVICES_MANAGE,
+            // As on the web (VpnServiceCrudController): regenerating configs is a panel operation.
+            'miniapp_admin_service_regenerate_config' => AdminPermission::PANELS_MANAGE,
+            'miniapp_admin_service_delete' => AdminPermission::SERVICES_DELETE,
         ];
     }
 

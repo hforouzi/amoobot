@@ -25,7 +25,8 @@ trait MiniAppAdminFixtures
     protected const SUPPORT = '8401';
     protected const INACTIVE = '8403';
     protected const CUSTOMER_ONLY = '8404';
-    protected const BUYER = '8405';
+    /** Real Telegram ids have 5+ digits (the customer search matches an id exactly only then). */
+    protected const BUYER = '840501';
     /** A translation key left in a rendered page. */
     protected const RAW_KEY = '/(?:admin|area|nav|order|service|money)\.[a-z_]+(?:\.[a-z_]+)*/';
 

@@ -60,7 +60,7 @@ final class MiniAppNavigationTest extends IntegrationTestCase
         self::assertSame(200, $this->httpStatus());
         $areas = (new Crawler($html))->filter('[data-area]')->each(static fn (Crawler $c): string => (string) $c->attr('data-area'));
         self::assertSame(['admin.orders', 'admin.payments', 'admin.customers', 'admin.services'], $areas, 'support: read-only areas only');
-        self::assertStringContainsString('data-coming-soon', $html);
+        self::assertStringNotContainsString('data-coming-soon', $html, 'their four areas are built');
 
         $this->appGet('/app/admin', $this->authenticate(self::ENV_ADMIN));
         $areas = (new Crawler((string) $this->client->getResponse()->getContent()))->filter('[data-area]')->count();
