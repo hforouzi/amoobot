@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Command;
 
 use App\Entity\Setting;
+use App\MiniApp\Application\MiniAppLinks;
 use App\Shop\Application\SalesSettingsProvider;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\Console\Attribute\AsCommand;
@@ -61,6 +62,7 @@ class CreateDefaultSettingsCommand extends Command
             SalesSettingsProvider::RENEWALS_ENABLED => 'true',
             SalesSettingsProvider::ADD_TRAFFIC_ENABLED => 'true',
             SalesSettingsProvider::DISABLED_MESSAGE => SalesSettingsProvider::DEFAULT_DISABLED_MESSAGE,
+            MiniAppLinks::ENABLED_SETTING => 'false',
         ];
         $types = [
             'automation.sync_usage_enabled' => 'boolean',
@@ -84,6 +86,7 @@ class CreateDefaultSettingsCommand extends Command
             SalesSettingsProvider::RENEWALS_ENABLED => 'boolean',
             SalesSettingsProvider::ADD_TRAFFIC_ENABLED => 'boolean',
             SalesSettingsProvider::DISABLED_MESSAGE => 'text',
+            MiniAppLinks::ENABLED_SETTING => 'boolean',
         ];
 
         foreach ($defaults as $key => $value) {

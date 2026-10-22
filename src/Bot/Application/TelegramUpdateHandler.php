@@ -190,6 +190,13 @@ class TelegramUpdateHandler
             return;
         }
 
+        $miniAppKeyboard = 'button.main.miniapp' === $replyButtonKey ? $this->keyboardFactory->miniAppOpen() : null;
+        if (null !== $miniAppKeyboard) {
+            $this->telegramApiClient->sendMessage($chatId, $this->botTextResolver->message('miniapp.open'), $miniAppKeyboard);
+
+            return;
+        }
+
         if ('button.main.admin' === $replyButtonKey || self::BUTTON_ADMIN_MENU === $text) {
             if (!$isAdmin) {
                 $this->debugLog(sprintf('admin_text_unauthorized actor_id="%s"', $actorId));

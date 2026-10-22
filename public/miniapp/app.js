@@ -357,6 +357,17 @@
         showState('loading');
         session = loadSession();
         (session ? Promise.resolve() : signIn()).then(loadNav).then(function () {
+            // ?service=ID (the bot's "View in the app" button): that service, with Home behind the BackButton.
+            var service = new URLSearchParams(window.location.search).get('service');
+            if (service && /^[0-9]{1,10}$/.test(service)) {
+                stack = ['/app/view/home'];
+                return navigate('/app/view/services/' + service, true).then(function () {
+                    if (!view.querySelector('.view-root')) {
+                        stack = [];
+                        return navigate('/app/view/home', true);
+                    }
+                });
+            }
             stack = [];
             return navigate('/app/view/home', true);
         }).then(function () {

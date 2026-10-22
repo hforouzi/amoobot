@@ -251,6 +251,17 @@ class TelegramApiClient
         return $this->callApi('setWebhook', $payload);
     }
 
+    /**
+     * The bot's default menu button (all private chats), e.g. ['type' => 'web_app', 'text' => ..., 'web_app' => ['url' => ...]]
+     * or ['type' => 'default'].
+     *
+     * @param array<string, mixed> $menuButton
+     */
+    public function setChatMenuButton(array $menuButton): array
+    {
+        return $this->callApi('setChatMenuButton', ['menu_button' => $menuButton]);
+    }
+
     public function getWebhookInfo(): array
     {
         return $this->callApi('getWebhookInfo', []);
