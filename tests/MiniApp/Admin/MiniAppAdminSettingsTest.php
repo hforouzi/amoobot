@@ -9,6 +9,7 @@ use App\Entity\RequiredChannel;
 use App\Entity\Setting;
 use App\Tests\Support\BotAdminTestTrait;
 use App\Tests\Support\IntegrationTestCase;
+use App\Tests\Support\RestoresTables;
 use App\Tests\Support\MiniAppAdminFixtures;
 use App\Tests\Support\MiniAppTestTrait;
 use App\Tests\Support\SettingsFormCases;
@@ -27,12 +28,14 @@ final class MiniAppAdminSettingsTest extends IntegrationTestCase
     use BotAdminTestTrait;
     use MiniAppAdminFixtures;
     use MiniAppTestTrait;
+    use RestoresTables;
 
     private const PREFIXES = ['renewal.', 'pricing.', 'traffic_addon.', 'sales.', 'automation.', 'orders.', 'settings_test.'];
 
     protected function setUp(): void
     {
         parent::setUp();
+        $this->snapshotTables('setting');
         $this->clean();
         $this->setUpAdminCast();
         $this->startMiniAppClient();
@@ -41,6 +44,7 @@ final class MiniAppAdminSettingsTest extends IntegrationTestCase
     protected function tearDown(): void
     {
         $this->clean();
+        $this->restoreTables();
         parent::tearDown();
     }
 

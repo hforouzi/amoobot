@@ -1,0 +1,62 @@
+{% extends 'miniapp/view/_base.html.twig' %}
+{% import 'miniapp/admin/_macros.html.twig' as ui %}
+{% trans_default_domain 'miniapp' %}
+{# Client apps and downloads (management only): the web's order, active state, one-step reordering. #}
+{% block section %}admin{% endblock %}
+{% block title %}{{ 'area.apps'|trans }}{% endblock %}
+{% block attributes %} data-back{% if tab == 'downloads' %} data-main-button-text="{{ 'admin.apps.new_download'|trans }}" data-main-button-href="{{ path('miniapp_admin_download_new') }}"{% endif %}{% endblock %}
+{% macro moves(route, id) %}
+    {% trans_default_domain 'miniapp' %}
+    <span class="row fit">
+        <button type="button" class="btn secondary small fit" data-action="{{ path(route, {id: id}) }}" data-body='{"direction":"up"}' data-reload aria-label="{{ 'admin.apps.move_up'|trans }}">▲</button>
+        <button type="button" class="btn secondary small fit" data-action="{{ path(route, {id: id}) }}" data-body='{"direction":"down"}' data-reload aria-label="{{ 'admin.apps.move_down'|trans }}">▼</button>
+    </span>
+{% endmacro %}
+{% import _self as m %}
+{% block content %}
+    <section class="card">
+        <div class="head">
+            <h1>{{ 'area.apps'|trans }}</h1>
+            {% if tab == 'downloads' %}<a class="btn small fit" href="{{ path('miniapp_admin_download_new') }}" data-nav>＋ {{ 'admin.apps.new_download'|trans }}</a>{% endif %}
+        </div>
+        <p class="muted">{{ 'admin.apps.intro'|trans }}</p>
+    </section>
+    {{ ui.chips('miniapp_admin_apps', tab, tabs, counts, 'admin.apps.tab.', {}) }}
+    {% if tab == 'clients' %}
+        {% if clientApps is empty %}{{ ui.empty('admin.apps.no_clients') }}{% endif %}
+        <div class="list">
+            {% for app in clientApps %}
+                <div class="list-item admin-row" data-client-app-id="{{ app.id }}" data-active="{{ app.active ? 1 : 0 }}">
+                    <a class="list-main" href="{{ path('miniapp_admin_client_app', {id: app.id}) }}" data-nav>
+                        <span class="head">
+                            <strong class="title">{{ app.name }}</strong>
+                            <span class="badge {{ app.active ? 'active' : 'muted-badge' }}">{{ app.active ? 'admin.panel.active'|trans : 'admin.panel.inactive'|trans }}</span>
+                        </span>
+                        <span class="muted">{{ app.platforms|map(p => ('platform.' ~ p)|trans({}, 'admin'))|join(' · ') }}</span>
+                    </a>
+                    {{ m.moves('miniapp_admin_client_app_move', app.id) }}
+                </div>
+            {% endfor %}
+        </div>
+    {% else %}
+        {% if downloads is empty %}{{ ui.empty('admin.apps.no_downloads') }}{% endif %}
+        <div class="list">
+            {% for d in downloads %}
+                <div class="list-item admin-row" data-download-id="{{ d.id }}" data-active="{{ d.active ? 1 : 0 }}">
+                    <a class="list-main" href="{{ path('miniapp_admin_download', {id: d.id}) }}" data-nav>
+                        <span class="head">
+                            <strong class="title">{{ d.title }}</strong>
+                            <span class="badge {{ d.active ? 'active' : 'muted-badge' }}">{{ d.active ? 'admin.panel.active'|trans : 'admin.panel.inactive'|trans }}</span>
+                        </span>
+                        <span class="muted">
+                            {{ ('platform.' ~ d.platform)|trans({}, 'admin') }}{% if d.version %} · <span class="ltr">{{ d.version }}</span>{% endif %}
+                            · {{ (d.file ? 'admin.apps.kind.file' : 'admin.apps.kind.link')|trans }}
+                            · {{ 'field.download_count'|trans({}, 'admin') }}: <b data-download-count>{{ d.downloadCount }}</b>
+                        </span>
+                    </a>
+                    {{ m.moves('miniapp_admin_download_move', d.id) }}
+                </div>
+            {% endfor %}
+        </div>
+    {% endif %}
+{% endblock %}

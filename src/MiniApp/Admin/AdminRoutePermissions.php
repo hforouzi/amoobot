@@ -122,6 +122,22 @@ final class AdminRoutePermissions
             'miniapp_admin_channel_activate' => AdminPermission::SETTINGS_MANAGE,
             'miniapp_admin_channel_deactivate' => AdminPermission::SETTINGS_MANAGE,
             'miniapp_admin_channel_delete' => AdminPermission::SETTINGS_MANAGE,
+            // Client apps and downloads (ADMIN has it too, as on the web).
+            'miniapp_admin_apps' => AdminPermission::APPS_MANAGE,
+            'miniapp_admin_client_app' => AdminPermission::APPS_MANAGE,
+            'miniapp_admin_client_app_update' => AdminPermission::APPS_MANAGE,
+            'miniapp_admin_client_app_check' => AdminPermission::APPS_MANAGE,
+            'miniapp_admin_client_app_activate' => AdminPermission::APPS_MANAGE,
+            'miniapp_admin_client_app_deactivate' => AdminPermission::APPS_MANAGE,
+            'miniapp_admin_client_app_move' => AdminPermission::APPS_MANAGE,
+            'miniapp_admin_download_new' => AdminPermission::APPS_MANAGE,
+            'miniapp_admin_download' => AdminPermission::APPS_MANAGE,
+            'miniapp_admin_download_create' => AdminPermission::APPS_MANAGE,
+            'miniapp_admin_download_update' => AdminPermission::APPS_MANAGE,
+            'miniapp_admin_download_check' => AdminPermission::APPS_MANAGE,
+            'miniapp_admin_download_activate' => AdminPermission::APPS_MANAGE,
+            'miniapp_admin_download_deactivate' => AdminPermission::APPS_MANAGE,
+            'miniapp_admin_download_move' => AdminPermission::APPS_MANAGE,
         ];
     }
 

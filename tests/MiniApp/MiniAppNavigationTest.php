@@ -64,7 +64,7 @@ final class MiniAppNavigationTest extends IntegrationTestCase
 
         $this->appGet('/app/admin', $this->authenticate(self::ENV_ADMIN));
         $areas = (new Crawler((string) $this->client->getResponse()->getContent()))->filter('[data-area]')->count();
-        self::assertSame(9, $areas, 'super admin (TELEGRAM_ADMIN_CHAT_ID): every area');
+        self::assertSame(10, $areas, 'super admin (TELEGRAM_ADMIN_CHAT_ID): every area');
     }
 
     public function testADeactivatedAdminLosesTheAdminSectionAtOnce(): void

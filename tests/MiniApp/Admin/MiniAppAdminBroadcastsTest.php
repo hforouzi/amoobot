@@ -9,6 +9,7 @@ use App\Entity\BroadcastMessage;
 use App\Entity\Setting;
 use App\Tests\Support\BotAdminTestTrait;
 use App\Tests\Support\IntegrationTestCase;
+use App\Tests\Support\RestoresTables;
 use App\Tests\Support\MiniAppAdminFixtures;
 use App\Tests\Support\MiniAppTestTrait;
 use Symfony\Component\DomCrawler\Crawler;
@@ -24,12 +25,14 @@ final class MiniAppAdminBroadcastsTest extends IntegrationTestCase
     use BotAdminTestTrait;
     use MiniAppAdminFixtures;
     use MiniAppTestTrait;
+    use RestoresTables;
 
     private const BASE = '/app/api/admin/broadcasts';
 
     protected function setUp(): void
     {
         parent::setUp();
+        $this->snapshotTables('setting');
         $this->clean();
         $this->setUpAdminCast();
         // Two more customers with an active service: with the fixture's buyer, three recipients.
@@ -43,6 +46,7 @@ final class MiniAppAdminBroadcastsTest extends IntegrationTestCase
     protected function tearDown(): void
     {
         $this->clean();
+        $this->restoreTables();
         parent::tearDown();
     }
 

@@ -6,6 +6,7 @@ namespace App\Tests\Admin;
 
 use App\Entity\AdminUser;
 use App\Tests\Support\IntegrationTestCase;
+use App\Tests\Support\RestoresTables;
 use App\Tests\Support\SettingsFormCases;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
@@ -17,6 +18,8 @@ use Symfony\Bundle\FrameworkBundle\KernelBrowser;
  */
 final class SettingsSaveCharacterizationTest extends IntegrationTestCase
 {
+    use RestoresTables;
+
     private const PREFIXES = ['renewal.', 'pricing.', 'traffic_addon.', 'sales.', 'automation.', 'orders.'];
 
     private KernelBrowser $client;
@@ -24,6 +27,7 @@ final class SettingsSaveCharacterizationTest extends IntegrationTestCase
     protected function setUp(): void
     {
         parent::setUp();
+        $this->snapshotTables('setting');
         $this->clearSettings();
         $this->em->getConnection()->executeStatement('DELETE FROM admin_audit_log');
         $this->em->getConnection()->executeStatement('DELETE FROM admin_user');
@@ -38,6 +42,7 @@ final class SettingsSaveCharacterizationTest extends IntegrationTestCase
     protected function tearDown(): void
     {
         $this->clearSettings();
+        $this->restoreTables();
         parent::tearDown();
     }
 

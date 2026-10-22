@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace App\Tests\MiniApp\Admin;
 
+use App\Entity\AppDownload;
 use App\Entity\BroadcastMessage;
+use App\Entity\ClientApp;
 use App\Entity\DiscountCode;
 use App\Entity\RequiredChannel;
 use App\Entity\TrialPlan;
@@ -15,6 +17,7 @@ use App\Tests\Support\BotAdminTestTrait;
 use App\Tests\Support\IntegrationTestCase;
 use App\Tests\Support\MiniAppAdminFixtures;
 use App\Tests\Support\MiniAppTestTrait;
+use App\Tests\Support\RestoresTables;
 use Symfony\Component\Routing\Route;
 use Symfony\Component\Routing\RouterInterface;
 
@@ -29,10 +32,13 @@ final class MiniAppAdminPermissionMatrixTest extends IntegrationTestCase
     private DiscountCode $discount;
     private BroadcastMessage $broadcast;
     private RequiredChannel $channel;
+    private ClientApp $clientApp;
+    private AppDownload $download;
 
     use BotAdminTestTrait;
     use MiniAppAdminFixtures;
     use MiniAppTestTrait;
+    use RestoresTables;
 
     private const SECRETS = ['panel-secret.example', 'panel-pass-123', 'gw-api-key-456', 'AgAD-receipt', 'dummy_existing'];
 
@@ -57,8 +63,19 @@ final class MiniAppAdminPermissionMatrixTest extends IntegrationTestCase
         $this->em->getConnection()->executeStatement('DELETE FROM required_channel');
         $this->channel = (new RequiredChannel())->setTitle('Matrix channel')->setChatId('@matrix_channel');
         $this->em->persist($this->channel);
+        $this->snapshotTables('client_app', 'app_download');
+        $this->clientApp = (new ClientApp())->setName('Matrix app')->setPlatforms(['android'])->setImportUrlTemplate('hiddify://import/{url}');
+        $this->download = (new AppDownload())->setTitle('Matrix link')->setPlatform('android')->setType(AppDownload::TYPE_URL)->setExternalUrl('https://dl.example.com/a.apk');
+        $this->em->persist($this->clientApp);
+        $this->em->persist($this->download);
         $this->em->flush();
         $this->startMiniAppClient();
+    }
+
+    protected function tearDown(): void
+    {
+        $this->restoreTables();
+        parent::tearDown();
     }
 
     public function testEveryRouteForEveryRole(): void
@@ -128,6 +145,8 @@ final class MiniAppAdminPermissionMatrixTest extends IntegrationTestCase
             '/broadcasts/' => $this->broadcast->getId(),
             '/panels/' => $this->service->getPanel()?->getId(),
             '/channels/' => $this->channel->getId(),
+            '/client-apps/' => $this->clientApp->getId(),
+            '/downloads/' => $this->download->getId(),
         ];
         $path = $route->getPath();
         foreach ($ids as $segment => $id) {
