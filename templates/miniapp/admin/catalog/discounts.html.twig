@@ -1,0 +1,39 @@
+{% extends 'miniapp/view/_base.html.twig' %}
+{% import 'miniapp/admin/_macros.html.twig' as ui %}
+{% trans_default_domain 'miniapp' %}
+{% block section %}admin{% endblock %}
+{% block title %}{{ 'area.discounts'|trans }}{% endblock %}
+{% block attributes %} data-back data-main-button-text="{{ 'admin.discount.new'|trans }}" data-main-button-href="{{ path('miniapp_admin_discount_new') }}"{% endblock %}
+{% block content %}
+    <section class="card">
+        <div class="head">
+            <h1>{{ 'area.discounts'|trans }}</h1>
+            <a class="btn small fit" href="{{ path('miniapp_admin_discount_new') }}" data-nav>＋ {{ 'admin.discount.new'|trans }}</a>
+        </div>
+        {{ ui.search('miniapp_admin_discounts', query, 'admin.discount.search', {tab: tab}) }}
+    </section>
+    {{ ui.chips('miniapp_admin_discounts', tab, tabs, counts, 'admin.discount.tab.', {}) }}
+    {% if list.items is empty %}
+        {{ ui.empty(query ? 'admin.no_results' : 'admin.discount.none') }}
+    {% else %}
+        <div class="list">
+            {% for code in list.items %}
+                {% set state = not code.active ? 'inactive' : (code.endsAt and code.endsAt <= now ? 'expired' : (code.maxUses is not null and code.usedCount >= code.maxUses ? 'exhausted' : 'active')) %}
+                <a class="list-item admin-row" href="{{ path('miniapp_admin_discount', {id: code.id}) }}" data-nav data-discount-id="{{ code.id }}" data-state="{{ state }}">
+                    <span class="list-main">
+                        <span class="head">
+                            <strong class="ltr code">{{ code.code }}</strong>
+                            <span class="badge discount-{{ state }}">{{ ('admin.discount.tab.' ~ state)|trans }}</span>
+                        </span>
+                        <span class="muted">
+                            {{ code.type == 'percent' ? (code.value ~ '٪') : 'money.toman'|trans({'%amount%': code.value|number_format}) }}
+                            · {{ 'admin.discount.uses'|trans({'%used%': code.usedCount, '%max%': code.maxUses ?? '∞'}) }}
+                            {% if code.endsAt %} · {{ 'admin.service.until'|trans({'%date%': code.endsAt|sub_date(lang)}) }}{% endif %}
+                        </span>
+                    </span>
+                </a>
+            {% endfor %}
+        </div>
+    {% endif %}
+    {{ ui.pager('miniapp_admin_discounts', list, {tab: tab, q: query}) }}
+{% endblock %}

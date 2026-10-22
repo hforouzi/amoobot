@@ -83,6 +83,18 @@ final class AdminRoutePermissions
             'miniapp_admin_trial_plan_activate' => AdminPermission::PLANS_MANAGE,
             'miniapp_admin_trial_plan_deactivate' => AdminPermission::PLANS_MANAGE,
             'miniapp_admin_trial_claims' => AdminPermission::PLANS_MANAGE,
+
+            'miniapp_admin_discounts' => AdminPermission::DISCOUNTS_MANAGE,
+            'miniapp_admin_discount_new' => AdminPermission::DISCOUNTS_MANAGE,
+            'miniapp_admin_discount' => AdminPermission::DISCOUNTS_MANAGE,
+            'miniapp_admin_discount_usages' => AdminPermission::DISCOUNTS_MANAGE,
+            'miniapp_admin_discount_create' => AdminPermission::DISCOUNTS_MANAGE,
+            'miniapp_admin_discount_update' => AdminPermission::DISCOUNTS_MANAGE,
+            'miniapp_admin_discount_check' => AdminPermission::DISCOUNTS_MANAGE,
+            'miniapp_admin_discount_generate' => AdminPermission::DISCOUNTS_MANAGE,
+            'miniapp_admin_discount_activate' => AdminPermission::DISCOUNTS_MANAGE,
+            'miniapp_admin_discount_deactivate' => AdminPermission::DISCOUNTS_MANAGE,
+            'miniapp_admin_discount_delete' => AdminPermission::DISCOUNTS_MANAGE,
         ];
     }
 

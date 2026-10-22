@@ -1,0 +1,35 @@
+{% extends 'miniapp/view/_base.html.twig' %}
+{% import 'miniapp/admin/_macros.html.twig' as ui %}
+{% trans_default_domain 'miniapp' %}
+{% block section %}admin{% endblock %}
+{% block title %}{{ code.code }}{% endblock %}
+{% block attributes %} data-back{% endblock %}
+{% block content %}
+    <section class="card">
+        <h1 class="ltr code">{{ code.code }}</h1>
+        <p class="muted">{{ 'admin.discount.uses'|trans({'%used%': code.usedCount, '%max%': code.maxUses ?? '∞'}) }}</p>
+    </section>
+    {% if list.items is empty %}
+        {{ ui.empty('admin.discount.no_usages') }}
+    {% else %}
+        <div class="list">
+            {% for usage in list.items %}
+                {% set account = usage.user.telegramAccount %}
+                <div class="list-item admin-row" data-usage-id="{{ usage.id }}">
+                    <span class="list-main">
+                        <span class="head">
+                            <strong>{{ 'money.toman'|trans({'%amount%': usage.discountAmount|number_format}) }}</strong>
+                            <span class="muted ltr">{{ usage.amountBefore|number_format }} → {{ usage.amountAfter|number_format }}</span>
+                        </span>
+                        <span class="muted">{{ ui.who({name: account ? ((account.firstName ?? '') ~ ' ' ~ (account.lastName ?? ''))|trim : (usage.user.name ?? ''), username: account.username ?? null, telegramId: account.telegramId ?? null}) }}</span>
+                        <span class="muted">
+                            <time datetime="{{ usage.usedAt|date('c') }}">{{ usage.usedAt|sub_date(lang) }}</time>
+                            {% if usage.order %} · <span class="ltr">{{ usage.order.trackingCode ?? ('#' ~ usage.order.id) }}</span>{% endif %}
+                        </span>
+                    </span>
+                </div>
+            {% endfor %}
+        </div>
+    {% endif %}
+    {{ ui.pager('miniapp_admin_discount_usages', list, {id: code.id}) }}
+{% endblock %}
