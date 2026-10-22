@@ -1,0 +1,33 @@
+{% extends 'miniapp/view/_base.html.twig' %}
+{% trans_default_domain 'miniapp' %}
+{# One log entry: its fields and its JSON, through AdminJsonFormatter (escaped, secret keys masked). Read only. #}
+{% block section %}admin{% endblock %}
+{% block title %}{{ ('admin.logs.tab.' ~ kind)|trans }} #{{ entry.id }}{% endblock %}
+{% block attributes %} data-back{% endblock %}
+{% block content %}
+    <section class="card">
+        <h1>{{ ('admin.logs.tab.' ~ kind)|trans }} #{{ entry.id }}</h1>
+        <dl class="facts">
+            {% if kind == 'audit' %}
+                <div><dt>{{ 'admin.logs.action'|trans }}</dt><dd class="ltr">{{ entry.action }}</dd></div>
+                <div><dt>{{ 'admin.logs.admin'|trans }}</dt><dd>{{ entry.actorLabel }}</dd></div>
+                <div><dt>{{ 'admin.logs.source'|trans }}</dt><dd>{{ ('admin.logs.sources.' ~ entry.source)|trans }}</dd></div>
+                {% if entry.targetType %}<div><dt>{{ 'admin.logs.target'|trans }}</dt><dd class="ltr">{{ entry.targetType }}#{{ entry.targetId }}</dd></div>{% endif %}
+                <div><dt>{{ 'admin.logs.at'|trans }}</dt><dd class="ltr">{{ entry.createdAt|date('Y-m-d H:i:s') }}</dd></div>
+            {% elseif kind == 'notifications' %}
+                <div><dt>{{ 'admin.logs.type'|trans }}</dt><dd class="ltr">{{ entry.type }} · {{ entry.keyName }}</dd></div>
+                <div><dt>{{ 'admin.logs.service'|trans }}</dt><dd class="ltr">{{ entry.service.username ?: ('#' ~ entry.service.id) }}</dd></div>
+                <div><dt>{{ 'admin.logs.at'|trans }}</dt><dd class="ltr">{{ entry.sentAt|date('Y-m-d H:i:s') }}</dd></div>
+            {% else %}
+                <div><dt>{{ 'admin.logs.direction'|trans }}</dt><dd>{{ ('admin.logs.directions.' ~ entry.direction)|trans }}</dd></div>
+                <div><dt>{{ 'admin.logs.type'|trans }}</dt><dd class="ltr">{{ entry.updateType ?? '—' }}</dd></div>
+                <div><dt>{{ 'admin.logs.chat'|trans }}</dt><dd class="ltr">{{ entry.telegramId ?? '—' }}</dd></div>
+                <div><dt>{{ 'admin.logs.at'|trans }}</dt><dd class="ltr">{{ entry.createdAt|date('Y-m-d H:i:s') }}</dd></div>
+            {% endif %}
+        </dl>
+    </section>
+    <section class="card json-box">
+        <h2>{{ 'admin.logs.payload'|trans }}</h2>
+        {% if json %}{{ json|raw }}{% else %}<p class="muted">—</p>{% endif %}
+    </section>
+{% endblock %}

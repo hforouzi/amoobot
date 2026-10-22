@@ -34,6 +34,7 @@ final class MiniAppAdminPermissionMatrixTest extends IntegrationTestCase
     private RequiredChannel $channel;
     private ClientApp $clientApp;
     private AppDownload $download;
+    private int $auditEntry;
 
     use BotAdminTestTrait;
     use MiniAppAdminFixtures;
@@ -68,6 +69,8 @@ final class MiniAppAdminPermissionMatrixTest extends IntegrationTestCase
         $this->download = (new AppDownload())->setTitle('Matrix link')->setPlatform('android')->setType(AppDownload::TYPE_URL)->setExternalUrl('https://dl.example.com/a.apk');
         $this->em->persist($this->clientApp);
         $this->em->persist($this->download);
+        $this->em->getConnection()->insert('admin_audit_log', ['actor_label' => 'matrix', 'source' => 'cli', 'action' => 'matrix.entry', 'details' => json_encode(['api_key' => 'gw-api-key-456']), 'created_at' => '2026-10-01 10:00:00']);
+        $this->auditEntry = (int) $this->em->getConnection()->lastInsertId();
         $this->em->flush();
         $this->startMiniAppClient();
     }
@@ -147,8 +150,9 @@ final class MiniAppAdminPermissionMatrixTest extends IntegrationTestCase
             '/channels/' => $this->channel->getId(),
             '/client-apps/' => $this->clientApp->getId(),
             '/downloads/' => $this->download->getId(),
+            '/logs/audit/' => $this->auditEntry,
         ];
-        $path = $route->getPath();
+        $path = str_replace('{kind}', 'audit', $route->getPath());
         foreach ($ids as $segment => $id) {
             if (str_contains($path, $segment.'{id}')) {
                 return str_replace('{id}', (string) $id, $path);

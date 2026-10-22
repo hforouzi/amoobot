@@ -138,6 +138,9 @@ final class AdminRoutePermissions
             'miniapp_admin_download_activate' => AdminPermission::APPS_MANAGE,
             'miniapp_admin_download_deactivate' => AdminPermission::APPS_MANAGE,
             'miniapp_admin_download_move' => AdminPermission::APPS_MANAGE,
+            // Logs: the super admin's, as on the web; read only.
+            'miniapp_admin_logs' => AdminPermission::LOGS_VIEW,
+            'miniapp_admin_log_entry' => AdminPermission::LOGS_VIEW,
         ];
     }
 

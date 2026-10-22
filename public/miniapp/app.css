@@ -282,3 +282,6 @@ div.list-item.admin-row > a.list-main { color: var(--fg); text-decoration: none;
 .hash { font-size: .78rem; word-break: break-all; }
 fieldset.field { border: 0; padding: 0; margin: 0; }
 fieldset.field legend { padding: 0; margin-bottom: 6px; }
+/* Logs (M3c): filters, the masked JSON. */
+.filters .row .field { margin: 0; }
+.json-box pre.admin-json { direction: ltr; text-align: left; white-space: pre-wrap; overflow-wrap: anywhere; font-size: .78rem; background: var(--code); border-radius: 10px; padding: 10px; margin: 0; max-height: 70vh; overflow: auto; }

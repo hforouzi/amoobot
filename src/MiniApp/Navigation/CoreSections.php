@@ -34,6 +34,7 @@ final class CoreSections implements MiniAppSectionProvider
             ['admin.apps', '📲', AdminPermission::APPS_MANAGE, 'miniapp_admin_apps'],
             ['admin.panels', '🖥', AdminPermission::PANELS_MANAGE, 'miniapp_admin_panels'],
             ['admin.settings', '⚙️', AdminPermission::SETTINGS_MANAGE, 'miniapp_admin_settings'],
+            ['admin.logs', '📜', AdminPermission::LOGS_VIEW, 'miniapp_admin_logs'],
         ];
         foreach ($areas as $position => [$key, $icon, $permission, $route]) {
             yield new MiniAppSection($key, 'area.'.substr($key, 6), $icon, 10 * ($position + 1), MiniAppAudience::ADMIN, [$permission], parent: 'admin', route: $route);
