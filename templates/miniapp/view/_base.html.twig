@@ -1,0 +1,6 @@
+{# One Mini App section, loaded into the shell by app.js. data-view: the bottom navigation entry to highlight;
+   data-title: the page title; data-back: shows Telegram's BackButton; data-main-button-*: Telegram's MainButton. #}
+{% trans_default_domain 'miniapp' %}
+<div class="view-root" data-view="{% block section %}{% endblock %}" data-title="{% block title %}{% endblock %}"{% block attributes %}{% endblock %}>
+    {% block content %}{% endblock %}
+</div>

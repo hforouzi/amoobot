@@ -18,6 +18,8 @@ trait MiniAppTestTrait
 
     protected function startMiniAppClient(): void
     {
+        // The per-Telegram-user login limit (10 per 5 min) would otherwise carry over between runs for fixed test ids.
+        self::getContainer()->get('cache.rate_limiter')->clear();
         $this->client = new KernelBrowser(self::$kernel);
         $this->client->disableReboot();
         // Every test from its own address: limiter state kept in the cache between runs cannot leak in.

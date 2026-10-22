@@ -1,0 +1,9 @@
+{% extends 'miniapp/view/_base.html.twig' %}
+{% trans_default_domain 'miniapp' %}
+{% block section %}home{% endblock %}
+{% block title %}{{ 'nav.home'|trans }}{% endblock %}
+{% block content %}
+    <section class="card">
+        <h1>{{ firstName is not empty ? 'home.greeting'|trans({'%name%': firstName}) : 'home.greeting_anonymous'|trans }}</h1>
+    </section>
+{% endblock %}

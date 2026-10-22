@@ -1,0 +1,8 @@
+{# Bottom navigation: the top-level sections this user may open (MiniAppSections::navigation). #}
+{% trans_default_domain 'miniapp' %}
+{% for section in sections %}
+    <a class="nav-item" href="{{ path(section.route) }}" data-nav data-nav-key="{{ section.key }}">
+        <span class="nav-icon" aria-hidden="true">{{ section.icon }}</span>
+        <span class="nav-label">{{ section.label|trans }}</span>
+    </a>
+{% endfor %}
