@@ -1,0 +1,37 @@
+{% extends 'miniapp/view/_base.html.twig' %}
+{% trans_default_domain 'miniapp' %}
+{# "My orders": the customer's orders, newest first, ten per page. #}
+{% block section %}services{% endblock %}
+{% block title %}{{ 'nav.orders'|trans }}{% endblock %}
+{% block attributes %} data-back{% endblock %}
+{% block content %}
+    <section class="card">
+        <h1>{{ 'nav.orders'|trans }}</h1>
+        {% if orders is empty %}<p class="muted" data-no-orders>{{ 'orders.none'|trans }}</p>{% endif %}
+    </section>
+    {% if orders is not empty %}
+        <div class="list">
+            {% for order in orders %}
+                <a class="list-item order-row" href="{{ path('miniapp_order', {id: order.id}) }}" data-nav data-order-id="{{ order.id }}" data-status="{{ order.status }}">
+                    <span class="list-main">
+                        <span class="head">
+                            <strong>{{ ('order.type.' ~ order.type)|trans }} · {{ order.plan.title }}</strong>
+                            <span class="badge order-{{ order.status }}">{{ ('order.status.' ~ order.status)|trans }}</span>
+                        </span>
+                        <span class="muted">
+                            {{ 'money.toman'|trans({'%amount%': order.amount|number_format}) }}
+                            · <time datetime="{{ order.createdAt|date('Y-m-d') }}">{{ order.createdAt|sub_date(lang) }}</time>
+                            {% if order.trackingCode %} · <span class="ltr">{{ order.trackingCode }}</span>{% endif %}
+                        </span>
+                    </span>
+                </a>
+            {% endfor %}
+        </div>
+    {% endif %}
+    {% if page > 1 or hasNext %}
+        <nav class="row pager">
+            {% if page > 1 %}<a class="btn secondary small" href="{{ path('miniapp_orders', {page: page - 1}) }}" data-nav data-previous-page>{{ 'orders.previous'|trans }}</a>{% else %}<span></span>{% endif %}
+            {% if hasNext %}<a class="btn secondary small" href="{{ path('miniapp_orders', {page: page + 1}) }}" data-nav data-next-page>{{ 'orders.next'|trans }}</a>{% endif %}
+        </nav>
+    {% endif %}
+{% endblock %}

@@ -5,16 +5,20 @@ declare(strict_types=1);
 namespace App\MiniApp\UI;
 
 use App\Entity\Order;
+use App\Entity\VpnService;
 use App\MiniApp\Checkout\CheckoutFailure;
 use App\MiniApp\Checkout\MiniAppCheckout;
 use App\MiniApp\Checkout\PaymentProgress;
 use App\MiniApp\Security\MiniAppUser;
 use App\Payment\Domain\PaymentDisplayState;
 use App\Payment\Domain\PaymentStatus;
+use App\Provisioning\Domain\VpnServiceStatus;
 use App\Shop\Application\Checkout\OrderLifecycle;
 use App\Shop\Application\Checkout\PaymentStarter;
 use App\Shop\Application\Checkout\ReceiptSubmission;
+use App\Shop\Domain\OrderStatus;
 use App\Shop\Domain\OrderType;
+use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -24,14 +28,18 @@ use Symfony\Component\Security\Http\Attribute\CurrentUser;
 use Symfony\Component\Security\Http\Attribute\IsGranted;
 
 /**
- * Paying an order in the Mini App: choosing a payment method, then the payment's own page (card details and receipt
+ * The customer's orders in the Mini App ("My orders", paged) and paying one: choosing a payment method, then the
+ * payment's own page (card details and receipt
  * upload, or the gateway to open), which polls the payment status until a final state. Read only: the choices are
  * sent to MiniAppCheckoutController. Every id is checked against the signed-in customer (404 otherwise).
  */
 #[IsGranted(MiniAppUser::ROLE)]
 final class MiniAppOrderController extends AbstractController
 {
+    private const PAGE_SIZE = 10;
+
     public function __construct(
+        private readonly EntityManagerInterface $entityManager,
         private readonly MiniAppFragments $fragments,
         private readonly MiniAppCheckout $checkout,
         private readonly PaymentStarter $paymentStarter,
@@ -77,6 +85,41 @@ final class MiniAppOrderController extends AbstractController
             'canUploadReceipt' => ReceiptSubmission::isManual($payment) && PaymentStatus::PENDING === $payment->getStatus(),
             'service' => $this->progress->service($payment),
             'canCancel' => PaymentDisplayState::PENDING === $state && $this->orderLifecycle->canCancel($order, $payment),
+        ]);
+    }
+
+    #[Route('/app/view/orders', name: 'miniapp_orders', defaults: ['_miniapp_section' => 'orders'], methods: ['GET'])]
+    public function orders(Request $request, #[CurrentUser] MiniAppUser $user): Response
+    {
+        $page = max(1, min(1000, $request->query->getInt('page', 1)));
+        /** @var list<Order> $orders */
+        $orders = $this->entityManager->getRepository(Order::class)->findBy(['user' => $user->customer()], ['id' => 'DESC'], self::PAGE_SIZE + 1, ($page - 1) * self::PAGE_SIZE);
+
+        return $this->fragments->render($request, 'miniapp/view/orders.html.twig', [
+            'orders' => array_slice($orders, 0, self::PAGE_SIZE),
+            'page' => $page,
+            'hasNext' => count($orders) > self::PAGE_SIZE,
+        ]);
+    }
+
+    #[Route('/app/view/orders/{id}', name: 'miniapp_order', requirements: ['id' => '\d+'], defaults: ['_miniapp_section' => 'orders'], methods: ['GET'])]
+    public function order(Request $request, #[CurrentUser] MiniAppUser $user, int $id): Response
+    {
+        $order = $this->orderLifecycle->ownedOrder($user->customer(), $id) ?? throw new NotFoundHttpException();
+        $payment = $this->orderLifecycle->latestPayment($order);
+        $service = in_array($order->getType(), [OrderType::RENEWAL, OrderType::ADD_TRAFFIC], true)
+            ? $order->getTargetService()
+            : $this->entityManager->getRepository(VpnService::class)->findOneBy(['order' => $order], ['id' => 'DESC']);
+        $payable = OrderStatus::WAITING_PAYMENT === $order->getStatus() && $this->orderLifecycle->canEditForPayment($order)
+            && (null === $payment || PaymentStatus::PENDING !== $payment->getStatus() || null === $payment->getGateway());
+
+        return $this->fragments->render($request, 'miniapp/view/order.html.twig', [
+            'order' => $order,
+            'summary' => self::summary($order),
+            'payment' => $payment,
+            'paymentState' => null !== $payment ? $this->progress->state($payment) : null,
+            'service' => $service instanceof VpnService && VpnServiceStatus::DELETED !== $service->getStatus() ? $service : null,
+            'payable' => $payable,
         ]);
     }
 
