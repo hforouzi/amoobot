@@ -7,6 +7,7 @@ namespace App\Bot\Application\Admin;
 use App\Entity\DiscountCode;
 use App\Entity\DiscountUsage;
 use App\Security\AdminPermission;
+use App\Shop\Application\Catalog\DiscountAdminService;
 use Doctrine\ORM\EntityManagerInterface;
 
 /**
@@ -18,6 +19,7 @@ final class AdminDiscountsHandler implements AdminArea
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
         private readonly AdminScreen $screen,
+        private readonly DiscountAdminService $discounts,
     ) {
     }
 
@@ -87,13 +89,11 @@ final class AdminDiscountsHandler implements AdminArea
 
             return;
         }
-        if ($code->isActive() === $active) {
+        if (!$this->discounts->setActive($code, $active)) {
             $this->screen->notice($request, 'admin.state_changed', [], 'admin.d:l:0');
 
             return;
         }
-        $code->setIsActive($active);
-        $this->entityManager->flush();
         $this->screen->audit($request, $active ? 'discount_code.activate' : 'discount_code.deactivate', 'DiscountCode', $id, ['code' => $code->getCode()]);
         $this->screen->notice($request, 'admin.done', [], 'admin.d:l:0');
     }
