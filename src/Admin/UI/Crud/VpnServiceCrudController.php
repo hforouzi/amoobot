@@ -4,16 +4,14 @@ declare(strict_types=1);
 
 namespace App\Admin\UI\Crud;
 
+use App\Admin\Application\ServiceTabs;
 use App\Admin\UI\SubscriptionPageLinkController;
 use App\Admin\UI\Support\AdminFormat;
 use App\Entity\VpnService;
 use App\Provisioning\Application\FinalConfigLinkProvider;
-use App\Provisioning\Domain\VpnServiceStatus;
 use App\Security\AdminPermission;
 use App\Subscription\Application\SubscriptionPageUrl;
-use Doctrine\Common\Collections\ArrayCollection;
 use Doctrine\ORM\EntityManagerInterface;
-use Doctrine\ORM\Query\Parameter;
 use Doctrine\ORM\QueryBuilder;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Action;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Actions;
@@ -42,8 +40,8 @@ use Symfony\Component\Security\Csrf\CsrfTokenManagerInterface;
  */
 class VpnServiceCrudController extends AbstractCrudController
 {
-    public const TABS = ['all', 'active', 'expiring', 'expired', 'suspended'];
-    public const EXPIRING_DAYS = 3;
+    public const TABS = ServiceTabs::TABS;
+    public const EXPIRING_DAYS = ServiceTabs::EXPIRING_DAYS;
 
     public function __construct(
         private readonly FinalConfigLinkProvider $finalConfigLinkProvider,
@@ -90,34 +88,7 @@ class VpnServiceCrudController extends AbstractCrudController
      */
     public static function countByTab(EntityManagerInterface $entityManager, \DateTimeImmutable $now): array
     {
-        $row = $entityManager->createQueryBuilder()
-            ->select(
-                'COUNT(s.id) AS all_count',
-                'SUM(CASE WHEN s.status = :active AND (s.expiresAt IS NULL OR s.expiresAt > :now) THEN 1 ELSE 0 END) AS active_count',
-                'SUM(CASE WHEN s.status = :active AND s.expiresAt > :now AND s.expiresAt <= :soon THEN 1 ELSE 0 END) AS expiring_count',
-                'SUM(CASE WHEN s.status = :expired THEN 1 ELSE 0 END) AS expired_count',
-                'SUM(CASE WHEN s.status = :suspended THEN 1 ELSE 0 END) AS suspended_count',
-            )
-            ->from(VpnService::class, 's')
-            ->andWhere('s.status != :deleted')
-            ->setParameters(new ArrayCollection([
-                new Parameter('active', VpnServiceStatus::ACTIVE),
-                new Parameter('expired', VpnServiceStatus::EXPIRED),
-                new Parameter('suspended', VpnServiceStatus::SUSPENDED),
-                new Parameter('deleted', VpnServiceStatus::DELETED),
-                new Parameter('now', $now),
-                new Parameter('soon', $now->modify('+'.self::EXPIRING_DAYS.' days')),
-            ]))
-            ->getQuery()
-            ->getSingleResult();
-
-        return [
-            'all' => (int) $row['all_count'],
-            'active' => (int) $row['active_count'],
-            'expiring' => (int) $row['expiring_count'],
-            'expired' => (int) $row['expired_count'],
-            'suspended' => (int) $row['suspended_count'],
-        ];
+        return ServiceTabs::countByTab($entityManager, $now);
     }
 
     public function configureActions(Actions $actions): Actions
@@ -213,26 +184,13 @@ class VpnServiceCrudController extends AbstractCrudController
             ->leftJoin('entity.user', 'listUser')->addSelect('listUser')
             ->leftJoin('entity.order', 'listOrder')->addSelect('listOrder')
             ->leftJoin('listOrder.plan', 'listPlan')->addSelect('listPlan')
-            ->leftJoin('entity.panel', 'listPanel')->addSelect('listPanel')
-            ->andWhere('entity.status != :deletedStatus')
-            ->setParameter('deletedStatus', VpnServiceStatus::DELETED);
+            ->leftJoin('entity.panel', 'listPanel')->addSelect('listPanel');
 
-        $now = $this->clock->now();
-        match ($this->currentTab()) {
-            'active' => $queryBuilder->andWhere('entity.status = :tabStatus AND (entity.expiresAt IS NULL OR entity.expiresAt > :tabNow)')->setParameter('tabStatus', VpnServiceStatus::ACTIVE)->setParameter('tabNow', $now),
-            'expiring' => $queryBuilder->andWhere('entity.status = :tabStatus AND entity.expiresAt > :tabNow AND entity.expiresAt <= :tabSoon')->setParameter('tabStatus', VpnServiceStatus::ACTIVE)->setParameter('tabNow', $now)->setParameter('tabSoon', $now->modify('+'.self::EXPIRING_DAYS.' days')),
-            'expired' => $queryBuilder->andWhere('entity.status = :tabStatus')->setParameter('tabStatus', VpnServiceStatus::EXPIRED),
-            'suspended' => $queryBuilder->andWhere('entity.status = :tabStatus')->setParameter('tabStatus', VpnServiceStatus::SUSPENDED),
-            default => null,
-        };
-
-        return $queryBuilder;
+        return ServiceTabs::apply($queryBuilder, 'entity', $this->currentTab(), $this->clock->now());
     }
 
     private function currentTab(): string
     {
-        $tab = (string) $this->requestStack->getCurrentRequest()?->query->get('tab', 'all');
-
-        return in_array($tab, self::TABS, true) ? $tab : 'all';
+        return ServiceTabs::normalize((string) $this->requestStack->getCurrentRequest()?->query->get('tab', 'all'));
     }
 }

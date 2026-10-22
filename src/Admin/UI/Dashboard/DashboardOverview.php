@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace App\Admin\UI\Dashboard;
 
-use App\Admin\UI\Crud\PaymentCrudController;
-use App\Admin\UI\Crud\VpnServiceCrudController;
+use App\Admin\Application\PaymentTabs;
+use App\Admin\Application\ServiceTabs;
 use App\Admin\UI\Support\PanelHealth;
 use App\Entity\Order;
 use App\Entity\Payment;
@@ -71,7 +71,7 @@ final class DashboardOverview
      */
     private function attention(): array
     {
-        $counts = PaymentCrudController::countByTab($this->entityManager);
+        $counts = PaymentTabs::countByTab($this->entityManager);
 
         return array_map(static fn (string $tab): array => [
             'key' => $tab,
@@ -119,7 +119,7 @@ final class DashboardOverview
      */
     private function services(): array
     {
-        $counts = VpnServiceCrudController::countByTab($this->entityManager, $this->clock->now());
+        $counts = ServiceTabs::countByTab($this->entityManager, $this->clock->now());
 
         return array_map(static fn (string $tab): array => [
             'key' => $tab,

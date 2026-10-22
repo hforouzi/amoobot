@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Admin\UI\Crud;
 
+use App\Admin\Application\PaymentTabs;
 use App\Admin\UI\PaymentModerationController;
 use App\Admin\UI\Support\AdminFormat;
 use App\Admin\UI\Support\AdminStatusBadge;
@@ -41,18 +42,8 @@ use Symfony\Contracts\Translation\TranslatorInterface;
  */
 final class PaymentCrudController extends AbstractCrudController
 {
-    /** Tab => the statuses it lists ("all": no filter). */
-    public const TABS = [
-        'all' => [],
-        'pending' => [PaymentStatus::PENDING, PaymentStatus::SUBMITTED],
-        'needs_review' => [PaymentStatus::NEEDS_REVIEW],
-        'provisioning_failed' => [PaymentStatus::PROVISIONING_FAILED],
-        'confirmed' => [PaymentStatus::CONFIRMED],
-        'rejected' => [PaymentStatus::REJECTED],
-    ];
-
-    /** Tabs an admin works through: oldest first (as the old "needs attention" lists). */
-    private const OLDEST_FIRST = ['needs_review', 'provisioning_failed'];
+    /** Tab => the statuses it lists ("all": no filter): PaymentTabs. */
+    public const TABS = PaymentTabs::TABS;
 
     public function __construct(
         private readonly CsrfTokenManagerInterface $csrfTokenManager,
@@ -84,10 +75,8 @@ final class PaymentCrudController extends AbstractCrudController
             ->leftJoin('entity.storePaymentMethod', 'listMethod')->addSelect('listMethod')
             ->leftJoin('entity.gateway', 'listGateway')->addSelect('listGateway');
         $tab = $this->currentTab();
-        if ([] !== self::TABS[$tab]) {
-            $qb->andWhere('entity.status IN (:tabStatuses)')->setParameter('tabStatuses', self::TABS[$tab]);
-        }
-        if (in_array($tab, self::OLDEST_FIRST, true) && [] === $searchDto->getCustomSort()) {
+        PaymentTabs::apply($qb, 'entity', $tab, false);
+        if (in_array($tab, PaymentTabs::OLDEST_FIRST, true) && [] === $searchDto->getCustomSort()) {
             $qb->orderBy('entity.id', 'ASC');
         }
 
@@ -110,17 +99,7 @@ final class PaymentCrudController extends AbstractCrudController
      */
     public static function countByTab(EntityManagerInterface $entityManager): array
     {
-        $byStatus = [];
-        foreach ($entityManager->createQueryBuilder()->select('p.status AS status', 'COUNT(p.id) AS total')->from(Payment::class, 'p')->groupBy('p.status')->getQuery()->getArrayResult() as $row) {
-            $byStatus[(string) $row['status']] = (int) $row['total'];
-        }
-
-        $counts = [];
-        foreach (self::TABS as $tab => $statuses) {
-            $counts[$tab] = [] === $statuses ? array_sum($byStatus) : array_sum(array_map(static fn (string $status): int => $byStatus[$status] ?? 0, $statuses));
-        }
-
-        return $counts;
+        return PaymentTabs::countByTab($entityManager);
     }
 
     /**
@@ -146,9 +125,7 @@ final class PaymentCrudController extends AbstractCrudController
 
     private function currentTab(): string
     {
-        $tab = (string) $this->requestStack->getCurrentRequest()?->query->get('tab', 'all');
-
-        return array_key_exists($tab, self::TABS) ? $tab : 'all';
+        return PaymentTabs::normalize((string) $this->requestStack->getCurrentRequest()?->query->get('tab', 'all'));
     }
 
     public function configureFilters(Filters $filters): Filters
