@@ -939,6 +939,7 @@ flash:
   broadcast.cancelled: "Broadcast cancelled."
   broadcast.retry_sent: "Retry batch done. Sent: %sent%, failed: %failed%."
   plan.price_warning: "Plan \"%plan%\": %warning%"
+  plan.in_use: "Plan \"%plan%\" has %count% order(s) and cannot be deleted. Deactivate it instead."
   plugin.installed: "Plugin installed."
   plugin.install_failed: "Plugin installation failed. %error%"
   plugin.enabled: "Plugin enabled."

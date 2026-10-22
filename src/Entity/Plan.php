@@ -5,7 +5,13 @@ declare(strict_types=1);
 namespace App\Entity;
 
 use Doctrine\ORM\Mapping as ORM;
+use Symfony\Component\Validator\Constraints as Assert;
+use Symfony\Component\Validator\Context\ExecutionContextInterface;
 
+/**
+ * A plan on sale. Its rules (the constraints below) are checked the same way by the web form, the bot and the Mini App
+ * (PlanAdminService); prices are only warned about, never blocked (PlanPriceSanityChecker).
+ */
 #[ORM\Entity]
 class Plan
 {
@@ -15,21 +21,27 @@ class Plan
     private ?int $id = null;
 
     #[ORM\Column(length: 255)]
+    #[Assert\NotBlank(message: 'plan.title.required')]
+    #[Assert\Length(max: 255)]
     private string $title;
 
     #[ORM\Column(type: 'text', nullable: true)]
     private ?string $description = null;
 
     #[ORM\Column]
+    #[Assert\PositiveOrZero]
     private int $durationDays;
 
     #[ORM\Column(nullable: true)]
+    #[Assert\PositiveOrZero]
     private ?int $trafficGb = null;
 
     #[ORM\Column(nullable: true)]
+    #[Assert\PositiveOrZero]
     private ?int $ipLimit = null;
 
     #[ORM\Column]
+    #[Assert\PositiveOrZero]
     private int $price;
 
     #[ORM\Column]
@@ -39,21 +51,27 @@ class Plan
     private bool $isCustomizable = false;
 
     #[ORM\Column(nullable: true)]
+    #[Assert\PositiveOrZero]
     private ?int $minTrafficGb = null;
 
     #[ORM\Column(nullable: true)]
+    #[Assert\PositiveOrZero]
     private ?int $maxTrafficGb = null;
 
     #[ORM\Column(nullable: true)]
+    #[Assert\PositiveOrZero]
     private ?int $pricePerGb = null;
 
     #[ORM\Column(nullable: true)]
+    #[Assert\PositiveOrZero]
     private ?int $minDurationDays = null;
 
     #[ORM\Column(nullable: true)]
+    #[Assert\PositiveOrZero]
     private ?int $maxDurationDays = null;
 
     #[ORM\Column(nullable: true)]
+    #[Assert\PositiveOrZero]
     private ?int $pricePerDay = null;
 
     #[ORM\Column]
@@ -312,6 +330,27 @@ class Plan
         }
 
         return ($trafficGb * $pricePerGb) + ($durationDays * $pricePerDay);
+    }
+
+    /**
+     * A limited plan lasts at least a day; a range's minimum is not above its maximum; a customizable plan has a
+     * price per GB or per day (else every custom choice would cost 0).
+     */
+    #[Assert\Callback]
+    public function validateRules(ExecutionContextInterface $context): void
+    {
+        if (!$this->isUnlimitedDuration && $this->durationDays < 1) {
+            $context->buildViolation('plan.duration.required')->atPath('durationDays')->addViolation();
+        }
+        if (null !== $this->minTrafficGb && null !== $this->maxTrafficGb && $this->minTrafficGb > $this->maxTrafficGb) {
+            $context->buildViolation('plan.range.order')->atPath('maxTrafficGb')->addViolation();
+        }
+        if (null !== $this->minDurationDays && null !== $this->maxDurationDays && $this->minDurationDays > $this->maxDurationDays) {
+            $context->buildViolation('plan.range.order')->atPath('maxDurationDays')->addViolation();
+        }
+        if ($this->isCustomizable && ($this->pricePerGb ?? 0) <= 0 && ($this->pricePerDay ?? 0) <= 0) {
+            $context->buildViolation('plan.custom.price_required')->atPath('pricePerGb')->addViolation();
+        }
     }
 
     public function getInbound(): ?VpnInbound
