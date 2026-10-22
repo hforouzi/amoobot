@@ -30,8 +30,8 @@ use Psr\Log\LoggerInterface;
  * was written the first time and changes nothing (the same key for a different movement is refused). A row can be
  * reversed at most once (unique reversalOf).
  *
- * Lock order: callers that also lock orders/payments (PaymentSettlementService, WalletPayment) take those first
- * and the wallet last, so the two never deadlock.
+ * Lock order: the customer's user row, then the wallet row (see lock()). Callers that also lock orders/payments
+ * (PaymentSettlementService, WalletPayment) take those first, so the two never deadlock.
  */
 class WalletService
 {
@@ -57,9 +57,8 @@ class WalletService
     /** The user's wallet, created (empty, active, no credit) on first use. */
     public function walletFor(User $user): Wallet
     {
-        $this->ensureWalletRow($this->userId($user));
-
-        return $this->find($user) ?? throw new \RuntimeException(sprintf('Wallet for user #%d could not be created.', $this->userId($user)));
+        return $this->find($user) ?? $this->changeWallet($this->userId($user), static function (): void {
+        }, ['action' => 'create']);
     }
 
     public function findTransaction(string $idempotencyKey): ?WalletTransaction
@@ -143,7 +142,6 @@ class WalletService
         $connection = $this->entityManager->getConnection();
         $nested = $connection->isTransactionActive();
         $this->entityManager->flush();
-        $this->ensureWalletRow($userId);
         $connection->beginTransaction();
         $mutated = false;
 
@@ -216,7 +214,6 @@ class WalletService
         $connection = $this->entityManager->getConnection();
         $nested = $connection->isTransactionActive();
         $this->entityManager->flush();
-        $this->ensureWalletRow($userId);
         $connection->beginTransaction();
 
         try {
@@ -235,23 +232,29 @@ class WalletService
         return $wallet;
     }
 
-    /** Creates the user's wallet row if it does not exist yet; a concurrent creation is simply ignored. */
-    private function ensureWalletRow(int $userId): void
-    {
-        $now = (new \DateTimeImmutable())->format('Y-m-d H:i:s');
-        $this->entityManager->getConnection()->executeStatement(
-            'INSERT IGNORE INTO wallet (user_id, balance, credit_limit, currency, status, created_at, updated_at) VALUES (?, 0, 0, ?, ?, ?, ?)',
-            [$userId, Wallet::CURRENCY, WalletStatus::ACTIVE, $now, $now]
-        );
-    }
-
     /**
-     * SELECT ... FOR UPDATE on the wallet row, then the entity re-read under that lock (refresh() with a lock mode
-     * is a locking read: it sees the latest committed balance, never a stale snapshot or identity-map copy).
+     * Locks the wallet row (creating it on first use) and re-reads the entity under that lock.
+     *
+     * The user row is the mutex: SELECT ... FOR UPDATE on an existing primary key locks that one row and no gap, so
+     * creating a missing wallet cannot deadlock with another user's first wallet, and two writers of one wallet queue
+     * here. The wallet row is then locked as well; refresh() with a lock mode is a locking read, so it sees the
+     * latest committed balance, never a stale snapshot or identity-map copy.
      */
     private function lock(int $userId): Wallet
     {
-        $walletId = $this->entityManager->getConnection()->fetchOne('SELECT id FROM wallet WHERE user_id = ? FOR UPDATE', [$userId]);
+        $connection = $this->entityManager->getConnection();
+        if (false === $connection->fetchOne('SELECT id FROM `user` WHERE id = ? FOR UPDATE', [$userId])) {
+            throw new \RuntimeException(sprintf('User #%d not found.', $userId));
+        }
+        if (false === $connection->fetchOne('SELECT id FROM wallet WHERE user_id = ?', [$userId])) {
+            // IGNORE: the plain read above may be an old snapshot of a wallet created meanwhile (we hold the user lock).
+            $now = (new \DateTimeImmutable())->format('Y-m-d H:i:s');
+            $connection->executeStatement(
+                'INSERT IGNORE INTO wallet (user_id, balance, credit_limit, currency, status, created_at, updated_at) VALUES (?, 0, 0, ?, ?, ?, ?)',
+                [$userId, Wallet::CURRENCY, WalletStatus::ACTIVE, $now, $now]
+            );
+        }
+        $walletId = $connection->fetchOne('SELECT id FROM wallet WHERE user_id = ? FOR UPDATE', [$userId]);
         if (false === $walletId) {
             throw new \RuntimeException(sprintf('Wallet for user #%d not found.', $userId));
         }

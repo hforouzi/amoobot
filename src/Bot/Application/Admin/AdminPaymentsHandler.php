@@ -187,7 +187,7 @@ final class AdminPaymentsHandler implements AdminArea
                 (string) ($order->getTrackingCode() ?? '-'),
                 $this->replies->identity($telegramAccount),
                 $order->getType(),
-                $order->getPlan()->getTitle(),
+                ($order->getPlan()?->getTitle() ?? '-'),
                 $payment->getAmount(),
                 $payment->getStatus(),
                 $tracking,
@@ -289,7 +289,7 @@ final class AdminPaymentsHandler implements AdminArea
                 $order->getId(),
                 (string) ($order->getTrackingCode() ?? '-'),
                 $this->replies->identity($telegramAccount),
-                $order->getPlan()->getTitle(),
+                ($order->getPlan()?->getTitle() ?? '-'),
                 $payment->getAmount(),
                 $payment->getStatus(),
                 $customSummary,
@@ -342,7 +342,7 @@ final class AdminPaymentsHandler implements AdminArea
                 $order->getId(),
                 (string) ($order->getTrackingCode() ?? '-'),
                 $this->replies->identity($telegramAccount),
-                $order->getPlan()->getTitle(),
+                ($order->getPlan()?->getTitle() ?? '-'),
                 $payment->getAmount()
             ));
 

@@ -91,7 +91,7 @@ final class PaymentStarter
     public function start(Order $order, StorePaymentMethod $storePaymentMethod): PaymentStart
     {
         $gateway = $storePaymentMethod->getGateway();
-        if (OrderType::NEW_SERVICE === $order->getType() && !$order->getPlan()->isActive()) {
+        if (OrderType::NEW_SERVICE === $order->getType() && !$order->requirePlan()->isActive()) {
             return new PaymentStart(PaymentStart::KIND_PLAN_INACTIVE, null, false, null, 0);
         }
 

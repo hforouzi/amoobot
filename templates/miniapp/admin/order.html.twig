@@ -13,7 +13,7 @@
         <dl class="facts">
             <div><dt>{{ 'admin.order.number'|trans }}</dt><dd class="ltr">#{{ order.id }}</dd></div>
             {% if order.trackingCode %}<div><dt>{{ 'admin.order.tracking'|trans }}</dt><dd class="ltr">{{ order.trackingCode }}</dd></div>{% endif %}
-            <div><dt>{{ 'admin.order.plan'|trans }}</dt><dd>{{ order.plan.title }}</dd></div>
+            {% if order.hasPlan %}<div><dt>{{ 'admin.order.plan'|trans }}</dt><dd>{{ order.plan.title }}</dd></div>{% endif %}
             <div><dt>{{ 'admin.order.amount'|trans }}</dt><dd>{{ 'money.toman'|trans({'%amount%': order.amount|number_format}) }}</dd></div>
             <div><dt>{{ 'admin.order.created'|trans }}</dt><dd>{{ order.createdAt|sub_date(lang) }} {{ order.createdAt|date('H:i') }}</dd></div>
             {% if order.paidAt %}<div><dt>{{ 'admin.order.paid'|trans }}</dt><dd>{{ order.paidAt|sub_date(lang) }} {{ order.paidAt|date('H:i') }}</dd></div>{% endif %}

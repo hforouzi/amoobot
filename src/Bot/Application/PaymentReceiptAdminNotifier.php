@@ -99,7 +99,7 @@ final class PaymentReceiptAdminNotifier
                 $order->getId(),
                 (string) ($order->getTrackingCode() ?? '-'),
                 $this->formatTelegramIdentity($telegramAccount),
-                $order->getPlan()->getTitle(),
+                ($order->getPlan()?->getTitle() ?? '-'),
                 $payment->getAmount(),
                 $customSummary,
                 $snapshotLines,

@@ -1009,7 +1009,7 @@ class ServiceManagementService
                 'trackingCode' => (string) ($order->getTrackingCode() ?? '-'),
             ],
             'plan' => [
-                'title' => $order->getPlan()->getTitle(),
+                'title' => $order->requirePlan()->getTitle(),
             ],
         ];
     }
@@ -1051,7 +1051,7 @@ class ServiceManagementService
             return ((string) ((int) ($metadata['trafficGb'] ?? 0))).' گیگ';
         }
 
-        $planTraffic = $order->getPlan()->getTrafficGb();
+        $planTraffic = $order->requirePlan()->getTrafficGb();
         if (null !== $planTraffic) {
             return ((string) $planTraffic).' گیگ';
         }
@@ -1064,7 +1064,7 @@ class ServiceManagementService
      */
     private function resolveOrderDuration(Order $order, array $metadata): string
     {
-        if ((bool) ($metadata['unlimitedDuration'] ?? false) || $order->getPlan()->isUnlimitedDuration()) {
+        if ((bool) ($metadata['unlimitedDuration'] ?? false) || $order->requirePlan()->isUnlimitedDuration()) {
             return 'نامحدود';
         }
 
@@ -1072,7 +1072,7 @@ class ServiceManagementService
             return ((string) $metadata['durationDays']).' روز';
         }
 
-        return ((string) $order->getPlan()->getDurationDays()).' روز';
+        return ((string) $order->requirePlan()->getDurationDays()).' روز';
     }
 
     private function createOrReuseOrderPayment(Order $order, PaymentGateway $gateway, StorePaymentMethod $storePaymentMethod, string $chatId, ?string $callbackId): void
@@ -1405,7 +1405,7 @@ class ServiceManagementService
             $lines[] = sprintf(
                 "#%d | plan: %s | amount: %d | status: %s",
                 $order->getId(),
-                $order->getPlan()->getTitle(),
+                $order->getPlan()?->getTitle() ?? '-',
                 $order->getAmount(),
                 $order->getStatus()
             );

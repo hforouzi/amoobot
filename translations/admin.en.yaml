@@ -972,6 +972,7 @@ order:
   type.renewal: "Renewal"
   type.add_traffic: "Extra traffic"
   type.trial: "Trial"
+  type.wallet_topup: "Wallet top-up"
 
 panel:
   health.connected: "Connected"

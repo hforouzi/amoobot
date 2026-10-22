@@ -23,7 +23,7 @@
                 <a class="list-item admin-row" href="{{ path('miniapp_admin_order', {id: order.id}) }}" data-nav data-order-id="{{ order.id }}" data-status="{{ order.status }}">
                     <span class="list-main">
                         <span class="head">
-                            <strong>{{ ('order.type.' ~ order.type)|trans }} · {{ order.plan.title }}</strong>
+                            <strong>{{ ('order.type.' ~ order.type)|trans }}{% if order.hasPlan %} · {{ order.plan.title }}{% endif %}</strong>
                             <span class="badge order-{{ order.status }}">{{ ('order.status.' ~ order.status)|trans }}</span>
                         </span>
                         <span class="muted">{{ ui.who({name: (order.user.telegramAccount.firstName ?? order.user.name ?? ''), username: order.user.telegramAccount.username ?? null, telegramId: order.user.telegramAccount.telegramId ?? null}) }}</span>

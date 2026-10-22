@@ -72,7 +72,7 @@ final class ServiceTestRenewCommand extends Command
 
         $testOrder = (new Order())
             ->setUser($service->getUser())
-            ->setPlan($sourceOrder->getPlan())
+            ->setPlan($sourceOrder->requirePlan())
             ->setType(OrderType::RENEWAL)
             ->setTargetService($service)
             ->setAmount(0)

@@ -972,6 +972,7 @@ order:
   type.renewal: "تمدید"
   type.add_traffic: "حجم اضافه"
   type.trial: "اکانت تست"
+  type.wallet_topup: "شارژ کیف پول"
 
 panel:
   health.connected: "متصل"

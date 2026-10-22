@@ -21,9 +21,10 @@ class Order
     #[ORM\JoinColumn(nullable: false, onDelete: 'CASCADE')]
     private User $user;
 
+    /** Null only for an order that buys no plan (WALLET_TOPUP). */
     #[ORM\ManyToOne]
-    #[ORM\JoinColumn(nullable: false, onDelete: 'RESTRICT')]
-    private Plan $plan;
+    #[ORM\JoinColumn(nullable: true, onDelete: 'RESTRICT')]
+    private ?Plan $plan = null;
 
     #[ORM\ManyToOne]
     #[ORM\JoinColumn(nullable: true, onDelete: 'SET NULL')]
@@ -75,9 +76,30 @@ class Order
         return $this;
     }
 
-    public function getPlan(): Plan
+    /** The order's plan; null only for an order that buys no plan (WALLET_TOPUP). */
+    public function getPlan(): ?Plan
     {
         return $this->plan;
+    }
+
+    /**
+     * The plan of a service order (new service, renewal, add traffic, trial: always set).
+     *
+     * @throws \LogicException for an order without a plan (a wallet top-up)
+     */
+    public function requirePlan(): Plan
+    {
+        return $this->plan ?? throw new \LogicException(sprintf('Order #%d (%s) has no plan.', $this->id ?? 0, $this->type));
+    }
+
+    public function hasPlan(): bool
+    {
+        return null !== $this->plan;
+    }
+
+    public function isWalletTopUp(): bool
+    {
+        return OrderType::WALLET_TOPUP === $this->type;
     }
 
     public function setPlan(Plan $plan): self

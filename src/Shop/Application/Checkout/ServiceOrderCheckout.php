@@ -51,7 +51,7 @@ final class ServiceOrderCheckout
             return null;
         }
 
-        $plan = $sourceOrder->getPlan();
+        $plan = $sourceOrder->requirePlan();
         $priceResult = $this->planPricingService->calculateRenewalAmount($service, $plan);
         if (!$priceResult instanceof RenewalPriceResult || $priceResult->finalAmount <= 0) {
             return null;

@@ -302,7 +302,7 @@ final class MiniAppAdminServiceController extends AbstractController
             'name' => self::name($service),
             'status' => $service->getStatus(),
             'deleted' => VpnServiceStatus::DELETED === $service->getStatus(),
-            'plan' => $service->getOrder()?->getPlan()->getTitle(),
+            'plan' => $service->getOrder()?->getPlan()?->getTitle(),
             'orderId' => $service->getOrder()?->getId(),
             'panel' => $service->getPanel()?->getTitle(),
             'inbound' => $service->getInbound()?->getTitle(),

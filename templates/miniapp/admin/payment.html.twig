@@ -29,7 +29,7 @@
 
     <section class="card">
         <h2>{{ 'admin.payment.order'|trans }}</h2>
-        {% set orderLine %}<span class="ltr">{{ p.order.tracking ?? ('#' ~ p.order.id) }}</span> · {{ ('order.type.' ~ p.order.type)|trans }} · {{ p.order.plan }}{% endset %}
+        {% set orderLine %}<span class="ltr">{{ p.order.tracking ?? ('#' ~ p.order.id) }}</span> · {{ ('order.type.' ~ p.order.type)|trans }}{% if p.order.plan %} · {{ p.order.plan }}{% endif %}{% endset %}
         {% if can.miniapp_admin_order %}<a class="list-item" href="{{ path('miniapp_admin_order', {id: p.order.id}) }}" data-nav><span class="list-main">{{ orderLine }}</span><span class="badge order-{{ p.order.status }}">{{ ('order.status.' ~ p.order.status)|trans }}</span></a>
         {% else %}<p>{{ orderLine }}</p>{% endif %}
         <h2 class="spaced">{{ 'admin.customer'|trans }}</h2>

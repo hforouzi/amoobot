@@ -13,6 +13,7 @@ use App\Payment\Application\Settlement\SettlementOutcome;
 use App\Payment\Domain\PaymentStatus;
 use App\Shop\Domain\OrderDraftStatus;
 use App\Shop\Domain\OrderStatus;
+use App\Shop\Domain\OrderType;
 use Doctrine\ORM\EntityManagerInterface;
 
 final class IncompleteOrderService
@@ -162,8 +163,11 @@ final class IncompleteOrderService
             ->createQueryBuilder('o')
             ->where('o.user = :user')
             ->andWhere('o.status IN (:statuses)')
+            // A wallet top-up is not a purchase to resume (it lives under "My wallet"); it still expires as usual.
+            ->andWhere('o.type <> :walletTopUp')
             ->setParameter('user', $user)
             ->setParameter('statuses', [OrderStatus::WAITING_PAYMENT, OrderStatus::PAYMENT_PENDING])
+            ->setParameter('walletTopUp', OrderType::WALLET_TOPUP)
             ->orderBy('o.id', 'DESC')
             ->setMaxResults(20)
             ->getQuery()

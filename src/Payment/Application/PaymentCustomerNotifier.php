@@ -17,6 +17,7 @@ use App\Provisioning\Application\CustomerAccessGuard;
 use App\Provisioning\Application\FinalConfigLinkProvider;
 use App\Provisioning\Application\ServiceConfigDeliveryRefresher;
 use App\Provisioning\Application\ServiceConfigRefreshOutcome;
+use App\Wallet\Application\WalletService;
 use Psr\Log\LoggerInterface;
 
 /**
@@ -37,11 +38,18 @@ class PaymentCustomerNotifier
         private readonly LoggerInterface $logger,
         private readonly CustomerAccessGuard $accessGuard,
         private readonly SubscriptionPageButton $subscriptionPageButton,
+        private readonly WalletService $walletService,
     ) {
     }
 
     public function confirmed(Payment $payment, ?VpnService $vpnService): void
     {
+        if (OrderType::WALLET_TOPUP === $payment->getOrder()->getType()) {
+            $this->walletToppedUp($payment);
+
+            return;
+        }
+
         // A new service: "Open subscription page" under the last message.
         $orderType = $payment->getOrder()->getType();
         $lastMessageKeyboard = OrderType::RENEWAL !== $orderType && OrderType::ADD_TRAFFIC !== $orderType ? $this->subscriptionPageButton->keyboardFor($vpnService) : null;
@@ -58,6 +66,15 @@ class PaymentCustomerNotifier
 
             return $this->buildNewServiceConfirmedMessages($vpnService);
         }, $lastMessageKeyboard);
+    }
+
+    /** A confirmed wallet top-up: the amount credited and the balance now. */
+    private function walletToppedUp(Payment $payment): void
+    {
+        $this->deliver($payment, 'wallet_topup', fn (): array => [$this->botTextResolver->message('wallet.topup_confirmed', ['wallet' => [
+            'amount' => number_format($payment->getOrder()->getAmount()),
+            'balance' => number_format($this->walletService->find($payment->getOrder()->getUser())?->getBalance() ?? 0),
+        ]])]);
     }
 
     public function rejected(Payment $payment): void

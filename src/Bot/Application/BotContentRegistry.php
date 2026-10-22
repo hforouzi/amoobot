@@ -149,7 +149,7 @@ final class BotContentRegistry
             'admin.payment_rejected' => ['title' => 'Admin payment rejected', 'body' => '❌ پرداخت رد شد.', 'category' => 'admin'],
             'admin.order_created' => ['title' => 'Admin order created', 'body' => 'سفارش جدید ثبت شد.', 'category' => 'admin'],
             'admin.unauthorized' => ['title' => 'Admin unauthorized', 'body' => 'Unauthorized', 'category' => 'admin'],
-        ] + Admin\AdminBotTexts::messages();
+        ] + Admin\AdminBotTexts::messages() + \App\Wallet\UI\WalletBotTexts::messages();
     }
 
     private function englishMessages(): array
@@ -236,7 +236,7 @@ final class BotContentRegistry
             'button.service.miniapp' => ['label' => '📱 مشاهده در اپ', 'buttonType' => 'inline', 'category' => 'service'],
             'button.miniapp.open' => ['label' => '📱 باز کردن اپ', 'buttonType' => 'inline', 'category' => 'main'],
             'button.miniapp.menu' => ['label' => 'اپلیکیشن', 'buttonType' => 'inline', 'category' => 'main'],
-        ] + Admin\AdminBotTexts::buttons();
+        ] + Admin\AdminBotTexts::buttons() + \App\Wallet\UI\WalletBotTexts::buttons();
     }
 
     private function englishButtons(): array

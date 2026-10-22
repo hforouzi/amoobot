@@ -52,7 +52,7 @@ final class PaymentPreviewProvisionConfigCommand extends Command
         }
 
         $order = $payment->getOrder();
-        $plan = $order->getPlan();
+        $plan = $order->requirePlan();
         $inbound = $plan->getInbound();
         $panel = $inbound?->getPanel();
         if (null === $inbound || null === $panel) {

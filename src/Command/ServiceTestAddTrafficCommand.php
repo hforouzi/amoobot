@@ -68,7 +68,7 @@ final class ServiceTestAddTrafficCommand extends Command
 
         $testOrder = (new Order())
             ->setUser($service->getUser())
-            ->setPlan($sourceOrder->getPlan())
+            ->setPlan($sourceOrder->requirePlan())
             ->setType(OrderType::ADD_TRAFFIC)
             ->setTargetService($service)
             ->setAmount(0)

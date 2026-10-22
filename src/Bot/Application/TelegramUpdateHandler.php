@@ -1497,7 +1497,7 @@ class TelegramUpdateHandler
         $originalAmount = (int) ($priceSnapshot['afterGlobalDiscountAmount'] ?? $order->getAmount());
         $discountAmount = (int) ($priceSnapshot['discountCodeAmount'] ?? 0);
         $payableAmount = (int) ($priceSnapshot['finalAmount'] ?? $order->getAmount());
-        $plan = $order->getPlan();
+        $plan = $order->requirePlan();
 
         return [
             'discount' => [
@@ -1569,7 +1569,7 @@ class TelegramUpdateHandler
             return ((string) $metadata['trafficGb']).' گیگ';
         }
 
-        $planTraffic = $order->getPlan()->getTrafficGb();
+        $planTraffic = $order->requirePlan()->getTrafficGb();
         if (null !== $planTraffic) {
             return ((string) $planTraffic).' گیگ';
         }
@@ -1582,7 +1582,7 @@ class TelegramUpdateHandler
      */
     private function resolveOrderDuration(Order $order, array $metadata): string
     {
-        if ((bool) ($metadata['unlimitedDuration'] ?? false) || $order->getPlan()->isUnlimitedDuration()) {
+        if ((bool) ($metadata['unlimitedDuration'] ?? false) || $order->requirePlan()->isUnlimitedDuration()) {
             return 'نامحدود';
         }
 
@@ -1590,7 +1590,7 @@ class TelegramUpdateHandler
             return ((string) $metadata['durationDays']).' روز';
         }
 
-        return ((string) $order->getPlan()->getDurationDays()).' روز';
+        return ((string) $order->requirePlan()->getDurationDays()).' روز';
     }
 
     private function handleSelectStorePaymentMethod(TelegramAccount $account, string $chatId, string $data, ?string $callbackId = null): void
@@ -2226,9 +2226,10 @@ class TelegramUpdateHandler
                 (string) ($metadata['targetServiceId'] ?? ($order->getTargetService()?->getId() ?? '-')),
                 (string) ($metadata['trafficGb'] ?? '-')
             ),
+            OrderType::WALLET_TOPUP => 'نوع سفارش: شارژ کیف پول',
             OrderType::TRIAL => sprintf(
                 "نوع سفارش: اکانت تست\nپلن تست: %s\nحجم: %s گیگ\nمدت: %s",
-                (string) ($metadata['trialPlanTitle'] ?? $order->getPlan()->getTitle()),
+                (string) ($metadata['trialPlanTitle'] ?? $order->getPlan()?->getTitle() ?? '-'),
                 (string) ($metadata['trafficGb'] ?? '-'),
                 ((string) ($metadata['durationDays'] ?? '-').' روز')
             ),
@@ -2246,7 +2247,7 @@ class TelegramUpdateHandler
             "خلاصه سفارش #%d\nکد پیگیری: %s\nپلن: %s\n%s\n\nمبلغ پایه: %d تومان\nتخفیف سراسری: %d تومان\nکد تخفیف: %s (%d تومان)\nمبلغ نهایی: %d تومان",
             (int) ($order->getId() ?? 0),
             (string) ($order->getTrackingCode() ?? '-'),
-            $order->getPlan()->getTitle(),
+            ($order->getPlan()?->getTitle() ?? '-'),
             $typeSummary,
             (int) ($priceSnapshot['baseAmount'] ?? $finalAmount),
             (int) ($priceSnapshot['globalDiscountAmount'] ?? 0),
@@ -2539,6 +2540,7 @@ class TelegramUpdateHandler
             OrderType::RENEWAL => 'تمدید',
             OrderType::ADD_TRAFFIC => 'خرید حجم',
             OrderType::TRIAL => 'اکانت تست',
+            OrderType::WALLET_TOPUP => 'شارژ کیف پول',
             default => 'خرید سرویس',
         };
     }

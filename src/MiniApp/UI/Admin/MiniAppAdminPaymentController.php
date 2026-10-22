@@ -221,7 +221,7 @@ final class MiniAppAdminPaymentController extends AbstractController
                 'type' => $order->getType(),
                 'status' => $order->getStatus(),
                 'tracking' => $order->getTrackingCode(),
-                'plan' => $order->getPlan()->getTitle(),
+                'plan' => $order->getPlan()?->getTitle(),
                 'amount' => $order->getAmount(),
             ],
             'customer' => AdminCustomerView::summary($order->getUser()),

@@ -126,21 +126,23 @@ final class MiniAppOrderController extends AbstractController
     /**
      * What the order is, from its own metadata (never recomputed): for the summaries.
      *
-     * @return array{type: string, plan: string, trafficGb: ?int, durationDays: ?int, unlimitedDuration: bool, baseAmount: int, globalDiscountAmount: int, discountCode: ?string, discountAmount: int, finalAmount: int, serviceId: ?int}
+     * @return array{type: string, plan: ?string, trafficGb: ?int, durationDays: ?int, unlimitedDuration: bool, baseAmount: int, globalDiscountAmount: int, discountCode: ?string, discountAmount: int, finalAmount: int, serviceId: ?int}
      */
     public static function summary(Order $order): array
     {
         $metadata = is_array($order->getMetadata()) ? $order->getMetadata() : [];
         $snapshot = is_array($metadata['priceSnapshot'] ?? null) ? $metadata['priceSnapshot'] : [];
-        $trafficGb = $metadata['trafficGb'] ?? (OrderType::ADD_TRAFFIC === $order->getType() ? null : $order->getPlan()->getTrafficGb());
-        $durationDays = OrderType::ADD_TRAFFIC === $order->getType() ? null : ($metadata['durationDays'] ?? $order->getPlan()->getDurationDays());
+        // A wallet top-up has no plan: no plan, traffic or duration lines.
+        $plan = $order->getPlan();
+        $trafficGb = $metadata['trafficGb'] ?? (OrderType::ADD_TRAFFIC === $order->getType() ? null : $plan?->getTrafficGb());
+        $durationDays = OrderType::ADD_TRAFFIC === $order->getType() ? null : ($metadata['durationDays'] ?? $plan?->getDurationDays());
 
         return [
             'type' => $order->getType(),
-            'plan' => $order->getPlan()->getTitle(),
+            'plan' => $plan?->getTitle(),
             'trafficGb' => is_numeric($trafficGb) ? (int) $trafficGb : null,
             'durationDays' => is_numeric($durationDays) ? (int) $durationDays : null,
-            'unlimitedDuration' => true === ($metadata['unlimitedDuration'] ?? false) || (OrderType::NEW_SERVICE === $order->getType() && $order->getPlan()->isUnlimitedDuration()),
+            'unlimitedDuration' => true === ($metadata['unlimitedDuration'] ?? false) || (OrderType::NEW_SERVICE === $order->getType() && true === $plan?->isUnlimitedDuration()),
             'baseAmount' => (int) ($snapshot['baseAmount'] ?? $order->getAmount()),
             'globalDiscountAmount' => (int) ($snapshot['globalDiscountAmount'] ?? 0),
             'discountCode' => isset($snapshot['discountCode']) && '' !== (string) $snapshot['discountCode'] ? (string) $snapshot['discountCode'] : null,

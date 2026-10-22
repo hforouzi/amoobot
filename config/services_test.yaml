@@ -17,7 +17,7 @@ services:
         public: true
         tags: ['doctrine.middleware']
 
-    # TEMP-WALLET: until WalletService has a consumer (removed in part 2).
-    App\Wallet\Application\WalletService:
+    # TEMP-WALLET: until the bot / Mini App use WalletTopUp (part 4).
+    App\Wallet\Application\WalletTopUp:
         autowire: true
         public: true
