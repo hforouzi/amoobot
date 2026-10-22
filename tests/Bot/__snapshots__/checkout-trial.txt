@@ -1,0 +1,30 @@
+answerCallbackQuery chat=cb
+
+sendMessage chat=731100
+  text: در حال ساخت اکانت تست شما هستیم...
+
+sendMessage chat=731100
+  text: 🎁 اکانت تست شما آماده شد
+
+نام سرویس:
+<code>SERVICE_VALUE</code>
+
+🔗 لینک اشتراک:
+<a href="SERVICE_VALUE">باز کردن لینک اشتراک</a>
+
+برای کپی:
+<code>SERVICE_VALUE</code>
+
+⚙️ کانفیگ‌ها:
+
+1. <a href="vless://SERVICE_VALUE@edge.panel.test:443?type=tcp&amp;security=none#test">کانفیگ ۱</a>
+<code>vless://SERVICE_VALUE@edge.panel.test:443?type=tcp&amp;security=none#test</code>
+  parse_mode: HTML
+
+answerCallbackQuery chat=cb
+
+sendMessage chat=731100
+  text: در حال ساخت اکانت تست شما هستیم...
+
+sendMessage chat=731100
+  text: شما قبلاً اکانت تست دریافت کرده‌اید.

@@ -1,0 +1,43 @@
+answerCallbackQuery chat=cb
+
+sendMessage chat=731100
+  text: لطفاً نام دلخواه اکانت را وارد کنید.
+  [inline_keyboard] ❌ انصراف -> draft_cancel:DRAFT
+
+sendMessage chat=731100
+  text: حجم موردنظر را وارد کنید. حداقل 10 گیگ و حداکثر 100 گیگ.
+  [inline_keyboard] 🔙 بازگشت -> draft_back:DRAFT
+  [inline_keyboard] ❌ انصراف -> draft_cancel:DRAFT
+
+sendMessage chat=731100
+  text: حجم نامعتبر است. عدد صحیح بین 10 تا 100 وارد کنید.
+
+sendMessage chat=731100
+  text: مدت زمان موردنظر را وارد کنید. حداقل 30 روز و حداکثر 90 روز.
+  [inline_keyboard] 🔙 بازگشت -> draft_back:DRAFT
+  [inline_keyboard] ❌ انصراف -> draft_cancel:DRAFT
+
+sendMessage chat=731100
+  text: مدت نامعتبر است. عدد صحیح بین 30 تا 90 وارد کنید.
+
+sendMessage chat=731100
+  text: پلن: Test plan
+خلاصه سفارش:
+نام اکانت: custom_user
+نام نهایی: FINAL_USERNAME
+حجم: 40 گیگ
+مدت: 60 روز
+مبلغ پایه: 140000 تومان
+تخفیف سراسری: 0 تومان
+کد تخفیف: -
+مبلغ نهایی: 140000 تومان
+  [inline_keyboard] ✅ تایید سفارش -> custom_order_confirm:DRAFT
+  [inline_keyboard] 🔙 بازگشت -> draft_back:DRAFT | ❌ انصراف -> draft_cancel:DRAFT
+
+answerCallbackQuery chat=cb
+
+sendMessage chat=731100
+  text: کد تخفیف دارید؟
+  [inline_keyboard] 🔙 بازگشت -> order_summary:ORDER
+  [inline_keyboard] 🎟 وارد کردن کد تخفیف -> discount_enter_order:ORDER | ادامه بدون کد تخفیف -> discount_skip_order:ORDER
+  [inline_keyboard] ❌ انصراف -> order_cancel:ORDER
