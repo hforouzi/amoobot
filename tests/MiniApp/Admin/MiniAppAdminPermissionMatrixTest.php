@@ -41,7 +41,8 @@ final class MiniAppAdminPermissionMatrixTest extends IntegrationTestCase
     use MiniAppTestTrait;
     use RestoresTables;
 
-    private const SECRETS = ['panel-secret.example', 'panel-pass-123', 'gw-api-key-456', 'AgAD-receipt', 'dummy_existing'];
+    /** The panel's address and login, a gateway key, a receipt file id, a panel remote id, the bot token. */
+    private const SECRETS = ['panel-secret.example', 'panel-pass-123', 'gw-api-key-456', 'AgAD-receipt', 'dummy_existing', 'test-only-fake-token'];
 
     protected function setUp(): void
     {
@@ -119,6 +120,46 @@ final class MiniAppAdminPermissionMatrixTest extends IntegrationTestCase
             self::assertSame(401, $this->httpStatus(), $name.' without a session');
         }
         self::assertGreaterThan(100, $checked);
+    }
+
+    /** As on the web (AdminRolePermissions): panels, settings and logs are the super admin's. */
+    public function testAnAdminHasNoPanelsSettingsOrLogs(): void
+    {
+        $session = $this->authenticate(self::ADMIN);
+        $routes = self::getContainer()->get(RouterInterface::class)->getRouteCollection();
+        $checked = 0;
+        foreach (AdminRoutePermissions::routes() as $name => $permission) {
+            if (!in_array($permission, [AdminPermission::PANELS_MANAGE, AdminPermission::SETTINGS_MANAGE, AdminPermission::LOGS_VIEW], true)) {
+                continue;
+            }
+            $route = $routes->get($name);
+            self::assertInstanceOf(Route::class, $route);
+            in_array('POST', $route->getMethods(), true) ? $this->appPostJson($this->pathOf($route), $session, [], self::newKey()) : $this->appGet($this->pathOf($route), $session);
+            self::assertSame(403, $this->httpStatus(), $name);
+            ++$checked;
+        }
+        self::assertGreaterThan(15, $checked);
+    }
+
+    /** Every state-changing admin call needs the session's CSRF token, whatever the role. */
+    public function testEveryAdminPostNeedsTheCsrfToken(): void
+    {
+        $session = $this->authenticate(self::SUPER);
+        $routes = self::getContainer()->get(RouterInterface::class)->getRouteCollection();
+        $checked = 0;
+        foreach (array_keys(AdminRoutePermissions::routes()) as $name) {
+            $route = $routes->get($name);
+            self::assertInstanceOf(Route::class, $route);
+            if (!in_array('POST', $route->getMethods(), true)) {
+                continue;
+            }
+            $answer = $this->appPostJson($this->pathOf($route), $session, [], self::newKey(), 'wrong-csrf');
+            self::assertSame(403, $this->httpStatus(), $name);
+            self::assertSame('csrf', $answer['error'] ?? null, $name);
+            ++$checked;
+        }
+        self::assertGreaterThan(60, $checked);
+        self::assertSame([], array_filter($this->auditRows(), static fn (array $r): bool => 'miniapp' === $r['source']), 'nothing was done');
     }
 
     public function testAPermissionRemovedMidSessionClosesItsActionsAtOnce(): void
