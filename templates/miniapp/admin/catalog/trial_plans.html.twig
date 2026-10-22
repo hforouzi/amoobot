@@ -1,0 +1,37 @@
+{% extends 'miniapp/view/_base.html.twig' %}
+{% import 'miniapp/admin/_macros.html.twig' as ui %}
+{% trans_default_domain 'miniapp' %}
+{% block section %}admin{% endblock %}
+{% block title %}{{ 'admin.trial.title'|trans }}{% endblock %}
+{% block attributes %} data-back data-main-button-text="{{ 'admin.trial.new'|trans }}" data-main-button-href="{{ path('miniapp_admin_trial_plan_new') }}"{% endblock %}
+{% block content %}
+    <section class="card">
+        <div class="head">
+            <h1>{{ 'admin.trial.title'|trans }}</h1>
+            <a class="btn small fit" href="{{ path('miniapp_admin_trial_plan_new') }}" data-nav>＋ {{ 'admin.trial.new'|trans }}</a>
+        </div>
+        <a class="btn secondary small spaced" href="{{ path('miniapp_admin_trial_claims') }}" data-nav data-claims-link>🧾 {{ 'admin.trial.claims'|trans }}</a>
+    </section>
+    {% if trialPlans is empty %}
+        {{ ui.empty('admin.trial.none') }}
+    {% else %}
+        <div class="list">
+            {% for trial in trialPlans %}
+                <div class="list-item admin-row plan-card" data-trial-id="{{ trial.id }}" data-active="{{ trial.active ? 1 : 0 }}">
+                    <a class="list-main" href="{{ path('miniapp_admin_trial_plan', {id: trial.id}) }}" data-nav>
+                        <strong>{{ trial.title }}</strong>
+                        <span class="muted">
+                            {{ 'admin.service.days'|trans({'%days%': trial.durationDays}) }}
+                            · {{ trial.trafficGb is null ? 'admin.plan.unlimited_traffic'|trans : 'admin.service.gb'|trans({'%gb%': trial.trafficGb}) }}
+                            · {{ 'admin.trial.per_user'|trans({'%count%': trial.maxClaimsPerUser}) }}
+                        </span>
+                    </a>
+                    {% set toggle = trial.active ? 'miniapp_admin_trial_plan_deactivate' : 'miniapp_admin_trial_plan_activate' %}
+                    {% if can[toggle] %}
+                        <button type="button" class="switch-button{{ trial.active ? ' on' : '' }}" role="switch" aria-checked="{{ trial.active ? 'true' : 'false' }}" aria-label="{{ 'field.is_active'|trans({}, 'admin') }}" data-action="{{ path(toggle, {id: trial.id}) }}" data-reload data-admin-action="{{ trial.active ? 'deactivate' : 'activate' }}"><span></span></button>
+                    {% endif %}
+                </div>
+            {% endfor %}
+        </div>
+    {% endif %}
+{% endblock %}

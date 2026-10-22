@@ -57,7 +57,7 @@ final class MiniAppAdminPlansTest extends IntegrationTestCase
     public static function webCases(): iterable
     {
         foreach (CatalogRulesTest::invalidInput() as $name => $case) {
-            if (in_array($case[0], ['plan'], true)) {
+            if (in_array($case[0], ['plan', 'trial-plan'], true)) {
                 yield $name => $case;
             }
         }
@@ -230,7 +230,7 @@ final class MiniAppAdminPlansTest extends IntegrationTestCase
         $session = $this->authenticate(self::SUPPORT);
         $admin = new Crawler($this->appGet('/app/admin', $session));
         self::assertCount(0, $admin->filter('[data-area="admin.plans"]'));
-        foreach (['/app/admin/plans', '/app/admin/plans/bulk'] as $path) {
+        foreach (['/app/admin/plans', '/app/admin/plans/bulk', '/app/admin/trial-plans'] as $path) {
             $this->appGet($path, $session);
             self::assertSame(403, $this->httpStatus(), $path);
         }

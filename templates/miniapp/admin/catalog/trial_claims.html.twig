@@ -1,0 +1,32 @@
+{% extends 'miniapp/view/_base.html.twig' %}
+{% import 'miniapp/admin/_macros.html.twig' as ui %}
+{% trans_default_domain 'miniapp' %}
+{% block section %}admin{% endblock %}
+{% block title %}{{ 'admin.trial.claims'|trans }}{% endblock %}
+{% block attributes %} data-back{% endblock %}
+{% block content %}
+    <section class="card">
+        <h1>{{ 'admin.trial.claims'|trans }}</h1>
+        {{ ui.search('miniapp_admin_trial_claims', query, 'admin.trial.claims_search', {}) }}
+    </section>
+    {% if list.items is empty %}
+        {{ ui.empty(query ? 'admin.no_results' : 'admin.trial.no_claims') }}
+    {% else %}
+        <div class="list">
+            {% for claim in list.items %}
+                {% set account = claim.telegramAccount %}
+                <div class="list-item admin-row" data-claim-id="{{ claim.id }}">
+                    <span class="list-main">
+                        <span class="head">
+                            <strong>{{ claim.trialPlan.title }}</strong>
+                            <span class="badge claim-{{ claim.status }}">{{ ('admin.trial.status.' ~ claim.status)|trans }}</span>
+                        </span>
+                        <span class="muted">{{ ui.who({name: ((account.firstName ?? '') ~ ' ' ~ (account.lastName ?? ''))|trim, username: account.username, telegramId: account.telegramId}) }}</span>
+                        <span class="muted"><time datetime="{{ claim.createdAt|date('c') }}">{{ claim.createdAt|sub_date(lang) }} {{ claim.createdAt|date('H:i') }}</time></span>
+                    </span>
+                </div>
+            {% endfor %}
+        </div>
+    {% endif %}
+    {{ ui.pager('miniapp_admin_trial_claims', list, {q: query}) }}
+{% endblock %}

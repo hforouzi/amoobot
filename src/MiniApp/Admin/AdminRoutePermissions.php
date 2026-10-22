@@ -74,6 +74,15 @@ final class AdminRoutePermissions
             'miniapp_admin_plan_bulk' => AdminPermission::PLANS_MANAGE,
             'miniapp_admin_plan_bulk_preview' => AdminPermission::PLANS_MANAGE,
             'miniapp_admin_plan_bulk_apply' => AdminPermission::PLANS_MANAGE,
+            'miniapp_admin_trial_plans' => AdminPermission::PLANS_MANAGE,
+            'miniapp_admin_trial_plan_new' => AdminPermission::PLANS_MANAGE,
+            'miniapp_admin_trial_plan' => AdminPermission::PLANS_MANAGE,
+            'miniapp_admin_trial_plan_create' => AdminPermission::PLANS_MANAGE,
+            'miniapp_admin_trial_plan_update' => AdminPermission::PLANS_MANAGE,
+            'miniapp_admin_trial_plan_check' => AdminPermission::PLANS_MANAGE,
+            'miniapp_admin_trial_plan_activate' => AdminPermission::PLANS_MANAGE,
+            'miniapp_admin_trial_plan_deactivate' => AdminPermission::PLANS_MANAGE,
+            'miniapp_admin_trial_claims' => AdminPermission::PLANS_MANAGE,
         ];
     }
 
