@@ -20,6 +20,10 @@
  * request for the server; after an error the key is dropped and the next try is a new one.
  * An admin money / destructive action is first answered 428 with {confirm: {token, message}}: the message is shown in
  * Telegram's confirm dialog and only on OK the call is repeated with the token in X-Admin-Confirm (same key).
+ *   a[data-replace]        (filter chips, pager) opens in place of the current section (BackButton skips it)
+ *   form[data-search]      opens that URL with the form's non-empty fields as the query, in place
+ *   img[data-auth-src]     loaded with the session token (a receipt), shown as a data: URL
+ *   .view-root[data-main-button-action]  Telegram's MainButton runs the [data-main-action] button
  *   button[data-copy]      copies its value
  *   button[data-close-app] closes the Mini App (back to the chat)
  *   .view-root[data-main-button-text][data-main-button-href|data-main-button-form]  Telegram's MainButton
@@ -126,6 +130,20 @@
         var text = root && root.getAttribute('data-main-button-text');
         var href = root && root.getAttribute('data-main-button-href');
         var formId = root && root.getAttribute('data-main-button-form');
+        var action = root && root.getAttribute('data-main-button-action');
+        if (text && action) {
+            mainButtonHandler = function () {
+                var button = root.querySelector('[data-main-action="' + action + '"]');
+                if (button) {
+                    haptic('select');
+                    runAction(button);
+                }
+            };
+            tg.MainButton.setText(text);
+            tg.MainButton.onClick(mainButtonHandler);
+            tg.MainButton.show();
+            return;
+        }
         if (!text || (!href && !formId)) {
             tg.MainButton.hide();
             return;
@@ -296,6 +314,7 @@
             updateBackButton();
             updateMainButton(root);
             startPolling(root);
+            loadAuthImages(root);
             if (!keepScroll) {
                 window.scrollTo(0, 0);
             }
@@ -338,6 +357,38 @@
             nav.innerHTML = html;
             nav.hidden = nav.children.length === 0;
         });
+    }
+
+    function loadAuthImages(root) {
+        if (!root) {
+            return;
+        }
+        root.querySelectorAll('img[data-auth-src]').forEach(function (img) {
+            var failed = function () {
+                var note = document.createElement('p');
+                note.className = 'muted';
+                note.textContent = img.getAttribute('data-failed-text') || body.getAttribute('data-msg-error');
+                img.replaceWith(note);
+            };
+            api('GET', img.getAttribute('data-auth-src')).then(function (response) {
+                if (!response.ok) {
+                    throw new Error('image');
+                }
+                return response.blob();
+            }).then(function (blob) {
+                var reader = new FileReader();
+                reader.onload = function () { img.src = reader.result; };
+                reader.onerror = failed;
+                reader.readAsDataURL(blob);
+            }).catch(failed);
+        });
+    }
+
+    /* Opens a URL in place of the current section (filters, pages, searches): Back goes to where the list came from. */
+    function replaceWith(url) {
+        haptic('select');
+        stack.pop();
+        navigate(url, true);
     }
 
     /* ---------- actions ---------- */
@@ -541,6 +592,12 @@
         if (form.matches('form[data-submit], form[data-upload]')) {
             e.preventDefault();
             submitForm(form);
+        } else if (form.matches('form[data-search]')) {
+            e.preventDefault();
+            var query = new URLSearchParams();
+            Object.keys(fieldsOf(form)).forEach(function (name) { query.set(name, fieldsOf(form)[name]); });
+            var search = query.toString();
+            replaceWith(form.getAttribute('data-search') + (search ? '?' + search : ''));
         }
     });
 
@@ -556,7 +613,10 @@
         if (!target) {
             return;
         }
-        if (target.matches('a[data-nav]')) {
+        if (target.matches('a[data-nav][data-replace]')) {
+            e.preventDefault();
+            replaceWith(target.getAttribute('href'));
+        } else if (target.matches('a[data-nav]')) {
             e.preventDefault();
             haptic('select');
             if (nav.contains(target)) {

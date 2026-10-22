@@ -155,3 +155,68 @@ details { margin-top: 12px; } summary { cursor: pointer; color: var(--accent); f
 ol.configs { padding-inline-start: 18px; margin: 10px 0 0; }
 ol.configs li { margin-bottom: 10px; }
 code { display: block; background: var(--code); border-radius: 8px; padding: 8px; font-size: .8rem; direction: ltr; text-align: left; overflow-wrap: anywhere; white-space: pre-wrap; }
+
+/* Admin area (templates/miniapp/admin/): compact cards, filter chips, a sticky action bar, the danger zone apart. */
+.toast { white-space: pre-line; }
+.spaced { margin-top: 12px; }
+.chevron { color: var(--muted); font-size: 1.3rem; line-height: 1; }
+.search { display: flex; gap: 8px; margin-top: 10px; }
+.search input, .form .input {
+    flex: 1 1 auto; min-width: 0; min-height: 44px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 10px;
+    background: var(--code); color: var(--fg); font: inherit;
+}
+.search input:focus, .form .input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.chips { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+.chips::-webkit-scrollbar { display: none; }
+.chip {
+    flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 4px 12px;
+    border: 1px solid var(--border); border-radius: 999px; background: var(--card); color: var(--fg);
+    font: inherit; font-size: .88rem; text-decoration: none; white-space: nowrap; cursor: pointer;
+}
+.chip.active { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); font-weight: 600; }
+.chip[aria-busy="true"] { opacity: .6; pointer-events: none; }
+.chip-count { font-size: .78rem; opacity: .8; }
+.presets { display: flex; flex-wrap: wrap; gap: 8px; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 8px; }
+.tile {
+    display: grid; gap: 2px; padding: 10px; border-radius: 12px; background: var(--code); color: var(--fg);
+    text-decoration: none; min-width: 0;
+}
+.tile b { font-size: 1.25rem; }
+.tile span { font-size: .8rem; color: var(--muted); overflow-wrap: anywhere; }
+.tile.hot { box-shadow: inset 0 0 0 2px var(--warn); }
+a.stat { color: var(--fg); text-decoration: none; }
+.list.compact .list-item { padding: 8px 12px; }
+.admin-row .list-main { display: grid; gap: 2px; }
+.admin-row .head strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.facts { margin: 10px 0 0; display: grid; gap: 6px; }
+.facts > div { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; min-width: 0; }
+.facts dt { color: var(--muted); font-size: .9rem; flex: 0 0 auto; }
+.facts dd { margin: 0; text-align: end; min-width: 0; overflow-wrap: anywhere; }
+.notice-line { margin: 10px 0 0; padding: 8px 10px; border-radius: 10px; background: var(--code); border-inline-start: 4px solid var(--warn); overflow-wrap: anywhere; }
+.notice-line.bad { border-inline-start-color: var(--bad); }
+.timeline { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.timeline li { display: flex; justify-content: space-between; gap: 8px; padding-inline-start: 12px; border-inline-start: 2px solid var(--border); }
+.receipt { display: block; width: 100%; max-height: 70vh; object-fit: contain; border-radius: 10px; background: var(--code); min-height: 120px; }
+.copy-mini { border: 0; background: none; cursor: pointer; padding: 0 4px; font-size: .9rem; }
+.empty { text-align: center; display: grid; justify-items: center; gap: 4px; }
+.empty-icon { font-size: 2rem; }
+/* The primary actions stay at hand above the bottom navigation. */
+.action-bar {
+    position: sticky; bottom: calc(var(--nav-h) + 8px + env(safe-area-inset-bottom)); z-index: 5;
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; padding: 10px;
+    background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: 0 6px 20px rgba(0, 0, 0, .12);
+}
+body.keyboard .action-bar { position: static; }
+.danger-zone { border-color: var(--bad); }
+.danger-zone h2 { color: var(--bad); }
+.btn.danger { color: var(--bad); border-color: var(--bad); }
+.btn.danger-solid { background: var(--bad); color: #fff; }
+/* Payment statuses: amber while waiting, red when it needs a human, green when settled, grey when closed. */
+.badge[class*="pay-"] { background: var(--code); color: var(--muted); }
+.badge.pay-pending, .badge.pay-submitted { background: var(--warn); color: #fff; }
+.badge.pay-needs_review, .badge.pay-provisioning_failed { background: var(--bad); color: #fff; }
+.badge.pay-confirmed { background: var(--ok); color: #fff; }
+.badge.deleted { background: var(--code); color: var(--muted); }
+.badge.health-connected { background: var(--ok); } .badge.health-degraded { background: var(--warn); }
+.badge.health-error { background: var(--bad); } .badge.health-untested { background: var(--code); color: var(--muted); }
