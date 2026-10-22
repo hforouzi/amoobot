@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace App\Entity;
 
+use App\Broadcast\BroadcastFormat;
 use Doctrine\DBAL\Types\Types;
 use Doctrine\ORM\Mapping as ORM;
 use Symfony\Component\Validator\Constraints as Assert;
+use Symfony\Component\Validator\Context\ExecutionContextInterface;
 
 #[ORM\Entity]
 class BroadcastMessage
@@ -17,6 +19,8 @@ class BroadcastMessage
     public const STATUS_SENT = 'sent';
     public const STATUS_FAILED = 'failed';
     public const STATUS_CANCELLED = 'cancelled';
+    /** Stopped by BroadcastSender: Telegram could not parse the text (metadata stopReason "format_error"). */
+    public const STATUS_STOPPED = 'stopped';
 
     public const TARGET_ALL = 'all';
     public const TARGET_ACTIVE_USERS = 'active_users';
@@ -32,6 +36,7 @@ class BroadcastMessage
         self::STATUS_SENT,
         self::STATUS_FAILED,
         self::STATUS_CANCELLED,
+        self::STATUS_STOPPED,
     ];
 
     public const TARGET_TYPES = [
@@ -330,6 +335,16 @@ class BroadcastMessage
         $this->metadata = $metadata;
 
         return $this;
+    }
+
+    /** Telegram's formatting rules for the chosen parse mode (BroadcastFormat), on the body. */
+    #[Assert\Callback]
+    public function validateFormat(ExecutionContextInterface $context): void
+    {
+        $problem = BroadcastFormat::problem($this->body, $this->parseMode);
+        if (null !== $problem) {
+            $context->buildViolation($problem->message, $problem->parameters)->atPath('body')->addViolation();
+        }
     }
 
     public function isEditable(): bool

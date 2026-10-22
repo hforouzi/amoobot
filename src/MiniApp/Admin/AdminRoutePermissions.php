@@ -107,6 +107,7 @@ final class AdminRoutePermissions
             'miniapp_admin_broadcast_send' => AdminPermission::BROADCAST_SEND,
             'miniapp_admin_broadcast_cancel' => AdminPermission::BROADCAST_SEND,
             'miniapp_admin_broadcast_retry' => AdminPermission::BROADCAST_SEND,
+            'miniapp_admin_broadcast_duplicate' => AdminPermission::BROADCAST_SEND,
             // Panels: the super admin's, as on the web (no credential, URL or token is changed here).
             'miniapp_admin_panels' => AdminPermission::PANELS_MANAGE,
             'miniapp_admin_panel' => AdminPermission::PANELS_MANAGE,

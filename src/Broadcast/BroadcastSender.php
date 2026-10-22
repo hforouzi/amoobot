@@ -11,10 +11,17 @@ use Doctrine\ORM\EntityManagerInterface;
 
 final class BroadcastSender
 {
+    /**
+     * A broadcast stops itself when this many deliveries failed because Telegram could not parse its text and none was
+     * sent: the text is the same for everyone, so the rest would fail too.
+     */
+    public const FORMAT_ERROR_STOP_AFTER = 3;
+
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
         private readonly BroadcastRecipientResolver $recipientResolver,
         private readonly TelegramApiClient $telegramApiClient,
+        private readonly BroadcastStopAlert $stopAlert,
     ) {
     }
 
@@ -86,6 +93,8 @@ final class BroadcastSender
 
         $sent = 0;
         $failed = 0;
+        $parseFailures = null;
+        $parseError = null;
         $now = new \DateTimeImmutable();
 
         foreach ($deliveries as $delivery) {
@@ -114,6 +123,13 @@ final class BroadcastSender
                     ->setErrorMessage($e->getMessage())
                     ->setUpdatedAt($now);
                 ++$failed;
+                if (BroadcastFormat::isParseError($e->getMessage())) {
+                    $parseFailures = ($parseFailures ?? $this->parseFailures($broadcast)) + 1;
+                    $parseError = $e->getMessage();
+                    if (0 === $broadcast->getSentCount() + $sent && $parseFailures >= self::FORMAT_ERROR_STOP_AFTER) {
+                        break;
+                    }
+                }
             }
 
             usleep(50000);
@@ -122,8 +138,18 @@ final class BroadcastSender
         if (!$dryRun) {
             $this->entityManager->flush();
             $this->refreshCounts($broadcast);
-            $this->finishIfComplete($broadcast);
+            $stop = null !== $parseError && 0 === $broadcast->getSentCount() && $parseFailures >= self::FORMAT_ERROR_STOP_AFTER;
+            if ($stop) {
+                $this->stopForFormat($broadcast, $parseError);
+            } else {
+                $this->finishIfComplete($broadcast);
+            }
             $this->entityManager->flush();
+            if ($stop && !isset($broadcast->getMetadata()['stopAlertedAt'])) {
+                $this->stopAlert->formatError($broadcast, $parseError);
+                $broadcast->setMetadata(['stopAlertedAt' => (new \DateTimeImmutable())->format(\DATE_ATOM)] + ($broadcast->getMetadata() ?? []));
+                $this->entityManager->flush();
+            }
         }
 
         $pending = $dryRun
@@ -208,6 +234,38 @@ final class BroadcastSender
     public function deliveryCount(BroadcastMessage $broadcast): int
     {
         return (int) $this->entityManager->getRepository(BroadcastDelivery::class)->count(['broadcast' => $broadcast]);
+    }
+
+    /** Failed deliveries of the broadcast that Telegram refused because it could not parse the text. */
+    public function parseFailures(BroadcastMessage $broadcast): int
+    {
+        return (int) $this->entityManager->createQueryBuilder()->select('COUNT(d.id)')->from(BroadcastDelivery::class, 'd')
+            ->where('d.broadcast = :broadcast AND d.status = :failed AND LOWER(d.errorMessage) LIKE :parse')
+            ->setParameter('broadcast', $broadcast)->setParameter('failed', BroadcastDelivery::STATUS_FAILED)->setParameter('parse', "%can't parse entities%")
+            ->getQuery()->getSingleScalarResult();
+    }
+
+    /** A digest of what was sent (text and parse mode): a format error stays until this changes. */
+    public static function formatFingerprint(BroadcastMessage $broadcast): string
+    {
+        return hash('sha256', (string) $broadcast->getParseMode()."\0".$broadcast->getBody());
+    }
+
+    /**
+     * The rest of the recipients are not tried (their deliveries stay pending); the reason is kept for the admin pages
+     * and the retry refusal.
+     */
+    private function stopForFormat(BroadcastMessage $broadcast, string $error): void
+    {
+        $now = new \DateTimeImmutable();
+        $broadcast
+            ->setStatus(BroadcastMessage::STATUS_STOPPED)
+            ->setFinishedAt($now)
+            ->setUpdatedAt($now)
+            ->setMetadata([
+                'stopReason' => 'format_error',
+                'formatError' => ['error' => BroadcastStopAlert::reason($error), 'fingerprint' => self::formatFingerprint($broadcast)],
+            ] + ($broadcast->getMetadata() ?? []));
     }
 
     private function finishIfComplete(BroadcastMessage $broadcast): void

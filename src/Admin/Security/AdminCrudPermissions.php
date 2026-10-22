@@ -65,6 +65,7 @@ final class AdminCrudPermissions
             \App\Admin\UI\SubscriptionPageLinkController::class => $p(AdminPermission::SERVICES_MANAGE),
             Crud\BroadcastMessageCrudController::class => $p(AdminPermission::BROADCAST_SEND),
             Crud\BroadcastDeliveryCrudController::class => $p(AdminPermission::BROADCAST_SEND),
+            \App\Admin\UI\BroadcastActionsController::class => $p(AdminPermission::BROADCAST_SEND),
             Crud\BotMessageTemplateCrudController::class => $p(AdminPermission::BOT_TEXTS_MANAGE),
             Crud\BotButtonLabelCrudController::class => $p(AdminPermission::BOT_TEXTS_MANAGE),
             SettingsAdminController::class => $p(AdminPermission::SETTINGS_MANAGE),
