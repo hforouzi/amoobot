@@ -61,9 +61,10 @@
                 </div>
                 <form class="form spaced" data-submit="{{ path('miniapp_admin_service_extend', {id: id}) }}" data-reload novalidate>
                     <div class="inline-field">
-                        <input class="input" type="text" name="days" inputmode="numeric" maxlength="5" placeholder="{{ 'admin.service.custom_days'|trans({'%max%': maxDays}) }}" aria-label="{{ 'admin.service.custom_days'|trans({'%max%': maxDays}) }}">
+                        <input class="input" type="text" name="days" inputmode="numeric" maxlength="5" placeholder="{{ 'admin.service.custom_amount'|trans }}" aria-label="{{ 'admin.service.custom_days'|trans({'%max%': maxDays}) }}">
                         <button type="submit" class="btn small fit">{{ 'admin.service.apply'|trans }}</button>
                     </div>
+                    <p class="muted small-print">{{ 'admin.service.custom_days'|trans({'%max%': maxDays|number_format}) }}</p>
                     <p class="field-error" data-form-error hidden></p>
                 </form>
             </section>
@@ -76,9 +77,10 @@
                 </div>
                 <form class="form spaced" data-submit="{{ path('miniapp_admin_service_add_traffic', {id: id}) }}" data-reload novalidate>
                     <div class="inline-field">
-                        <input class="input" type="text" name="trafficGb" inputmode="numeric" maxlength="6" placeholder="{{ 'admin.service.custom_gb'|trans({'%max%': maxTrafficGb}) }}" aria-label="{{ 'admin.service.custom_gb'|trans({'%max%': maxTrafficGb}) }}">
+                        <input class="input" type="text" name="trafficGb" inputmode="numeric" maxlength="6" placeholder="{{ 'admin.service.custom_amount'|trans }}" aria-label="{{ 'admin.service.custom_gb'|trans({'%max%': maxTrafficGb}) }}">
                         <button type="submit" class="btn small fit">{{ 'admin.service.apply'|trans }}</button>
                     </div>
+                    <p class="muted small-print">{{ 'admin.service.custom_gb'|trans({'%max%': maxTrafficGb|number_format}) }}</p>
                     <p class="field-error" data-form-error hidden></p>
                 </form>
             </section>
