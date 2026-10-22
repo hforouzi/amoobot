@@ -121,6 +121,7 @@ final class MiniAppAdminPermissionMatrixTest extends IntegrationTestCase
             '/trial-plans/' => $this->trialPlan->getId(),
             '/discounts/' => $this->discount->getId(),
             '/broadcasts/' => $this->broadcast->getId(),
+            '/panels/' => $this->service->getPanel()?->getId(),
         ];
         $path = $route->getPath();
         foreach ($ids as $segment => $id) {

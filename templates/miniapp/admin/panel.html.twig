@@ -1,0 +1,57 @@
+{% extends 'miniapp/view/_base.html.twig' %}
+{% import 'miniapp/admin/_macros.html.twig' as ui %}
+{% trans_default_domain 'miniapp' %}
+{# One panel: health and the last test's explanation, the connection test and the active switch, and its inbounds
+   (read only: attached for sale or not, plans). Changing the connection stays on the web. #}
+{% block section %}admin{% endblock %}
+{% block title %}{{ panel.title }}{% endblock %}
+{% block attributes %} data-back data-panel-id="{{ panel.id }}"{% endblock %}
+{% block content %}
+    <section class="card" data-health="{{ panel.health }}">
+        <div class="head">
+            <h1>{{ panel.title }}</h1>
+            <span class="badge health-{{ panel.health }}">{{ ('admin.home.panel_state.' ~ panel.health)|trans }}</span>
+        </div>
+        <dl class="facts">
+            <div><dt>{{ 'admin.panel.state'|trans }}</dt><dd>{{ panel.active ? 'admin.panel.active'|trans : 'admin.panel.inactive'|trans }}</dd></div>
+            <div><dt>{{ 'admin.panel.checked'|trans }}</dt><dd>{{ panel.checkedAt ? panel.checkedAt|sub_date(lang) ~ ' ' ~ panel.checkedAt|date('H:i') : 'admin.panel.never'|trans }}</dd></div>
+            <div><dt>{{ 'admin.panel.mode'|trans }}</dt><dd class="ltr">{{ panel.mode }}</dd></div>
+            <div><dt>{{ 'admin.panel.plans'|trans }}</dt><dd>{{ panel.plans }}</dd></div>
+            {% if panel.degradedSince %}<div><dt>{{ 'admin.panel.degraded_since'|trans }}</dt><dd>{{ panel.degradedSince|sub_date(lang) }} {{ panel.degradedSince|date('H:i') }}</dd></div>{% endif %}
+        </dl>
+        {% if panel.subscription is not null %}<p class="muted" data-subscription-check="{{ panel.subscription }}">{{ ('admin.panel.subscription.' ~ panel.subscription)|trans }}</p>{% endif %}
+        {% if panel.lastFailure %}
+            <div class="notice-line bad" data-last-failure>
+                <b>{{ panel.lastFailure }}</b>
+                {% if panel.lastFix %}<p class="muted">{{ panel.lastFix }}</p>{% endif %}
+            </div>
+        {% endif %}
+        <div class="row">
+            <button type="button" class="btn secondary small" data-action="{{ path('miniapp_admin_panel_test', {id: panel.id}) }}" data-reload data-admin-action="test">🔌 {{ 'admin.panel.test'|trans }}</button>
+            {% if panel.active %}
+                <button type="button" class="btn secondary small" data-action="{{ path('miniapp_admin_panel_deactivate', {id: panel.id}) }}" data-reload data-admin-action="deactivate">⏸ {{ 'admin.plan.deactivate'|trans }}</button>
+            {% else %}
+                <button type="button" class="btn secondary small" data-action="{{ path('miniapp_admin_panel_activate', {id: panel.id}) }}" data-reload data-admin-action="activate">▶️ {{ 'admin.plan.activate'|trans }}</button>
+            {% endif %}
+        </div>
+    </section>
+    <section class="card">
+        <h2>{{ 'admin.panel.inbounds'|trans }} ({{ panel.inbounds }})</h2>
+        {% if inbounds is empty %}<p class="muted">{{ 'admin.panel.no_inbounds'|trans }}</p>{% endif %}
+        <ul class="list compact">
+            {% for i in inbounds %}
+                <li class="list-item" data-inbound data-attached="{{ i.attached ? 1 : 0 }}">
+                    <span class="list-main">
+                        <span class="head">
+                            <strong class="title">{{ i.title }}</strong>
+                            <span class="badge {{ i.attached ? 'active' : 'muted-badge' }}">{{ i.attached ? 'admin.panel.attached'|trans : 'admin.panel.detached'|trans }}</span>
+                        </span>
+                        <span class="muted ltr">{{ [i.protocol, i.network, i.security]|filter(v => v)|join(' · ') ?: '—' }}</span>
+                        <span class="muted">{{ 'admin.panel.plans'|trans }}: <b data-plan-count>{{ i.plans }}</b>{% if i.syncedAt %} · {{ 'admin.panel.synced'|trans }}: {{ i.syncedAt|sub_date(lang) }}{% endif %}</span>
+                    </span>
+                </li>
+            {% endfor %}
+        </ul>
+    </section>
+    <section class="card"><p class="muted" data-web-only>{{ 'admin.panel.web_only'|trans }}</p></section>
+{% endblock %}
