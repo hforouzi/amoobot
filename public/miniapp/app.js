@@ -8,10 +8,18 @@
  * Sections are server-rendered fragments (templates/miniapp/view/) loaded into #view. Inside them:
  *   a[data-nav]            opens another section (stack kept for Telegram's BackButton)
  *   a[data-open-link]      opens a page in Telegram's in-app browser (the subscription page)
- *   button[data-action]    POSTs to that URL, shows the answer's message, reloads the section if data-reload
+ *   button[data-action]    POSTs to that URL (JSON body from data-body); the answer's redirect is opened, its
+ *                          message shown; data-reload reloads the section
+ *   form[data-submit]      sends its fields as JSON to that URL, then follows the answer's redirect
+ *   form[data-quote-url]   asks that URL for the server's price when [data-requote] fields change
+ *   form[data-upload]      sends its file (multipart) to that URL
+ *   .view-root[data-poll-url]  polled (backoff) until its state changes or is final, then the section reloads
+ *
+ * Every action and submit carries an Idempotency-Key kept on its element, so a double tap or a retry is the same
+ * request for the server; after an error the key is dropped and the next try is a new one.
  *   button[data-copy]      copies its value
  *   button[data-close-app] closes the Mini App (back to the chat)
- *   .view-root[data-main-button-text][data-main-button-href]  Telegram's MainButton for the section
+ *   .view-root[data-main-button-text][data-main-button-href|data-main-button-form]  Telegram's MainButton
  */
 (function () {
     'use strict';
@@ -114,13 +122,17 @@
         }
         var text = root && root.getAttribute('data-main-button-text');
         var href = root && root.getAttribute('data-main-button-href');
-        if (!text || !href) {
+        var formId = root && root.getAttribute('data-main-button-form');
+        if (!text || (!href && !formId)) {
             tg.MainButton.hide();
             return;
         }
         mainButtonHandler = function () {
             haptic('select');
-            if (root.getAttribute('data-main-button-external') !== null) {
+            var form = formId ? document.getElementById(formId) : null;
+            if (form) {
+                submitForm(form);
+            } else if (root.getAttribute('data-main-button-external') !== null) {
                 openLink(href);
             } else {
                 navigate(href, true);
@@ -202,19 +214,43 @@
         });
     }
 
-    /* fetch() with the session; on 401 signs in again once (initData stays valid for an hour). */
-    function api(method, url, retried) {
+    /*
+     * fetch() with the session; on 401 signs in again once (initData stays valid for an hour).
+     * options: json (sent as JSON), form (FormData, multipart), key (Idempotency-Key).
+     */
+    function api(method, url, options, retried) {
+        options = options || {};
         var headers = {'Accept': 'application/json, text/html', 'Authorization': 'Bearer ' + session.token};
+        var payload;
         if (method !== 'GET') {
             headers['X-CSRF-Token'] = session.csrfToken;
         }
-        return fetch(withLang(url), {method: method, headers: headers, credentials: 'omit'}).then(function (response) {
+        if (options.key) {
+            headers['Idempotency-Key'] = options.key;
+        }
+        if (options.json !== undefined) {
+            headers['Content-Type'] = 'application/json';
+            payload = JSON.stringify(options.json);
+        } else if (options.form) {
+            payload = options.form;
+        }
+        return fetch(withLang(url), {method: method, headers: headers, body: payload, credentials: 'omit'}).then(function (response) {
             if (response.status === 401 && !retried) {
                 saveSession(null);
-                return signIn().then(function () { return api(method, url, true); });
+                return signIn().then(function () { return api(method, url, options, true); });
             }
             return response;
         });
+    }
+
+    /* The Idempotency-Key of an element: made once, kept until a call with it fails. */
+    function keyOf(el) {
+        if (!el.getAttribute('data-idempotency-key')) {
+            var bytes = new Uint8Array(16);
+            window.crypto.getRandomValues(bytes);
+            el.setAttribute('data-idempotency-key', Array.prototype.map.call(bytes, function (b) { return ('0' + b.toString(16)).slice(-2); }).join(''));
+        }
+        return el.getAttribute('data-idempotency-key');
     }
 
     function withLang(url) {
@@ -223,7 +259,7 @@
 
     /* ---------- sections ---------- */
 
-    function navigate(path, push) {
+    function navigate(path, push, keepScroll) {
         return api('GET', path).then(function (response) {
             if (!response.ok) {
                 throw new Error('view');
@@ -243,7 +279,10 @@
             markNav(root ? root.getAttribute('data-view') : '');
             updateBackButton();
             updateMainButton(root);
-            window.scrollTo(0, 0);
+            startPolling(root);
+            if (!keepScroll) {
+                window.scrollTo(0, 0);
+            }
         }).catch(function () {
             toast(body.getAttribute(navigator.onLine === false ? 'data-msg-offline' : 'data-msg-error'));
         });
@@ -310,22 +349,172 @@
     }
 
     function runAction(button) {
-        button.setAttribute('aria-busy', 'true');
-        api('POST', button.getAttribute('data-action')).then(function (response) {
+        var json;
+        try { json = JSON.parse(button.getAttribute('data-body') || '{}'); } catch (e) { json = {}; }
+        send(button, 'POST', button.getAttribute('data-action'), {json: json, key: keyOf(button)}, null);
+    }
+
+    /* One state-changing call from an element (button or form): busy while it runs, then the answer is applied. */
+    function send(el, method, url, options, errorBox) {
+        if (el.getAttribute('aria-busy') === 'true') {
+            return;
+        }
+        el.setAttribute('aria-busy', 'true');
+        if (errorBox) {
+            errorBox.hidden = true;
+        }
+        api(method, url, options).then(function (response) {
             return response.json().catch(function () { return {}; }).then(function (data) {
-                haptic(response.ok ? 'success' : 'error');
-                toast(data.message || body.getAttribute('data-msg-error'));
-                if (response.ok && button.hasAttribute('data-reload')) {
-                    return navigate(current(), false);
+                if (!response.ok) {
+                    el.removeAttribute('data-idempotency-key');
+                    haptic('error');
+                    showError(data, errorBox);
+                    return;
+                }
+                haptic('success');
+                if (data.message) {
+                    toast(data.message);
+                }
+                if (data.redirect) {
+                    return navigate(data.redirect, true);
+                }
+                if (el.hasAttribute('data-reload')) {
+                    return navigate(current(), false, true);
                 }
             });
         }).catch(function () {
+            el.removeAttribute('data-idempotency-key');
             haptic('error');
-            toast(body.getAttribute('data-msg-error'));
+            toast(body.getAttribute(navigator.onLine === false ? 'data-msg-offline' : 'data-msg-error'));
         }).then(function () {
-            button.removeAttribute('aria-busy');
+            el.removeAttribute('aria-busy');
         });
     }
+
+    /* An error answer: its message, and the channels to join when membership is required. */
+    function showError(data, errorBox) {
+        var message = data.message || body.getAttribute('data-msg-error');
+        if (!errorBox) {
+            toast(message);
+            return;
+        }
+        errorBox.textContent = message;
+        (data.channels || []).forEach(function (channel) {
+            if (!channel.url) {
+                return;
+            }
+            var link = document.createElement('a');
+            link.href = channel.url;
+            link.setAttribute('data-open-link', '');
+            link.className = 'btn secondary small';
+            link.textContent = channel.title;
+            errorBox.appendChild(link);
+        });
+        errorBox.hidden = false;
+        errorBox.scrollIntoView({block: 'nearest'});
+    }
+
+    /* A form's fields as an object (empty ones left out). */
+    function fieldsOf(form) {
+        var data = {};
+        new FormData(form).forEach(function (value, name) {
+            if (typeof value === 'string' && value.trim() !== '') {
+                data[name] = value.trim();
+            }
+        });
+        return data;
+    }
+
+    function submitForm(form) {
+        var errorBox = form.querySelector('[data-form-error]');
+        if (form.hasAttribute('data-upload')) {
+            send(form, 'POST', form.getAttribute('data-upload'), {form: new FormData(form)}, errorBox);
+        } else {
+            send(form, 'POST', form.getAttribute('data-submit'), {json: fieldsOf(form), key: keyOf(form)}, errorBox);
+        }
+    }
+
+    /* The server's price for the form's current choices (nothing is created). */
+    var quoteTimer = null;
+    function requote(form, delay) {
+        clearTimeout(quoteTimer);
+        quoteTimer = setTimeout(function () {
+            var target = form.querySelector('[data-quote]');
+            api('POST', form.getAttribute('data-quote-url'), {json: fieldsOf(form)}).then(function (response) {
+                return response.json().then(function (data) {
+                    if (response.ok && target && data.html) {
+                        target.innerHTML = data.html;
+                    } else if (!response.ok) {
+                        showError(data, form.querySelector('[data-form-error]'));
+                    }
+                });
+            }).catch(function () { /* the price stays as shown; the submit checks again */ });
+        }, delay);
+    }
+
+    /* ---------- polling ---------- */
+
+    var POLL_DELAYS = [2000, 3000, 5000, 8000, 13000, 20000, 30000];
+    var pollRun = 0;
+
+    /* Polls the section's status URL with a growing delay (capped at 30 s) while it stays on screen; a changed or
+       final state reloads the section. Coming back to the app (Telegram's activated event) polls at once. */
+    function startPolling(root) {
+        var run = ++pollRun;
+        var url = root && root.getAttribute('data-poll-url');
+        if (!url) {
+            return;
+        }
+        var shown = root.getAttribute('data-poll-state');
+        var attempt = 0;
+        var timer = null;
+        var poll = function () {
+            if (run !== pollRun) {
+                return;
+            }
+            api('GET', url).then(function (response) {
+                return response.ok ? response.json() : null;
+            }).then(function (data) {
+                if (run !== pollRun) {
+                    return;
+                }
+                if (data && (data.final || data.state !== shown)) {
+                    haptic(data.state === 'paid' ? 'success' : 'select');
+                    navigate(current(), false, true);
+                    return;
+                }
+                schedule();
+            }).catch(schedule);
+        };
+        var schedule = function () {
+            clearTimeout(timer);
+            timer = setTimeout(poll, POLL_DELAYS[Math.min(attempt++, POLL_DELAYS.length - 1)]);
+        };
+        pollNow = function () {
+            if (run === pollRun) {
+                attempt = 0;
+                clearTimeout(timer);
+                poll();
+            }
+        };
+        schedule();
+    }
+    var pollNow = function () {};
+
+    document.addEventListener('submit', function (e) {
+        var form = e.target;
+        if (form.matches('form[data-submit], form[data-upload]')) {
+            e.preventDefault();
+            submitForm(form);
+        }
+    });
+
+    document.addEventListener('input', function (e) {
+        var form = e.target.closest('form[data-quote-url]');
+        if (form && e.target.matches('[data-requote]')) {
+            requote(form, 400);
+        }
+    });
 
     document.addEventListener('click', function (e) {
         var target = e.target.closest('a, button');
@@ -348,6 +537,8 @@
             copy(target.getAttribute('data-copy'));
         } else if (target.matches('button[data-close-app]')) {
             tg.close();
+        } else if (target.matches('button[data-requote-now]')) {
+            requote(target.closest('form'), 0);
         }
     });
 
@@ -392,6 +583,13 @@
     if (supports('6.1')) {
         tg.BackButton.onClick(back);
     }
+    // Back from the gateway's page or the bot: check the payment now instead of at the next poll.
+    tg.onEvent('activated', function () { pollNow(); });
+    document.addEventListener('visibilitychange', function () {
+        if (document.visibilityState === 'visible') {
+            pollNow();
+        }
+    });
     document.querySelector('[data-retry]').addEventListener('click', start);
     start();
 })();

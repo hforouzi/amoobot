@@ -67,6 +67,39 @@ final class SubscriptionPageController extends AbstractController
     }
 
     /**
+     * The import bridge for one client app: a page the Mini App opens in the external browser (Telegram's WebView
+     * blocks custom schemes such as hiddify:// and v2rayng://), with one big button carrying the app's import link
+     * and the subscription link to copy as a fallback. Same key, limits and headers as the subscription page; only
+     * a working subscription of an active app that has an import link has a bridge (404 otherwise).
+     */
+    #[Route('/s/{token}/open/{appId}', name: 'subscription_app_bridge', requirements: ['token' => self::TOKEN_PATTERN, 'appId' => '\d+'], methods: ['GET'])]
+    public function bridge(Request $request, string $token, int $appId): Response
+    {
+        $locale = 'en' === $request->query->get('lang') ? 'en' : 'fa';
+        $this->localeSwitcher->setLocale($locale);
+        $request->setLocale($locale);
+
+        if (!$this->limiter->create((string) $request->getClientIp())->consume()->isAccepted()) {
+            return $this->page('subscription/not_found.html.twig', [], Response::HTTP_TOO_MANY_REQUESTS);
+        }
+
+        $service = $this->entityManager->getRepository(VpnService::class)->findOneBy(['publicToken' => $token]);
+        $platform = ClientPlatform::fromUserAgent($request->headers->get('User-Agent'));
+        $view = $service instanceof VpnService ? $this->viewFactory->build($service, $platform) : null;
+        $app = null;
+        foreach (null !== $view && $view->isUsable() ? $view->apps : [] as $candidate) {
+            if ($appId === $candidate->id && null !== $candidate->importUrl) {
+                $app = $candidate;
+            }
+        }
+        if (null === $view || null === $app) {
+            return $this->page('subscription/not_found.html.twig', [], Response::HTTP_NOT_FOUND);
+        }
+
+        return $this->page('subscription/bridge.html.twig', ['view' => $view, 'clientApp' => $app, 'locale' => $locale]);
+    }
+
+    /**
      * @param array<string, mixed> $parameters
      */
     private function page(string $template, array $parameters, int $status = Response::HTTP_OK): Response

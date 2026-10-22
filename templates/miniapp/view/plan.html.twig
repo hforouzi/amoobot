@@ -1,0 +1,50 @@
+{% extends 'miniapp/view/_base.html.twig' %}
+{% trans_default_domain 'miniapp' %}
+{# A plan's checkout: account name, traffic/duration where the plan lets the customer choose, a discount code. The
+   price box is the server's quote (/app/api/checkout/quote); the form only sends choices, never a price. #}
+{% block section %}shop{% endblock %}
+{% block title %}{{ plan.title }}{% endblock %}
+{% block attributes %} data-back data-main-button-text="{{ 'checkout.continue'|trans }}" data-main-button-form="checkout-form"{% endblock %}
+{% block content %}
+    <section class="card">
+        <h1>{{ plan.title }}</h1>
+        <p class="muted">
+            {{ trafficGb ? 'plan.traffic'|trans({'%gb%': trafficGb}) : 'plan.traffic_unlimited'|trans }}
+            · {{ durationDays ? 'plan.duration'|trans({'%days%': durationDays}) : 'plan.duration_unlimited'|trans }}
+        </p>
+    </section>
+    {% if not salesOpen %}
+        <section class="card notice" data-sales-closed><p class="pre-line">{{ disabledMessage }}</p></section>
+    {% else %}
+        <form class="card form" id="checkout-form" data-submit="{{ path('miniapp_checkout_new') }}" data-quote-url="{{ path('miniapp_checkout_quote') }}" novalidate>
+            <input type="hidden" name="planId" value="{{ plan.id }}">
+            <label class="field">
+                <span>{{ 'checkout.account_name'|trans }}</span>
+                <input type="text" name="accountName" required minlength="3" maxlength="24" autocomplete="off" autocapitalize="none" spellcheck="false" dir="ltr" pattern="[A-Za-z0-9_]{3,24}">
+                <small class="muted">{{ 'checkout.account_name_hint'|trans }}</small>
+            </label>
+            {% if asksTraffic %}
+                <label class="field">
+                    <span>{{ 'checkout.traffic'|trans({'%min%': plan.minTrafficGb, '%max%': plan.maxTrafficGb}) }}</span>
+                    <input type="number" name="trafficGb" inputmode="numeric" min="{{ plan.minTrafficGb }}" max="{{ plan.maxTrafficGb }}" value="{{ trafficGb }}" data-requote dir="ltr">
+                </label>
+            {% endif %}
+            {% if asksDuration %}
+                <label class="field">
+                    <span>{{ 'checkout.duration'|trans({'%min%': plan.minDurationDays, '%max%': plan.maxDurationDays}) }}</span>
+                    <input type="number" name="durationDays" inputmode="numeric" min="{{ plan.minDurationDays }}" max="{{ plan.maxDurationDays }}" value="{{ durationDays }}" data-requote dir="ltr">
+                </label>
+            {% endif %}
+            <label class="field">
+                <span>{{ 'checkout.discount_code'|trans }}</span>
+                <span class="inline-field">
+                    <input type="text" name="discountCode" autocomplete="off" autocapitalize="characters" spellcheck="false" dir="ltr">
+                    <button type="button" class="btn secondary small fit" data-requote-now>{{ 'checkout.apply_code'|trans }}</button>
+                </span>
+            </label>
+            <div data-quote>{{ include('miniapp/view/_price.html.twig', {quote: quote}) }}</div>
+            <p class="field-error" data-form-error hidden></p>
+            <button type="submit" class="btn">{{ 'checkout.continue'|trans }}</button>
+        </form>
+    {% endif %}
+{% endblock %}

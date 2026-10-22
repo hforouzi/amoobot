@@ -20,6 +20,8 @@ final class ClientAppView
         public readonly ?string $importUrl,
         public readonly ?string $installUrl,
         public readonly bool $matchesPlatform,
+        /** The ClientApp id (the import bridge /s/{token}/open/{id} is per app). */
+        public readonly ?int $id = null,
     ) {
     }
 }

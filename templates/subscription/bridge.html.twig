@@ -1,0 +1,26 @@
+{% extends 'subscription/_layout.html.twig' %}
+{% trans_default_domain 'subscription' %}
+{# The import bridge for one client app, opened by the Mini App in the external browser, where custom schemes work:
+   one big button with the app's import link (tapped by the customer, never automatic) and, when nothing opens, the
+   subscription link to copy. #}
+{% block title %}{{ 'bridge.title'|trans({'%app%': clientApp.name}) }}{% endblock %}
+{% block body %}
+    <section class="card bridge" data-app>
+        <h1>{% if clientApp.icon %}{{ clientApp.icon }} {% endif %}{{ clientApp.name }}</h1>
+        <p class="muted">{{ 'bridge.intro'|trans({'%app%': clientApp.name}) }}</p>
+        <a class="btn bridge-open" href="{{ clientApp.importUrl }}" data-deeplink>➕ {{ 'bridge.open'|trans({'%app%': clientApp.name}) }}</a>
+        {% if clientApp.installUrl %}
+            <p class="muted" style="margin-top:12px">{{ 'bridge.not_installed'|trans({'%app%': clientApp.name}) }}</p>
+            <a class="btn secondary small" href="{{ clientApp.installUrl }}" rel="noopener noreferrer">⬇️ {{ 'apps.install'|trans }}</a>
+        {% endif %}
+        <div class="hint" data-fallback>
+            <p>{{ 'bridge.not_opening'|trans({'%app%': clientApp.name}) }}</p>
+            <button type="button" class="btn secondary small" data-copy="{{ view.subscriptionUrl }}">📋 {{ 'link.copy'|trans }}</button>
+        </div>
+        <p class="muted" style="margin-top:12px">{{ 'bridge.back'|trans }}</p>
+    </section>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+{% endblock %}
+{% block scripts %}
+    {{ include('subscription/_script.html.twig') }}
+{% endblock %}

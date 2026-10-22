@@ -1,10 +1,12 @@
 # Telegram Mini App
 
 The Mini App (`/app`) is a small web app that opens inside Telegram, for customers today and for admins and resellers
-later. In this release customers see their services (status, expiry, traffic), open the subscription page, have the
-bot send their link, QR code or configs into the chat, refresh usage, browse the client apps and downloads, and read
-the support text. Admins also get an **Admin** entry that lists the areas their role allows, marked "coming soon".
-Buying, paying and admin forms are not in the app yet: they stay in the bot and the web panel.
+later. Customers buy a service (or claim a trial), pay it with any of the shop's payment methods, renew it or add
+traffic, follow their orders, and use their subscription (link, QR code, configs, one-tap import into apps) without
+leaving Telegram. They also see their services, have the bot send links or configs into the chat, refresh usage,
+browse the client apps and downloads, and read the support text. Admins also get an **Admin** entry that lists the
+areas their role allows, marked "coming soon"; admin forms stay in the bot and the web panel. The bot keeps working
+exactly as before: both use the same checkout services (`src/Shop/Application/Checkout`).
 
 ## Requirements
 
@@ -12,7 +14,8 @@ Buying, paying and admin forms are not in the app yet: they stay in the bot and 
   internet. The app uses the shop's own domain: set `DEFAULT_URI=https://shop.example.com` (the same value the bot
   already uses for the subscription page). `localhost`, private IPs and plain `http://` are refused: no button is
   shown and the menu-button command stops with an error.
-- **The migration** `Version20261022120000` (table `mini_app_session`): `php bin/console doctrine:migrations:migrate`.
+- **The migrations** `Version20261022120000` (table `mini_app_session`) and `Version20261023090000` (table
+  `checkout_request`): `php bin/console doctrine:migrations:migrate`.
 - **The bot token** `TELEGRAM_BOT_TOKEN`: the app checks that the login data was signed with it.
 - No BotFather domain registration (`/setdomain` is for the Login Widget, not for Mini Apps).
 
@@ -75,9 +78,18 @@ Use the same URL everywhere; it must match `DEFAULT_URI`.
   attempts are logged with the reason and the IP only, never the login data or a token.
 - Pages are `no-store`, `noindex`, sent without a Referer, and allow only the site's own files and Telegram's
   `telegram-web-app.js` (Content-Security-Policy).
-- What the app shows about a service is what the subscription page's status block shows: plan, status, expiry, traffic.
-  No panel address, sub id, config, subscription URL or token is in any `/app` response. Those stay on the
-  subscription page (opened from the app with Telegram's in-app browser) or reach the chat through the bot.
+- The customer's own subscription link, QR code and configs appear in exactly one `/app` response: the subscription
+  view `/app/view/services/{id}/subscription`, for its signed-in owner. Every other `/app` response shows a service
+  only as the subscription page's status block does (plan, status, expiry, traffic). Panel addresses, panel tokens,
+  the bot token and other customers' data appear in no response at all (tests check each of these).
+- Prices, discounts and totals are always computed by the server; nothing the client sends about a price is read.
+  Every call that creates something (order, payment, trial) carries an `Idempotency-Key` from the page: the first call
+  with a key inserts it into `checkout_request` (unique per customer) in the same transaction, a repeat (double tap,
+  retry after a lost answer, or a parallel request) gets the first answer back, so no second order or payment is
+  ever made. Creating calls are limited to 20 per 10 minutes per Telegram user, receipt uploads to 10.
+- The app never marks a payment paid. Its status endpoint only reads the payment's state; payments are confirmed
+  by the gateway's webhook/callback, its return page (`/payment/return/{token}`), the bot's "check payment" button or
+  an admin, exactly as before.
 
 ## Routes
 
@@ -90,6 +102,48 @@ Use the same URL everywhere; it must match `DEFAULT_URI`.
 | `/app/view/nav` | GET | Bottom navigation for this user |
 | `/app/view/home`, `/app/view/services`, `/app/view/services/{id}`, `/app/view/apps`, `/app/view/help`, `/app/view/admin` | GET | Sections (HTML fragments) |
 | `/app/api/services/{id}/send-link`, `send-qr`, `resend-config`, `refresh` | POST | The owner's service actions |
+| `/app/view/shop`, `/app/view/shop/plans/{id}` | GET | Plans for sale, a plan's checkout form |
+| `/app/api/checkout/quote`, `/app/api/checkout/new` | POST | Server price; create a new-service order (key) |
+| `/app/api/trial/{id}` | POST | Claim a trial (key) |
+| `/app/view/orders/{id}/pay`, `/app/api/orders/{id}/pay` | GET / POST | Choose a payment method; start the payment (key) |
+| `/app/api/orders/{id}/cancel` | POST | Cancel an unpaid order |
+| `/app/view/payments/{id}`, `/app/api/payments/{id}/status` | GET | A payment's page; its state (read only, polled) |
+| `/app/api/payments/{id}/receipt` | POST | Card-to-card receipt photo (multipart) |
+| `/app/view/services/{id}/renew`, `/app/api/services/{id}/renew[/quote]` | GET / POST | Renew a service |
+| `/app/view/services/{id}/add-traffic`, `/app/api/services/{id}/add-traffic[/quote]` | GET / POST | Extra traffic |
+| `/app/view/orders`, `/app/view/orders/{id}` | GET | My orders (paged), one order |
+| `/app/view/services/{id}/subscription` | GET | The owner's subscription: link, QR, configs, apps |
+| `/s/{token}/open/{app}` | GET | Public import bridge (opened in the external browser) |
+
+## Buying and paying
+
+- **Card to card**: the page shows the card number, holder and the exact amount, then takes a photo of the receipt
+  (JPEG, PNG or WebP, at most 5 MB; the content is checked, not the name). The photo is posted into the customer's
+  own chat with the bot and stored as its Telegram file id, exactly like a receipt sent to the bot, and the admins
+  who moderate payments get the usual alert with approve/reject buttons.
+- **Online gateways** (Zibal, custom API, plugins) and **NOWPayments**: the gateway's page opens with
+  `Telegram.WebApp.openLink`. When the customer comes back (to the app, or to the bot), the payment page polls the
+  status (2 s, then slower, up to every 30 s) and shows paid → the subscription, in review, failed / needs support,
+  cancelled or expired.
+
+## One-tap import into apps
+
+Telegram's in-app WebView blocks custom URL schemes (`hiddify://`, `v2rayng://`, `sn://`), so an import button
+inside the Mini App would do nothing. The subscription view's **Add** buttons therefore open an https bridge page,
+`/s/{token}/open/{app}`, in the phone's real browser with `openLink`. That page has one big "Add to <app>" button
+with the app's import link (tapped by the customer, never automatic) and the subscription link to copy if the app
+does not open. The bridge uses the same secret token, rate limit and private headers as the public subscription page
+and exists only for an active client app with an import link, on a working subscription.
+
+What was verified and what was not:
+
+- Verified by tests: the import links of the seeded apps (Hiddify, v2rayNG, NekoBox) are built from the schemes
+  documented in those apps' sources; no custom-scheme link is rendered inside the Mini App; the bridge opens only
+  for active importing apps; apps without a scheme (v2rayN) get the copy button.
+- **Not verified on real devices** (no Telegram client or phones were available while building this): whether
+  `openLink` lands in the external browser rather than Telegram's in-app browser on each client, and whether each
+  app actually opens from the bridge on Android and iOS. Check Hiddify and v2rayNG/NekoBox on Android, and Hiddify
+  on iOS, before announcing the feature; the copy-link fallback works everywhere.
 
 ## Adding sections later
 

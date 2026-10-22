@@ -7,7 +7,8 @@ namespace App\MiniApp\Navigation;
 use App\Security\AdminPermission;
 
 /**
- * The sections of this release: the customer's four, and the admin entry with its areas, which are listed as
+ * The sections of this release: the customer's (with the shop, and orders under My services), and the admin entry
+ * with its areas, which are listed as
  * "coming soon" (route null) until their screens are built; each then only gets a route here.
  */
 final class CoreSections implements MiniAppSectionProvider
@@ -15,7 +16,9 @@ final class CoreSections implements MiniAppSectionProvider
     public function sections(): iterable
     {
         yield new MiniAppSection('home', 'nav.home', '🏠', 10, route: 'miniapp_home');
-        yield new MiniAppSection('services', 'nav.services', '📦', 20, route: 'miniapp_services');
+        yield new MiniAppSection('shop', 'nav.shop', '🛒', 15, route: 'miniapp_shop');
+        yield new MiniAppSection('services', 'nav.services_tab', '📦', 20, route: 'miniapp_services');
+        yield new MiniAppSection('orders', 'nav.orders', '🧾', 25, parent: 'services', route: 'miniapp_orders');
         yield new MiniAppSection('apps', 'nav.apps', '📲', 30, route: 'miniapp_apps');
         yield new MiniAppSection('help', 'nav.help', '💬', 40, route: 'miniapp_help');
 

@@ -27,15 +27,20 @@ use App\Payment\Domain\PaymentGatewayType;
 use App\Payment\Domain\PaymentStatus;
 use App\Payment\Infrastructure\NowPaymentsGateway;
 use App\Payment\Infrastructure\PaymentGatewayRegistry;
-use App\Shared\Infrastructure\SettingValueProvider;
-use App\Shop\Application\IncompleteOrderSettingsProvider;
 use App\Shop\Application\IncompleteOrderService;
 use App\Shop\Application\IncompleteOrderContext;
 use App\Shop\Application\OrderTrackingCodeService;
-use App\Shop\Application\DiscountCodeService;
 use App\Shop\Application\PlanPricingService;
 use App\Shop\Application\SalesSettingsProvider;
-use App\Shop\Application\TrialAccountService;
+use App\Shop\Application\Checkout\DiscountApplication;
+use App\Shop\Application\Checkout\NewServiceCheckout;
+use App\Shop\Application\Checkout\OrderLifecycle;
+use App\Shop\Application\Checkout\PaymentStart;
+use App\Shop\Application\Checkout\PaymentStarter;
+use App\Shop\Application\Checkout\PlanCatalog;
+use App\Shop\Application\Checkout\PlanOptions;
+use App\Shop\Application\Checkout\ReceiptSubmission;
+use App\Shop\Application\Checkout\TrialCheckout;
 use App\Shop\Domain\OrderDraftStatus;
 use App\Shop\Domain\OrderStatus;
 use App\Shop\Domain\OrderType;
@@ -72,16 +77,11 @@ class TelegramUpdateHandler
         private readonly EntityManagerInterface $entityManager,
         private readonly PaymentCustomerNotifier $paymentCustomerNotifier,
         private readonly PaymentSettlementService $paymentSettlementService,
-        private readonly SettingValueProvider $settingValueProvider,
-        private readonly IncompleteOrderSettingsProvider $incompleteOrderSettingsProvider,
         private readonly IncompleteOrderService $incompleteOrderService,
         private readonly OrderTrackingCodeService $orderTrackingCodeService,
         private readonly PlanPricingService $planPricingService,
-        private readonly DiscountCodeService $discountCodeService,
         private readonly SalesSettingsProvider $salesSettingsProvider,
         private readonly PaymentGatewayRegistry $paymentGatewayRegistry,
-        private readonly StorePaymentMethodResolver $storePaymentMethodResolver,
-        private readonly TrialAccountService $trialAccountService,
         private readonly TelegramChannelMembershipGate $membershipGate,
         private readonly BotTextResolver $botTextResolver,
         private readonly BotButtonMatcher $botButtonMatcher,
@@ -90,9 +90,14 @@ class TelegramUpdateHandler
         private readonly AdminBotHandler $adminBotHandler,
         private readonly SubscriptionPageButton $subscriptionPageButton,
         private readonly AppDownloadCatalog $appDownloads,
-        private readonly string $paymentCardNumber = '',
-        private readonly string $paymentCardHolder = '',
-        private readonly ?string $paymentDescription = null,
+        private readonly PlanCatalog $planCatalog,
+        private readonly PlanOptions $planOptions,
+        private readonly NewServiceCheckout $newServiceCheckout,
+        private readonly DiscountApplication $discountApplication,
+        private readonly PaymentStarter $paymentStarter,
+        private readonly OrderLifecycle $orderLifecycle,
+        private readonly ReceiptSubmission $receiptSubmission,
+        private readonly TrialCheckout $trialCheckout,
     ) {
     }
 
@@ -608,10 +613,7 @@ class TelegramUpdateHandler
             return;
         }
 
-        $plans = array_values(array_filter(
-            $this->entityManager->getRepository(Plan::class)->findBy(['isActive' => true], ['id' => 'ASC']),
-            static fn (Plan $plan): bool => $plan->isAvailableForSale(),
-        ));
+        $plans = $this->planCatalog->forSale();
         if ([] === $plans) {
             $this->showPopupOrMessage($chatId, $callbackId, $this->botTextResolver->message('plan.list_empty'), 'popup_no_active_plans');
 
@@ -651,8 +653,8 @@ class TelegramUpdateHandler
             return;
         }
 
-        $trialPlan = $this->entityManager->getRepository(TrialPlan::class)->find($trialPlanId);
-        if (!$trialPlan instanceof TrialPlan || !$trialPlan->isActive()) {
+        $trialPlan = $this->trialCheckout->activePlan($trialPlanId);
+        if (!$trialPlan instanceof TrialPlan) {
             $this->showPopupOrMessage($chatId, $callbackId, 'در حال حاضر اکانت تست فعالی وجود ندارد.', 'invalid_trial_plan');
 
             return;
@@ -666,7 +668,7 @@ class TelegramUpdateHandler
         $this->acknowledgeCallback($callbackId);
         $this->telegramApiClient->sendMessage($chatId, 'در حال ساخت اکانت تست شما هستیم...');
 
-        $result = $this->trialAccountService->claim($account, $trialPlan);
+        $result = $this->trialCheckout->claim($account, $trialPlan);
         if (!$result->isSuccess()) {
             $this->telegramApiClient->sendMessage($chatId, $result->message);
 
@@ -690,17 +692,7 @@ class TelegramUpdateHandler
      */
     private function findActiveTrialPlans(): array
     {
-        /** @var list<TrialPlan> $trialPlans */
-        $trialPlans = $this->entityManager->getRepository(TrialPlan::class)
-            ->createQueryBuilder('plan')
-            ->where('plan.isActive = :active')
-            ->setParameter('active', true)
-            ->orderBy('plan.sortOrder', 'ASC')
-            ->addOrderBy('plan.id', 'ASC')
-            ->getQuery()
-            ->getResult();
-
-        return $trialPlans;
+        return $this->trialCheckout->activePlans();
     }
 
     private function handleSelectPlan(TelegramAccount $account, string $chatId, int $planId, ?string $callbackId = null): void
@@ -715,8 +707,8 @@ class TelegramUpdateHandler
             return;
         }
 
-        $plan = $this->entityManager->getRepository(Plan::class)->find($planId);
-        if (!$plan instanceof Plan || !$plan->isAvailableForSale()) {
+        $plan = $this->planCatalog->findForSale($planId);
+        if (!$plan instanceof Plan) {
             $this->showPopupOrMessage($chatId, $callbackId, 'این پلن دیگر فعال نیست یا وجود ندارد.', 'popup_invalid_plan');
 
             return;
@@ -727,45 +719,8 @@ class TelegramUpdateHandler
 
     private function startCustomOrderDraft(TelegramAccount $account, Plan $plan, string $chatId, ?string $callbackId = null): void
     {
-        $this->expireUserDrafts($account);
-
-        $draft = $this->findActiveOrderDraft($account);
-        if (!$draft instanceof OrderDraft || $draft->getPlan()->getId() !== $plan->getId()) {
-            $draft = (new OrderDraft())
-                ->setUser($account->getUser())
-                ->setPlan($plan)
-                ->setStatus(OrderDraftStatus::PENDING)
-                ->setStep(self::STEP_WAITING_CUSTOM_USERNAME)
-                ->setExpiresAt($this->resolveIncompleteExpiresAt());
-            $this->entityManager->persist($draft);
-        }
+        $draft = $this->newServiceCheckout->startDraft($account->getUser(), $plan, self::STEP_WAITING_CUSTOM_USERNAME);
         $this->debugLog(sprintf('order_draft_start user_id=%d plan_id=%d draft_id=%d', $account->getUser()->getId() ?? 0, $plan->getId() ?? 0, $draft->getId() ?? 0));
-
-        $draftData = is_array($draft->getData()) ? $draft->getData() : [];
-        unset(
-            $draftData['navigation'],
-            $draftData['draftType'],
-            $draftData['orderType'],
-            $draftData['targetServiceId'],
-            $draftData['adminMode'],
-            $draftData['inputState'],
-            $draftData['priceSnapshot']
-        );
-
-        $draft
-            ->setStatus(OrderDraftStatus::PENDING)
-            ->setStep(self::STEP_WAITING_CUSTOM_USERNAME)
-            ->setCustomUsernamePrefix(null)
-            ->setFinalUsername(null)
-            ->setTrafficGb(null)
-            ->setDurationDays(null)
-            ->setCalculatedAmount(null)
-            ->setDiscountCode(null)
-            ->setDiscountAmount(null)
-            ->setFinalAmount(null)
-            ->setPriceSnapshot(null)
-            ->setUpdatedAt(new \DateTimeImmutable())
-            ->setData($draftData);
 
         $this->setDraftCurrentStep($draft, self::STEP_WAITING_CUSTOM_USERNAME, false);
 
@@ -805,17 +760,12 @@ class TelegramUpdateHandler
         }
 
         if (self::STEP_WAITING_CUSTOM_USERNAME === $draft->getStep()) {
-            $prefix = $this->normalizeUsernamePrefix($text);
+            $prefix = $this->newServiceCheckout->setAccountName($draft, $text);
             if (null === $prefix) {
                 $this->telegramApiClient->sendMessage($chatId, 'نام نامعتبر است. فقط a-z, 0-9 و _ با طول 3 تا 24 مجاز است.');
 
                 return;
             }
-
-            $draft
-                ->setCustomUsernamePrefix($prefix)
-                ->setFinalUsername($this->buildFinalUsername($prefix))
-                ->setUpdatedAt(new \DateTimeImmutable());
             $this->entityManager->flush();
             $this->debugLog(sprintf('order_draft_username_set draft_id=%d prefix="%s" final="%s"', $draft->getId() ?? 0, $prefix, (string) $draft->getFinalUsername()));
 
@@ -839,16 +789,7 @@ class TelegramUpdateHandler
                 return;
             }
 
-            $durationDays = $this->resolveDefaultDurationDays($plan);
-            $trafficGb = $draft->getTrafficGb();
-            $amount = $this->planPricingService->calculateNewOrderAmount($plan, [
-                'trafficGb' => $trafficGb,
-                'durationDays' => $durationDays,
-            ]);
-            $draft
-                ->setDurationDays($durationDays)
-                ->setCalculatedAmount($amount)
-                ->setUpdatedAt(new \DateTimeImmutable());
+            $this->newServiceCheckout->price($draft, $draft->getTrafficGb(), $this->resolveDefaultDurationDays($plan));
             $this->setDraftCurrentStep($draft, self::STEP_WAITING_DISCOUNT_DECISION);
             $this->entityManager->flush();
             $this->sendCustomDraftSummary($chatId, $draft);
@@ -858,10 +799,8 @@ class TelegramUpdateHandler
 
         if (self::STEP_WAITING_CUSTOM_TRAFFIC === $draft->getStep()) {
             $traffic = $this->parsePositiveInt($text);
-            $minTraffic = $plan->getMinTrafficGb();
-            $maxTraffic = $plan->getMaxTrafficGb();
-            if (null === $traffic || null === $minTraffic || null === $maxTraffic || $traffic < $minTraffic || $traffic > $maxTraffic) {
-                $this->telegramApiClient->sendMessage($chatId, sprintf('حجم نامعتبر است. عدد صحیح بین %d تا %d وارد کنید.', (int) ($minTraffic ?? 0), (int) ($maxTraffic ?? 0)));
+            if (!$this->planOptions->isValidTraffic($plan, $traffic)) {
+                $this->telegramApiClient->sendMessage($chatId, sprintf('حجم نامعتبر است. عدد صحیح بین %d تا %d وارد کنید.', (int) ($plan->getMinTrafficGb() ?? 0), (int) ($plan->getMaxTrafficGb() ?? 0)));
 
                 return;
             }
@@ -878,15 +817,7 @@ class TelegramUpdateHandler
                 return;
             }
 
-            $durationDays = $this->resolveDefaultDurationDays($plan);
-            $amount = $this->planPricingService->calculateNewOrderAmount($plan, [
-                'trafficGb' => $draft->getTrafficGb(),
-                'durationDays' => $durationDays,
-            ]);
-            $draft
-                ->setDurationDays($durationDays)
-                ->setCalculatedAmount($amount)
-                ->setUpdatedAt(new \DateTimeImmutable());
+            $this->newServiceCheckout->price($draft, $draft->getTrafficGb(), $this->resolveDefaultDurationDays($plan));
             $this->setDraftCurrentStep($draft, self::STEP_WAITING_DISCOUNT_DECISION);
             $this->entityManager->flush();
             $this->sendCustomDraftSummary($chatId, $draft);
@@ -896,10 +827,8 @@ class TelegramUpdateHandler
 
         if (self::STEP_WAITING_CUSTOM_DURATION === $draft->getStep()) {
             $duration = $this->parsePositiveInt($text);
-            $minDuration = $plan->getMinDurationDays();
-            $maxDuration = $plan->getMaxDurationDays();
-            if (null === $duration || null === $minDuration || null === $maxDuration || $duration < $minDuration || $duration > $maxDuration) {
-                $this->telegramApiClient->sendMessage($chatId, sprintf('مدت نامعتبر است. عدد صحیح بین %d تا %d وارد کنید.', (int) ($minDuration ?? 0), (int) ($maxDuration ?? 0)));
+            if (!$this->planOptions->isValidDuration($plan, $duration)) {
+                $this->telegramApiClient->sendMessage($chatId, sprintf('مدت نامعتبر است. عدد صحیح بین %d تا %d وارد کنید.', (int) ($plan->getMinDurationDays() ?? 0), (int) ($plan->getMaxDurationDays() ?? 0)));
 
                 return;
             }
@@ -913,14 +842,7 @@ class TelegramUpdateHandler
                 return;
             }
 
-            $amount = $this->planPricingService->calculateNewOrderAmount($plan, [
-                'trafficGb' => $traffic,
-                'durationDays' => $duration,
-            ]);
-            $draft
-                ->setDurationDays($duration)
-                ->setCalculatedAmount($amount)
-                ->setUpdatedAt(new \DateTimeImmutable());
+            $amount = $this->newServiceCheckout->price($draft, $traffic, $duration);
             $this->setDraftCurrentStep($draft, self::STEP_WAITING_DISCOUNT_DECISION);
             $this->entityManager->flush();
             $this->debugLog(sprintf('order_draft_duration_set draft_id=%d duration=%d amount=%d', $draft->getId() ?? 0, $duration, $amount));
@@ -951,10 +873,7 @@ class TelegramUpdateHandler
     private function sendCustomDraftSummary(string $chatId, OrderDraft $draft): void
     {
         $plan = $draft->getPlan();
-        $price = $this->planPricingService->calculateNewOrderPrice($plan, [
-            'trafficGb' => $draft->getTrafficGb(),
-            'durationDays' => $draft->getDurationDays(),
-        ]);
+        $price = $this->newServiceCheckout->quote($plan, $draft->getTrafficGb(), $draft->getDurationDays());
         $durationText = null === $draft->getDurationDays() || $plan->isUnlimitedDuration()
             ? 'نامحدود'
             : sprintf('%d روز', (int) $draft->getDurationDays());
@@ -989,30 +908,25 @@ class TelegramUpdateHandler
             return;
         }
 
-        if (OrderDraftStatus::PENDING !== $draft->getStatus()) {
-            $existingOrder = $this->findOrderByDraftIdForAnyOpenStatus($draft);
-            if ($existingOrder instanceof Order) {
-                $this->sendPaymentGatewaySelectionForOrder($existingOrder, $chatId, $callbackId);
+        switch ($this->newServiceCheckout->confirmationBlocker($draft)) {
+            case NewServiceCheckout::CONFIRM_NOT_PENDING:
+                $existingOrder = $this->findOrderByDraftIdForAnyOpenStatus($draft);
+                if ($existingOrder instanceof Order) {
+                    $this->sendPaymentGatewaySelectionForOrder($existingOrder, $chatId, $callbackId);
+
+                    return;
+                }
+                $this->showPopupOrMessage($chatId, $callbackId, 'درخواست نامعتبر است.', 'popup_custom_order_confirm_not_pending');
 
                 return;
-            }
-            $this->showPopupOrMessage($chatId, $callbackId, 'درخواست نامعتبر است.', 'popup_custom_order_confirm_not_pending');
+            case NewServiceCheckout::CONFIRM_EXPIRED:
+                $this->showPopupOrMessage($chatId, $callbackId, 'این درخواست منقضی شده است.', 'popup_custom_order_confirm_expired');
 
-            return;
-        }
+                return;
+            case NewServiceCheckout::CONFIRM_INCOMPLETE:
+                $this->showPopupOrMessage($chatId, $callbackId, 'اطلاعات سفارش ناقص است.', 'popup_custom_order_confirm_incomplete');
 
-        if (null !== $draft->getExpiresAt() && $draft->getExpiresAt() < new \DateTimeImmutable()) {
-            $draft->setStatus(OrderDraftStatus::EXPIRED)->setUpdatedAt(new \DateTimeImmutable());
-            $this->entityManager->flush();
-            $this->showPopupOrMessage($chatId, $callbackId, 'این درخواست منقضی شده است.', 'popup_custom_order_confirm_expired');
-
-            return;
-        }
-
-        if (null === $draft->getCalculatedAmount() || $draft->getCalculatedAmount() <= 0 || null === $draft->getFinalUsername()) {
-            $this->showPopupOrMessage($chatId, $callbackId, 'اطلاعات سفارش ناقص است.', 'popup_custom_order_confirm_incomplete');
-
-            return;
+                return;
         }
 
         if (!$this->salesSettingsProvider->newOrdersEnabled()) {
@@ -1025,31 +939,7 @@ class TelegramUpdateHandler
             return;
         }
 
-        $price = $this->planPricingService->calculateNewOrderPrice($draft->getPlan(), [
-            'trafficGb' => $draft->getTrafficGb(),
-            'durationDays' => $draft->getDurationDays(),
-        ]);
-        $draft
-            ->setCalculatedAmount($price->afterGlobalDiscountAmount)
-            ->setDiscountCode(null)
-            ->setDiscountAmount(0)
-            ->setFinalAmount($price->afterGlobalDiscountAmount)
-            ->setPriceSnapshot([
-                'baseAmount' => $price->baseAmount,
-                'globalDiscountPercent' => $price->globalDiscountPercent,
-                'globalDiscountAmount' => $price->globalDiscountAmount,
-                'afterGlobalDiscountAmount' => $price->afterGlobalDiscountAmount,
-                'discountCode' => null,
-                'discountCodeAmount' => 0,
-                'finalAmount' => $price->afterGlobalDiscountAmount,
-                'planPriceSource' => 'current_plan',
-            ])
-            ->setData(array_merge((array) ($draft->getData() ?? []), [
-                'draftType' => 'new_service',
-                'orderType' => OrderType::NEW_SERVICE,
-            ]))
-            ->setUpdatedAt(new \DateTimeImmutable());
-        $order = $this->createOrderFromNewServiceDraft($draft);
+        $order = $this->newServiceCheckout->confirm($draft);
         if (!$order instanceof Order) {
             $this->showPopupOrMessage($chatId, $callbackId, 'سفارش نامعتبر است.', 'invalid_order_from_new_service_draft');
 
@@ -1165,9 +1055,8 @@ class TelegramUpdateHandler
         $this->entityManager->flush();
         $this->debugLog(sprintf('custom_order_confirmed draft_id=%d order_id=%d payment_id=%d amount=%d', $draft->getId() ?? 0, $order->getId() ?? 0, $payment->getId() ?? 0, $amount));
 
-        $cardNumber = $this->settingValueProvider->get('payment.card_number', $this->paymentCardNumber);
-        $cardHolder = $this->settingValueProvider->get('payment.card_holder', $this->paymentCardHolder);
-        $description = $this->settingValueProvider->get('payment.description', $this->paymentDescription);
+        $card = $this->paymentStarter->manualCard(null);
+        [$cardNumber, $cardHolder, $description] = [$card->cardNumber, $card->cardHolder, $card->instructions];
 
         $message = $this->botTextResolver->message('payment.manual_card.custom_order_instructions', [
             'order' => [
@@ -1261,9 +1150,8 @@ class TelegramUpdateHandler
         $this->entityManager->persist($payment);
         $this->entityManager->flush();
 
-        $cardNumber = $this->settingValueProvider->get('payment.card_number', $this->paymentCardNumber);
-        $cardHolder = $this->settingValueProvider->get('payment.card_holder', $this->paymentCardHolder);
-        $description = $this->settingValueProvider->get('payment.description', $this->paymentDescription);
+        $card = $this->paymentStarter->manualCard(null);
+        [$cardNumber, $cardHolder, $description] = [$card->cardNumber, $card->cardHolder, $card->instructions];
 
         $message = $this->botTextResolver->message('payment.manual_card.plan_instructions', [
             'order' => [
@@ -1355,11 +1243,7 @@ class TelegramUpdateHandler
             return;
         }
 
-        $draft
-            ->setDiscountCode(null)
-            ->setDiscountAmount(0)
-            ->setFinalAmount((int) ($draft->getCalculatedAmount() ?? 0))
-            ->setUpdatedAt(new \DateTimeImmutable());
+        $this->discountApplication->clearOnDraft($draft);
         $this->setDraftCurrentStep($draft, self::STEP_WAITING_PAYMENT_METHOD);
         $this->entityManager->flush();
 
@@ -1391,22 +1275,7 @@ class TelegramUpdateHandler
             return;
         }
 
-        $metadata = is_array($order->getMetadata()) ? $order->getMetadata() : [];
-        $priceSnapshot = is_array($metadata['priceSnapshot'] ?? null) ? $metadata['priceSnapshot'] : [];
-        $baseFinal = (int) ($priceSnapshot['afterGlobalDiscountAmount'] ?? $order->getAmount());
-        $priceSnapshot['discountCode'] = null;
-        $priceSnapshot['discountCodeAmount'] = 0;
-        $priceSnapshot['finalAmount'] = $baseFinal;
-        $metadata['priceSnapshot'] = $priceSnapshot;
-        $metadata['discountCode'] = null;
-        $metadata['discountAmount'] = 0;
-        unset($metadata['inputState']);
-
-        $order
-            ->setMetadata($metadata)
-            ->setAmount($baseFinal);
-
-        $this->entityManager->flush();
+        $this->discountApplication->clearOnOrder($order);
         $this->sendPaymentGatewaySelectionForOrder($order, $chatId, $callbackId, null, null, 'skipped');
     }
 
@@ -1416,36 +1285,13 @@ class TelegramUpdateHandler
             return;
         }
 
-        $amountBeforeCode = (int) ($draft->getCalculatedAmount() ?? 0);
-        $result = $this->discountCodeService->validateCode($codeInput, $draft->getUser(), OrderType::NEW_SERVICE, $draft->getPlan(), $amountBeforeCode);
-        if (!$result->valid || !$result->discountCode instanceof \App\Entity\DiscountCode) {
-            $draft
-                ->setDiscountCode(null)
-                ->setDiscountAmount(0)
-                ->setFinalAmount($amountBeforeCode)
-                ->setUpdatedAt(new \DateTimeImmutable());
-            $this->setDraftCurrentStep($draft, self::STEP_WAITING_PAYMENT_METHOD);
-            $this->entityManager->flush();
-            $this->sendPaymentGatewaySelectionForNewServiceDraft($draft, $chatId, null, 'invalid', $result->message);
-
-            return;
-        }
-
-        $snapshot = is_array($draft->getPriceSnapshot()) ? $draft->getPriceSnapshot() : [];
-        $snapshot['discountCode'] = $result->discountCode->getCode();
-        $snapshot['discountCodeAmount'] = $result->discountAmount;
-        $snapshot['finalAmount'] = $result->finalAmount;
-
-        $draft
-            ->setDiscountCode($result->discountCode->getCode())
-            ->setDiscountAmount($result->discountAmount)
-            ->setFinalAmount($result->finalAmount)
-            ->setPriceSnapshot($snapshot)
-            ->setUpdatedAt(new \DateTimeImmutable());
+        $outcome = $this->discountApplication->applyToDraft($draft, $codeInput, OrderType::NEW_SERVICE);
         $this->setDraftCurrentStep($draft, self::STEP_WAITING_PAYMENT_METHOD);
         $this->entityManager->flush();
 
-        $this->sendPaymentGatewaySelectionForNewServiceDraft($draft, $chatId, null, 'applied');
+        $outcome->applied
+            ? $this->sendPaymentGatewaySelectionForNewServiceDraft($draft, $chatId, null, 'applied')
+            : $this->sendPaymentGatewaySelectionForNewServiceDraft($draft, $chatId, null, 'invalid', $outcome->reason);
     }
 
     private function handleOrderDiscountCodeInput(TelegramAccount $account, Order $order, string $codeInput, string $chatId): void
@@ -1457,125 +1303,34 @@ class TelegramUpdateHandler
             return;
         }
 
-        $metadata = is_array($order->getMetadata()) ? $order->getMetadata() : [];
-        $priceSnapshot = is_array($metadata['priceSnapshot'] ?? null) ? $metadata['priceSnapshot'] : [];
-        $amountBeforeCode = (int) ($priceSnapshot['afterGlobalDiscountAmount'] ?? $order->getAmount());
-        $result = $this->discountCodeService->validateCode($codeInput, $order->getUser(), $order->getType(), $order->getPlan(), $amountBeforeCode);
-        if (!$result->valid || !$result->discountCode instanceof \App\Entity\DiscountCode) {
-            $priceSnapshot['discountCode'] = null;
-            $priceSnapshot['discountCodeAmount'] = 0;
-            $priceSnapshot['finalAmount'] = $amountBeforeCode;
-            $metadata['priceSnapshot'] = $priceSnapshot;
-            $metadata['discountCode'] = null;
-            $metadata['discountAmount'] = 0;
-            unset($metadata['inputState']);
-
-            $order
-                ->setMetadata($metadata)
-                ->setAmount($amountBeforeCode);
-
-            $this->entityManager->flush();
-            $this->sendPaymentGatewaySelectionForOrder($order, $chatId, null, null, null, 'invalid', $result->message);
-
-            return;
-        }
-
-        $priceSnapshot['discountCode'] = $result->discountCode->getCode();
-        $priceSnapshot['discountCodeAmount'] = $result->discountAmount;
-        $priceSnapshot['finalAmount'] = $result->finalAmount;
-        $metadata['priceSnapshot'] = $priceSnapshot;
-        $metadata['discountCode'] = $result->discountCode->getCode();
-        $metadata['discountAmount'] = $result->discountAmount;
-        unset($metadata['inputState']);
-
-        $order
-            ->setMetadata($metadata)
-            ->setAmount($result->finalAmount);
-
-        $this->entityManager->flush();
-        $this->sendPaymentGatewaySelectionForOrder($order, $chatId, null, null, null, 'applied');
+        $outcome = $this->discountApplication->applyToOrder($order, $codeInput);
+        $outcome->applied
+            ? $this->sendPaymentGatewaySelectionForOrder($order, $chatId, null, null, null, 'applied')
+            : $this->sendPaymentGatewaySelectionForOrder($order, $chatId, null, null, null, 'invalid', $outcome->reason);
     }
 
     private function createOrReuseNewServiceOrderPayment(Order $order, PaymentGateway $gateway, StorePaymentMethod $storePaymentMethod, string $chatId, ?string $callbackId = null): void
     {
-        $plan = $order->getPlan();
-        if (!$plan->isActive()) {
+        $start = $this->paymentStarter->start($order, $storePaymentMethod);
+        if (PaymentStart::KIND_PLAN_INACTIVE === $start->kind) {
             $this->showPopupOrMessage($chatId, $callbackId, 'این پلن دیگر فعال نیست یا وجود ندارد.', 'popup_invalid_plan_select_payment_method_draft');
 
             return;
         }
-
+        $plan = $order->getPlan();
+        $payment = $start->payment ?? throw new \LogicException('A started payment has a payment.');
+        $finalAmount = $start->amount;
         $metadata = is_array($order->getMetadata()) ? $order->getMetadata() : [];
         $priceSnapshot = is_array($metadata['priceSnapshot'] ?? null) ? $metadata['priceSnapshot'] : [];
-        $finalAmount = (int) ($priceSnapshot['finalAmount'] ?? $order->getAmount());
-
-        $payment = $this->entityManager->getRepository(Payment::class)
-            ->createQueryBuilder('p')
-            ->where('p.order = :order')
-            ->andWhere('p.status IN (:statuses)')
-            ->setParameter('order', $order)
-            ->setParameter('statuses', [PaymentStatus::PENDING, PaymentStatus::SUBMITTED])
-            ->orderBy('p.id', 'DESC')
-            ->setMaxResults(1)
-            ->getQuery()
-            ->getOneOrNullResult();
-        $paymentWasCreated = false;
-
-        if (!$payment instanceof Payment) {
-            $payment = (new Payment())
-                ->setOrder($order)
-                ->setGateway($gateway)
-                ->setStorePaymentMethod($storePaymentMethod)
-                ->setGatewayType($gateway->getType())
-                ->setMethod($gateway->getType())
-                ->setCurrency($gateway->getCurrency())
-                ->setAmount($finalAmount)
-                ->setPayableAmount($finalAmount)
-                ->setStatus(PaymentStatus::PENDING);
-            $this->entityManager->persist($payment);
-            $this->entityManager->flush();
-            $paymentWasCreated = true;
-        } else {
-            $payment
-                ->setGateway($gateway)
-                ->setStorePaymentMethod($storePaymentMethod)
-                ->setGatewayType($gateway->getType())
-                ->setMethod($gateway->getType())
-                ->setCurrency($gateway->getCurrency());
-        }
-
-        $requestResult = $this->paymentGatewayRegistry
-            ->resolve($gateway)
-            ->createPayment($payment, $order);
-
-        if ($requestResult->rawResponse !== null) {
-            $payment->setRequestPayload($requestResult->rawResponse);
-        }
-        if ($requestResult->transactionId) {
-            $payment->setGatewayTransactionId($requestResult->transactionId);
-        }
-        if ($requestResult->authority) {
-            $payment->setAuthority($requestResult->authority);
-        }
-        if ($requestResult->paymentUrl) {
-            $payment->setPaymentUrl($requestResult->paymentUrl);
-        }
-        if (!$requestResult->success) {
-            $payment->setAdminNote($requestResult->message);
-            if (PaymentGatewayType::NOWPAYMENTS === $gateway->getType() && NowPaymentsGateway::BELOW_MINIMUM_USER_MESSAGE === $requestResult->message) {
-                $this->markRejectedFailedNowPaymentsPayment($payment, $paymentWasCreated);
-            }
-        }
-        $this->entityManager->flush();
         $this->debugLog(sprintf('payment_gateway_selected order_id=%d payment_id=%d amount=%d', $order->getId() ?? 0, $payment->getId() ?? 0, $finalAmount));
 
-        if (in_array($gateway->getType(), [PaymentGatewayType::ZIBAL, PaymentGatewayType::CUSTOM_API], true) || null !== $gateway->getPluginCode()) {
-            if (!$requestResult->success || null === $payment->getPaymentUrl()) {
+        if (PaymentStart::KIND_ONLINE === $start->kind) {
+            if (!$start->success || null === $payment->getPaymentUrl()) {
                 $logKey = match ($gateway->getPluginCode()) {
                     null => 'zibal_request_failed_new_service',
                     default => 'plugin_request_failed_new_service',
                 };
-                $this->showPopupOrMessage($chatId, $callbackId, $requestResult->message ?: 'ایجاد لینک پرداخت آنلاین انجام نشد.', $logKey);
+                $this->showPopupOrMessage($chatId, $callbackId, $start->message ?: 'ایجاد لینک پرداخت آنلاین انجام نشد.', $logKey);
 
                 return;
             }
@@ -1590,9 +1345,9 @@ class TelegramUpdateHandler
             return;
         }
 
-        if (PaymentGatewayType::NOWPAYMENTS === $gateway->getType()) {
-            if (!$requestResult->success) {
-                $this->showPopupOrMessage($chatId, $callbackId, $requestResult->message ?: 'ایجاد پرداخت ارز دیجیتال انجام نشد.', 'nowpayments_create_failed');
+        if (PaymentStart::KIND_CRYPTO === $start->kind) {
+            if (!$start->success) {
+                $this->showPopupOrMessage($chatId, $callbackId, $start->message ?: 'ایجاد پرداخت ارز دیجیتال انجام نشد.', 'nowpayments_create_failed');
 
                 return;
             }
@@ -1611,9 +1366,8 @@ class TelegramUpdateHandler
             return;
         }
 
-        $cardNumber = $gateway->getManualCardNumber() ?? $this->settingValueProvider->get('payment.card_number', $this->paymentCardNumber);
-        $cardHolder = $gateway->getManualCardHolder() ?? $this->settingValueProvider->get('payment.card_holder', $this->paymentCardHolder);
-        $description = $gateway->getManualInstructions() ?? $this->settingValueProvider->get('payment.description', $this->paymentDescription);
+        $card = $this->paymentStarter->manualCard($gateway);
+        [$cardNumber, $cardHolder, $description] = [$card->cardNumber, $card->cardHolder, $card->instructions];
         $discountCode = trim((string) ($priceSnapshot['discountCode'] ?? ''));
         $message = $this->botTextResolver->message('payment.manual_card.custom_order_instructions', [
             'order' => [
@@ -1665,31 +1419,6 @@ class TelegramUpdateHandler
         $this->sendPaymentGatewaySelectionForOrder($order, $chatId, $callbackId, null, null, $discountResult, $discountReason);
     }
 
-    private function markRejectedFailedNowPaymentsPayment(Payment $payment, bool $paymentWasCreated): void
-    {
-        $payment
-            ->setStatus(PaymentStatus::REJECTED)
-            ->setFailedAt(new \DateTimeImmutable())
-            ->setGatewayTransactionId(null)
-            ->setAuthority(null)
-            ->setPaymentUrl(null);
-
-        if ($paymentWasCreated) {
-            $payment
-                ->setCryptoPaymentId(null)
-                ->setCryptoPaymentStatus(null)
-                ->setCryptoAddress(null)
-                ->setCryptoPayAmount(null)
-                ->setCryptoPayCurrency(null)
-                ->setCryptoPriceCurrency(null)
-                ->setCryptoPurchaseId(null)
-                ->setCryptoInvoiceId(null)
-                ->setCryptoInvoiceUrl(null)
-                ->setCryptoNetwork(null)
-                ->setCryptoExpiresAt(null);
-        }
-    }
-
     private function sendPaymentGatewaySelectionForOrder(Order $order, string $chatId, ?string $callbackId, ?string $backCallback = null, ?string $cancelCallback = null, ?string $discountResult = null, ?string $discountReason = null): void
     {
         if (OrderType::NEW_SERVICE === $order->getType()) {
@@ -1699,9 +1428,9 @@ class TelegramUpdateHandler
             }
         }
 
-        $methods = $this->storePaymentMethodResolver->getAvailableMethods($order);
+        $methods = $this->paymentStarter->methodsFor($order);
         if ([] === $methods) {
-            $diagnostics = $this->storePaymentMethodResolver->getDiagnostics($order);
+            $diagnostics = $this->paymentStarter->diagnostics($order);
             $encodedReasons = json_encode($diagnostics['skippedReasons'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
             $encodedMethods = json_encode($diagnostics['methods'] ?? [], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
             $this->debugLog(sprintf(
@@ -1736,63 +1465,7 @@ class TelegramUpdateHandler
 
     private function createOrderFromNewServiceDraft(OrderDraft $draft): ?Order
     {
-        $existingOrder = $this->findOrderByDraftIdForAnyOpenStatus($draft);
-        if ($existingOrder instanceof Order) {
-            return $existingOrder;
-        }
-
-        if (OrderDraftStatus::PENDING !== $draft->getStatus()) {
-            return null;
-        }
-
-        $plan = $draft->getPlan();
-        if (!$plan->isActive()) {
-            return null;
-        }
-
-        $finalAmount = max(0, (int) ($draft->getFinalAmount() ?? $draft->getCalculatedAmount() ?? 0));
-        $priceSnapshot = is_array($draft->getPriceSnapshot()) ? $draft->getPriceSnapshot() : [];
-        $metadata = [
-            'custom' => true,
-            'customUsername' => $draft->getCustomUsernamePrefix(),
-            'customUsernamePrefix' => $draft->getCustomUsernamePrefix(),
-            'finalUsername' => $draft->getFinalUsername(),
-            'trafficGb' => $draft->getTrafficGb(),
-            'durationDays' => $draft->getDurationDays(),
-            'unlimitedDuration' => $plan->isUnlimitedDuration() || null === $draft->getDurationDays(),
-            'calculatedAmount' => $finalAmount,
-            'priceSnapshot' => [
-                'baseAmount' => (int) ($priceSnapshot['baseAmount'] ?? 0),
-                'globalDiscountPercent' => (int) ($priceSnapshot['globalDiscountPercent'] ?? 0),
-                'globalDiscountAmount' => (int) ($priceSnapshot['globalDiscountAmount'] ?? 0),
-                'afterGlobalDiscountAmount' => (int) ($priceSnapshot['afterGlobalDiscountAmount'] ?? $draft->getCalculatedAmount() ?? 0),
-                'discountCode' => $draft->getDiscountCode(),
-                'discountCodeAmount' => (int) ($draft->getDiscountAmount() ?? 0),
-                'finalAmount' => $finalAmount,
-                'planPriceSource' => (string) ($priceSnapshot['planPriceSource'] ?? 'current_plan'),
-            ],
-            'orderDraftId' => $draft->getId(),
-            'orderType' => OrderType::NEW_SERVICE,
-            'draftStep' => (string) $draft->getStep(),
-        ];
-
-        $order = (new Order())
-            ->setUser($draft->getUser())
-            ->setPlan($plan)
-            ->setAmount($finalAmount)
-            ->setType(OrderType::NEW_SERVICE)
-            ->setMetadata($metadata)
-            ->setStatus(OrderStatus::WAITING_PAYMENT);
-        $this->orderTrackingCodeService->assignIfMissing($order);
-
-        $draft
-            ->setStatus(OrderDraftStatus::CONFIRMED)
-            ->setUpdatedAt(new \DateTimeImmutable());
-
-        $this->entityManager->persist($order);
-        $this->entityManager->flush();
-
-        return $order;
+        return $this->newServiceCheckout->createOrderFromDraft($draft);
     }
 
     private function buildDiscountResultPaymentMethodMessage(Order $order, string $discountResult, ?string $discountReason = null): string
@@ -2135,26 +1808,22 @@ class TelegramUpdateHandler
             return;
         }
 
-        if ($payment->getOrder()->getUser()->getId() !== $account->getUser()->getId()) {
-            $this->showPopupOrMessage($chatId, $callbackId, 'دسترسی غیرمجاز.', 'popup_payment_submit_receipt_unauthorized');
+        switch ($this->receiptSubmission->check($payment, $account->getUser())) {
+            case ReceiptSubmission::NOT_YOURS:
+                $this->showPopupOrMessage($chatId, $callbackId, 'دسترسی غیرمجاز.', 'popup_payment_submit_receipt_unauthorized');
 
-            return;
+                return;
+            case ReceiptSubmission::ALREADY_SUBMITTED:
+                $this->showPopupOrMessage($chatId, $callbackId, 'رسید این پرداخت قبلاً ارسال شده است.', 'popup_payment_submit_receipt_already_submitted');
+
+                return;
+            case ReceiptSubmission::NOT_PENDING:
+                $this->showPopupOrMessage($chatId, $callbackId, 'امکان ارسال رسید برای این پرداخت وجود ندارد.', 'popup_payment_submit_receipt_invalid_status');
+
+                return;
         }
 
-        if (PaymentStatus::SUBMITTED === $payment->getStatus()) {
-            $this->showPopupOrMessage($chatId, $callbackId, 'رسید این پرداخت قبلاً ارسال شده است.', 'popup_payment_submit_receipt_already_submitted');
-
-            return;
-        }
-
-        if (PaymentStatus::PENDING !== $payment->getStatus()) {
-            $this->showPopupOrMessage($chatId, $callbackId, 'امکان ارسال رسید برای این پرداخت وجود ندارد.', 'popup_payment_submit_receipt_invalid_status');
-
-            return;
-        }
-
-        $payment->getOrder()->setStatus(OrderStatus::WAITING_PAYMENT);
-        $this->entityManager->flush();
+        $this->receiptSubmission->expectReceipt($payment);
 
         $this->telegramApiClient->answerCallbackQuery($callbackId, 'لطفاً تصویر رسید یا کد پیگیری را در همین چت ارسال کنید.', true);
     }
@@ -2181,8 +1850,7 @@ class TelegramUpdateHandler
             return;
         }
 
-        // Locked and re-checked in the settlement service: never overwrites a confirmed payment.
-        if (SettlementOutcome::REJECTED !== $this->paymentSettlementService->cancelByCustomer($order)->outcome) {
+        if (OrderLifecycle::CANCEL_CANCELLED !== $this->orderLifecycle->cancel($order)) {
             $this->showPopupOrMessage($chatId, $callbackId, 'امکان لغو این پرداخت وجود ندارد.', 'popup_payment_cancel_not_allowed');
 
             return;
@@ -2237,77 +1905,29 @@ class TelegramUpdateHandler
             return;
         }
 
-        $openPayment
-            ->setReceiptFileId($fileId)
-            ->setStatus(PaymentStatus::SUBMITTED)
-            ->setSubmittedAt(new \DateTimeImmutable());
-        $openPayment->getOrder()->setStatus(OrderStatus::WAITING_PAYMENT);
-        $this->entityManager->flush();
-        $this->notifyAdmin($openPayment, 'receipt_photo');
+        $this->receiptSubmission->submitPhoto($openPayment, $fileId);
         $this->telegramApiClient->sendMessage($chatId, $this->botTextResolver->message('payment.receipt_received'));
     }
 
     private function handleReceiptText(Payment $openPayment, string $text, string $chatId): void
     {
-        $openPayment
-            ->setTrackingCode($text)
-            ->setReceiptMessage($text)
-            ->setStatus(PaymentStatus::SUBMITTED)
-            ->setSubmittedAt(new \DateTimeImmutable());
-        $openPayment->getOrder()->setStatus(OrderStatus::WAITING_PAYMENT);
-        $this->entityManager->flush();
-        $this->notifyAdmin($openPayment, 'tracking_code');
+        $this->receiptSubmission->submitTrackingCode($openPayment, $text);
         $this->telegramApiClient->sendMessage($chatId, $this->botTextResolver->message('payment.receipt_received'));
     }
 
     private function findOpenPayment(TelegramAccount $account): ?Payment
     {
-        return $this->entityManager->getRepository(Payment::class)
-            ->createQueryBuilder('p')
-            ->join('p.order', 'o')
-            ->where('o.user = :user')
-            ->andWhere('o.status = :orderStatus')
-            ->andWhere('p.status IN (:paymentStatuses)')
-            ->andWhere('(p.gatewayType = :manualGateway OR (p.gatewayType IS NULL AND p.method = :manualMethod))')
-            ->setParameter('user', $account->getUser())
-            ->setParameter('orderStatus', OrderStatus::WAITING_PAYMENT)
-            ->setParameter('paymentStatuses', [PaymentStatus::PENDING, PaymentStatus::SUBMITTED])
-            ->setParameter('manualGateway', PaymentGatewayType::MANUAL_CARD)
-            ->setParameter('manualMethod', PaymentGatewayType::MANUAL_CARD)
-            ->orderBy('p.id', 'DESC')
-            ->setMaxResults(1)
-            ->getQuery()
-            ->getOneOrNullResult();
-    }
-
-    /**
-     * @return list<StorePaymentMethod>
-     */
-    private function findAvailableStorePaymentMethods(Order $order): array
-    {
-        return $this->storePaymentMethodResolver->getAvailableMethods($order);
+        return $this->receiptSubmission->openManualPayment($account->getUser());
     }
 
     private function findStorePaymentMethodForOrder(Order $order, int $storePaymentMethodId): ?StorePaymentMethod
     {
-        foreach ($this->findAvailableStorePaymentMethods($order) as $method) {
-            if ((int) ($method->getId() ?? 0) === $storePaymentMethodId) {
-                return $method;
-            }
-        }
-
-        return null;
+        return $this->paymentStarter->methodFor($order, $storePaymentMethodId);
     }
 
     private function findStorePaymentMethodByGatewayForOrder(Order $order, int $gatewayId): ?StorePaymentMethod
     {
-        foreach ($this->findAvailableStorePaymentMethods($order) as $method) {
-            if ((int) ($method->getGateway()->getId() ?? 0) === $gatewayId) {
-                return $method;
-            }
-        }
-
-        return null;
+        return $this->paymentStarter->methodForGateway($order, $gatewayId);
     }
 
     private function findPendingNewServiceOrder(TelegramAccount $account, int $orderId): ?Order
@@ -2322,20 +1942,7 @@ class TelegramUpdateHandler
 
     private function findPendingEditableOrder(TelegramAccount $account, int $orderId): ?Order
     {
-        if ($orderId <= 0) {
-            return null;
-        }
-
-        $order = $this->entityManager->getRepository(Order::class)->find($orderId);
-        if (
-            !$order instanceof Order
-            || $order->getUser()->getId() !== $account->getUser()->getId()
-            || !$this->canEditOrderForPayment($order)
-        ) {
-            return null;
-        }
-
-        return $order;
+        return $this->orderLifecycle->editableOrder($account->getUser(), $orderId);
     }
 
     private function findOrderByDraftId(TelegramAccount $account, int $draftId): ?Order
@@ -2365,30 +1972,7 @@ class TelegramUpdateHandler
 
     private function findOrderByDraftIdForAnyOpenStatus(OrderDraft $draft): ?Order
     {
-        if (null === $draft->getId()) {
-            return null;
-        }
-
-        $orders = $this->entityManager->getRepository(Order::class)->findBy(
-            ['user' => $draft->getUser(), 'type' => OrderType::NEW_SERVICE],
-            ['id' => 'DESC'],
-            50
-        );
-
-        foreach ($orders as $order) {
-            if (!$order instanceof Order) {
-                continue;
-            }
-            if (!in_array($order->getStatus(), [OrderStatus::WAITING_PAYMENT, OrderStatus::PAYMENT_PENDING, OrderStatus::PENDING, OrderStatus::DRAFT], true)) {
-                continue;
-            }
-            $metadata = is_array($order->getMetadata()) ? $order->getMetadata() : [];
-            if ((int) ($metadata['orderDraftId'] ?? 0) === (int) $draft->getId()) {
-                return $order;
-            }
-        }
-
-        return null;
+        return $this->newServiceCheckout->openOrderForDraft($draft);
     }
 
     private function markOrderWaitingDiscountCode(Order $order): void
@@ -2435,51 +2019,12 @@ class TelegramUpdateHandler
 
     private function canEditOrderForPayment(Order $order): bool
     {
-        return in_array($order->getType(), [OrderType::NEW_SERVICE, OrderType::RENEWAL, OrderType::ADD_TRAFFIC], true)
-            && in_array($order->getStatus(), [OrderStatus::WAITING_PAYMENT, OrderStatus::PAYMENT_PENDING, OrderStatus::PENDING, OrderStatus::DRAFT], true);
+        return $this->orderLifecycle->canEditForPayment($order);
     }
 
     private function findActiveOrderDraft(TelegramAccount $account): ?OrderDraft
     {
-        $this->expireUserDrafts($account);
-
-        return $this->entityManager->getRepository(OrderDraft::class)
-            ->createQueryBuilder('d')
-            ->where('d.user = :user')
-            ->andWhere('d.status = :status')
-            ->andWhere('d.expiresAt IS NULL OR d.expiresAt > :now')
-            ->setParameter('user', $account->getUser())
-            ->setParameter('status', OrderDraftStatus::PENDING)
-            ->setParameter('now', new \DateTimeImmutable())
-            ->orderBy('d.id', 'DESC')
-            ->setMaxResults(1)
-            ->getQuery()
-            ->getOneOrNullResult();
-    }
-
-    private function expireUserDrafts(TelegramAccount $account): void
-    {
-        $drafts = $this->entityManager->getRepository(OrderDraft::class)
-            ->createQueryBuilder('d')
-            ->where('d.user = :user')
-            ->andWhere('d.status = :status')
-            ->andWhere('d.expiresAt IS NOT NULL AND d.expiresAt <= :now')
-            ->setParameter('user', $account->getUser())
-            ->setParameter('status', OrderDraftStatus::PENDING)
-            ->setParameter('now', new \DateTimeImmutable())
-            ->getQuery()
-            ->getResult();
-
-        if ([] === $drafts) {
-            return;
-        }
-
-        foreach ($drafts as $draft) {
-            if ($draft instanceof OrderDraft) {
-                $draft->setStatus(OrderDraftStatus::EXPIRED)->setUpdatedAt(new \DateTimeImmutable());
-            }
-        }
-        $this->entityManager->flush();
+        return $this->newServiceCheckout->activeDraft($account->getUser());
     }
 
     private function handleDraftBack(TelegramAccount $account, string $chatId, int $draftId, ?string $callbackId): void
@@ -2542,27 +2087,11 @@ class TelegramUpdateHandler
             return;
         }
 
-        if (in_array($order->getStatus(), [OrderStatus::CANCELLED, OrderStatus::EXPIRED, OrderStatus::FAILED], true)) {
-            $this->showPopupOrMessage($chatId, $callbackId, 'سفارش ناتمام حذف شد.', 'order_cancel_already_done');
-
-            return;
-        }
-
-        $payment = $this->findLatestOrderPayment($order);
-        if (!$this->canCancelIncompleteOrder($order, $payment)) {
-            $this->showPopupOrMessage($chatId, $callbackId, 'امکان لغو این سفارش وجود ندارد.', 'order_cancel_not_allowed');
-
-            return;
-        }
-
-        // Locked and re-checked in the settlement service: never overwrites a confirmed payment.
-        if (SettlementOutcome::REJECTED !== $this->paymentSettlementService->cancelByCustomer($order)->outcome) {
-            $this->showPopupOrMessage($chatId, $callbackId, 'امکان لغو این سفارش وجود ندارد.', 'order_cancel_not_allowed');
-
-            return;
-        }
-
-        $this->showPopupOrMessage($chatId, $callbackId, 'سفارش ناتمام حذف شد.', 'order_cancelled');
+        match ($this->orderLifecycle->cancel($order)) {
+            OrderLifecycle::CANCEL_ALREADY_CLOSED => $this->showPopupOrMessage($chatId, $callbackId, 'سفارش ناتمام حذف شد.', 'order_cancel_already_done'),
+            OrderLifecycle::CANCEL_CANCELLED => $this->showPopupOrMessage($chatId, $callbackId, 'سفارش ناتمام حذف شد.', 'order_cancelled'),
+            default => $this->showPopupOrMessage($chatId, $callbackId, 'امکان لغو این سفارش وجود ندارد.', 'order_cancel_not_allowed'),
+        };
     }
 
     private function handleOrderResume(TelegramAccount $account, string $chatId, int $orderId, ?string $callbackId): void
@@ -2612,9 +2141,8 @@ class TelegramUpdateHandler
             return;
         }
 
-        $cardNumber = $gateway?->getManualCardNumber() ?? $this->settingValueProvider->get('payment.card_number', $this->paymentCardNumber);
-        $cardHolder = $gateway?->getManualCardHolder() ?? $this->settingValueProvider->get('payment.card_holder', $this->paymentCardHolder);
-        $description = $gateway?->getManualInstructions() ?? $this->settingValueProvider->get('payment.description', $this->paymentDescription);
+        $card = $this->paymentStarter->manualCard($gateway);
+        [$cardNumber, $cardHolder, $description] = [$card->cardNumber, $card->cardHolder, $card->instructions];
         $this->telegramApiClient->sendMessage(
             $chatId,
             $this->botTextResolver->message('payment.manual_card.incomplete_instructions', [
@@ -3092,40 +2620,17 @@ class TelegramUpdateHandler
 
     private function findLatestIncompleteOrder(TelegramAccount $account): ?Order
     {
-        $context = $this->incompleteOrderService->findActiveIncompleteForUser($account->getUser());
-        if ($context instanceof IncompleteOrderContext && 'order' === $context->type) {
-            $order = $this->entityManager->getRepository(Order::class)->find($context->id);
-            if ($order instanceof Order && $order->getUser()->getId() === $account->getUser()->getId()) {
-                return $order;
-            }
-        }
-
-        return null;
+        return $this->orderLifecycle->incompleteOrder($account->getUser());
     }
 
     private function canCancelIncompleteOrder(Order $order, ?Payment $payment): bool
     {
-        if (in_array($order->getStatus(), [OrderStatus::PAID, OrderStatus::PROVISIONED, OrderStatus::PROCESSING, OrderStatus::COMPLETED], true)) {
-            return false;
-        }
-
-        if ($payment instanceof Payment && in_array($payment->getStatus(), [PaymentStatus::CONFIRMED, PaymentStatus::SUBMITTED], true)) {
-            return false;
-        }
-
-        return in_array($order->getStatus(), [OrderStatus::WAITING_PAYMENT, OrderStatus::PAYMENT_PENDING, OrderStatus::PENDING, OrderStatus::DRAFT], true);
+        return $this->orderLifecycle->canCancel($order, $payment);
     }
 
     private function findLatestOrderPayment(Order $order): ?Payment
     {
-        return $this->entityManager->getRepository(Payment::class)
-            ->createQueryBuilder('p')
-            ->where('p.order = :order')
-            ->orderBy('p.id', 'DESC')
-            ->setMaxResults(1)
-            ->setParameter('order', $order)
-            ->getQuery()
-            ->getOneOrNullResult();
+        return $this->orderLifecycle->latestPayment($order);
     }
 
     private function renderDraftStep(TelegramAccount $account, OrderDraft $draft, string $chatId): void
@@ -3215,180 +2720,27 @@ class TelegramUpdateHandler
 
     private function parsePositiveInt(string $text): ?int
     {
-        $value = trim($text);
-        if (!preg_match('/^\d+$/', $value)) {
-            return null;
-        }
-        $int = (int) $value;
-
-        return $int > 0 ? $int : null;
+        return PlanOptions::parsePositiveInt($text);
     }
 
     private function shouldAskCustomTraffic(Plan $plan): bool
     {
-        return $this->hasCustomTrafficPricing($plan)
-            && $plan->getMinTrafficGb() !== $plan->getMaxTrafficGb();
-    }
-
-    private function hasCustomTrafficPricing(Plan $plan): bool
-    {
-        return $plan->isCustomizable()
-            && null !== $plan->getMinTrafficGb()
-            && null !== $plan->getMaxTrafficGb()
-            && (int) ($plan->getPricePerGb() ?? 0) > 0;
+        return $this->planOptions->asksTraffic($plan);
     }
 
     private function shouldAskCustomDuration(Plan $plan): bool
     {
-        return !$plan->isUnlimitedDuration()
-            && $this->hasCustomDurationPricing($plan)
-            && $plan->getMinDurationDays() !== $plan->getMaxDurationDays();
-    }
-
-    private function hasCustomDurationPricing(Plan $plan): bool
-    {
-        return $plan->isCustomizable()
-            && null !== $plan->getMinDurationDays()
-            && null !== $plan->getMaxDurationDays()
-            && (int) ($plan->getPricePerDay() ?? 0) > 0;
+        return $this->planOptions->asksDuration($plan);
     }
 
     private function resolveDefaultTrafficGb(Plan $plan): ?int
     {
-        if ($this->hasCustomTrafficPricing($plan) && $plan->getMinTrafficGb() === $plan->getMaxTrafficGb()) {
-            return $plan->getMinTrafficGb();
-        }
-
-        return $plan->getTrafficGb();
+        return $this->planOptions->defaultTrafficGb($plan);
     }
 
     private function resolveDefaultDurationDays(Plan $plan): ?int
     {
-        if ($plan->isUnlimitedDuration()) {
-            return null;
-        }
-
-        if (null !== $plan->getMinDurationDays() && $plan->getMinDurationDays() === $plan->getMaxDurationDays()) {
-            return $plan->getMinDurationDays();
-        }
-
-        return $plan->getDurationDays();
-    }
-
-    private function normalizeUsernamePrefix(string $value): ?string
-    {
-        $normalized = strtolower(trim($value));
-        $normalized = preg_replace('/[^a-z0-9_]/', '', $normalized) ?? '';
-        if (!preg_match('/^[a-z0-9_]{3,24}$/', $normalized)) {
-            return null;
-        }
-
-        return $normalized;
-    }
-
-    private function buildFinalUsername(string $prefix): string
-    {
-        return sprintf('%s_%d', $prefix, random_int(10000, 99999));
-    }
-
-    private function resolveIncompleteExpiresAt(): \DateTimeImmutable
-    {
-        return (new \DateTimeImmutable())->modify(sprintf('+%d hours', $this->incompleteOrderSettingsProvider->expireHours()));
-    }
-
-    private function notifyAdmin(Payment $payment, string $kind): void
-    {
-        $chats = $this->accessPolicy->telegramRecipients(AdminPermission::PAYMENTS_MODERATE);
-        if ([] === $chats) {
-            return;
-        }
-
-        $order = $payment->getOrder();
-        $telegramAccount = $this->entityManager->getRepository(TelegramAccount::class)->findOneBy(['user' => $order->getUser()]);
-        $meta = is_array($order->getMetadata()) ? $order->getMetadata() : [];
-        $isRenewal = OrderType::RENEWAL === $order->getType();
-        $isAddTraffic = OrderType::ADD_TRAFFIC === $order->getType();
-        $durationText = true === ($meta['unlimitedDuration'] ?? false)
-            ? 'نامحدود'
-            : sprintf('%s روز', (string) ($meta['durationDays'] ?? '-'));
-        $customSummary = true === ($meta['custom'] ?? false)
-            ? sprintf("Custom: yes\nUsername: %s\nTraffic: %s GB\nDuration: %s\nCalculated amount: %s\n", (string) ($meta['finalUsername'] ?? '-'), (string) ($meta['trafficGb'] ?? '-'), $durationText, (string) ($meta['calculatedAmount'] ?? '-'))
-            : "Custom: no\n";
-        $priceSnapshot = is_array($meta['priceSnapshot'] ?? null) ? $meta['priceSnapshot'] : [];
-        $snapshotLines = sprintf(
-            "Base amount: %s\nGlobal discount: %s\nDiscount code: %s\nDiscount code amount: %s\nFinal amount: %s",
-            (string) ($priceSnapshot['baseAmount'] ?? '-'),
-            (string) ($priceSnapshot['globalDiscountAmount'] ?? 0),
-            (string) ($priceSnapshot['discountCode'] ?? '-'),
-            (string) ($priceSnapshot['discountCodeAmount'] ?? 0),
-            (string) ($priceSnapshot['finalAmount'] ?? $payment->getAmount())
-        );
-        if ($isAddTraffic) {
-            $message = sprintf(
-                "پرداخت خرید حجم اضافه\n\nPayment ID: %d\nOrder ID: %d\nکد پیگیری: %s\nOrder type: add_traffic\nService ID: %s\nUser: %s\nRequested traffic: %s GB\nAmount: %d تومان\n%s\nTracking: %s\nReceipt message: %s",
-                $payment->getId(),
-                $order->getId(),
-                (string) ($order->getTrackingCode() ?? '-'),
-                (string) ($meta['targetServiceId'] ?? ($order->getTargetService()?->getId() ?? '-')),
-                $this->formatTelegramIdentity($telegramAccount),
-                (string) ($meta['trafficGb'] ?? '-'),
-                $payment->getAmount(),
-                $snapshotLines,
-                $payment->getTrackingCode() ?: '-',
-                $payment->getReceiptMessage() ?: '-'
-            );
-        } elseif ($isRenewal) {
-            $renewalPolicy = is_array($meta['renewalPolicy'] ?? null) ? $meta['renewalPolicy'] : [];
-            $message = sprintf(
-                "پرداخت تمدید سرویس\n\nPayment ID: %d\nOrder ID: %d\nکد پیگیری: %s\nOrder type: renewal\nService ID: %s\nUser: %s\nAmount: %d تومان\nRenewal duration: %s\nRenewal traffic: %s GB\nPolicy traffic carry: %s\nPolicy days carry: %s\nPrice source: %s\n%s\nTracking: %s\nReceipt message: %s",
-                $payment->getId(),
-                $order->getId(),
-                (string) ($order->getTrackingCode() ?? '-'),
-                (string) ($meta['targetServiceId'] ?? ($order->getTargetService()?->getId() ?? '-')),
-                $this->formatTelegramIdentity($telegramAccount),
-                $payment->getAmount(),
-                $durationText,
-                (string) ($meta['trafficGb'] ?? '-'),
-                true === ($renewalPolicy['carryRemainingTraffic'] ?? true) ? 'yes' : 'no',
-                true === ($renewalPolicy['carryRemainingDays'] ?? true) ? 'yes' : 'no',
-                (string) ($priceSnapshot['planPriceSource'] ?? 'current_plan'),
-                $snapshotLines,
-                $payment->getTrackingCode() ?: '-',
-                $payment->getReceiptMessage() ?: '-'
-            );
-        } else {
-            $message = sprintf(
-                "پرداخت جدید ثبت شد\n\nPayment ID: %d\nOrder ID: %d\nکد پیگیری: %s\nUser: %s\nPlan: %s\nAmount: %d تومان\n%s%s\nTracking: %s\nReceipt message: %s",
-                $payment->getId(),
-                $order->getId(),
-                (string) ($order->getTrackingCode() ?? '-'),
-                $this->formatTelegramIdentity($telegramAccount),
-                $order->getPlan()->getTitle(),
-                $payment->getAmount(),
-                $customSummary,
-                $snapshotLines,
-                $payment->getTrackingCode() ?: '-',
-                $payment->getReceiptMessage() ?: '-'
-            );
-        }
-
-        if ('receipt_photo' === $kind) {
-            $receiptFileId = (string) ($payment->getReceiptFileId() ?? '');
-            if ('' !== $receiptFileId) {
-                foreach ($chats as $chat) {
-                    $this->telegramApiClient->sendPhoto($chat, $receiptFileId, $message, $this->keyboardFactory->adminPaymentActions((int) $payment->getId()));
-                }
-                $this->debugLog(sprintf('notify_admin_sent_receipt_photo payment_id=%d', $payment->getId()));
-
-                return;
-            }
-
-            $this->debugLog(sprintf('notify_admin_missing_receipt_file payment_id=%d', $payment->getId()));
-        }
-
-        foreach ($chats as $chat) {
-            $this->telegramApiClient->sendMessage($chat, $message, $this->keyboardFactory->adminPaymentActions((int) $payment->getId()));
-        }
+        return $this->planOptions->defaultDurationDays($plan);
     }
 
     private function acknowledgeCallback(?string $callbackId): void
@@ -3441,15 +2793,6 @@ class TelegramUpdateHandler
             $action,
             $settingKey
         ));
-    }
-
-    private function formatTelegramIdentity(?TelegramAccount $telegramAccount): string
-    {
-        if (!$telegramAccount instanceof TelegramAccount) {
-            return '@- / -';
-        }
-
-        return sprintf('@%s / %s', $telegramAccount->getUsername() ?: '-', $telegramAccount->getTelegramId());
     }
 
     private function debugLog(string $message): void

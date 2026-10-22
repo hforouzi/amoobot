@@ -1,0 +1,32 @@
+{% extends 'miniapp/view/_base.html.twig' %}
+{% trans_default_domain 'miniapp' %}
+{# Choosing how to pay an order: the store payment methods this order may use (StorePaymentMethodResolver). #}
+{% block section %}services{% endblock %}
+{% block title %}{{ 'pay.title'|trans }}{% endblock %}
+{% block attributes %} data-back{% endblock %}
+{% block content %}
+    {{ include('miniapp/view/_order_summary.html.twig', {order: order, summary: summary}) }}
+    {% if openPayment %}
+        <section class="card notice">
+            <p>{{ 'pay.open_payment'|trans }}</p>
+            <a class="btn secondary small" href="{{ path('miniapp_payment', {id: openPayment.id}) }}" data-nav>{{ 'pay.continue_payment'|trans }}</a>
+        </section>
+    {% endif %}
+    <section class="card">
+        <h2>{{ 'pay.choose_method'|trans }}</h2>
+        {% if methods is empty %}
+            <p class="muted" data-no-methods>{{ 'pay.no_methods'|trans }}</p>
+        {% else %}
+            <div class="methods">
+                {% for method in methods %}
+                    <button type="button" class="method" data-method-id="{{ method.id }}" data-action="{{ path('miniapp_order_pay_api', {id: order.id}) }}" data-body="{{ {methodId: method.id}|json_encode }}">
+                        <span class="method-icon" aria-hidden="true">{{ {manual_card: '💳', nowpayments: '💎'}[method.gateway.type] ?? '🌐' }}</span>
+                        <span class="list-main">{{ method.title }}</span>
+                        <span aria-hidden="true">›</span>
+                    </button>
+                {% endfor %}
+            </div>
+        {% endif %}
+    </section>
+    <button type="button" class="btn secondary small" data-action="{{ path('miniapp_order_cancel', {id: order.id}) }}">{{ 'shop.cancel_order'|trans }}</button>
+{% endblock %}

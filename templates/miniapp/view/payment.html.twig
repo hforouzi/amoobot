@@ -1,0 +1,66 @@
+{% extends 'miniapp/view/_base.html.twig' %}
+{% trans_default_domain 'miniapp' %}
+{# One payment. Until a final state the page polls /app/api/payments/{id}/status (read only) and reloads when the
+   state changes. Card to card: the details, the exact amount and the receipt upload. Online/crypto: the gateway's
+   page opens with Telegram's openLink; the gateway's own return page or webhook settles it, never this page. #}
+{% block section %}services{% endblock %}
+{% block title %}{{ 'payment.title'|trans }}{% endblock %}
+{% block attributes %} data-back{% if not final %} data-poll-url="{{ path('miniapp_payment_status', {id: payment.id}) }}" data-poll-state="{{ state }}"{% endif %}{% if state == 'pending' and kind != 'manual_card' and payment.paymentUrl %} data-main-button-text="{{ ('payment.open_' ~ kind)|trans }}" data-main-button-href="{{ payment.paymentUrl }}" data-main-button-external{% endif %}{% endblock %}
+{% block content %}
+    <section class="card state-card state-{{ state }}" data-payment-state="{{ state }}">
+        <p class="state-icon" aria-hidden="true">{{ {pending: '⏳', review: '🕵️', paid: '✅', provision_failed: '🛠', failed: '❌', cancelled: '🚫', expired: '⌛'}[state] }}</p>
+        <h1 data-state-text>{{ ('payment.state.' ~ state)|trans }}</h1>
+        <p class="muted">{{ ('payment.state_hint.' ~ (state == 'pending' ? 'pending_' ~ kind : state))|trans }}</p>
+        {% if state == 'paid' and service %}
+            <a class="btn" href="{{ path('miniapp_subscription', {id: service.id}) }}" data-nav data-go-service>{{ 'payment.go_to_subscription'|trans }}</a>
+        {% elseif state in ['failed', 'cancelled', 'expired'] %}
+            <a class="btn secondary" href="{{ path('miniapp_shop') }}" data-nav>{{ 'payment.back_to_shop'|trans }}</a>
+        {% elseif state == 'provision_failed' %}
+            <a class="btn secondary" href="{{ path('miniapp_help') }}" data-nav>{{ 'payment.contact_support'|trans }}</a>
+        {% endif %}
+    </section>
+
+    {% if state == 'pending' %}
+        {% if kind == 'manual_card' and card %}
+            <section class="card">
+                <h2>{{ 'payment.card_title'|trans }}</h2>
+                <p>{{ 'payment.card_amount'|trans }} <b class="amount">{{ 'money.toman'|trans({'%amount%': payment.amount|number_format}) }}</b></p>
+                <div class="copy-line">
+                    <span class="ltr card-number">{{ card.cardNumber ?: '-' }}</span>
+                    {% if card.cardNumber %}<button type="button" class="btn secondary small fit" data-copy="{{ card.cardNumber }}">📋 {{ 'payment.copy_card'|trans }}</button>{% endif %}
+                </div>
+                <p class="muted">{{ 'payment.card_holder'|trans }}: {{ card.cardHolder ?: '-' }}</p>
+                {% if card.instructions %}<p class="pre-line muted">{{ card.instructions }}</p>{% endif %}
+            </section>
+            {% if canUploadReceipt %}
+                <form class="card form" data-upload="{{ path('miniapp_payment_receipt', {id: payment.id}) }}" enctype="multipart/form-data" novalidate>
+                    <h2>{{ 'payment.receipt_title'|trans }}</h2>
+                    <p class="muted">{{ 'payment.receipt_hint'|trans({'%mb%': 5}) }}</p>
+                    <input type="file" name="receipt" accept="image/jpeg,image/png,image/webp" required>
+                    <p class="field-error" data-form-error hidden></p>
+                    <button type="submit" class="btn">{{ 'payment.receipt_send'|trans }}</button>
+                </form>
+            {% endif %}
+        {% elseif payment.paymentUrl %}
+            <section class="card">
+                <p class="muted">{{ ('payment.gateway_hint_' ~ kind)|trans }}</p>
+                <a class="btn" href="{{ payment.paymentUrl }}" data-open-link>{{ ('payment.open_' ~ kind)|trans }}</a>
+                <p class="muted small-print">{{ 'payment.return_hint'|trans }}</p>
+            </section>
+        {% elseif kind == 'crypto' and payment.cryptoAddress %}
+            <section class="card">
+                <h2>{{ 'payment.crypto_title'|trans }}</h2>
+                <p>{{ 'payment.crypto_amount'|trans }} <b class="ltr">{{ payment.cryptoPayAmount }} {{ payment.cryptoPayCurrency|upper }}</b></p>
+                <div class="copy-line">
+                    <span class="ltr card-number">{{ payment.cryptoAddress }}</span>
+                    <button type="button" class="btn secondary small fit" data-copy="{{ payment.cryptoAddress }}">📋 {{ 'payment.copy_address'|trans }}</button>
+                </div>
+            </section>
+        {% endif %}
+        {% if canCancel %}
+            <button type="button" class="btn secondary small" data-action="{{ path('miniapp_order_cancel', {id: order.id}) }}">{{ 'shop.cancel_order'|trans }}</button>
+        {% endif %}
+    {% endif %}
+
+    {{ include('miniapp/view/_order_summary.html.twig', {order: order, summary: summary}) }}
+{% endblock %}

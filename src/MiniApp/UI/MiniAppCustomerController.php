@@ -8,6 +8,9 @@ use App\Bot\Application\BotTextResolver;
 use App\Entity\VpnService;
 use App\MiniApp\Security\MiniAppUser;
 use App\Provisioning\Application\CustomerServiceFinder;
+use App\Provisioning\Application\TrafficAddonSettingsProvider;
+use App\Shop\Application\Checkout\ServiceOrderCheckout;
+use App\Shop\Application\SalesSettingsProvider;
 use App\Subscription\Application\AppDownloadCatalog;
 use App\Subscription\Application\ClientAppCatalog;
 use App\Subscription\Application\SubscriptionPageUrl;
@@ -38,6 +41,9 @@ final class MiniAppCustomerController extends AbstractController
         private readonly SubscriptionPageUrl $pageUrl,
         private readonly ClientAppCatalog $clientApps,
         private readonly AppDownloadCatalog $downloads,
+        private readonly ServiceOrderCheckout $serviceOrderCheckout,
+        private readonly SalesSettingsProvider $salesSettings,
+        private readonly TrafficAddonSettingsProvider $trafficAddonSettings,
         private readonly string $serviceNotifyTrafficThresholds = '80',
     ) {
     }
@@ -77,6 +83,31 @@ final class MiniAppCustomerController extends AbstractController
             'service' => $service,
             'view' => $view,
             'pageUrl' => $this->pageUrl->forService($service),
+            // The same switches the bot's service view uses; the pages check them again.
+            'canRenew' => $this->salesSettings->renewalsEnabled() && null !== $this->serviceOrderCheckout->renewalQuote($service),
+            'canAddTraffic' => $this->salesSettings->addTrafficEnabled() && $this->trafficAddonSettings->canPurchase() && null !== $this->serviceOrderCheckout->addTrafficPlan($service),
+        ]);
+    }
+
+    /**
+     * The subscription page inside the Mini App, for the signed-in owner only (not the public /s/{token} link): the
+     * same SubscriptionPageViewFactory::build() and partials, so it carries the customer's own subscription link,
+     * QR code and configs. The only /app response that does; one-tap imports go through the https bridge.
+     */
+    #[Route('/app/view/services/{id}/subscription', name: 'miniapp_subscription', requirements: ['id' => '\d+'], defaults: ['_miniapp_section' => 'services'], methods: ['GET'])]
+    public function subscription(Request $request, #[CurrentUser] MiniAppUser $user, int $id): Response
+    {
+        $service = $this->customerServices->ownedBy($user->customer(), $id);
+        $platform = ClientPlatform::tryFrom((string) $request->query->get('platform')) ?? ClientPlatform::fromUserAgent($request->headers->get('User-Agent'));
+        $view = null !== $service ? $this->viewFactory->build($service, $platform) : null;
+        if (null === $service || null === $view) {
+            throw new NotFoundHttpException();
+        }
+
+        return $this->fragments->render($request, 'miniapp/view/subscription.html.twig', [
+            'service' => $service,
+            'view' => $view,
+            'platforms' => ClientPlatform::cases(),
         ]);
     }
 

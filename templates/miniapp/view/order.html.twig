@@ -1,0 +1,21 @@
+{% extends 'miniapp/view/_base.html.twig' %}
+{% trans_default_domain 'miniapp' %}
+{# One order: its summary and status, and where to go: pay it, its payment, its service. #}
+{% block section %}services{% endblock %}
+{% block title %}{{ ('order.type.' ~ order.type)|trans }}{% endblock %}
+{% block attributes %} data-back{% endblock %}
+{% block content %}
+    <section class="card" data-order-status="{{ order.status }}">
+        <div class="head">
+            <h1>{{ ('order.type.' ~ order.type)|trans }}</h1>
+            <span class="badge order-{{ order.status }}">{{ ('order.status.' ~ order.status)|trans }}</span>
+        </div>
+        <p class="muted"><time datetime="{{ order.createdAt|date('Y-m-d') }}">{{ order.createdAt|sub_date(lang) }}</time></p>
+        <div class="row">
+            {% if payable %}<a class="btn small" href="{{ path('miniapp_order_pay', {id: order.id}) }}" data-nav data-pay-order>{{ 'shop.resume'|trans }}</a>{% endif %}
+            {% if payment %}<a class="btn secondary small" href="{{ path('miniapp_payment', {id: payment.id}) }}" data-nav data-payment-link>{{ 'orders.payment'|trans }}: {{ ('payment.state.' ~ paymentState)|trans }}</a>{% endif %}
+            {% if service %}<a class="btn secondary small" href="{{ path('miniapp_service', {id: service.id}) }}" data-nav data-service-link>{{ 'payment.go_to_service'|trans }}</a>{% endif %}
+        </div>
+    </section>
+    {{ include('miniapp/view/_order_summary.html.twig', {order: order, summary: summary}) }}
+{% endblock %}

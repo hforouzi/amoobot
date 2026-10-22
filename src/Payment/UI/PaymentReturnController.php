@@ -9,9 +9,9 @@ use App\Entity\Payment;
 use App\Entity\VpnService;
 use App\Payment\Application\Settlement\PaymentSettlementService;
 use App\Payment\Application\Settlement\VerifiedPayment;
+use App\Payment\Domain\PaymentDisplayState;
 use App\Payment\Domain\PaymentGatewayType;
 use App\Payment\Domain\PaymentReturnUrl;
-use App\Payment\Domain\PaymentStatus;
 use App\Payment\Infrastructure\PaymentGatewayRegistry;
 use App\Provisioning\Application\CustomerAccessGuard;
 use App\Shop\Domain\OrderType;
@@ -162,14 +162,7 @@ final class PaymentReturnController extends AbstractController
 
     private function displayState(Payment $payment): string
     {
-        return match ($payment->getStatus()) {
-            PaymentStatus::CONFIRMED => 'paid',
-            PaymentStatus::NEEDS_REVIEW => 'review',
-            PaymentStatus::PROVISIONING_FAILED => 'provision_failed',
-            // Cancelled/expired unpaid: not a failed payment. A later "paid" still goes to review.
-            PaymentStatus::REJECTED => $payment->isRejectedUnpaid() ? 'cancelled' : 'failed',
-            default => 'pending',
-        };
+        return PaymentDisplayState::forReturnPage($payment);
     }
 
     private function findPayment(string $token): ?Payment

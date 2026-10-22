@@ -151,6 +151,40 @@ class TelegramApiClient
     }
 
     /**
+     * Sends a photo from disk and returns the file id Telegram stored it under (its largest size), so it can be sent
+     * again by id like a photo the user sent to the bot. Null when Telegram did not accept it.
+     */
+    public function uploadPhoto(string $chatId, string $filePath, string $caption = ''): ?string
+    {
+        if (!is_file($filePath)) {
+            return null;
+        }
+
+        $payload = ['chat_id' => $chatId, 'photo' => DataPart::fromPath($filePath)];
+        if ('' !== trim($caption)) {
+            $payload['caption'] = $caption;
+        }
+        $formData = new FormDataPart($payload);
+        $options = ['headers' => $formData->getPreparedHeaders()->toArray(), 'body' => $formData->bodyToIterable()];
+        $proxy = trim($this->telegramProxy);
+        if ('' !== $proxy) {
+            $options['proxy'] = $proxy;
+        }
+
+        try {
+            $data = $this->httpClient->request('POST', sprintf('https://api.telegram.org/bot%s/sendPhoto', $this->botToken), $options)->toArray(false);
+        } catch (\Throwable) {
+            return null;
+        }
+        $photos = is_array($data['result']['photo'] ?? null) ? $data['result']['photo'] : [];
+        $largest = end($photos);
+        $fileId = is_array($largest) ? trim((string) ($largest['file_id'] ?? '')) : '';
+        $this->botMessageLogger->log(BotMessageDirection::OUTGOING, ['method' => 'uploadPhoto', 'payload' => ['chat_id' => $chatId, 'caption' => $caption]], $chatId, 'photo');
+
+        return true === ($data['ok'] ?? false) && '' !== $fileId ? $fileId : null;
+    }
+
+    /**
      * Sends the file as is (Telegram does not recompress documents, unlike photos).
      */
     public function sendDocumentFile(string $chatId, string $filePath, string $caption = '', ?array $replyMarkup = null, ?string $fileName = null, ?string $contentType = null): void

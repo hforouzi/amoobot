@@ -1,0 +1,36 @@
+{% extends 'miniapp/view/_base.html.twig' %}
+{% trans_default_domain 'miniapp' %}
+{# Renewing a service at the price of its plan as it is now (ServiceOrderCheckout::renewalQuote). #}
+{% block section %}services{% endblock %}
+{% block title %}{{ 'renew.title'|trans }}{% endblock %}
+{% block attributes %} data-back{% if open and quote %} data-main-button-text="{{ 'checkout.continue'|trans }}" data-main-button-form="renew-form"{% endif %}{% endblock %}
+{% block content %}
+    {% if view %}{{ include('subscription/_status.html.twig', {view: view}) }}{% endif %}
+    {% if not open %}
+        <section class="card notice" data-sales-closed><p class="pre-line">{{ disabledMessage }}</p></section>
+    {% elseif not renewal or not quote %}
+        <section class="card notice"><p>{{ 'checkout.message.renewal_unavailable'|trans }}</p></section>
+    {% else %}
+        <form class="card form" id="renew-form" data-submit="{{ path('miniapp_renew', {id: service.id}) }}" data-quote-url="{{ path('miniapp_renew_quote', {id: service.id}) }}" novalidate>
+            <h2>{{ 'renew.title'|trans }}</h2>
+            <p class="muted">
+                {{ 'plan.traffic'|trans({'%gb%': renewal.trafficGb}) }} ·
+                {{ renewal.unlimitedDuration ? 'plan.duration_unlimited'|trans : 'plan.duration'|trans({'%days%': renewal.durationDays}) }}
+            </p>
+            <p class="muted">
+                {{ renewal.carryRemainingTraffic ? 'renew.keeps_traffic'|trans : 'renew.resets_traffic'|trans }}
+                {{ renewal.carryRemainingDays ? 'renew.keeps_days'|trans : 'renew.resets_days'|trans }}
+            </p>
+            <label class="field">
+                <span>{{ 'checkout.discount_code'|trans }}</span>
+                <span class="inline-field">
+                    <input type="text" name="discountCode" autocomplete="off" autocapitalize="characters" spellcheck="false" dir="ltr">
+                    <button type="button" class="btn secondary small fit" data-requote-now>{{ 'checkout.apply_code'|trans }}</button>
+                </span>
+            </label>
+            <div data-quote>{{ include('miniapp/view/_price.html.twig', {quote: quote}) }}</div>
+            <p class="field-error" data-form-error hidden></p>
+            <button type="submit" class="btn">{{ 'checkout.continue'|trans }}</button>
+        </form>
+    {% endif %}
+{% endblock %}

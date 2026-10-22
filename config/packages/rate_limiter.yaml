@@ -19,3 +19,13 @@ framework:
             policy: sliding_window
             limit: 10
             interval: '5 minutes'
+        # Mini App orders/payments/trials created, per Telegram user (MiniAppCheckoutController).
+        miniapp_checkout:
+            policy: sliding_window
+            limit: 20
+            interval: '10 minutes'
+        # Mini App receipt uploads, per Telegram user.
+        miniapp_receipt:
+            policy: sliding_window
+            limit: 10
+            interval: '10 minutes'
