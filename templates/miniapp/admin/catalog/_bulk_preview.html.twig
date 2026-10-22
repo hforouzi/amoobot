@@ -1,0 +1,17 @@
+{% trans_default_domain 'miniapp' %}
+<div data-preview data-plans="{{ plans }}" data-changes="{{ changes }}">
+    {% if changes == 0 %}
+        <p class="muted">{{ 'admin.bulk.none'|trans }}</p>
+    {% else %}
+        <p><b>{{ 'admin.bulk.preview_count'|trans({'%plans%': plans, '%changes%': changes}) }}</b></p>
+        <ul class="list compact">
+            {% for row in sample %}
+                <li class="list-item">
+                    <span class="list-main">{{ row.title }} <span class="muted">· {{ ('admin.bulk.fields.' ~ row.field)|trans }}</span></span>
+                    <span class="ltr">{{ row.before|number_format }} → <b>{{ row.after|number_format }}</b></span>
+                </li>
+            {% endfor %}
+        </ul>
+        {% if changes > sample|length %}<p class="muted small-print">{{ 'admin.bulk.more'|trans({'%count%': changes - sample|length}) }}</p>{% endif %}
+    {% endif %}
+</div>

@@ -1,0 +1,82 @@
+{% extends 'miniapp/view/_base.html.twig' %}
+{% import 'miniapp/admin/catalog/_fields.html.twig' as f %}
+{% trans_default_domain 'miniapp' %}
+{# A plan's form: the web form's fields and help, in sections. Saved with Telegram's MainButton (or the Save button);
+   checked live as the admin types (the same rules, nothing saved); a price change asks to confirm old -> new.
+   Leaving with unsaved changes asks first. #}
+{% set isNew = plan.id is null %}
+{% block section %}admin{% endblock %}
+{% block title %}{{ isNew ? 'admin.plan.new'|trans : plan.title }}{% endblock %}
+{% block attributes %} data-back data-main-button-text="{{ 'admin.form.save'|trans }}" data-main-button-form="plan-form"{% if not isNew %} data-plan-id="{{ plan.id }}"{% endif %}{% endblock %}
+{% block content %}
+    <form id="plan-form" class="form" novalidate
+          data-submit="{{ isNew ? path('miniapp_admin_plan_create') : path('miniapp_admin_plan_update', {id: plan.id}) }}"
+          data-check-url="{{ path('miniapp_admin_plan_check') }}" data-dirty-guard="{{ 'admin.form.leave_unsaved'|trans }}"{% if not isNew %} data-reload{% endif %}>
+        {% if not isNew %}<input type="hidden" name="id" value="{{ plan.id }}">{% endif %}
+        <section class="card warnings{{ warnings is empty ? '' : ' show' }}" data-warnings{% if warnings is empty %} hidden{% endif %}>
+            <h2>⚠ {{ 'admin.plan.check_price'|trans }}</h2>
+            <ul data-warning-list>{% for w in warnings %}<li>{{ w }}</li>{% endfor %}</ul>
+        </section>
+
+        {{ f.section('basics', true) }}{{ 'admin.plan.section.basics'|trans }}</summary>
+            {{ f.text('title', values.title ?? '', true, null, 'maxlength="255"') }}
+            {{ f.textarea('description', values.description ?? null, null) }}
+            {{ f.toggle('isActive', values.isActive ?? true, null) }}
+        </details>
+
+        {{ f.section('price', true) }}{{ 'admin.plan.section.price'|trans }}</summary>
+            {{ f.number('price', values.price ?? null, true, 'help.plan.toman', 'money.toman_short'|trans) }}
+            {{ f.number('durationDays', values.durationDays ?? null, true, null, 'admin.plan.days_suffix'|trans) }}
+            {{ f.toggle('isUnlimitedDuration', values.isUnlimitedDuration ?? false, 'help.plan.is_unlimited_duration') }}
+        </details>
+
+        {{ f.section('traffic', false) }}{{ 'admin.plan.section.traffic'|trans }}</summary>
+            {{ f.number('trafficGb', values.trafficGb ?? null, false, null, 'GB') }}
+            {{ f.number('ipLimit', values.ipLimit ?? null, false, 'help.plan.ip_limit', null) }}
+        </details>
+
+        {{ f.section('binding', false) }}{{ 'admin.plan.section.binding'|trans }}</summary>
+            {{ f.inbound('inbound', values.inbound ?? null, inbounds) }}
+        </details>
+
+        {{ f.section('sales', false) }}{{ 'admin.plan.section.sales'|trans }}</summary>
+            {{ f.toggle('allowCustomUsername', values.allowCustomUsername ?? true, null) }}
+            {{ f.toggle('isCustomizable', values.isCustomizable ?? false, 'help.plan_custom_pricing') }}
+        </details>
+
+        {{ f.section('advanced', false) }}{{ 'admin.plan.section.advanced'|trans }}</summary>
+            <p class="muted small-print">{{ 'admin.plan.custom_hint'|trans }}</p>
+            {{ f.number('minTrafficGb', values.minTrafficGb ?? null, false, null, 'GB') }}
+            {{ f.number('maxTrafficGb', values.maxTrafficGb ?? null, false, null, 'GB') }}
+            {{ f.number('pricePerGb', values.pricePerGb ?? null, false, 'help.plan.toman', 'money.toman_short'|trans) }}
+            {{ f.number('minDurationDays', values.minDurationDays ?? null, false, null, 'admin.plan.days_suffix'|trans) }}
+            {{ f.number('maxDurationDays', values.maxDurationDays ?? null, false, null, 'admin.plan.days_suffix'|trans) }}
+            {{ f.number('pricePerDay', values.pricePerDay ?? null, false, 'help.plan.toman', 'money.toman_short'|trans) }}
+        </details>
+
+        <p class="field-error" data-form-error hidden></p>
+        <button type="submit" class="btn" data-save>{{ 'admin.form.save'|trans }}</button>
+    </form>
+
+    {% if not isNew %}
+        <section class="card">
+            <div class="row">
+                <button type="button" class="btn secondary small" data-action="{{ path('miniapp_admin_plan_duplicate', {id: plan.id}) }}" data-confirm="{{ 'admin.plan.confirm.duplicate'|trans({'%title%': plan.title}) }}" data-admin-action="duplicate">⧉ {{ 'admin.plan.duplicate'|trans }}</button>
+                {% if plan.active %}
+                    <button type="button" class="btn secondary small" data-action="{{ path('miniapp_admin_plan_deactivate', {id: plan.id}) }}" data-reload data-admin-action="deactivate">⏸ {{ 'admin.plan.deactivate'|trans }}</button>
+                {% else %}
+                    <button type="button" class="btn secondary small" data-action="{{ path('miniapp_admin_plan_activate', {id: plan.id}) }}" data-reload data-admin-action="activate">▶️ {{ 'admin.plan.activate'|trans }}</button>
+                {% endif %}
+            </div>
+        </section>
+        <section class="card danger-zone" data-group="delete">
+            <h2>{{ 'admin.plan.delete'|trans }}</h2>
+            {% if orderCount > 0 %}
+                <p class="muted" data-delete-blocked>{{ 'admin.plan.in_use'|trans({'%count%': orderCount}) }}</p>
+            {% else %}
+                <p class="muted">{{ 'admin.plan.delete_hint'|trans }}</p>
+                <button type="button" class="btn small danger-solid" data-action="{{ path('miniapp_admin_plan_delete', {id: plan.id}) }}" data-admin-action="delete">🗑 {{ 'admin.plan.delete'|trans }}</button>
+            {% endif %}
+        </section>
+    {% endif %}
+{% endblock %}

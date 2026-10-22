@@ -58,6 +58,22 @@ final class AdminRoutePermissions
             // As on the web (VpnServiceCrudController): regenerating configs is a panel operation.
             'miniapp_admin_service_regenerate_config' => AdminPermission::PANELS_MANAGE,
             'miniapp_admin_service_delete' => AdminPermission::SERVICES_DELETE,
+
+            // Catalog (M3b): plans, trial plans and the bulk price change need PLANS_MANAGE, as on the web
+            // (AdminCrudPermissions); there is no separate view permission.
+            'miniapp_admin_plans' => AdminPermission::PLANS_MANAGE,
+            'miniapp_admin_plan_new' => AdminPermission::PLANS_MANAGE,
+            'miniapp_admin_plan' => AdminPermission::PLANS_MANAGE,
+            'miniapp_admin_plan_create' => AdminPermission::PLANS_MANAGE,
+            'miniapp_admin_plan_update' => AdminPermission::PLANS_MANAGE,
+            'miniapp_admin_plan_check' => AdminPermission::PLANS_MANAGE,
+            'miniapp_admin_plan_duplicate' => AdminPermission::PLANS_MANAGE,
+            'miniapp_admin_plan_activate' => AdminPermission::PLANS_MANAGE,
+            'miniapp_admin_plan_deactivate' => AdminPermission::PLANS_MANAGE,
+            'miniapp_admin_plan_delete' => AdminPermission::PLANS_MANAGE,
+            'miniapp_admin_plan_bulk' => AdminPermission::PLANS_MANAGE,
+            'miniapp_admin_plan_bulk_preview' => AdminPermission::PLANS_MANAGE,
+            'miniapp_admin_plan_bulk_apply' => AdminPermission::PLANS_MANAGE,
         ];
     }
 

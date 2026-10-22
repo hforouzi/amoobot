@@ -1,0 +1,46 @@
+{% extends 'miniapp/view/_base.html.twig' %}
+{% trans_default_domain 'miniapp' %}
+{# Bulk percent price change: scope (active plans or a selection), signed percent, price fields; the preview is the
+   server's (how many change, a before / after sample) and refreshes as the inputs change; applying asks to confirm. #}
+{% block section %}admin{% endblock %}
+{% block title %}{{ 'admin.bulk.title'|trans }}{% endblock %}
+{% block attributes %} data-back data-main-button-text="{{ 'admin.bulk.apply'|trans }}" data-main-button-form="bulk-form"{% endblock %}
+{% block content %}
+    <form id="bulk-form" class="form" novalidate data-submit="{{ path('miniapp_admin_plan_bulk_apply') }}" data-quote-url="{{ path('miniapp_admin_plan_bulk_preview') }}" data-dirty-guard="{{ 'admin.form.leave_unsaved'|trans }}">
+        <section class="card">
+            <h1>{{ 'admin.bulk.title'|trans }}</h1>
+            <p class="muted">{{ 'admin.bulk.intro'|trans }}</p>
+            <label class="field" data-field="percent">
+                <span>{{ 'admin.bulk.percent'|trans }} <span class="req" aria-hidden="true">*</span></span>
+                <span class="inline-field">
+                    <input class="input ltr" type="text" name="percent" inputmode="decimal" autocomplete="off" maxlength="7" placeholder="+10 / -5" data-requote>
+                    <span class="suffix">%</span>
+                </span>
+                <span class="muted small-print">{{ 'admin.bulk.percent_help'|trans({'%min%': range[0], '%max%': '+' ~ range[1]}) }}</span>
+                <p class="field-error" data-error-for="percent" hidden></p>
+            </label>
+            <label class="field">
+                <span>{{ 'admin.bulk.field'|trans }}</span>
+                <select class="input" name="field" data-requote>
+                    {% for field in fields %}<option value="{{ field }}">{{ ('admin.bulk.fields.' ~ field)|trans }}</option>{% endfor %}
+                </select>
+            </label>
+        </section>
+        <section class="card">
+            <h2>{{ 'admin.bulk.scope'|trans }}</h2>
+            <label class="radio"><input type="radio" name="scope" value="active" checked data-requote> {{ 'admin.bulk.scope_active'|trans }}</label>
+            <label class="radio"><input type="radio" name="scope" value="selection" data-requote> {{ 'admin.bulk.scope_selection'|trans }}</label>
+            <div class="check-list" data-plan-choices>
+                {% for plan in plans %}
+                    <label class="check"><input type="checkbox" name="plans[]" value="{{ plan.id }}" data-requote> <span>{{ plan.title }}</span> <span class="muted ltr">{{ plan.price|number_format }}</span>{% if not plan.active %} <span class="badge muted-badge">{{ 'admin.plan.tab.inactive'|trans }}</span>{% endif %}</label>
+                {% endfor %}
+            </div>
+            <p class="field-error" data-error-for="plans" hidden></p>
+        </section>
+        <section class="card" data-quote aria-live="polite">
+            <p class="muted">{{ 'admin.bulk.preview_hint'|trans }}</p>
+        </section>
+        <p class="field-error" data-form-error hidden></p>
+        <button type="submit" class="btn" data-save>{{ 'admin.bulk.apply'|trans }}</button>
+    </form>
+{% endblock %}
