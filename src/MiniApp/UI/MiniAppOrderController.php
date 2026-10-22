@@ -18,6 +18,8 @@ use App\Shop\Application\Checkout\PaymentStarter;
 use App\Shop\Application\Checkout\ReceiptSubmission;
 use App\Shop\Domain\OrderStatus;
 use App\Shop\Domain\OrderType;
+use App\Wallet\Application\WalletPayment;
+use App\Wallet\Application\WalletService;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\Request;
@@ -45,6 +47,8 @@ final class MiniAppOrderController extends AbstractController
         private readonly PaymentStarter $paymentStarter,
         private readonly PaymentProgress $progress,
         private readonly OrderLifecycle $orderLifecycle,
+        private readonly WalletPayment $walletPayment,
+        private readonly WalletService $wallets,
     ) {
     }
 
@@ -62,6 +66,10 @@ final class MiniAppOrderController extends AbstractController
             'order' => $order,
             'summary' => self::summary($order),
             'methods' => $this->paymentStarter->methodsFor($order),
+            'walletOffer' => $this->walletPayment->canPay($order) ? [
+                'amount' => $this->paymentStarter->payableAmount($order),
+                'available' => $this->wallets->find($order->getUser())?->getAvailable() ?? 0,
+            ] : null,
             'openPayment' => null !== $payment && PaymentStatus::PENDING === $payment->getStatus() && null !== $payment->getGateway() ? $payment : null,
         ]);
     }
@@ -80,7 +88,7 @@ final class MiniAppOrderController extends AbstractController
             'summary' => self::summary($order),
             'state' => $state,
             'final' => PaymentDisplayState::isFinal($state),
-            'kind' => null !== $gateway ? PaymentStarter::kindOf($gateway) : 'manual_card',
+            'kind' => null !== $gateway ? PaymentStarter::kindOf($gateway) : ($payment->isWalletPayment() ? 'wallet' : 'manual_card'),
             'card' => ReceiptSubmission::isManual($payment) ? $this->paymentStarter->manualCard($gateway) : null,
             'canUploadReceipt' => ReceiptSubmission::isManual($payment) && PaymentStatus::PENDING === $payment->getStatus(),
             'service' => $this->progress->service($payment),

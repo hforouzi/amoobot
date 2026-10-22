@@ -27,6 +27,10 @@ use App\Shop\Application\PriceCalculationResult;
 use App\Shop\Application\SalesSettingsProvider;
 use App\Shop\Domain\OrderStatus;
 use App\Shop\Domain\OrderType;
+use App\Payment\Application\Settlement\SettlementResult;
+use App\Wallet\Application\WalletPayment;
+use App\Wallet\Application\WalletTopUp;
+use App\Wallet\Domain\WalletException;
 use Doctrine\ORM\EntityManagerInterface;
 
 /**
@@ -55,6 +59,8 @@ final class MiniAppCheckout
         private readonly TrafficAddonSettingsProvider $trafficAddonSettings,
         private readonly TelegramChannelMembershipGate $membershipGate,
         private readonly CustomerServiceFinder $customerServices,
+        private readonly WalletTopUp $walletTopUp,
+        private readonly WalletPayment $walletPayment,
     ) {
     }
 
@@ -151,10 +157,10 @@ final class MiniAppCheckout
         return $this->serviceOrderCheckout->createOrderFromDraft($draft) ?? throw new CheckoutFailure('add_traffic_unavailable', 409);
     }
 
-    /** The customer's order while it can still be paid. */
+    /** The customer's order (a service order or a wallet top-up) while it can still be paid. */
     public function payableOrder(User $user, int $orderId): Order
     {
-        $order = $this->orderLifecycle->editableOrder($user, $orderId) ?? throw new CheckoutFailure('order_not_found', 404);
+        $order = $this->orderLifecycle->editableOrder($user, $orderId) ?? $this->walletTopUp->payableOrder($user, $orderId) ?? throw new CheckoutFailure('order_not_found', 404);
         if (OrderStatus::WAITING_PAYMENT !== $order->getStatus()) {
             throw new CheckoutFailure('order_not_payable', 409);
         }
@@ -179,6 +185,34 @@ final class MiniAppCheckout
         }
 
         return $start;
+    }
+
+    /** A WALLET_TOPUP order of this amount, to be paid with a store method (pay()). */
+    public function topUp(User $user, mixed $amount): Order
+    {
+        $amount = self::intOrNull($amount) ?? 0;
+        try {
+            return $this->walletTopUp->createOrder($user, $amount);
+        } catch (WalletException $e) {
+            throw new CheckoutFailure($e->error, 'topup_out_of_range' === $e->error ? 422 : 409);
+        }
+    }
+
+    /**
+     * Pays the order from the wallet (debit + settlement, WalletPayment). Must run outside an outer transaction
+     * (CheckoutIdempotency::claimOnce()): the settlement locks and commits on its own.
+     */
+    public function payFromWallet(MiniAppUser $user, int $orderId): SettlementResult
+    {
+        $order = $this->payableOrder($user->customer(), $orderId);
+        if (OrderType::NEW_SERVICE === $order->getType()) {
+            $this->requireChannels($user, TelegramChannelMembershipGate::CONTEXT_PURCHASE);
+        }
+        try {
+            return $this->walletPayment->pay($order);
+        } catch (WalletException $e) {
+            throw new CheckoutFailure($e->error, 409);
+        }
     }
 
     /**

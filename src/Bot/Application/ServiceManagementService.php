@@ -7,6 +7,7 @@ namespace App\Bot\Application;
 use App\Bot\Application\BotTextResolver;
 use App\Bot\Infrastructure\TelegramApiClient;
 use App\Entity\Order;
+use App\Wallet\Application\WalletPayment;
 use App\Entity\OrderDraft;
 use App\Entity\Payment;
 use App\Entity\PaymentGateway;
@@ -75,6 +76,7 @@ class ServiceManagementService
         private readonly ServiceOrderCheckout $serviceOrderCheckout,
         private readonly DiscountApplication $discountApplication,
         private readonly PaymentStarter $paymentStarter,
+        private readonly WalletPayment $walletPayment,
     ) {
     }
 
@@ -841,7 +843,8 @@ class ServiceManagementService
         }
 
         $methods = $this->findAvailableStorePaymentMethods($order);
-        if ([] === $methods) {
+        $offerWallet = $this->walletPayment->canPay($order);
+        if ([] === $methods && !$offerWallet) {
             $this->showPopupOrMessage($chatId, $callbackId, $this->botTextResolver->message('payment.no_methods'), 'no_active_store_method_order_resume');
 
             return true;
@@ -855,7 +858,8 @@ class ServiceManagementService
                 (int) ($order->getId() ?? 0),
                 $methods,
                 'order_summary:'.((int) ($order->getId() ?? 0)),
-                'order_cancel:'.((int) ($order->getId() ?? 0))
+                'order_cancel:'.((int) ($order->getId() ?? 0)),
+                $offerWallet
             )
         );
 
@@ -885,7 +889,8 @@ class ServiceManagementService
         }
 
         $methods = $this->findAvailableStorePaymentMethods($order);
-        if ([] === $methods) {
+        $offerWallet = $this->walletPayment->canPay($order);
+        if ([] === $methods && !$offerWallet) {
             $diagnostics = $this->paymentStarter->diagnostics($order);
             $encodedReasons = json_encode($diagnostics['skippedReasons'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
             $encodedMethods = json_encode($diagnostics['methods'] ?? [], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
@@ -917,7 +922,8 @@ class ServiceManagementService
                 (int) ($order->getId() ?? 0),
                 $methods,
                 'order_summary:'.((int) ($order->getId() ?? 0)),
-                'order_cancel:'.((int) ($order->getId() ?? 0))
+                'order_cancel:'.((int) ($order->getId() ?? 0)),
+                $offerWallet
             )
         );
     }

@@ -13,6 +13,7 @@ use App\Shop\Application\SalesSettingsProvider;
 use App\Security\AdminPermission;
 use App\MiniApp\Application\MiniAppLinks;
 use App\Subscription\Application\AppDownloadCatalog;
+use App\Wallet\Application\WalletSettings;
 
 class TelegramKeyboardFactory
 {
@@ -21,6 +22,7 @@ class TelegramKeyboardFactory
         private readonly SalesSettingsProvider $salesSettingsProvider,
         private readonly AppDownloadCatalog $appDownloads,
         private readonly MiniAppLinks $miniAppLinks,
+        private readonly WalletSettings $walletSettings,
     )
     {
     }
@@ -39,10 +41,15 @@ class TelegramKeyboardFactory
             ];
         }
 
+        $trackRow = [];
         if ($hasTrackableOrder) {
-            $keyboard[] = [
-                ['text' => $this->button('button.main.track_order')],
-            ];
+            $trackRow[] = ['text' => $this->button('button.main.track_order')];
+        }
+        if ($this->walletSettings->enabled()) {
+            $trackRow[] = ['text' => $this->button('button.main.wallet')];
+        }
+        if ([] !== $trackRow) {
+            $keyboard[] = $trackRow;
         }
 
         $mainRow = [];
@@ -257,9 +264,13 @@ class TelegramKeyboardFactory
      *
      * @return array<string, array<array<array<string, string>>>>
      */
-    public function paymentGatewaySelectionMenu(int $orderId, array $methods, string $backCallback, string $cancelCallback): array
+    public function paymentGatewaySelectionMenu(int $orderId, array $methods, string $backCallback, string $cancelCallback, bool $offerWallet = false): array
     {
         $rows = [];
+        // Only when the wallet covers the whole amount (WalletPayment::canPay()); partial wallet payment is out of scope.
+        if ($offerWallet) {
+            $rows[] = [['text' => $this->button('button.payment.wallet'), 'callback_data' => 'wallet_pay:'.$orderId]];
+        }
         $methodButtons = [];
         foreach ($methods as $method) {
             if (!$method instanceof StorePaymentMethod) {

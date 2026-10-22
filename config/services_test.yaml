@@ -17,11 +17,3 @@ services:
         public: true
         tags: ['doctrine.middleware']
 
-    # TEMP-WALLET: until the bot / Mini App use WalletTopUp (part 4).
-    App\Wallet\Application\WalletTopUp:
-        autowire: true
-        public: true
-
-    App\Wallet\Application\WalletPayment:
-        autowire: true
-        public: true

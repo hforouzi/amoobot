@@ -1,0 +1,72 @@
+{% extends 'miniapp/view/_base.html.twig' %}
+{% trans_default_domain 'miniapp' %}
+{# "My wallet": balance, credit limit, frozen notice, top-up (paid with the store methods) and the ledger, paged. #}
+{% block section %}services{% endblock %}
+{% block title %}{{ 'wallet.title'|trans }}{% endblock %}
+{% block attributes %} data-back{% endblock %}
+{% block content %}
+    <section class="card" data-wallet>
+        <h1>{{ 'wallet.title'|trans }}</h1>
+        <p>{{ 'wallet.balance'|trans }} <b class="amount" data-wallet-balance="{{ wallet.balance ?? 0 }}">{{ 'money.toman'|trans({'%amount%': (wallet.balance ?? 0)|number_format}) }}</b></p>
+        {% if wallet and wallet.creditLimit > 0 %}
+            <p class="muted" data-wallet-credit>{{ 'wallet.credit_limit'|trans }} {{ 'money.toman'|trans({'%amount%': wallet.creditLimit|number_format}) }} · {{ 'wallet.available'|trans }} {{ 'money.toman'|trans({'%amount%': wallet.available|number_format}) }}</p>
+        {% endif %}
+        {% if wallet and wallet.frozen %}
+            <p class="notice" data-wallet-frozen>{{ 'wallet.frozen'|trans }}</p>
+        {% endif %}
+    </section>
+
+    {% if not (wallet and wallet.frozen) %}
+        <section class="card">
+            <h2>{{ 'wallet.topup_title'|trans }}</h2>
+            {% if quickAmounts is not empty %}
+                <div class="methods" data-quick-amounts>
+                    {% for amount in quickAmounts %}
+                        <button type="button" class="method" data-action="{{ path('miniapp_wallet_topup') }}" data-body="{{ {amount: amount}|json_encode }}">
+                            <span class="list-main">{{ 'money.toman'|trans({'%amount%': amount|number_format}) }}</span>
+                            <span aria-hidden="true">›</span>
+                        </button>
+                    {% endfor %}
+                </div>
+            {% endif %}
+            <form class="form" data-submit="{{ path('miniapp_wallet_topup') }}" novalidate>
+                <label class="field">
+                    <span>{{ 'wallet.topup_amount'|trans({'%min%': topUpMin|number_format, '%max%': topUpMax|number_format}) }}</span>
+                    <input type="number" name="amount" inputmode="numeric" min="{{ topUpMin }}" max="{{ topUpMax }}" step="1" required dir="ltr">
+                </label>
+                <p class="field-error" data-form-error hidden></p>
+                <button type="submit" class="btn">{{ 'wallet.topup_submit'|trans }}</button>
+            </form>
+        </section>
+    {% endif %}
+
+    <section class="card">
+        <h2>{{ 'wallet.transactions'|trans }}</h2>
+        {% if transactions is empty %}
+            <p class="muted" data-no-transactions>{{ 'wallet.no_transactions'|trans }}</p>
+        {% else %}
+            <div class="list">
+                {% for tx in transactions %}
+                    <div class="list-item" data-transaction-id="{{ tx.id }}" data-type="{{ tx.type }}">
+                        <span class="list-main">
+                            <span class="head">
+                                <strong>{{ ('wallet.type.' ~ tx.type)|trans }}</strong>
+                                <b class="ltr amount">{{ tx.amount > 0 ? '+' : '−' }}{{ (tx.amount|abs)|number_format }}</b>
+                            </span>
+                            <span class="muted">
+                                <time datetime="{{ tx.createdAt|date('Y-m-d') }}">{{ tx.createdAt|sub_date(lang) }}</time>
+                                · {{ 'wallet.balance_after'|trans({'%amount%': tx.balanceAfter|number_format}) }}
+                            </span>
+                        </span>
+                    </div>
+                {% endfor %}
+            </div>
+        {% endif %}
+    </section>
+    {% if page > 1 or hasNext %}
+        <nav class="row pager">
+            {% if page > 1 %}<a class="btn secondary small" href="{{ path('miniapp_wallet', {page: page - 1}) }}" data-nav data-previous-page>{{ 'orders.previous'|trans }}</a>{% else %}<span></span>{% endif %}
+            {% if hasNext %}<a class="btn secondary small" href="{{ path('miniapp_wallet', {page: page + 1}) }}" data-nav data-next-page>{{ 'orders.next'|trans }}</a>{% endif %}
+        </nav>
+    {% endif %}
+{% endblock %}

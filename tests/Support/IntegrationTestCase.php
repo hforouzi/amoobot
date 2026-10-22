@@ -62,6 +62,15 @@ abstract class IntegrationTestCase extends KernelTestCase
         $this->purge();
     }
 
+    protected function tearDown(): void
+    {
+        // Never leave the wallet switched on for a test that does not purge.
+        if (isset($this->em) && $this->em->isOpen()) {
+            $this->em->getConnection()->executeStatement("DELETE FROM setting WHERE key_name LIKE 'wallet.%'");
+        }
+        parent::tearDown();
+    }
+
     protected function purge(): void
     {
         $connection = $this->em->getConnection();
@@ -69,6 +78,8 @@ abstract class IntegrationTestCase extends KernelTestCase
         foreach (self::PURGED_TABLES as $table) {
             $connection->executeStatement('DELETE FROM '.$table);
         }
+        // The wallet is off unless a test switches it on (settings are not purged otherwise).
+        $connection->executeStatement("DELETE FROM setting WHERE key_name LIKE 'wallet.%'");
         $connection->executeStatement('SET FOREIGN_KEY_CHECKS = 1');
         $this->em->clear();
     }

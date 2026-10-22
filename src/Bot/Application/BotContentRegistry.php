@@ -74,6 +74,7 @@ final class BotContentRegistry
             'button.main.downloads',
             'button.main.miniapp',
             'button.main.track_order',
+            'button.main.wallet',
             'button.main.continue_order',
             'button.main.cancel_incomplete_order',
             'button.main.admin',
