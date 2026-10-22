@@ -24,8 +24,8 @@ final class CoreSections implements MiniAppSectionProvider
 
         yield new MiniAppSection('admin', 'nav.admin', '🛠', 90, MiniAppAudience::ADMIN, route: 'miniapp_admin');
         $areas = [
-            ['admin.orders', '🧾', AdminPermission::ORDERS_VIEW],
-            ['admin.payments', '💳', AdminPermission::PAYMENTS_VIEW],
+            ['admin.orders', '🧾', AdminPermission::ORDERS_VIEW, 'miniapp_admin_orders'],
+            ['admin.payments', '💳', AdminPermission::PAYMENTS_VIEW, 'miniapp_admin_payments'],
             ['admin.customers', '👥', AdminPermission::CUSTOMERS_VIEW],
             ['admin.services', '📦', AdminPermission::SERVICES_VIEW],
             ['admin.plans', '🏷', AdminPermission::PLANS_MANAGE],
@@ -33,8 +33,9 @@ final class CoreSections implements MiniAppSectionProvider
             ['admin.broadcast', '📣', AdminPermission::BROADCAST_SEND],
             ['admin.settings', '⚙️', AdminPermission::SETTINGS_MANAGE],
         ];
-        foreach ($areas as $position => [$key, $icon, $permission]) {
-            yield new MiniAppSection($key, 'area.'.substr($key, 6), $icon, 10 * ($position + 1), MiniAppAudience::ADMIN, [$permission], parent: 'admin');
+        foreach ($areas as $position => $area) {
+            [$key, $icon, $permission] = $area;
+            yield new MiniAppSection($key, 'area.'.substr($key, 6), $icon, 10 * ($position + 1), MiniAppAudience::ADMIN, [$permission], parent: 'admin', route: $area[3] ?? null);
         }
     }
 }

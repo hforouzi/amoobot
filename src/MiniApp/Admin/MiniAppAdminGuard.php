@@ -29,7 +29,8 @@ final class MiniAppAdminGuard
     public function __invoke(ControllerEvent $event): void
     {
         $request = $event->getRequest();
-        if (!AdminRoutePermissions::isAdminPath($request->getPathInfo())) {
+        // Sub-requests (the error page of a 404 thrown by an admin controller) were checked as the main request.
+        if (!$event->isMainRequest() || !AdminRoutePermissions::isAdminPath($request->getPathInfo())) {
             return;
         }
 

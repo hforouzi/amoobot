@@ -1,0 +1,36 @@
+{% extends 'miniapp/view/_base.html.twig' %}
+{% import 'miniapp/admin/_macros.html.twig' as ui %}
+{% trans_default_domain 'miniapp' %}
+{% block section %}admin{% endblock %}
+{% block title %}{{ 'area.payments'|trans }}{% endblock %}
+{% block attributes %} data-back{% endblock %}
+{% block content %}
+    <section class="card">
+        <h1>{{ 'area.payments'|trans }}</h1>
+        {{ ui.search('miniapp_admin_payments', query, 'admin.payments.search', {tab: tab}) }}
+    </section>
+    {{ ui.chips('miniapp_admin_payments', tab, tabs, counts, 'admin.payments.tab.', {}) }}
+    {% if list.items is empty %}
+        {{ ui.empty(query ? 'admin.no_results' : 'admin.payments.none') }}
+    {% else %}
+        <div class="list">
+            {% for payment in list.items %}
+                {% set order = payment.order %}
+                <a class="list-item admin-row" href="{{ path('miniapp_admin_payment', {id: payment.id}) }}" data-nav data-payment-id="{{ payment.id }}" data-status="{{ payment.status }}">
+                    <span class="list-main">
+                        <span class="head">
+                            <strong>{{ 'money.toman'|trans({'%amount%': payment.amount|number_format}) }}</strong>
+                            <span class="badge pay-{{ payment.status }}">{{ ('admin.payment.status.' ~ payment.status)|trans }}</span>
+                        </span>
+                        <span class="muted">{{ ui.who({name: (order.user.telegramAccount.firstName ?? order.user.name ?? ''), username: order.user.telegramAccount.username ?? null, telegramId: order.user.telegramAccount.telegramId ?? null}) }}</span>
+                        <span class="muted">
+                            <span class="ltr">{{ order.trackingCode ?? ('#' ~ order.id) }}</span>
+                            · <time datetime="{{ payment.createdAt|date('c') }}">{{ payment.createdAt|sub_date(lang) }}</time>
+                        </span>
+                    </span>
+                </a>
+            {% endfor %}
+        </div>
+    {% endif %}
+    {{ ui.pager('miniapp_admin_payments', list, {tab: tab, q: query}) }}
+{% endblock %}

@@ -31,6 +31,17 @@ final class AdminRoutePermissions
     {
         return [
             'miniapp_admin' => self::ANY_ADMIN,
+
+            'miniapp_admin_payments' => AdminPermission::PAYMENTS_VIEW,
+            'miniapp_admin_payment' => AdminPermission::PAYMENTS_VIEW,
+            'miniapp_admin_payment_receipt' => AdminPermission::PAYMENTS_VIEW,
+            'miniapp_admin_payment_approve' => AdminPermission::PAYMENTS_MODERATE,
+            'miniapp_admin_payment_retry' => AdminPermission::PAYMENTS_MODERATE,
+            'miniapp_admin_payment_reject' => AdminPermission::PAYMENTS_MODERATE,
+            'miniapp_admin_payment_reject_refunded' => AdminPermission::PAYMENTS_MODERATE,
+
+            'miniapp_admin_orders' => AdminPermission::ORDERS_VIEW,
+            'miniapp_admin_order' => AdminPermission::ORDERS_VIEW,
         ];
     }
 

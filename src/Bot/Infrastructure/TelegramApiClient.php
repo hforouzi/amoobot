@@ -245,6 +245,37 @@ class TelegramApiClient
         }
     }
 
+    /**
+     * The content of a file the bot received (e.g. a receipt photo), downloaded by the server: getFile, then the file
+     * from Telegram's file endpoint. Null when it is unknown, larger than $maxBytes or Telegram cannot be reached. The
+     * download URL carries the bot token, so it never leaves this method.
+     */
+    public function downloadFile(string $fileId, int $maxBytes): ?string
+    {
+        try {
+            $file = $this->callApi('getFile', ['file_id' => $fileId])['result'] ?? null;
+            $path = is_array($file) ? trim((string) ($file['file_path'] ?? '')) : '';
+            if ('' === $path || (int) ($file['file_size'] ?? 0) > $maxBytes) {
+                return null;
+            }
+
+            $options = [];
+            $proxy = trim($this->telegramProxy);
+            if ('' !== $proxy) {
+                $options['proxy'] = $proxy;
+            }
+            $response = $this->httpClient->request('GET', sprintf('https://api.telegram.org/file/bot%s/%s', $this->botToken, $path), $options);
+            if (200 !== $response->getStatusCode()) {
+                return null;
+            }
+            $content = $response->getContent();
+
+            return strlen($content) > $maxBytes ? null : $content;
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
     public function getUpdates(?int $offset = null, int $limit = 20, int $timeout = 25): array
     {
         $payload = [

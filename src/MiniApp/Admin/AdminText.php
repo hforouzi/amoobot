@@ -25,6 +25,7 @@ final class AdminText
             return null;
         }
         $text = SecretRedactor::redact($text, [], 2000);
+        $text = preg_replace('/\b(password|passwd|pass|token|secret|api[_-]?key|authorization|cookie)(\s*[:=]\s*)("[^"]*"|\'[^\']*\'|[^\s&,;)]+)/i', '$1$2'.SecretRedactor::MASK, $text) ?? $text;
         $text = preg_replace('#\b[a-z][a-z0-9+.-]*://[^\s"\'<>]+#i', self::URL_MASK, $text) ?? $text;
         $text = preg_replace('#\b(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?\b#', self::URL_MASK, $text) ?? $text;
 

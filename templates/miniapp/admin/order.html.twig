@@ -1,0 +1,44 @@
+{% extends 'miniapp/view/_base.html.twig' %}
+{% import 'miniapp/admin/_macros.html.twig' as ui %}
+{% trans_default_domain 'miniapp' %}
+{% block section %}admin{% endblock %}
+{% block title %}{{ 'admin.order.title'|trans({'%id%': order.id}) }}{% endblock %}
+{% block attributes %} data-back data-order-id="{{ order.id }}"{% endblock %}
+{% block content %}
+    <section class="card">
+        <div class="head">
+            <h1>{{ ('order.type.' ~ order.type)|trans }}</h1>
+            <span class="badge order-{{ order.status }}">{{ ('order.status.' ~ order.status)|trans }}</span>
+        </div>
+        <dl class="facts">
+            <div><dt>{{ 'admin.order.number'|trans }}</dt><dd class="ltr">#{{ order.id }}</dd></div>
+            {% if order.trackingCode %}<div><dt>{{ 'admin.order.tracking'|trans }}</dt><dd class="ltr">{{ order.trackingCode }}</dd></div>{% endif %}
+            <div><dt>{{ 'admin.order.plan'|trans }}</dt><dd>{{ order.plan.title }}</dd></div>
+            <div><dt>{{ 'admin.order.amount'|trans }}</dt><dd>{{ 'money.toman'|trans({'%amount%': order.amount|number_format}) }}</dd></div>
+            <div><dt>{{ 'admin.order.created'|trans }}</dt><dd>{{ order.createdAt|sub_date(lang) }} {{ order.createdAt|date('H:i') }}</dd></div>
+            {% if order.paidAt %}<div><dt>{{ 'admin.order.paid'|trans }}</dt><dd>{{ order.paidAt|sub_date(lang) }} {{ order.paidAt|date('H:i') }}</dd></div>{% endif %}
+            {% if order.provisionedAt %}<div><dt>{{ 'admin.order.provisioned'|trans }}</dt><dd>{{ order.provisionedAt|sub_date(lang) }} {{ order.provisionedAt|date('H:i') }}</dd></div>{% endif %}
+        </dl>
+    </section>
+    <section class="card">
+        <h2>{{ 'admin.customer'|trans }}</h2>
+        {% if can.miniapp_admin_customer %}<a class="list-item" href="{{ path('miniapp_admin_customer', {id: customer.id}) }}" data-nav><span class="list-main">{{ ui.who(customer) }}</span><span class="chevron" aria-hidden="true">›</span></a>
+        {% else %}<p>{{ ui.who(customer) }}</p>{% endif %}
+        {% if order.targetService %}
+            <h2 class="spaced">{{ 'admin.order.service'|trans }}</h2>
+            {% if can.miniapp_admin_service %}<a class="list-item" href="{{ path('miniapp_admin_service', {id: order.targetService.id}) }}" data-nav><span class="list-main">{{ 'service.number'|trans({'%id%': order.targetService.id}) }}</span><span class="chevron" aria-hidden="true">›</span></a>
+            {% else %}<p>{{ 'service.number'|trans({'%id%': order.targetService.id}) }}</p>{% endif %}
+        {% endif %}
+    </section>
+    <section class="card">
+        <h2>{{ 'area.payments'|trans }}</h2>
+        {% if payments is empty %}<p class="muted">{{ 'admin.order.no_payments'|trans }}</p>{% endif %}
+        <div class="list">
+            {% for payment in payments %}
+                {% set line %}<span class="list-main">#{{ payment.id }} · {{ 'money.toman'|trans({'%amount%': payment.amount|number_format}) }} · {{ payment.createdAt|sub_date(lang) }}</span><span class="badge pay-{{ payment.status }}">{{ ('admin.payment.status.' ~ payment.status)|trans }}</span>{% endset %}
+                {% if can.miniapp_admin_payment %}<a class="list-item" href="{{ path('miniapp_admin_payment', {id: payment.id}) }}" data-nav data-payment-id="{{ payment.id }}">{{ line }}</a>
+                {% else %}<div class="list-item">{{ line }}</div>{% endif %}
+            {% endfor %}
+        </div>
+    </section>
+{% endblock %}

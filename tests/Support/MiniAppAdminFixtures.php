@@ -49,7 +49,7 @@ trait MiniAppAdminFixtures
         $inbound = $this->createTestInbound();
         $plan = $this->createPlan(150000, $inbound);
         $gateway = $this->createGateway(PaymentGatewayType::MANUAL_CARD, [], 'IRT');
-        $this->payment = $this->createPayment($this->createOrder($this->buyer, $plan), $gateway, PaymentStatus::SUBMITTED);
+        $this->payment = $this->createPayment($this->createOrder($this->buyer, $plan)->setTrackingCode('TRK8405AA'), $gateway, PaymentStatus::SUBMITTED);
         $this->payment->setReceiptFileId('AgAD-receipt');
         $this->service = $this->createActiveService($this->buyer, $inbound);
         $this->em->flush();

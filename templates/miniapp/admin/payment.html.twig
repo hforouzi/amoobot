@@ -1,0 +1,77 @@
+{% extends 'miniapp/view/_base.html.twig' %}
+{% import 'miniapp/admin/_macros.html.twig' as ui %}
+{% trans_default_domain 'miniapp' %}
+{# One payment for an admin: amounts, order, customer, method, receipt (loaded through the authenticated endpoint),
+   history; the moderation actions in a sticky bar, the refund-and-reject apart. The primary action is also on
+   Telegram's MainButton. #}
+{% set primary = 'miniapp_admin_payment_approve' in actions and can['miniapp_admin_payment_approve'] ? 'approve' : ('miniapp_admin_payment_retry' in actions and can['miniapp_admin_payment_retry'] ? 'retry' : null) %}
+{% block section %}admin{% endblock %}
+{% block title %}{{ 'admin.payment.title'|trans({'%id%': p.id}) }}{% endblock %}
+{% block attributes %} data-back data-payment-id="{{ p.id }}"{% if primary %} data-main-button-text="{{ ('admin.payment.action.' ~ primary)|trans }}" data-main-button-action="{{ primary }}"{% endif %}{% endblock %}
+{% block content %}
+    <section class="card">
+        <div class="head">
+            <h1>{{ 'money.toman'|trans({'%amount%': p.amount|number_format}) }}</h1>
+            <span class="badge pay-{{ p.status }}" data-status="{{ p.status }}">{{ ('admin.payment.status.' ~ p.status)|trans }}</span>
+        </div>
+        <dl class="facts">
+            <div><dt>{{ 'admin.payment.number'|trans }}</dt><dd class="ltr">#{{ p.id }}</dd></div>
+            {% if p.method %}<div><dt>{{ 'admin.payment.method'|trans }}</dt><dd>{{ p.method }}{% if p.gatewayType %} <span class="muted ltr">({{ p.gatewayType }})</span>{% endif %}</dd></div>{% endif %}
+            {% if p.payable is not null and p.payable != p.amount %}<div><dt>{{ 'admin.payment.payable'|trans }}</dt><dd>{{ p.payable|number_format }}</dd></div>{% endif %}
+            {% if p.expected %}<div><dt>{{ 'admin.payment.expected'|trans }}</dt><dd class="ltr">{{ p.expected }}</dd></div>{% endif %}
+            {% if p.verified %}<div><dt>{{ 'admin.payment.verified'|trans }}</dt><dd class="ltr">{{ p.verified }}</dd></div>{% endif %}
+            {% if p.transaction %}<div><dt>{{ 'admin.payment.transaction'|trans }}</dt><dd class="ltr">{{ p.transaction }}</dd></div>{% endif %}
+            {% if p.attempts > 0 %}<div><dt>{{ 'admin.payment.attempts'|trans }}</dt><dd>{{ p.attempts }}</dd></div>{% endif %}
+        </dl>
+        {% if p.reviewReason %}<p class="notice-line" data-review-reason><b>{{ 'admin.payment.review_reason'|trans }}</b> <span class="pre-line">{{ p.reviewReason }}</span></p>{% endif %}
+        {% if p.provisioningError %}<p class="notice-line bad" data-provisioning-error><b>{{ 'admin.payment.provisioning_error'|trans }}</b> <span class="pre-line">{{ p.provisioningError }}</span></p>{% endif %}
+    </section>
+
+    <section class="card">
+        <h2>{{ 'admin.payment.order'|trans }}</h2>
+        {% set orderLine %}<span class="ltr">{{ p.order.tracking ?? ('#' ~ p.order.id) }}</span> · {{ ('order.type.' ~ p.order.type)|trans }} · {{ p.order.plan }}{% endset %}
+        {% if can.miniapp_admin_order %}<a class="list-item" href="{{ path('miniapp_admin_order', {id: p.order.id}) }}" data-nav><span class="list-main">{{ orderLine }}</span><span class="badge order-{{ p.order.status }}">{{ ('order.status.' ~ p.order.status)|trans }}</span></a>
+        {% else %}<p>{{ orderLine }}</p>{% endif %}
+        <h2 class="spaced">{{ 'admin.customer'|trans }}</h2>
+        {% if can.miniapp_admin_customer %}<a class="list-item" href="{{ path('miniapp_admin_customer', {id: p.customer.id}) }}" data-nav><span class="list-main">{{ ui.who(p.customer) }}</span><span class="chevron" aria-hidden="true">›</span></a>
+        {% else %}<p>{{ ui.who(p.customer) }}</p>{% endif %}
+    </section>
+
+    {% if p.hasReceipt or p.receiptMessage %}
+        <section class="card" data-receipt>
+            <h2>{{ 'admin.payment.receipt'|trans }}</h2>
+            {% if p.hasReceipt %}
+                <img class="receipt" alt="{{ 'admin.payment.receipt'|trans }}" data-auth-src="{{ path('miniapp_admin_payment_receipt', {id: p.id}) }}" data-failed-text="{{ 'admin.payment.receipt_failed'|trans }}">
+            {% endif %}
+            {% if p.receiptMessage %}<p class="pre-line">{{ p.receiptMessage }}</p>{% endif %}
+        </section>
+    {% endif %}
+
+    <section class="card">
+        <h2>{{ 'admin.payment.history'|trans }}</h2>
+        <ol class="timeline">
+            {% for event, at in p.events %}
+                <li data-event="{{ event }}"><span>{{ ('admin.payment.event.' ~ event)|trans }}</span> <time class="muted" datetime="{{ at|date('c') }}">{{ at|sub_date(lang) }} {{ at|date('H:i') }}</time></li>
+            {% endfor %}
+        </ol>
+        {% if p.confirmationSource %}<p class="muted small-print">{{ 'admin.payment.source'|trans }} <span class="ltr">{{ p.confirmationSource }}</span></p>{% endif %}
+        {% if p.adminNote %}<p class="muted small-print pre-line">{{ p.adminNote }}</p>{% endif %}
+    </section>
+
+    {% set mainActions = actions|filter(a => a != 'miniapp_admin_payment_reject_refunded' and can[a]) %}
+    {% if mainActions is not empty %}
+        <div class="action-bar" data-action-bar>
+            {% for a in mainActions %}
+                {% set name = a|replace({'miniapp_admin_payment_': ''}) %}
+                <button type="button" class="btn small{{ name == 'reject' ? ' secondary danger' : '' }}" data-action="{{ path(a, {id: p.id}) }}" data-reload data-admin-action="{{ name }}"{% if primary == name %} data-main-action="{{ name }}"{% endif %}>{{ ('admin.payment.action.' ~ name)|trans }}</button>
+            {% endfor %}
+        </div>
+    {% endif %}
+    {% if 'miniapp_admin_payment_reject_refunded' in actions and can.miniapp_admin_payment_reject_refunded %}
+        <section class="card danger-zone">
+            <h2>{{ 'admin.payment.refund_title'|trans }}</h2>
+            <p class="muted">{{ 'admin.payment.refund_hint'|trans }}</p>
+            <button type="button" class="btn small secondary danger" data-action="{{ path('miniapp_admin_payment_reject_refunded', {id: p.id}) }}" data-reload data-admin-action="reject_refunded">{{ 'admin.payment.action.reject_refunded'|trans }}</button>
+        </section>
+    {% endif %}
+{% endblock %}
