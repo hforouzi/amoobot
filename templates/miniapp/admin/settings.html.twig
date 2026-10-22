@@ -1,0 +1,84 @@
+{% extends 'miniapp/view/_base.html.twig' %}
+{% trans_default_domain 'miniapp' %}
+{# The web settings page's two forms, grouped as there (labels are the web's): only these keys; no raw editor. Each
+   form is saved on its own, after a confirmation. #}
+{% macro toggle(name, checked, label) %}
+    <label class="switch-field" data-field="{{ name }}">
+        <input type="checkbox" name="{{ name }}" value="1"{% if checked %} checked{% endif %}>
+        <span class="switch" aria-hidden="true"></span>
+        <span class="switch-label">{{ label|trans({}, 'admin') }}</span>
+        <p class="field-error" data-error-for="{{ name }}" hidden></p>
+    </label>
+{% endmacro %}
+{% macro number(name, value, label, help) %}
+    <label class="field" data-field="{{ name }}">
+        <span>{{ label|trans({}, 'admin') }}</span>
+        <input class="input ltr" type="text" name="{{ name }}" value="{{ value }}" inputmode="decimal" autocomplete="off" maxlength="12">
+        {% if help %}<span class="muted small-print">{{ help|trans({}, 'admin') }}</span>{% endif %}
+        <p class="field-error" data-error-for="{{ name }}" hidden></p>
+    </label>
+{% endmacro %}
+{% import _self as s %}
+{% block section %}admin{% endblock %}
+{% block title %}{{ 'area.settings'|trans }}{% endblock %}
+{% block attributes %} data-back{% endblock %}
+{% block content %}
+    <section class="card">
+        <h1>{{ 'area.settings'|trans }}</h1>
+        <p class="muted">{{ 'admin.settings.intro'|trans }}</p>
+    </section>
+
+    <form class="form" data-settings="sales" data-submit="{{ path('miniapp_admin_settings_sales') }}" data-reload data-dirty-guard="{{ 'admin.form.leave_unsaved'|trans }}" novalidate>
+        <details class="card form-section" data-section="sales_status" open><summary>{{ 'renewal_pricing_settings.sections.sales_status'|trans({}, 'admin') }}</summary>
+            {{ s.toggle('sales_new_orders_enabled', sales.sales_new_orders_enabled, 'renewal_pricing_settings.fields.sales_new_orders_enabled') }}
+            {{ s.toggle('sales_renewals_enabled', sales.sales_renewals_enabled, 'renewal_pricing_settings.fields.sales_renewals_enabled') }}
+            {{ s.toggle('sales_add_traffic_enabled', sales.sales_add_traffic_enabled, 'renewal_pricing_settings.fields.sales_add_traffic_enabled') }}
+            <label class="field" data-field="sales_disabled_message">
+                <span>{{ 'renewal_pricing_settings.fields.sales_disabled_message'|trans({}, 'admin') }}</span>
+                <textarea class="input" name="sales_disabled_message" rows="3">{{ sales.sales_disabled_message }}</textarea>
+                <p class="field-error" data-error-for="sales_disabled_message" hidden></p>
+            </label>
+        </details>
+        <details class="card form-section" data-section="renewal"><summary>{{ 'renewal_pricing_settings.sections.renewal'|trans({}, 'admin') }}</summary>
+            {{ s.toggle('renewal_carry_remaining_traffic', sales.renewal_carry_remaining_traffic, 'renewal_pricing_settings.fields.carry_remaining_traffic') }}
+            {{ s.toggle('renewal_carry_remaining_days', sales.renewal_carry_remaining_days, 'renewal_pricing_settings.fields.carry_remaining_days') }}
+            {{ s.toggle('renewal_expired_start_from_now', sales.renewal_expired_start_from_now, 'renewal_pricing_settings.fields.expired_start_from_now') }}
+        </details>
+        <details class="card form-section" data-section="pricing"><summary>{{ 'renewal_pricing_settings.sections.pricing'|trans({}, 'admin') }}</summary>
+            {{ s.number('pricing_global_discount_percent', sales.pricing_global_discount_percent, 'renewal_pricing_settings.fields.global_discount_percent', 'renewal_pricing_settings.help.global_discount_percent') }}
+        </details>
+        <details class="card form-section" data-section="traffic_addon"><summary>{{ 'renewal_pricing_settings.sections.traffic_addon'|trans({}, 'admin') }}</summary>
+            {{ s.toggle('traffic_addon_enabled', sales.traffic_addon_enabled, 'renewal_pricing_settings.fields.traffic_addon_enabled') }}
+            {{ s.number('traffic_addon_min_gb', sales.traffic_addon_min_gb, 'renewal_pricing_settings.fields.traffic_addon_min_gb', null) }}
+            {{ s.number('traffic_addon_max_gb', sales.traffic_addon_max_gb, 'renewal_pricing_settings.fields.traffic_addon_max_gb', null) }}
+            {{ s.number('traffic_addon_price_per_gb', sales.traffic_addon_price_per_gb, 'renewal_pricing_settings.fields.traffic_addon_price_per_gb', null) }}
+        </details>
+        <p class="field-error" data-form-error hidden></p>
+        <button type="submit" class="btn">{{ 'admin.settings.save_sales'|trans }}</button>
+    </form>
+
+    <form class="form" data-settings="automation" data-submit="{{ path('miniapp_admin_settings_automation') }}" data-reload data-dirty-guard="{{ 'admin.form.leave_unsaved'|trans }}" novalidate>
+        <details class="card form-section" data-section="tasks"><summary>{{ 'automation_settings.sections.tasks'|trans({}, 'admin') }}</summary>
+            {{ s.toggle('automation_sync_usage_enabled', automation.automation_sync_usage_enabled, 'automation_settings.fields.sync_usage') }}
+            {{ s.toggle('automation_check_expiry_enabled', automation.automation_check_expiry_enabled, 'automation_settings.fields.check_expiry') }}
+            {{ s.toggle('automation_send_notifications_enabled', automation.automation_send_notifications_enabled, 'automation_settings.fields.send_notifications') }}
+            {{ s.toggle('automation_auto_suspend_expired_enabled', automation.automation_auto_suspend_expired_enabled, 'automation_settings.fields.auto_suspend_expired') }}
+            {{ s.toggle('automation_auto_suspend_traffic_exhausted_enabled', automation.automation_auto_suspend_traffic_exhausted_enabled, 'automation_settings.fields.auto_suspend_traffic_exhausted') }}
+            {{ s.toggle('automation_expire_incomplete_orders_enabled', automation.automation_expire_incomplete_orders_enabled, 'automation_settings.fields.expire_incomplete_orders') }}
+        </details>
+        <details class="card form-section" data-section="execution"><summary>{{ 'automation_settings.sections.execution'|trans({}, 'admin') }}</summary>
+            {{ s.number('automation_batch_limit', automation.automation_batch_limit, 'automation_settings.fields.batch_limit', null) }}
+            {{ s.number('orders_incomplete_expire_hours', automation.orders_incomplete_expire_hours, 'automation_settings.fields.incomplete_expire_hours', 'help.incomplete_order_expiration') }}
+        </details>
+        <p class="field-error" data-form-error hidden></p>
+        <button type="submit" class="btn">{{ 'admin.settings.save_automation'|trans }}</button>
+    </form>
+
+    <ul class="list">
+        <li><a class="list-item" href="{{ path('miniapp_admin_channels') }}" data-nav data-channels-link>
+            <span class="list-icon" aria-hidden="true">📢</span>
+            <span class="list-main">{{ 'admin.channel.title'|trans }} <span class="muted">({{ channels }})</span></span>
+            <span class="chevron" aria-hidden="true">›</span>
+        </a></li>
+    </ul>
+{% endblock %}

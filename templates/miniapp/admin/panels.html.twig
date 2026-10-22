@@ -1,0 +1,38 @@
+{% extends 'miniapp/view/_base.html.twig' %}
+{% import 'miniapp/admin/_macros.html.twig' as ui %}
+{% trans_default_domain 'miniapp' %}
+{# Panels by title (never an address): health, last check, active, subscription URL check, plans. #}
+{% block section %}admin{% endblock %}
+{% block title %}{{ 'area.panels'|trans }}{% endblock %}
+{% block attributes %} data-back{% endblock %}
+{% block content %}
+    <section class="card">
+        <h1>{{ 'area.panels'|trans }}</h1>
+        <p class="muted" data-web-only>{{ 'admin.panel.web_only'|trans }}</p>
+    </section>
+    {% if panels is empty %}
+        {{ ui.empty('admin.panel.none') }}
+    {% else %}
+        <div class="list">
+            {% for p in panels %}
+                <a class="list-item admin-row" href="{{ path('miniapp_admin_panel', {id: p.id}) }}" data-nav data-panel-id="{{ p.id }}" data-health="{{ p.health }}" data-active="{{ p.active ? 1 : 0 }}">
+                    <span class="list-main">
+                        <span class="head">
+                            <strong class="title">{{ p.title }}</strong>
+                            <span class="badge health-{{ p.health }}">{{ ('admin.home.panel_state.' ~ p.health)|trans }}</span>
+                        </span>
+                        <span class="muted">
+                            {{ p.active ? 'admin.panel.active'|trans : 'admin.panel.inactive'|trans }}
+                            · {{ 'admin.panel.plans'|trans }}: <b data-plan-count>{{ p.plans }}</b>
+                            · {{ 'admin.panel.inbounds'|trans }}: {{ p.inbounds }}
+                        </span>
+                        <span class="muted">{{ 'admin.panel.checked'|trans }}: {{ p.checkedAt ? p.checkedAt|sub_date(lang) ~ ' ' ~ p.checkedAt|date('H:i') : 'admin.panel.never'|trans }}</span>
+                        {% if p.subscription is not null %}
+                            <span class="muted" data-subscription-check="{{ p.subscription }}">{{ ('admin.panel.subscription.' ~ p.subscription)|trans }}</span>
+                        {% endif %}
+                    </span>
+                </a>
+            {% endfor %}
+        </div>
+    {% endif %}
+{% endblock %}

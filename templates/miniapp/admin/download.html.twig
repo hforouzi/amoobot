@@ -1,0 +1,71 @@
+{% extends 'miniapp/view/_base.html.twig' %}
+{% trans_default_domain 'miniapp' %}
+{# A download: title, platform, version, description; an external link's URL (http/https). A new download is always a
+   link; a file's upload or replacement stays on the web (a note, no link there). Counter and SHA-256 are shown. #}
+{% set d = download %}
+{% block section %}admin{% endblock %}
+{% block title %}{{ isNew ? 'admin.apps.new_download'|trans : d.title }}{% endblock %}
+{% block attributes %} data-back data-main-button-text="{{ 'admin.form.save'|trans }}" data-main-button-form="download-form"{% if not isNew %} data-download-id="{{ d.id }}"{% endif %}{% endblock %}
+{% block content %}
+    <form id="download-form" class="form" novalidate data-submit="{{ isNew ? path('miniapp_admin_download_create') : path('miniapp_admin_download_update', {id: d.id}) }}" data-check-url="{{ path('miniapp_admin_download_check') }}"{% if not isNew %} data-reload{% endif %} data-dirty-guard="{{ 'admin.form.leave_unsaved'|trans }}">
+        {% if not isNew %}<input type="hidden" name="id" value="{{ d.id }}">{% endif %}
+        <section class="card">
+            <label class="field" data-field="title">
+                <span>{{ 'field.title'|trans({}, 'admin') }} <span class="req" aria-hidden="true">*</span></span>
+                <input class="input" type="text" name="title" value="{{ d.title }}" maxlength="150" required>
+                <p class="field-error" data-error-for="title" hidden></p>
+            </label>
+            <label class="field" data-field="platform">
+                <span>{{ 'field.platform'|trans({}, 'admin') }} <span class="req" aria-hidden="true">*</span></span>
+                <select class="input" name="platform">
+                    {% if isNew %}<option value="">—</option>{% endif %}
+                    {% for p in platforms %}<option value="{{ p.value }}"{% if p.value == d.platform %} selected{% endif %}>{{ ('platform.' ~ p.value)|trans({}, 'admin') }}</option>{% endfor %}
+                </select>
+                <p class="field-error" data-error-for="platform" hidden></p>
+            </label>
+            <label class="field" data-field="version">
+                <span>{{ 'field.version'|trans({}, 'admin') }}</span>
+                <input class="input ltr" type="text" name="version" value="{{ d.version }}" maxlength="50">
+                <p class="field-error" data-error-for="version" hidden></p>
+            </label>
+            <label class="field" data-field="description">
+                <span>{{ 'field.description'|trans({}, 'admin') }}</span>
+                <textarea class="input" name="description" rows="3" maxlength="2000">{{ d.description }}</textarea>
+                <p class="field-error" data-error-for="description" hidden></p>
+            </label>
+            {% if not d.file %}
+                <label class="field" data-field="externalUrl">
+                    <span>{{ 'field.external_url'|trans({}, 'admin') }} <span class="req" aria-hidden="true">*</span></span>
+                    <input class="input ltr" type="url" name="externalUrl" value="{{ d.externalUrl }}" maxlength="500" autocomplete="off" spellcheck="false" placeholder="https://">
+                    <span class="muted small-print">{{ 'admin.apps.link_help'|trans }}</span>
+                    <p class="field-error" data-error-for="externalUrl" hidden></p>
+                </label>
+            {% endif %}
+            <p class="field-error" data-form-error hidden></p>
+            <button type="submit" class="btn">{{ 'admin.form.save'|trans }}</button>
+        </section>
+    </form>
+    {% if isNew %}
+        <section class="card"><p class="muted" data-file-web-only>{{ 'admin.apps.files_web_only'|trans }}</p></section>
+    {% else %}
+        <section class="card">
+            <dl class="facts">
+                <div><dt>{{ 'admin.apps.kind'|trans }}</dt><dd>{{ (d.file ? 'admin.apps.kind.file' : 'admin.apps.kind.link')|trans }}</dd></div>
+                <div><dt>{{ 'field.download_count'|trans({}, 'admin') }}</dt><dd data-download-count>{{ d.downloadCount }}</dd></div>
+                {% if d.file %}
+                    <div><dt>{{ 'admin.apps.file'|trans }}</dt><dd class="ltr">{{ d.originalName ?? '—' }}{% if d.sizeBytes %} · {{ d.sizeBytes|sub_bytes }}{% endif %}</dd></div>
+                    <div><dt>{{ 'field.sha256'|trans({}, 'admin') }}</dt><dd><code class="ltr hash" data-sha256>{{ d.sha256 ?? '—' }}</code></dd></div>
+                {% endif %}
+            </dl>
+            {% if d.sha256 %}<button type="button" class="btn secondary small fit" data-copy="{{ d.sha256 }}">📋 {{ 'admin.copy'|trans }}</button>{% endif %}
+            {% if d.file %}<p class="muted small-print" data-file-web-only>{{ 'admin.apps.files_web_only'|trans }}</p>{% endif %}
+            <div class="row">
+                {% if d.active %}
+                    <button type="button" class="btn secondary small" data-action="{{ path('miniapp_admin_download_deactivate', {id: d.id}) }}" data-reload data-admin-action="deactivate">⏸ {{ 'admin.plan.deactivate'|trans }}</button>
+                {% else %}
+                    <button type="button" class="btn secondary small" data-action="{{ path('miniapp_admin_download_activate', {id: d.id}) }}" data-reload data-admin-action="activate">▶️ {{ 'admin.plan.activate'|trans }}</button>
+                {% endif %}
+            </div>
+        </section>
+    {% endif %}
+{% endblock %}

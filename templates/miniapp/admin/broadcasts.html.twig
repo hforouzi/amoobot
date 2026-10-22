@@ -1,0 +1,39 @@
+{% extends 'miniapp/view/_base.html.twig' %}
+{% import 'miniapp/admin/_macros.html.twig' as ui %}
+{% trans_default_domain 'miniapp' %}
+{# Recent broadcasts: status, delivery counts and progress; a new one opens the compose form. #}
+{% block section %}admin{% endblock %}
+{% block title %}{{ 'area.broadcast'|trans }}{% endblock %}
+{% block attributes %} data-back data-main-button-text="{{ 'admin.broadcast.new'|trans }}" data-main-button-href="{{ path('miniapp_admin_broadcast_new') }}"{% endblock %}
+{% block content %}
+    <section class="card">
+        <div class="head">
+            <h1>{{ 'area.broadcast'|trans }}</h1>
+            <a class="btn small fit" href="{{ path('miniapp_admin_broadcast_new') }}" data-nav>＋ {{ 'admin.broadcast.new'|trans }}</a>
+        </div>
+        {% if paused %}<p class="muted" data-paused>⏸ {{ 'admin.broadcast.paused'|trans }}</p>{% endif %}
+    </section>
+    {{ ui.chips('miniapp_admin_broadcasts', tab, tabs, counts, 'admin.broadcast.tab.', {}) }}
+    {% if list.items is empty %}
+        {{ ui.empty('admin.broadcast.none') }}
+    {% else %}
+        <div class="list">
+            {% for row in list.items %}
+                <a class="list-item admin-row" href="{{ path('miniapp_admin_broadcast', {id: row.broadcast.id}) }}" data-nav data-broadcast-id="{{ row.broadcast.id }}" data-state="{{ row.state }}">
+                    <span class="list-main">
+                        <span class="head">
+                            <strong class="title">{{ row.broadcast.title }}</strong>
+                            <span class="badge broadcast-{{ row.state }}">{{ ('admin.broadcast.state.' ~ row.state)|trans }}</span>
+                        </span>
+                        <span class="muted">{{ ('broadcast.target.' ~ row.broadcast.targetType)|trans({}, 'admin') }}</span>
+                        {% if row.total > 0 %}
+                            <span class="muted">{{ 'admin.broadcast.counts'|trans({'%sent%': row.sent|number_format, '%failed%': row.failed|number_format, '%pending%': row.pending|number_format, '%total%': row.total|number_format}) }}</span>
+                            <progress max="100" value="{{ row.progress }}" aria-label="{{ 'admin.broadcast.progress'|trans }}">{{ row.progress }}%</progress>
+                        {% endif %}
+                    </span>
+                </a>
+            {% endfor %}
+        </div>
+    {% endif %}
+    {{ ui.pager('miniapp_admin_broadcasts', list, {tab: tab}) }}
+{% endblock %}

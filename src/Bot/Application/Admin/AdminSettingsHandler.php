@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Bot\Application\Admin;
 
-use App\Entity\Setting;
+use App\Admin\Application\SettingsAdministration;
 use App\Provisioning\Application\AutomationSettingsProvider;
 use App\Provisioning\Application\RenewalSettingsProvider;
 use App\Provisioning\Application\TrafficAddonSettingsProvider;
@@ -28,6 +28,7 @@ final class AdminSettingsHandler implements AdminArea
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
         private readonly AdminScreen $screen,
+        private readonly SettingsAdministration $settingsAdministration,
         SalesSettingsProvider $sales,
         AutomationSettingsProvider $automation,
         TrafficAddonSettingsProvider $trafficAddon,
@@ -179,12 +180,7 @@ final class AdminSettingsHandler implements AdminArea
 
     private function write(string $key, string $value, string $type): void
     {
-        $setting = $this->entityManager->getRepository(Setting::class)->findOneBy(['keyName' => $key]);
-        if (!$setting instanceof Setting) {
-            $setting = (new Setting())->setKeyName($key);
-            $this->entityManager->persist($setting);
-        }
-        $setting->setValue($value)->setType($type)->setUpdatedAt(new \DateTimeImmutable());
+        $this->settingsAdministration->set($key, $value, $type);
         $this->entityManager->flush();
     }
 }

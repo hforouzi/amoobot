@@ -1,0 +1,48 @@
+{% extends 'miniapp/view/_base.html.twig' %}
+{% trans_default_domain 'miniapp' %}
+{# A client app: name, platforms and the import link template, checked live with the entity's rules and previewed on an
+   example subscription URL. Install link, icon and notes stay on the web form. #}
+{% block section %}admin{% endblock %}
+{% block title %}{{ app.name }}{% endblock %}
+{% block attributes %} data-back data-main-button-text="{{ 'admin.form.save'|trans }}" data-main-button-form="client-app-form" data-client-app-id="{{ app.id }}"{% endblock %}
+{% block content %}
+    <form id="client-app-form" class="form" novalidate data-submit="{{ path('miniapp_admin_client_app_update', {id: app.id}) }}" data-check-url="{{ path('miniapp_admin_client_app_check') }}" data-check-now data-reload data-dirty-guard="{{ 'admin.form.leave_unsaved'|trans }}">
+        <input type="hidden" name="id" value="{{ app.id }}">
+        <section class="card">
+            <label class="field" data-field="name">
+                <span>{{ 'field.name'|trans({}, 'admin') }} <span class="req" aria-hidden="true">*</span></span>
+                <input class="input" type="text" name="name" value="{{ app.name }}" maxlength="100" required>
+                <p class="field-error" data-error-for="name" hidden></p>
+            </label>
+            <fieldset class="field" data-field="platforms">
+                <legend>{{ 'field.platforms'|trans({}, 'admin') }} <span class="req" aria-hidden="true">*</span></legend>
+                {% for p in platforms %}
+                    <label class="switch-field"><input type="checkbox" name="platforms[]" value="{{ p.value }}"{% if p.value in app.platforms %} checked{% endif %}><span class="switch" aria-hidden="true"></span><span class="switch-label">{{ ('platform.' ~ p.value)|trans({}, 'admin') }}</span></label>
+                {% endfor %}
+                <p class="field-error" data-error-for="platforms" hidden></p>
+            </fieldset>
+            <label class="field" data-field="importUrlTemplate">
+                <span>{{ 'field.import_url_template'|trans({}, 'admin') }}</span>
+                <input class="input ltr" type="text" name="importUrlTemplate" value="{{ app.importUrlTemplate }}" maxlength="2000" autocomplete="off" autocapitalize="off" spellcheck="false">
+                <span class="muted small-print">{{ 'help.client_app.template'|trans({}, 'admin') }}</span>
+                <p class="field-error" data-error-for="importUrlTemplate" hidden></p>
+            </label>
+            <div class="field">
+                <span>{{ 'admin.apps.example'|trans({'%url%': exampleUrl}) }}</span>
+                <code class="preview-box ltr" data-live="example">{{ example ?? '—' }}</code>
+            </div>
+            <p class="field-error" data-form-error hidden></p>
+            <button type="submit" class="btn">{{ 'admin.form.save'|trans }}</button>
+        </section>
+    </form>
+    <section class="card">
+        <div class="row">
+            {% if app.active %}
+                <button type="button" class="btn secondary small" data-action="{{ path('miniapp_admin_client_app_deactivate', {id: app.id}) }}" data-reload data-admin-action="deactivate">⏸ {{ 'admin.plan.deactivate'|trans }}</button>
+            {% else %}
+                <button type="button" class="btn secondary small" data-action="{{ path('miniapp_admin_client_app_activate', {id: app.id}) }}" data-reload data-admin-action="activate">▶️ {{ 'admin.plan.activate'|trans }}</button>
+            {% endif %}
+        </div>
+        <p class="muted small-print">{{ 'admin.apps.client_web_only'|trans }}</p>
+    </section>
+{% endblock %}

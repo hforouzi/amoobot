@@ -1,0 +1,64 @@
+{% extends 'miniapp/view/_base.html.twig' %}
+{% import 'miniapp/admin/_macros.html.twig' as ui %}
+{% trans_default_domain 'miniapp' %}
+{# Required channels: the list (enable / disable, remove, each confirmed) and the add form (the entity's rules). #}
+{% block section %}admin{% endblock %}
+{% block title %}{{ 'admin.channel.title'|trans }}{% endblock %}
+{% block attributes %} data-back{% endblock %}
+{% block content %}
+    <section class="card">
+        <h1>{{ 'admin.channel.title'|trans }}</h1>
+        <p class="muted">{{ 'settings_page.channels_intro'|trans({}, 'admin') }}</p>
+    </section>
+    {% if channels is empty %}
+        {{ ui.empty('admin.channel.none') }}
+    {% else %}
+        <div class="list">
+            {% for c in channels %}
+                <div class="list-item admin-row" data-channel-id="{{ c.id }}" data-active="{{ c.active ? 1 : 0 }}">
+                    <span class="list-main">
+                        <span class="head">
+                            <strong class="title">{{ c.title }}</strong>
+                            <span class="badge {{ c.active ? 'active' : 'muted-badge' }}">{{ c.active ? 'admin.panel.active'|trans : 'admin.panel.inactive'|trans }}</span>
+                        </span>
+                        <span class="muted ltr">{{ c.chatId }}{% if c.inviteUrl %} · {{ c.inviteUrl }}{% endif %}</span>
+                        <span class="muted">{{ 'admin.channel.required_for'|trans }}: {{ c.requireForPurchase ? 'admin.channel.purchase'|trans : '' }}{{ c.requireForPurchase and c.requireForTrial ? ' · ' : '' }}{{ c.requireForTrial ? 'admin.channel.trial'|trans : '' }}{{ not c.requireForPurchase and not c.requireForTrial ? '—' : '' }}</span>
+                        <span class="row">
+                            {% if c.active %}
+                                <button type="button" class="btn secondary small" data-action="{{ path('miniapp_admin_channel_deactivate', {id: c.id}) }}" data-reload data-admin-action="deactivate">⏸ {{ 'admin.plan.deactivate'|trans }}</button>
+                            {% else %}
+                                <button type="button" class="btn secondary small" data-action="{{ path('miniapp_admin_channel_activate', {id: c.id}) }}" data-reload data-admin-action="activate">▶️ {{ 'admin.plan.activate'|trans }}</button>
+                            {% endif %}
+                            <button type="button" class="btn small danger-solid" data-action="{{ path('miniapp_admin_channel_delete', {id: c.id}) }}" data-admin-action="delete">🗑 {{ 'admin.channel.delete'|trans }}</button>
+                        </span>
+                    </span>
+                </div>
+            {% endfor %}
+        </div>
+    {% endif %}
+    <form class="card form" data-submit="{{ path('miniapp_admin_channel_create') }}" novalidate data-channel-form>
+        <h2>{{ 'settings_page.channels_add'|trans({}, 'admin') }}</h2>
+        <label class="field" data-field="title">
+            <span>{{ 'field.title'|trans({}, 'admin') }} <span class="req" aria-hidden="true">*</span></span>
+            <input class="input" type="text" name="title" maxlength="255" required>
+            <p class="field-error" data-error-for="title" hidden></p>
+        </label>
+        <label class="field" data-field="chatId">
+            <span>{{ 'field.chat_id'|trans({}, 'admin') }} <span class="req" aria-hidden="true">*</span></span>
+            <input class="input ltr" type="text" name="chatId" maxlength="64" autocomplete="off" spellcheck="false" placeholder="@channel" required>
+            <span class="muted small-print">{{ 'help.required_channel.chat_id'|trans({}, 'admin') }}</span>
+            <p class="field-error" data-error-for="chatId" hidden></p>
+        </label>
+        <label class="field" data-field="inviteUrl">
+            <span>{{ 'field.invite_url'|trans({}, 'admin') }}</span>
+            <input class="input ltr" type="url" name="inviteUrl" maxlength="255" autocomplete="off" spellcheck="false" placeholder="https://t.me/…">
+            <span class="muted small-print">{{ 'help.required_channel.invite_url'|trans({}, 'admin') }}</span>
+            <p class="field-error" data-error-for="inviteUrl" hidden></p>
+        </label>
+        <label class="switch-field"><input type="checkbox" name="isActive" value="1" checked><span class="switch" aria-hidden="true"></span><span class="switch-label">{{ 'field.is_active'|trans({}, 'admin') }}</span></label>
+        <label class="switch-field"><input type="checkbox" name="requireForPurchase" value="1" checked><span class="switch" aria-hidden="true"></span><span class="switch-label">{{ 'field.require_for_purchase'|trans({}, 'admin') }}</span></label>
+        <label class="switch-field"><input type="checkbox" name="requireForTrial" value="1" checked><span class="switch" aria-hidden="true"></span><span class="switch-label">{{ 'field.require_for_trial'|trans({}, 'admin') }}</span></label>
+        <p class="field-error" data-form-error hidden></p>
+        <button type="submit" class="btn">{{ 'admin.channel.add'|trans }}</button>
+    </form>
+{% endblock %}

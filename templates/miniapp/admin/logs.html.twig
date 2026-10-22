@@ -1,0 +1,66 @@
+{% extends 'miniapp/view/_base.html.twig' %}
+{% import 'miniapp/admin/_macros.html.twig' as ui %}
+{% trans_default_domain 'miniapp' %}
+{# Logs, read only: the audit log (admin, action, source, dates), the notification log and the bot message log; an
+   entry opens its masked JSON. No export. #}
+{% block section %}admin{% endblock %}
+{% block title %}{{ 'area.logs'|trans }}{% endblock %}
+{% block attributes %} data-back{% endblock %}
+{% block content %}
+    <section class="card">
+        <h1>{{ 'area.logs'|trans }}</h1>
+        <p class="muted">{{ 'admin.logs.intro'|trans }}</p>
+    </section>
+    {{ ui.chips('miniapp_admin_logs', tab, tabs, {}, 'admin.logs.tab.', {}) }}
+    <form class="card form filters" data-search="{{ path('miniapp_admin_logs') }}" role="search">
+        <input type="hidden" name="tab" value="{{ tab }}">
+        <input class="input" type="search" name="q" value="{{ filters.q }}" maxlength="64" enterkeyhint="search" autocomplete="off" placeholder="{{ ('admin.logs.search.' ~ tab)|trans }}" aria-label="{{ ('admin.logs.search.' ~ tab)|trans }}">
+        {% if tab == 'audit' %}
+            <label class="field"><span>{{ 'admin.logs.admin'|trans }}</span>
+                <select class="input" name="admin"><option value="">{{ 'admin.all'|trans }}</option>{% for a in admins %}<option value="{{ a }}"{% if a == filters.admin %} selected{% endif %}>{{ a }}</option>{% endfor %}</select>
+            </label>
+            <label class="field"><span>{{ 'admin.logs.source'|trans }}</span>
+                <select class="input" name="source"><option value="">{{ 'admin.all'|trans }}</option>{% for s in sources %}<option value="{{ s }}"{% if s == filters.source %} selected{% endif %}>{{ ('admin.logs.sources.' ~ s)|trans }}</option>{% endfor %}</select>
+            </label>
+            <label class="field"><span>{{ 'admin.logs.action'|trans }}</span>
+                <input class="input ltr" type="text" name="action" value="{{ filters.action }}" maxlength="64" autocomplete="off" spellcheck="false" placeholder="payment.approve">
+            </label>
+        {% elseif tab == 'messages' %}
+            <label class="field"><span>{{ 'admin.logs.direction'|trans }}</span>
+                <select class="input" name="direction"><option value="">{{ 'admin.all'|trans }}</option>{% for d in directions %}<option value="{{ d }}"{% if d == filters.direction %} selected{% endif %}>{{ ('admin.logs.directions.' ~ d)|trans }}</option>{% endfor %}</select>
+            </label>
+        {% endif %}
+        <div class="row">
+            <label class="field"><span>{{ 'admin.logs.from'|trans }}</span><input class="input ltr" type="date" name="from" value="{{ filters.from }}"></label>
+            <label class="field"><span>{{ 'admin.logs.to'|trans }}</span><input class="input ltr" type="date" name="to" value="{{ filters.to }}"></label>
+        </div>
+        <button type="submit" class="btn small">🔍 {{ 'admin.logs.apply'|trans }}</button>
+    </form>
+    {% if list.items is empty %}
+        {{ ui.empty('admin.logs.none') }}
+    {% else %}
+        <ul class="list">
+            {% for e in list.items %}
+                <li data-log-entry><a class="list-item admin-row" href="{{ path('miniapp_admin_log_entry', {kind: tab, id: e.id}) }}" data-nav>
+                    <span class="list-main">
+                        {% if tab == 'audit' %}
+                            <span class="head"><strong class="action ltr">{{ e.action }}</strong><span class="badge muted-badge">{{ ('admin.logs.sources.' ~ e.source)|trans }}</span></span>
+                            <span class="muted">{{ e.actorLabel }}{% if e.targetType %} · <span class="ltr">{{ e.targetType }}#{{ e.targetId }}</span>{% endif %}</span>
+                            <span class="muted ltr">{{ e.createdAt|date('Y-m-d H:i') }}</span>
+                        {% elseif tab == 'notifications' %}
+                            <span class="head"><strong class="action ltr">{{ e.keyName }}</strong><span class="badge muted-badge ltr">{{ e.type }}</span></span>
+                            <span class="muted">{{ 'admin.logs.service'|trans }}: <span class="ltr">{{ e.service.username ?: ('#' ~ e.service.id) }}</span></span>
+                            <span class="muted ltr">{{ e.sentAt|date('Y-m-d H:i') }}</span>
+                        {% else %}
+                            <span class="head"><strong class="action ltr">{{ e.updateType ?? '—' }}</strong><span class="badge muted-badge">{{ ('admin.logs.directions.' ~ e.direction)|trans }}</span></span>
+                            <span class="muted ltr">{{ e.telegramId ?? '—' }}</span>
+                            <span class="muted ltr">{{ e.createdAt|date('Y-m-d H:i') }}</span>
+                        {% endif %}
+                    </span>
+                    <span class="chevron" aria-hidden="true">›</span>
+                </a></li>
+            {% endfor %}
+        </ul>
+    {% endif %}
+    {{ ui.pager('miniapp_admin_logs', list, params) }}
+{% endblock %}
