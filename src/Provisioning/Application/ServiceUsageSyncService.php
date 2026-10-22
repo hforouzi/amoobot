@@ -4,12 +4,15 @@ declare(strict_types=1);
 
 namespace App\Provisioning\Application;
 
+use App\Entity\Payment;
 use App\Entity\VpnPanel;
 use App\Entity\VpnService;
 use App\Provisioning\Domain\BatchUsageDriverInterface;
 use App\Provisioning\Domain\Dto\VpnUsage;
 use App\Provisioning\Domain\VpnServiceStatus;
 use App\Provisioning\Infrastructure\VpnPanelDriverRegistry;
+use App\Payment\Domain\PaymentStatus;
+use App\Shop\Domain\OrderType;
 use Doctrine\ORM\EntityManagerInterface;
 
 final class ServiceUsageSyncService
@@ -75,6 +78,15 @@ final class ServiceUsageSyncService
         $usedGb = null !== $usedBytes ? $this->bytesToGb($usedBytes) : $usage->trafficUsedGb;
         $limitGb = null !== $totalBytes ? $this->bytesToGb($totalBytes) : $usage->trafficLimitGb;
         $expiresAt = $usage->expiresAt ?? $service->getExpiresAt();
+        // A paid renewal / add-traffic whose fulfilment failed is retried from the database values (absolute limit and
+        // expiry). If the failed attempt had already reached the panel, taking the panel's values here would make the
+        // retry apply the purchase twice; until it is fulfilled only usage is synced.
+        $keepPlan = $this->hasUnfulfilledPanelChange($service);
+        if ($keepPlan) {
+            $totalBytes = $service->getTrafficLimitBytes();
+            $limitGb = $service->getTrafficLimitGb();
+            $expiresAt = $service->getExpiresAt();
+        }
 
         if (!$dryRun) {
             $now = new \DateTimeImmutable();
@@ -95,14 +107,15 @@ final class ServiceUsageSyncService
         }
 
         $this->log(sprintf(
-            'sync_end service_id=%d panel_type="%s" email="%s" used_bytes=%s total_bytes=%s expiry="%s" is_enabled=%s',
+            'sync_end service_id=%d panel_type="%s" email="%s" used_bytes=%s total_bytes=%s expiry="%s" is_enabled=%s kept_limit_and_expiry=%s',
             $serviceId,
             (string) $panel->getType(),
             $email,
             null === $usedBytes ? 'null' : (string) $usedBytes,
             null === $totalBytes ? 'null' : (string) $totalBytes,
             $expiresAt?->format('Y-m-d H:i:s') ?? 'null',
-            null === $usage->isEnabled ? 'null' : ($usage->isEnabled ? 'true' : 'false')
+            null === $usage->isEnabled ? 'null' : ($usage->isEnabled ? 'true' : 'false'),
+            $keepPlan ? 'yes' : 'no'
         ));
 
         return new SyncResult($serviceId, 'updated', $expiryResult->statusChanged ? 'expiry_status_updated' : null);
@@ -249,5 +262,27 @@ final class ServiceUsageSyncService
         $safe = preg_replace('/\s+/', ' ', $safe) ?? $safe;
 
         return mb_substr($safe, 0, 300);
+    }
+
+    /** Is a renewal or add-traffic for this service paid but not applied (payment PROVISIONING_FAILED, awaiting a retry)? */
+    private function hasUnfulfilledPanelChange(VpnService $service): bool
+    {
+        if (null === $service->getId()) {
+            return false;
+        }
+
+        return null !== $this->entityManager->createQueryBuilder()
+            ->select('payment.id')
+            ->from(Payment::class, 'payment')
+            ->join('payment.order', 'o')
+            ->where('o.targetService = :service')
+            ->andWhere('o.type IN (:types)')
+            ->andWhere('payment.status = :status')
+            ->setParameter('service', $service)
+            ->setParameter('types', [OrderType::RENEWAL, OrderType::ADD_TRAFFIC])
+            ->setParameter('status', PaymentStatus::PROVISIONING_FAILED)
+            ->setMaxResults(1)
+            ->getQuery()
+            ->getOneOrNullResult();
     }
 }

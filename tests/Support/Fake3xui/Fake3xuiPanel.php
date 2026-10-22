@@ -194,7 +194,22 @@ final class Fake3xuiPanel
     }
 
     /** Client fields the panel stores; an update REPLACES the row with these (missing ones fall back to defaults). */
-    public const CLIENT_FIELDS = ['email', 'id', 'subId', 'flow', 'totalGB', 'expiryTime', 'limitIp', 'limitHwid', 'tgId', 'comment', 'enable', 'group', 'reset'];
+    public const CLIENT_FIELDS = ['email', 'id', 'subId', 'flow', 'totalGB', 'expiryTime', 'limitIp', 'limitHwid', 'tgId', 'comment', 'enable', 'group', 'reset',
+        'security', 'password', 'auth', 'reverse', 'privateKey', 'publicKey', 'allowedIPs', 'preSharedKey', 'keepAlive', 'forwardedPorts', 'secret', 'adTag',
+        'resetDay', 'resetWeekday', 'resetMax', 'trafficReset', 'trafficResetDay'];
+
+    /**
+     * The Go types of 3x-ui's model.Client, which add and update unmarshal the client into
+     * (MHSanaei/3x-ui internal/database/model/model.go). GET answers with the database record (model.ClientRecord), where
+     * allowedIPs and reverse are plain strings: that is what the fake stores and returns.
+     */
+    public const GO_CLIENT_TYPES = [
+        'id' => 'string', 'security' => 'string', 'password' => 'string', 'flow' => 'string', 'reverse' => '*model.ClientReverse', 'auth' => 'string',
+        'privateKey' => 'string', 'publicKey' => 'string', 'allowedIPs' => '[]string', 'allowedIPsByInbound' => 'map[int][]string', 'preSharedKey' => 'string',
+        'keepAlive' => 'int', 'forwardedPorts' => 'string', 'secret' => 'string', 'adTag' => 'string', 'email' => 'string', 'limitIp' => 'int',
+        'totalGB' => 'int64', 'expiryTime' => 'int64', 'enable' => 'bool', 'tgId' => 'int64', 'subId' => 'string', 'group' => 'string', 'comment' => 'string',
+        'reset' => 'int', 'resetDay' => 'int', 'resetWeekday' => 'int', 'resetMax' => 'int', 'trafficReset' => 'string', 'trafficResetDay' => 'int',
+    ];
 
     /**
      * @param array<string, string> $query
@@ -299,6 +314,9 @@ final class Fake3xuiPanel
         if (!is_array($client) || '' === (string) ($client['email'] ?? '')) {
             return self::envelope(false, null, 'client.email is required');
         }
+        if (null !== $error = self::goUnmarshalError($client)) {
+            return self::envelope(false, null, $error);
+        }
         if ([] === $inboundIds) {
             return self::envelope(false, null, 'at least one inbound is required');
         }
@@ -329,6 +347,9 @@ final class Fake3xuiPanel
      */
     private function update(string $key, array $body): MockResponse
     {
+        if (null !== $error = self::goUnmarshalError($body)) {
+            return self::envelope(false, null, $error);
+        }
         if (isset($body['client']) || 0 !== strcasecmp((string) ($body['email'] ?? ''), $this->clients[$key]['email'])) {
             return self::envelope(false, null, 'invalid client payload');
         }
@@ -447,8 +468,57 @@ final class Fake3xuiPanel
     private function storedRow(array $client): array
     {
         $defaults = ['email' => '', 'id' => '', 'subId' => '', 'flow' => '', 'totalGB' => 0, 'expiryTime' => 0, 'limitIp' => 0, 'limitHwid' => 0, 'tgId' => 0, 'comment' => '', 'enable' => true, 'group' => '', 'reset' => 0];
+        // The other model.Client fields are stored only when sent, in their database-record form (allowedIPs and
+        // reverse as strings), so rows the existing tests compare keep their shape.
+        $row = array_replace($defaults, array_intersect_key($client, $defaults));
+        foreach (array_diff(self::CLIENT_FIELDS, array_keys($defaults)) as $field) {
+            if (array_key_exists($field, $client) && null !== $client[$field]) {
+                $row[$field] = match ($field) {
+                    'allowedIPs' => is_array($client[$field]) ? implode(',', $client[$field]) : (string) $client[$field],
+                    'reverse' => is_array($client[$field]) ? (string) json_encode($client[$field]) : (string) $client[$field],
+                    default => $client[$field],
+                };
+            }
+        }
 
-        return array_replace($defaults, array_intersect_key($client, $defaults));
+        return $row;
+    }
+
+    /**
+     * What Go's encoding/json says when a body does not fit model.Client, or null when it does. Unknown fields are
+     * ignored and null is accepted for every type, exactly as in Go.
+     *
+     * @param array<mixed> $client
+     */
+    public static function goUnmarshalError(array $client): ?string
+    {
+        foreach (self::GO_CLIENT_TYPES as $field => $type) {
+            if (!array_key_exists($field, $client) || null === $client[$field]) {
+                continue;
+            }
+            $value = $client[$field];
+            $ok = match ($type) {
+                'string' => is_string($value),
+                'int', 'int64' => is_int($value) || (is_float($value) && floor($value) === $value),
+                'bool' => is_bool($value),
+                '[]string' => is_array($value) && array_is_list($value) && [] === array_filter($value, static fn (mixed $v): bool => !is_string($v) && null !== $v),
+                'map[int][]string' => is_array($value) && (array_is_list($value) ? [] === $value : [] === array_filter($value, static fn (mixed $v): bool => !is_array($v))),
+                default => is_array($value) && ([] === $value || !array_is_list($value)),
+            };
+            if (!$ok) {
+                $got = match (true) {
+                    is_string($value) => 'string',
+                    is_bool($value) => 'bool',
+                    is_int($value), is_float($value) => 'number',
+                    is_array($value) && array_is_list($value) => 'array',
+                    default => 'object',
+                };
+
+                return sprintf('json: cannot unmarshal %s into Go struct field .%s of type %s', $got, $field, $type);
+            }
+        }
+
+        return null;
     }
 
     /**
