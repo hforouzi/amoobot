@@ -71,6 +71,43 @@ final class MiniAppCheckoutController extends AbstractController
         });
     }
 
+    #[Route('/app/api/services/{id}/renew/quote', name: 'miniapp_renew_quote', requirements: ['id' => '\d+'], defaults: ['_miniapp_section' => 'services'], methods: ['POST'])]
+    public function renewQuote(Request $request, #[CurrentUser] MiniAppUser $user, int $id): JsonResponse
+    {
+        return $this->guarded($request, fn (): JsonResponse => $this->quoteResponse($request, $this->checkout->quoteRenewal($user->customer(), $id, $this->string($this->body($request), 'discountCode'))));
+    }
+
+    #[Route('/app/api/services/{id}/renew', name: 'miniapp_renew', requirements: ['id' => '\d+'], defaults: ['_miniapp_section' => 'services'], methods: ['POST'])]
+    public function renew(Request $request, #[CurrentUser] MiniAppUser $user, int $id): JsonResponse
+    {
+        return $this->creating($request, $user, 'renew:'.$id, function () use ($request, $user, $id): array {
+            $order = $this->checkout->renewal($user->customer(), $id, $this->string($this->body($request), 'discountCode'));
+
+            return ['redirect' => $this->generateUrl('miniapp_order_pay', ['id' => $order->getId()])];
+        });
+    }
+
+    #[Route('/app/api/services/{id}/add-traffic/quote', name: 'miniapp_add_traffic_quote', requirements: ['id' => '\d+'], defaults: ['_miniapp_section' => 'services'], methods: ['POST'])]
+    public function addTrafficQuote(Request $request, #[CurrentUser] MiniAppUser $user, int $id): JsonResponse
+    {
+        return $this->guarded($request, function () use ($request, $user, $id): JsonResponse {
+            $body = $this->body($request);
+
+            return $this->quoteResponse($request, $this->checkout->quoteAddTraffic($user->customer(), $id, $body['trafficGb'] ?? null, $this->string($body, 'discountCode')));
+        });
+    }
+
+    #[Route('/app/api/services/{id}/add-traffic', name: 'miniapp_add_traffic', requirements: ['id' => '\d+'], defaults: ['_miniapp_section' => 'services'], methods: ['POST'])]
+    public function addTraffic(Request $request, #[CurrentUser] MiniAppUser $user, int $id): JsonResponse
+    {
+        return $this->creating($request, $user, 'add_traffic:'.$id, function () use ($request, $user, $id): array {
+            $body = $this->body($request);
+            $order = $this->checkout->addTraffic($user->customer(), $id, $body['trafficGb'] ?? null, $this->string($body, 'discountCode'));
+
+            return ['redirect' => $this->generateUrl('miniapp_order_pay', ['id' => $order->getId()])];
+        });
+    }
+
     #[Route('/app/api/orders/{id}/pay', name: 'miniapp_order_pay_api', requirements: ['id' => '\d+'], defaults: ['_miniapp_section' => 'orders'], methods: ['POST'])]
     public function pay(Request $request, #[CurrentUser] MiniAppUser $user, int $id): JsonResponse
     {

@@ -7,6 +7,15 @@
 {% block attributes %} data-back data-main-button-text="{{ 'service.open_page'|trans }}" data-main-button-href="{{ pageUrl }}" data-main-button-external{% endblock %}
 {% block content %}
     {{ include('subscription/_status.html.twig', {view: view}) }}
+    {% if canRenew or canAddTraffic %}
+        <section class="card">
+            <h2>{{ 'service.buy_more'|trans }}</h2>
+            <div class="row">
+                {% if canRenew %}<a class="btn small" href="{{ path('miniapp_service_renew', {id: service.id}) }}" data-nav data-renew>🔄 {{ 'renew.title'|trans }}</a>{% endif %}
+                {% if canAddTraffic %}<a class="btn secondary small" href="{{ path('miniapp_service_add_traffic', {id: service.id}) }}" data-nav data-add-traffic>➕ {{ 'add_traffic.title'|trans }}</a>{% endif %}
+            </div>
+        </section>
+    {% endif %}
     <section class="card">
         <h2>{{ 'service.subscription'|trans }}</h2>
         <p class="muted">{{ 'service.page_hint'|trans }}</p>

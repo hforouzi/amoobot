@@ -1,0 +1,33 @@
+{% extends 'miniapp/view/_base.html.twig' %}
+{% trans_default_domain 'miniapp' %}
+{# Buying extra traffic for a service at the add-on price per GB (ServiceOrderCheckout::addTrafficQuote). #}
+{% block section %}services{% endblock %}
+{% block title %}{{ 'add_traffic.title'|trans }}{% endblock %}
+{% block attributes %} data-back{% if open and quote %} data-main-button-text="{{ 'checkout.continue'|trans }}" data-main-button-form="add-traffic-form"{% endif %}{% endblock %}
+{% block content %}
+    {% if view %}{{ include('subscription/_status.html.twig', {view: view}) }}{% endif %}
+    {% if not open %}
+        <section class="card notice" data-sales-closed><p class="pre-line">{{ disabledMessage }}</p></section>
+    {% elseif not quote %}
+        <section class="card notice"><p>{{ 'checkout.message.add_traffic_unavailable'|trans }}</p></section>
+    {% else %}
+        <form class="card form" id="add-traffic-form" data-submit="{{ path('miniapp_add_traffic', {id: service.id}) }}" data-quote-url="{{ path('miniapp_add_traffic_quote', {id: service.id}) }}" novalidate>
+            <h2>{{ 'add_traffic.title'|trans }}</h2>
+            <p class="muted">{{ 'add_traffic.price_per_gb'|trans({'%amount%': pricePerGb|number_format}) }}</p>
+            <label class="field">
+                <span>{{ 'checkout.traffic'|trans({'%min%': minGb, '%max%': maxGb}) }}</span>
+                <input type="number" name="trafficGb" inputmode="numeric" min="{{ minGb }}" max="{{ maxGb }}" value="{{ minGb }}" data-requote dir="ltr">
+            </label>
+            <label class="field">
+                <span>{{ 'checkout.discount_code'|trans }}</span>
+                <span class="inline-field">
+                    <input type="text" name="discountCode" autocomplete="off" autocapitalize="characters" spellcheck="false" dir="ltr">
+                    <button type="button" class="btn secondary small fit" data-requote-now>{{ 'checkout.apply_code'|trans }}</button>
+                </span>
+            </label>
+            <div data-quote>{{ include('miniapp/view/_price.html.twig', {quote: quote}) }}</div>
+            <p class="field-error" data-form-error hidden></p>
+            <button type="submit" class="btn">{{ 'checkout.continue'|trans }}</button>
+        </form>
+    {% endif %}
+{% endblock %}

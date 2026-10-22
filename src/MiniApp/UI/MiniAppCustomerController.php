@@ -8,6 +8,9 @@ use App\Bot\Application\BotTextResolver;
 use App\Entity\VpnService;
 use App\MiniApp\Security\MiniAppUser;
 use App\Provisioning\Application\CustomerServiceFinder;
+use App\Provisioning\Application\TrafficAddonSettingsProvider;
+use App\Shop\Application\Checkout\ServiceOrderCheckout;
+use App\Shop\Application\SalesSettingsProvider;
 use App\Subscription\Application\AppDownloadCatalog;
 use App\Subscription\Application\ClientAppCatalog;
 use App\Subscription\Application\SubscriptionPageUrl;
@@ -38,6 +41,9 @@ final class MiniAppCustomerController extends AbstractController
         private readonly SubscriptionPageUrl $pageUrl,
         private readonly ClientAppCatalog $clientApps,
         private readonly AppDownloadCatalog $downloads,
+        private readonly ServiceOrderCheckout $serviceOrderCheckout,
+        private readonly SalesSettingsProvider $salesSettings,
+        private readonly TrafficAddonSettingsProvider $trafficAddonSettings,
         private readonly string $serviceNotifyTrafficThresholds = '80',
     ) {
     }
@@ -77,6 +83,9 @@ final class MiniAppCustomerController extends AbstractController
             'service' => $service,
             'view' => $view,
             'pageUrl' => $this->pageUrl->forService($service),
+            // The same switches the bot's service view uses; the pages check them again.
+            'canRenew' => $this->salesSettings->renewalsEnabled() && null !== $this->serviceOrderCheckout->renewalQuote($service),
+            'canAddTraffic' => $this->salesSettings->addTrafficEnabled() && $this->trafficAddonSettings->canPurchase() && null !== $this->serviceOrderCheckout->addTrafficPlan($service),
         ]);
     }
 
