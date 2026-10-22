@@ -214,6 +214,37 @@ final class MiniAppPurchaseTest extends IntegrationTestCase
         self::assertSame(2, $this->rows('`order`'));
     }
 
+    /**
+     * Two calls with one key at the same moment (two processes, two connections): the second's insert waits on the
+     * unique index until the first commits, then answers with the first's result.
+     */
+    #[\PHPUnit\Framework\Attributes\Group('subprocess')]
+    public function testParallelCallsWithTheSameKeyCreateOneOrder(): void
+    {
+        $this->em->getProxyFactory()->generateProxyClasses($this->em->getMetadataFactory()->getAllMetadata());
+        $php = (new \Symfony\Component\Process\PhpExecutableFinder())->find(false) ?: 'php';
+        $script = dirname(__DIR__).'/Support/bin/checkout-once.php';
+        $key = self::newKey();
+
+        $processes = [];
+        foreach ([1500, 0] as $holdMs) {
+            $process = new \Symfony\Component\Process\Process([$php, $script, self::CUSTOMER, (string) $this->plan->getId(), $key, (string) $holdMs], dirname(__DIR__, 2), ['APP_ENV' => 'test'], null, 60);
+            $process->start();
+            $processes[] = $process;
+            usleep(300000);
+        }
+        $answers = [];
+        foreach ($processes as $process) {
+            $process->wait();
+            self::assertTrue($process->isSuccessful(), $process->getErrorOutput().$process->getOutput());
+            $answers[] = trim($process->getOutput());
+        }
+
+        self::assertSame($answers[0], $answers[1], 'both got the first call\'s answer');
+        self::assertSame(1, $this->rows('`order`'));
+        self::assertSame(1, $this->rows('checkout_request'));
+    }
+
     public function testAKeyIsRequiredAndCannotBeReusedForSomethingElse(): void
     {
         $session = $this->authenticate(self::CUSTOMER);

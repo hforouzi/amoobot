@@ -108,6 +108,25 @@ final class MiniAppPaymentTest extends IntegrationTestCase
         self::assertSame('receipt_already_submitted', $answer['error']);
     }
 
+    public function testReceiptUploadsNeedCsrfAndAreRateLimited(): void
+    {
+        $session = $this->authenticate(self::CUSTOMER);
+        $payment = $this->pay($session, 'manual_card');
+        $url = '/app/api/payments/'.$payment->getId().'/receipt';
+
+        $this->upload($url, ['token' => $session['token'], 'csrf' => 'forged'], $this->png(), 'image/png');
+        self::assertSame(403, $this->httpStatus());
+
+        for ($i = 0; $i < 10; ++$i) {
+            $this->upload($url, $session, $this->file('r.txt', 'nope'), 'text/plain');
+            self::assertSame(422, $this->httpStatus());
+        }
+        $answer = $this->upload($url, $session, $this->png(), 'image/png');
+        self::assertSame(429, $this->httpStatus());
+        self::assertSame('rate_limited', $answer['error']);
+        self::assertSame([], $this->http->requests('/sendPhoto'));
+    }
+
     /**
      * @return iterable<string, array{string, string, string}>
      */
