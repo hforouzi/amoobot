@@ -14,8 +14,8 @@ use Symfony\Component\Security\Http\Attribute\CurrentUser;
 use Symfony\Component\Security\Http\Attribute\IsGranted;
 
 /**
- * The shell's own fragments: the bottom navigation (built per user from MiniAppSections) and the admin entry, which
- * lists the admin areas the user's permissions allow (screens come in later releases).
+ * The shell's own fragment: the bottom navigation, built per user from MiniAppSections. The admin entry is
+ * MiniAppAdminHomeController.
  */
 #[IsGranted(MiniAppUser::ROLE)]
 final class MiniAppShellController extends AbstractController
@@ -30,11 +30,5 @@ final class MiniAppShellController extends AbstractController
     public function nav(Request $request, #[CurrentUser] MiniAppUser $user): Response
     {
         return $this->fragments->render($request, 'miniapp/_nav.html.twig', ['sections' => $this->sections->navigation($user)]);
-    }
-
-    #[Route('/app/admin', name: 'miniapp_admin', defaults: ['_miniapp_section' => 'admin'], methods: ['GET'])]
-    public function admin(Request $request, #[CurrentUser] MiniAppUser $user): Response
-    {
-        return $this->fragments->render($request, 'miniapp/view/admin.html.twig', ['areas' => $this->sections->children('admin', $user)]);
     }
 }
