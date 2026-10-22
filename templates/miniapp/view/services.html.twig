@@ -3,5 +3,17 @@
 {% block section %}services{% endblock %}
 {% block title %}{{ 'nav.services'|trans }}{% endblock %}
 {% block content %}
-    <section class="card"><h1>{{ 'services.title'|trans }}</h1></section>
+    <section class="card">
+        <h1>{{ 'services.title'|trans }}</h1>
+        {% if cards is empty %}
+            <p class="muted" data-no-services>{{ 'home.buy_in_bot'|trans }}</p>
+        {% endif %}
+    </section>
+    {% if cards is not empty %}
+        <div class="list">
+            {% for card in cards %}
+                {{ include('miniapp/view/_service_card.html.twig', {card: card}) }}
+            {% endfor %}
+        </div>
+    {% endif %}
 {% endblock %}

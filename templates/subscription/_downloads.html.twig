@@ -1,4 +1,6 @@
 {% trans_default_domain 'subscription' %}
+{# App downloads. Shared by the subscription page and the Mini App (in_app: true: links open with Telegram's openLink). #}
+{% set in_app = in_app|default(false) %}
 <section class="card">
     <h2>{{ 'downloads.title'|trans }}</h2>
     <ul class="downloads">
@@ -9,7 +11,7 @@
                     <span class="muted">{{ ('platform.' ~ download.platform)|trans }}{% if download.version %} · <span class="ltr">{{ download.version }}</span>{% endif %}</span>
                 </div>
                 {% if download.description %}<p class="muted">{{ download.description }}</p>{% endif %}
-                <a class="btn small" style="margin-top:8px" href="{{ download.url }}" rel="noopener noreferrer"{% if download.isExternal %} target="_blank"{% endif %}>
+                <a class="btn small" style="margin-top:8px" href="{{ download.url }}"{% if in_app %} data-open-link{% else %} rel="noopener noreferrer"{% if download.isExternal %} target="_blank"{% endif %}{% endif %}>
                     ⬇️ {{ download.isExternal ? 'downloads.open'|trans : 'downloads.download'|trans }}{% if download.sizeBytes %} <span class="ltr">({{ download.sizeBytes|sub_bytes }})</span>{% endif %}
                 </a>
                 {% if download.sha256 %}

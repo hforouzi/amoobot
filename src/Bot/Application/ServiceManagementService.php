@@ -24,6 +24,7 @@ use App\Provisioning\Application\ServiceUsageSyncService;
 use App\Provisioning\Application\ServiceConfigDeliveryRefresher;
 use App\Provisioning\Application\TrafficAddonSettingsProvider;
 use App\Provisioning\Application\CustomerAccessGuard;
+use App\Provisioning\Application\CustomerServiceFinder;
 use App\Provisioning\Application\FinalConfigLinkProvider;
 use App\Provisioning\Application\VpnConfigLinkSetResult;
 use App\Provisioning\Domain\ServiceActivationDriverInterface;
@@ -76,6 +77,7 @@ class ServiceManagementService
         private readonly QrCodeSender $qrCodeSender,
         private readonly CustomerAccessGuard $accessGuard,
         private readonly SubscriptionPageUrl $subscriptionPageUrl,
+        private readonly CustomerServiceFinder $customerServices,
         private readonly string $paymentCardNumber = '',
         private readonly string $paymentCardHolder = '',
         private readonly ?string $paymentDescription = null,
@@ -84,20 +86,7 @@ class ServiceManagementService
 
     public function handleMyServices(TelegramAccount $account, string $chatId, ?string $callbackId = null): void
     {
-        $services = $this->entityManager->getRepository(VpnService::class)
-            ->createQueryBuilder('service')
-            ->andWhere('service.user = :user')
-            ->andWhere('service.status IN (:statuses)')
-            ->setParameter('user', $account->getUser())
-            ->setParameter('statuses', [
-                VpnServiceStatus::ACTIVE,
-                VpnServiceStatus::SUSPENDED,
-                VpnServiceStatus::EXPIRED,
-            ])
-            ->orderBy('service.id', 'DESC')
-            ->setMaxResults(10)
-            ->getQuery()
-            ->getResult();
+        $services = $this->customerServices->visibleTo($account->getUser(), 10);
 
         if ([] === $services) {
             $this->showPopupOrMessage($chatId, $callbackId, 'شما در حال حاضر سرویسی ندارید.', 'popup_no_services_user');
