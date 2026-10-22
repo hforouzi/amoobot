@@ -55,12 +55,6 @@ parameters:
 			path: src/Bot/Application/ServiceAction/ExtendServiceAction.php
 
 		-
-			message: '#^Instanceof between App\\Entity\\Plan and App\\Entity\\Plan will always evaluate to true\.$#'
-			identifier: instanceof.alwaysTrue
-			count: 1
-			path: src/Bot/Application/ServiceManagementService.php
-
-		-
 			message: '#^Method App\\Bot\\Application\\ServiceManagementService\:\:formatConfigLinksMessage\(\) is unused\.$#'
 			identifier: method.unused
 			count: 1
@@ -183,13 +177,7 @@ parameters:
 		-
 			message: '#^Instanceof between App\\Entity\\Order and App\\Entity\\Order will always evaluate to true\.$#'
 			identifier: instanceof.alwaysTrue
-			count: 4
-			path: src/Bot/Application/TelegramUpdateHandler.php
-
-		-
-			message: '#^Instanceof between App\\Entity\\OrderDraft and App\\Entity\\OrderDraft will always evaluate to true\.$#'
-			identifier: instanceof.alwaysTrue
-			count: 1
+			count: 3
 			path: src/Bot/Application/TelegramUpdateHandler.php
 
 		-

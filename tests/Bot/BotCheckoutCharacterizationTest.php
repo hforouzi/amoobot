@@ -64,6 +64,14 @@ final class BotCheckoutCharacterizationTest extends IntegrationTestCase
         $this->http->onJson('gateway.zibal.ir/v1/request', ['result' => 100, 'trackId' => 'ZTRACK1', 'message' => 'success']);
     }
 
+    protected function tearDown(): void
+    {
+        // Trial rows point at this test's inbound, which the next test's purge deletes.
+        $this->em->getConnection()->executeStatement('DELETE FROM trial_claim');
+        $this->em->getConnection()->executeStatement('DELETE FROM trial_plan');
+        parent::tearDown();
+    }
+
     public function testNewServiceWithManualCardAndReceipt(): void
     {
         $this->pressButton(self::CUSTOMER, 'buy_service');

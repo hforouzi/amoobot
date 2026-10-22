@@ -37,6 +37,10 @@ use App\Shop\Application\RenewalPriceResult;
 use App\Shop\Application\SalesSettingsProvider;
 use App\Shop\Application\TrafficAddonPricingService;
 use App\Shop\Application\DiscountCodeService;
+use App\Shop\Application\Checkout\DiscountApplication;
+use App\Shop\Application\Checkout\PaymentStart;
+use App\Shop\Application\Checkout\PaymentStarter;
+use App\Shop\Application\Checkout\ServiceOrderCheckout;
 use App\Shop\Application\IncompleteOrderSettingsProvider;
 use App\Shop\Application\OrderTrackingCodeService;
 use App\Shop\Domain\OrderDraftStatus;
@@ -60,27 +64,18 @@ class ServiceManagementService
         private readonly BotTextResolver $botTextResolver,
         private readonly VpnPanelDriverRegistry $driverRegistry,
         private readonly ServiceUsageSyncService $serviceUsageSyncService,
-        private readonly SettingValueProvider $settingValueProvider,
-        private readonly RenewalSettingsProvider $renewalSettingsProvider,
         private readonly TrafficAddonSettingsProvider $trafficAddonSettingsProvider,
         private readonly FinalConfigLinkProvider $finalConfigLinkProvider,
         private readonly ServiceConfigDeliveryRefresher $deliveryRefresher,
-        private readonly PlanPricingService $planPricingService,
         private readonly SalesSettingsProvider $salesSettingsProvider,
-        private readonly TrafficAddonPricingService $trafficAddonPricingService,
-        private readonly DiscountCodeService $discountCodeService,
-        private readonly IncompleteOrderSettingsProvider $incompleteOrderSettingsProvider,
-        private readonly OrderTrackingCodeService $orderTrackingCodeService,
-        private readonly PaymentGatewayRegistry $paymentGatewayRegistry,
-        private readonly StorePaymentMethodResolver $storePaymentMethodResolver,
         private readonly VpnAccessMessageFormatter $vpnAccessMessageFormatter,
         private readonly QrCodeSender $qrCodeSender,
         private readonly CustomerAccessGuard $accessGuard,
         private readonly SubscriptionPageUrl $subscriptionPageUrl,
         private readonly CustomerServiceFinder $customerServices,
-        private readonly string $paymentCardNumber = '',
-        private readonly string $paymentCardHolder = '',
-        private readonly ?string $paymentDescription = null,
+        private readonly ServiceOrderCheckout $serviceOrderCheckout,
+        private readonly DiscountApplication $discountApplication,
+        private readonly PaymentStarter $paymentStarter,
     ) {
     }
 
@@ -455,26 +450,26 @@ class ServiceManagementService
             return;
         }
 
-        $package = $this->resolveRenewalPackage($service);
-        if (null === $package) {
+        $quote = $this->serviceOrderCheckout->renewalQuote($service);
+        if (null === $quote) {
             $this->showPopupOrMessage($chatId, $callbackId, 'امکان تمدید خودکار برای این سرویس وجود ندارد. لطفاً با پشتیبانی تماس بگیرید.', 'renewal_package_missing');
 
             return;
         }
 
-        $durationText = $package['unlimitedDuration'] ? 'نامحدود' : ((string) $package['durationDays'].' روز');
-        $carryTrafficText = $package['carryRemainingTraffic'] ? 'بله' : 'خیر';
-        $carryDaysText = $package['carryRemainingDays'] ? 'بله' : 'خیر';
+        $durationText = $quote->unlimitedDuration ? 'نامحدود' : ((string) $quote->durationDays.' روز');
+        $carryTrafficText = $quote->carryRemainingTraffic ? 'بله' : 'خیر';
+        $carryDaysText = $quote->carryRemainingDays ? 'بله' : 'خیر';
         $summary = sprintf(
             "تمدید سرویس #%d\nحجم تمدید: %d گیگ\nمدت تمدید: %s\nحفظ حجم باقیمانده: %s\nحفظ روزهای باقیمانده: %s\nمبلغ پایه: %d تومان\nتخفیف سراسری: %d تومان\nکد تخفیف: -\nمبلغ نهایی: %d تومان",
             $serviceId,
-            $package['trafficGb'],
+            $quote->trafficGb,
             $durationText,
             $carryTrafficText,
             $carryDaysText,
-            $package['baseAmount'],
-            $package['globalDiscountAmount'],
-            $package['amount']
+            $quote->baseAmount,
+            $quote->globalDiscountAmount,
+            $quote->amount
         );
 
         $this->acknowledgeCallback($callbackId);
@@ -510,54 +505,14 @@ class ServiceManagementService
             return;
         }
 
-        $package = $this->resolveRenewalPackage($service);
-        if (null === $package) {
+        $quote = $this->serviceOrderCheckout->renewalQuote($service);
+        if (null === $quote) {
             $this->showPopupOrMessage($chatId, $callbackId, 'امکان تمدید خودکار برای این سرویس وجود ندارد. لطفاً با پشتیبانی تماس بگیرید.', 'renewal_confirm_package_missing');
 
             return;
         }
 
-        /** @var Plan $plan */
-        $plan = $package['plan'];
-        $draft = (new OrderDraft())
-            ->setUser($service->getUser())
-            ->setPlan($plan)
-            ->setStatus(OrderDraftStatus::PENDING)
-            ->setStep(self::STEP_WAITING_DISCOUNT_DECISION)
-            ->setTrafficGb($package['trafficGb'])
-            ->setDurationDays($package['durationDays'])
-            ->setCalculatedAmount($package['amount'])
-            ->setDiscountCode(null)
-            ->setDiscountAmount(0)
-            ->setFinalAmount($package['amount'])
-            ->setPriceSnapshot([
-                'baseAmount' => $package['baseAmount'],
-                'globalDiscountPercent' => $package['globalDiscountPercent'],
-                'globalDiscountAmount' => $package['globalDiscountAmount'],
-                'afterGlobalDiscountAmount' => $package['amount'],
-                'discountCode' => null,
-                'discountCodeAmount' => 0,
-                'finalAmount' => $package['amount'],
-                'planPriceSource' => 'current_plan',
-            ])
-            ->setData([
-                'draftType' => 'renewal',
-                'orderType' => OrderType::RENEWAL,
-                'targetServiceId' => $service->getId(),
-                'trafficGb' => $package['trafficGb'],
-                'durationDays' => $package['durationDays'],
-                'unlimitedDuration' => $package['unlimitedDuration'],
-                'renewalPolicy' => [
-                    'carryRemainingTraffic' => $package['carryRemainingTraffic'],
-                    'carryRemainingDays' => $package['carryRemainingDays'],
-                ],
-                'adminMode' => $adminMode,
-            ])
-            ->setExpiresAt($this->resolveIncompleteExpiresAt())
-            ->setUpdatedAt(new \DateTimeImmutable());
-
-        $this->entityManager->persist($draft);
-        $this->entityManager->flush();
+        $draft = $this->serviceOrderCheckout->startRenewalDraft($service, $quote, $adminMode, self::STEP_WAITING_DISCOUNT_DECISION);
 
         $this->acknowledgeCallback($callbackId);
         $this->telegramApiClient->sendMessage(
@@ -601,30 +556,14 @@ class ServiceManagementService
             return;
         }
 
-        $sourceOrder = $service->getOrder();
-        $plan = $sourceOrder?->getPlan();
+        $plan = $this->serviceOrderCheckout->addTrafficPlan($service);
         if (!$plan instanceof Plan) {
             $this->showPopupOrMessage($chatId, $callbackId, 'امکان خرید حجم اضافه برای این سرویس وجود ندارد.', 'traffic_addon_missing_plan');
 
             return;
         }
 
-        $draft = (new OrderDraft())
-            ->setUser($account->getUser())
-            ->setPlan($plan)
-            ->setStatus(OrderDraftStatus::PENDING)
-            ->setStep(self::STEP_WAITING_ADD_TRAFFIC_AMOUNT)
-            ->setTrafficGb(null)
-            ->setCalculatedAmount(null)
-            ->setData([
-                'draftType' => 'add_traffic',
-                'targetServiceId' => $serviceId,
-            ])
-            ->setExpiresAt($this->resolveIncompleteExpiresAt())
-            ->setUpdatedAt(new \DateTimeImmutable());
-
-        $this->entityManager->persist($draft);
-        $this->entityManager->flush();
+        $draft = $this->serviceOrderCheckout->startAddTrafficDraft($account->getUser(), $service, $plan, self::STEP_WAITING_ADD_TRAFFIC_AMOUNT);
 
         $this->acknowledgeCallback($callbackId);
         $this->telegramApiClient->sendMessage(
@@ -674,41 +613,20 @@ class ServiceManagementService
         }
 
         $trafficGb = $this->parsePositiveInt($text);
-        $minGb = $this->trafficAddonSettingsProvider->minGb();
-        $maxGb = $this->trafficAddonSettingsProvider->maxGb();
-        if (null === $trafficGb || $trafficGb < $minGb || $trafficGb > $maxGb) {
-            $this->telegramApiClient->sendMessage($chatId, sprintf('عدد صحیح بین %d تا %d وارد کنید.', $minGb, $maxGb));
+        if (!$this->serviceOrderCheckout->isValidAddTrafficAmount($trafficGb)) {
+            $this->telegramApiClient->sendMessage($chatId, sprintf('عدد صحیح بین %d تا %d وارد کنید.', $this->trafficAddonSettingsProvider->minGb(), $this->trafficAddonSettingsProvider->maxGb()));
 
             return;
         }
 
-        $price = $this->trafficAddonPricingService->calculate($trafficGb);
-        if ($price->finalAmount <= 0) {
+        $price = $this->serviceOrderCheckout->addTrafficQuote((int) $trafficGb);
+        if (null === $price) {
             $this->telegramApiClient->sendMessage($chatId, 'خرید حجم اضافه فعال نیست.');
 
             return;
         }
 
-        $priceSnapshot = [
-            'baseAmount' => $price->baseAmount,
-            'globalDiscountPercent' => $price->globalDiscountPercent,
-            'globalDiscountAmount' => $price->globalDiscountAmount,
-            'afterGlobalDiscountAmount' => $price->afterGlobalDiscountAmount,
-            'discountCode' => null,
-            'discountCodeAmount' => 0,
-            'finalAmount' => $price->finalAmount,
-        ];
-
-        $draft
-            ->setTrafficGb($trafficGb)
-            ->setCalculatedAmount($price->finalAmount)
-            ->setDiscountCode(null)
-            ->setDiscountAmount(0)
-            ->setFinalAmount($price->finalAmount)
-            ->setPriceSnapshot($priceSnapshot)
-            ->setData(array_merge($data, ['priceSnapshot' => $priceSnapshot]))
-            ->setUpdatedAt(new \DateTimeImmutable());
-        $this->entityManager->flush();
+        $this->serviceOrderCheckout->setAddTrafficAmount($draft, (int) $trafficGb, $price);
 
         $summary = sprintf(
             "خلاصه خرید حجم اضافه\nشناسه سرویس: %d\nحجم کل فعلی: %s\nمصرف فعلی: %s\nحجم درخواستی: %d گیگ\nقیمت هر گیگ: %d تومان\nمبلغ پایه: %d تومان\nتخفیف سراسری: %d تومان\nکد تخفیف: -\nمبلغ نهایی: %d تومان",
@@ -773,52 +691,27 @@ class ServiceManagementService
             return;
         }
 
-        $sourceOrder = $service->getOrder();
-        $plan = $sourceOrder?->getPlan();
-        if (!$plan instanceof Plan) {
+        if (!$this->serviceOrderCheckout->addTrafficPlan($service) instanceof Plan) {
             $this->showPopupOrMessage($chatId, $callbackId, 'امکان خرید حجم اضافه برای این سرویس وجود ندارد.', 'invalid_add_traffic_plan_confirm');
 
             return;
         }
 
         $trafficGb = (int) ($draft->getTrafficGb() ?? 0);
-        $minGb = $this->trafficAddonSettingsProvider->minGb();
-        $maxGb = $this->trafficAddonSettingsProvider->maxGb();
-        if ($trafficGb <= 0 || $trafficGb < $minGb || $trafficGb > $maxGb) {
+        if ($trafficGb <= 0 || !$this->serviceOrderCheckout->isValidAddTrafficAmount($trafficGb)) {
             $this->showPopupOrMessage($chatId, $callbackId, 'حجم درخواستی معتبر نیست.', 'invalid_add_traffic_amount_confirm');
 
             return;
         }
 
-        $price = $this->trafficAddonPricingService->calculate($trafficGb);
-        if ($price->finalAmount <= 0) {
+        $price = $this->serviceOrderCheckout->addTrafficQuote($trafficGb);
+        if (null === $price) {
             $this->showPopupOrMessage($chatId, $callbackId, 'خرید حجم اضافه فعال نیست.', 'add_traffic_price_zero_confirm');
 
             return;
         }
 
-        $draft
-            ->setStep(self::STEP_WAITING_DISCOUNT_DECISION)
-            ->setCalculatedAmount($price->finalAmount)
-            ->setDiscountCode(null)
-            ->setDiscountAmount(0)
-            ->setFinalAmount($price->finalAmount)
-            ->setPriceSnapshot([
-                'baseAmount' => $price->baseAmount,
-                'globalDiscountPercent' => $price->globalDiscountPercent,
-                'globalDiscountAmount' => $price->globalDiscountAmount,
-                'afterGlobalDiscountAmount' => $price->afterGlobalDiscountAmount,
-                'discountCode' => null,
-                'discountCodeAmount' => 0,
-                'finalAmount' => $price->finalAmount,
-            ])
-            ->setData(array_merge($data, [
-                'orderType' => OrderType::ADD_TRAFFIC,
-                'targetServiceId' => $service->getId(),
-                'trafficGb' => $trafficGb,
-            ]))
-            ->setUpdatedAt(new \DateTimeImmutable());
-        $this->entityManager->flush();
+        $this->serviceOrderCheckout->confirmAddTraffic($draft, $service, $trafficGb, $price, self::STEP_WAITING_DISCOUNT_DECISION);
 
         $this->acknowledgeCallback($callbackId);
         $this->telegramApiClient->sendMessage(
@@ -855,13 +748,8 @@ class ServiceManagementService
             return;
         }
 
-        $draft
-            ->setDiscountCode(null)
-            ->setDiscountAmount(0)
-            ->setFinalAmount((int) ($draft->getCalculatedAmount() ?? 0))
-            ->setStep(self::STEP_WAITING_DISCOUNT_DECISION)
-            ->setUpdatedAt(new \DateTimeImmutable());
-        $this->entityManager->flush();
+        $draft->setStep(self::STEP_WAITING_DISCOUNT_DECISION);
+        $this->discountApplication->clearOnDraft($draft);
 
         $this->sendPaymentGatewaySelection($draft, $chatId, $callbackId, 'skipped');
     }
@@ -881,37 +769,11 @@ class ServiceManagementService
             return;
         }
 
-        $orderType = (string) ($data['orderType'] ?? OrderType::NEW_SERVICE);
-        $amountBeforeCode = (int) ($draft->getCalculatedAmount() ?? 0);
-        $result = $this->discountCodeService->validateCode($codeInput, $draft->getUser(), $orderType, $draft->getPlan(), $amountBeforeCode);
-        if (!$result->valid || null === $result->discountCode) {
-            $draft
-                ->setDiscountCode(null)
-                ->setDiscountAmount(0)
-                ->setFinalAmount($amountBeforeCode)
-                ->setStep(self::STEP_WAITING_DISCOUNT_DECISION)
-                ->setUpdatedAt(new \DateTimeImmutable());
-            $this->entityManager->flush();
-            $this->sendPaymentGatewaySelection($draft, $chatId, null, 'invalid', $result->message);
-
-            return;
-        }
-
-        $snapshot = is_array($draft->getPriceSnapshot()) ? $draft->getPriceSnapshot() : [];
-        $snapshot['discountCode'] = $result->discountCode->getCode();
-        $snapshot['discountCodeAmount'] = $result->discountAmount;
-        $snapshot['finalAmount'] = $result->finalAmount;
-
-        $draft
-            ->setDiscountCode($result->discountCode->getCode())
-            ->setDiscountAmount($result->discountAmount)
-            ->setFinalAmount($result->finalAmount)
-            ->setPriceSnapshot($snapshot)
-            ->setStep(self::STEP_WAITING_DISCOUNT_DECISION)
-            ->setUpdatedAt(new \DateTimeImmutable());
-        $this->entityManager->flush();
-
-        $this->sendPaymentGatewaySelection($draft, $chatId, null, 'applied');
+        $draft->setStep(self::STEP_WAITING_DISCOUNT_DECISION);
+        $outcome = $this->discountApplication->applyToDraft($draft, $codeInput, (string) ($data['orderType'] ?? OrderType::NEW_SERVICE));
+        $outcome->applied
+            ? $this->sendPaymentGatewaySelection($draft, $chatId, null, 'applied')
+            : $this->sendPaymentGatewaySelection($draft, $chatId, null, 'invalid', $outcome->reason);
     }
 
     public function handleSelectStorePaymentMethodForOrder(TelegramAccount $account, int $orderId, int $storePaymentMethodId, string $chatId, ?string $callbackId = null): bool
@@ -1016,7 +878,7 @@ class ServiceManagementService
             return;
         }
 
-        $order = $this->createOrderFromDraft($draft);
+        $order = $this->serviceOrderCheckout->createOrderFromDraft($draft);
         if (!$order instanceof Order) {
             $this->showPopupOrMessage($chatId, $callbackId, 'سفارش نامعتبر است.', 'invalid_order_from_draft');
 
@@ -1025,7 +887,7 @@ class ServiceManagementService
 
         $methods = $this->findAvailableStorePaymentMethods($order);
         if ([] === $methods) {
-            $diagnostics = $this->storePaymentMethodResolver->getDiagnostics($order);
+            $diagnostics = $this->paymentStarter->diagnostics($order);
             $encodedReasons = json_encode($diagnostics['skippedReasons'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
             $encodedMethods = json_encode($diagnostics['methods'] ?? [], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
             $this->debugLog(sprintf(
@@ -1066,29 +928,17 @@ class ServiceManagementService
      */
     private function findAvailableStorePaymentMethods(Order $order): array
     {
-        return $this->storePaymentMethodResolver->getAvailableMethods($order);
+        return $this->paymentStarter->methodsFor($order);
     }
 
     private function findStorePaymentMethodForOrder(Order $order, int $storePaymentMethodId): ?StorePaymentMethod
     {
-        foreach ($this->findAvailableStorePaymentMethods($order) as $method) {
-            if ((int) ($method->getId() ?? 0) === $storePaymentMethodId) {
-                return $method;
-            }
-        }
-
-        return null;
+        return $this->paymentStarter->methodFor($order, $storePaymentMethodId);
     }
 
     private function findStorePaymentMethodByGatewayForOrder(Order $order, int $gatewayId): ?StorePaymentMethod
     {
-        foreach ($this->findAvailableStorePaymentMethods($order) as $method) {
-            if ((int) ($method->getGateway()->getId() ?? 0) === $gatewayId) {
-                return $method;
-            }
-        }
-
-        return null;
+        return $this->paymentStarter->methodForGateway($order, $gatewayId);
     }
 
     private function resolveCancelCallbackForDraft(OrderDraft $draft): string
@@ -1108,65 +958,6 @@ class ServiceManagementService
         }
 
         return 'main_menu';
-    }
-
-    private function createOrderFromDraft(OrderDraft $draft): ?Order
-    {
-        $data = is_array($draft->getData()) ? $draft->getData() : [];
-        $draftType = (string) ($data['draftType'] ?? '');
-        if (!in_array($draftType, ['renewal', 'add_traffic'], true)) {
-            return null;
-        }
-
-        $targetServiceId = (int) ($data['targetServiceId'] ?? 0);
-        $targetService = $targetServiceId > 0 ? $this->entityManager->getRepository(VpnService::class)->find($targetServiceId) : null;
-        if (!$targetService instanceof VpnService) {
-            return null;
-        }
-
-        $priceSnapshot = is_array($draft->getPriceSnapshot()) ? $draft->getPriceSnapshot() : [];
-        $finalAmount = max(0, (int) ($draft->getFinalAmount() ?? $draft->getCalculatedAmount() ?? 0));
-        $metadata = [
-            'targetServiceId' => $targetService->getId(),
-            'trafficGb' => (int) ($data['trafficGb'] ?? $draft->getTrafficGb() ?? 0),
-            'priceSnapshot' => [
-                'baseAmount' => (int) ($priceSnapshot['baseAmount'] ?? 0),
-                'globalDiscountPercent' => (int) ($priceSnapshot['globalDiscountPercent'] ?? 0),
-                'globalDiscountAmount' => (int) ($priceSnapshot['globalDiscountAmount'] ?? 0),
-                'afterGlobalDiscountAmount' => (int) ($priceSnapshot['afterGlobalDiscountAmount'] ?? $draft->getCalculatedAmount() ?? 0),
-                'discountCode' => $draft->getDiscountCode(),
-                'discountCodeAmount' => (int) ($draft->getDiscountAmount() ?? 0),
-                'finalAmount' => $finalAmount,
-                'planPriceSource' => (string) ($priceSnapshot['planPriceSource'] ?? 'current_plan'),
-            ],
-            'orderDraftId' => $draft->getId(),
-        ];
-
-        $orderType = 'renewal' === $draftType ? OrderType::RENEWAL : OrderType::ADD_TRAFFIC;
-        if (OrderType::RENEWAL === $orderType) {
-            $metadata['renewal'] = true;
-            $metadata['durationDays'] = (int) ($data['durationDays'] ?? 0);
-            $metadata['unlimitedDuration'] = (bool) ($data['unlimitedDuration'] ?? false);
-            $metadata['renewalPolicy'] = is_array($data['renewalPolicy'] ?? null) ? $data['renewalPolicy'] : [];
-        } else {
-            $metadata['addTraffic'] = true;
-        }
-
-        $order = (new Order())
-            ->setUser($draft->getUser())
-            ->setPlan($draft->getPlan())
-            ->setTargetService($targetService)
-            ->setType($orderType)
-            ->setAmount($finalAmount)
-            ->setMetadata($metadata)
-            ->setStatus(OrderStatus::WAITING_PAYMENT);
-        $this->orderTrackingCodeService->assignIfMissing($order);
-
-        $draft->setStatus(OrderDraftStatus::CONFIRMED)->setUpdatedAt(new \DateTimeImmutable());
-        $this->entityManager->persist($order);
-        $this->entityManager->flush();
-
-        return $order;
     }
 
     private function buildDiscountResultPaymentMethodMessage(Order $order, string $discountResult, ?string $discountReason = null): string
@@ -1287,91 +1078,16 @@ class ServiceManagementService
 
     private function createOrReuseOrderPayment(Order $order, PaymentGateway $gateway, StorePaymentMethod $storePaymentMethod, string $chatId, ?string $callbackId): void
     {
-        $payment = $this->entityManager->getRepository(Payment::class)
-            ->createQueryBuilder('p')
-            ->where('p.order = :order')
-            ->andWhere('p.status IN (:statuses)')
-            ->setParameter('order', $order)
-            ->setParameter('statuses', [PaymentStatus::PENDING, PaymentStatus::SUBMITTED])
-            ->orderBy('p.id', 'DESC')
-            ->setMaxResults(1)
-            ->getQuery()
-            ->getOneOrNullResult();
-        $paymentWasCreated = false;
+        $start = $this->paymentStarter->start($order, $storePaymentMethod);
+        $payment = $start->payment ?? throw new \LogicException('A started payment has a payment.');
 
-        if (!$payment instanceof Payment) {
-            $payment = (new Payment())
-                ->setOrder($order)
-                ->setGateway($gateway)
-                ->setStorePaymentMethod($storePaymentMethod)
-                ->setGatewayType($gateway->getType())
-                ->setMethod($gateway->getType())
-                ->setCurrency($gateway->getCurrency())
-                ->setAmount($order->getAmount())
-                ->setPayableAmount($order->getAmount())
-                ->setStatus(PaymentStatus::PENDING);
-            $this->entityManager->persist($payment);
-            $this->entityManager->flush();
-            $paymentWasCreated = true;
-        } else {
-            $payment
-                ->setGateway($gateway)
-                ->setStorePaymentMethod($storePaymentMethod)
-                ->setGatewayType($gateway->getType())
-                ->setMethod($gateway->getType())
-                ->setCurrency($gateway->getCurrency());
-        }
-
-        $requestResult = $this->paymentGatewayRegistry
-            ->resolve($gateway)
-            ->createPayment($payment, $order);
-
-        if ($requestResult->rawResponse !== null) {
-            $payment->setRequestPayload($requestResult->rawResponse);
-        }
-        if ($requestResult->transactionId) {
-            $payment->setGatewayTransactionId($requestResult->transactionId);
-        }
-        if ($requestResult->authority) {
-            $payment->setAuthority($requestResult->authority);
-        }
-        if ($requestResult->paymentUrl) {
-            $payment->setPaymentUrl($requestResult->paymentUrl);
-        }
-        if (!$requestResult->success) {
-            $payment->setAdminNote($requestResult->message);
-            if (PaymentGatewayType::NOWPAYMENTS === $gateway->getType() && NowPaymentsGateway::BELOW_MINIMUM_USER_MESSAGE === $requestResult->message) {
-                $payment
-                    ->setStatus(PaymentStatus::REJECTED)
-                    ->setFailedAt(new \DateTimeImmutable())
-                    ->setGatewayTransactionId(null)
-                    ->setAuthority(null)
-                    ->setPaymentUrl(null);
-                if ($paymentWasCreated) {
-                    $payment
-                        ->setCryptoPaymentId(null)
-                        ->setCryptoPaymentStatus(null)
-                        ->setCryptoAddress(null)
-                        ->setCryptoPayAmount(null)
-                        ->setCryptoPayCurrency(null)
-                        ->setCryptoPriceCurrency(null)
-                        ->setCryptoPurchaseId(null)
-                        ->setCryptoInvoiceId(null)
-                        ->setCryptoInvoiceUrl(null)
-                        ->setCryptoNetwork(null)
-                        ->setCryptoExpiresAt(null);
-                }
-            }
-        }
-        $this->entityManager->flush();
-
-        if (in_array($gateway->getType(), [PaymentGatewayType::ZIBAL, PaymentGatewayType::CUSTOM_API], true) || null !== $gateway->getPluginCode()) {
-            if (!$requestResult->success || null === $payment->getPaymentUrl()) {
+        if (PaymentStart::KIND_ONLINE === $start->kind) {
+            if (!$start->success || null === $payment->getPaymentUrl()) {
                 $logKey = match ($gateway->getPluginCode()) {
                     null => 'zibal_request_failed',
                     default => 'plugin_request_failed',
                 };
-                $this->showPopupOrMessage($chatId, $callbackId, $requestResult->message ?: 'ایجاد لینک پرداخت آنلاین انجام نشد.', $logKey);
+                $this->showPopupOrMessage($chatId, $callbackId, $start->message ?: 'ایجاد لینک پرداخت آنلاین انجام نشد.', $logKey);
 
                 return;
             }
@@ -1386,9 +1102,9 @@ class ServiceManagementService
             return;
         }
 
-        if (PaymentGatewayType::NOWPAYMENTS === $gateway->getType()) {
-            if (!$requestResult->success) {
-                $this->showPopupOrMessage($chatId, $callbackId, $requestResult->message ?: 'ایجاد پرداخت ارز دیجیتال انجام نشد.', 'nowpayments_create_failed');
+        if (PaymentStart::KIND_CRYPTO === $start->kind) {
+            if (!$start->success) {
+                $this->showPopupOrMessage($chatId, $callbackId, $start->message ?: 'ایجاد پرداخت ارز دیجیتال انجام نشد.', 'nowpayments_create_failed');
 
                 return;
             }
@@ -1420,9 +1136,8 @@ class ServiceManagementService
 
         $metadata = is_array($order->getMetadata()) ? $order->getMetadata() : [];
         $priceSnapshot = is_array($metadata['priceSnapshot'] ?? null) ? $metadata['priceSnapshot'] : [];
-        $cardNumber = $gateway->getManualCardNumber() ?? $this->settingValueProvider->get('payment.card_number', $this->paymentCardNumber);
-        $cardHolder = $gateway->getManualCardHolder() ?? $this->settingValueProvider->get('payment.card_holder', $this->paymentCardHolder);
-        $description = $gateway->getManualInstructions() ?? $this->settingValueProvider->get('payment.description', $this->paymentDescription);
+        $card = $this->paymentStarter->manualCard($gateway);
+        [$cardNumber, $cardHolder, $description] = [$card->cardNumber, $card->cardHolder, $card->instructions];
         $discountCode = trim((string) ($priceSnapshot['discountCode'] ?? ''));
         $message = $this->botTextResolver->message('payment.manual_card.instructions', [
             'order' => [
@@ -1787,48 +1502,6 @@ class ServiceManagementService
         $this->telegramApiClient->sendMessage($chatId, implode("\n", $lines), $this->keyboardFactory->adminUserDetail($userId, $backServiceId));
     }
 
-    /**
-     * amount and afterGlobalDiscountAmount are intentionally the same at this stage (before discount code).
-     *
-     * @return array{plan: Plan, amount: int, trafficGb: int, durationDays: int, unlimitedDuration: bool, baseAmount: int, globalDiscountPercent: int, globalDiscountAmount: int, afterGlobalDiscountAmount: int, carryRemainingTraffic: bool, carryRemainingDays: bool}|null
-     */
-    private function resolveRenewalPackage(VpnService $service): ?array
-    {
-        $sourceOrder = $service->getOrder();
-        if (!$sourceOrder instanceof Order) {
-            return null;
-        }
-
-        $plan = $sourceOrder->getPlan();
-        if (!$plan instanceof Plan) {
-            return null;
-        }
-
-        $priceResult = $this->planPricingService->calculateRenewalAmount($service, $plan);
-        if (!$priceResult instanceof RenewalPriceResult) {
-            return null;
-        }
-        if ($priceResult->finalAmount <= 0) {
-            return null;
-        }
-        $carryRemainingTraffic = $this->renewalSettingsProvider->carryRemainingTraffic();
-        $carryRemainingDays = $this->renewalSettingsProvider->carryRemainingDays();
-
-        return [
-            'plan' => $plan,
-            'amount' => $priceResult->finalAmount,
-            'trafficGb' => $priceResult->trafficGb,
-            'durationDays' => $priceResult->durationDays,
-            'unlimitedDuration' => $priceResult->unlimitedDuration,
-            'baseAmount' => $priceResult->baseAmount,
-            'globalDiscountPercent' => $priceResult->globalDiscountPercent,
-            'globalDiscountAmount' => $priceResult->globalDiscountAmount,
-            'afterGlobalDiscountAmount' => $priceResult->afterGlobalDiscountAmount,
-            'carryRemainingTraffic' => $carryRemainingTraffic,
-            'carryRemainingDays' => $carryRemainingDays,
-        ];
-    }
-
     private function findServiceOrPopup(int $serviceId, string $chatId, ?string $callbackId, string $logKey): ?VpnService
     {
         $service = $this->entityManager->getRepository(VpnService::class)->find($serviceId);
@@ -2026,19 +1699,7 @@ class ServiceManagementService
 
     private function parsePositiveInt(string $text): ?int
     {
-        $value = trim($text);
-        if (!preg_match('/^\d+$/', $value)) {
-            return null;
-        }
-
-        $int = (int) $value;
-
-        return $int > 0 ? $int : null;
-    }
-
-    private function resolveIncompleteExpiresAt(): \DateTimeImmutable
-    {
-        return (new \DateTimeImmutable())->modify(sprintf('+%d hours', $this->incompleteOrderSettingsProvider->expireHours()));
+        return \App\Shop\Application\Checkout\PlanOptions::parsePositiveInt($text);
     }
 
     private function formatTrafficUsed(VpnService $service): string
