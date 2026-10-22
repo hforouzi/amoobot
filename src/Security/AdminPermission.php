@@ -40,4 +40,8 @@ enum AdminPermission: string
     case APPS_MANAGE = 'PERM_APPS_MANAGE';
     /** Notification log, bot message log, admin audit log. */
     case LOGS_VIEW = 'PERM_LOGS_VIEW';
+    /** Customer wallets and their ledger, read only (lists, detail, dashboard totals). */
+    case WALLETS_VIEW = 'PERM_WALLETS_VIEW';
+    /** Change a wallet: manual credit/debit adjustment, credit limit, freeze/unfreeze (always audited). */
+    case WALLETS_MANAGE = 'PERM_WALLETS_MANAGE';
 }

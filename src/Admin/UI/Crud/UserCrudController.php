@@ -10,6 +10,7 @@ use App\Entity\Order;
 use App\Entity\User;
 use App\Entity\VpnService;
 use App\Provisioning\Domain\VpnServiceStatus;
+use App\Security\AdminPermission;
 use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\ORM\QueryBuilder;
 use EasyCorp\Bundle\EasyAdminBundle\Attribute\AdminRoute;
@@ -67,7 +68,14 @@ class UserCrudController extends AbstractCrudController
 
     public function configureActions(Actions $actions): Actions
     {
-        return $actions->add(Crud::PAGE_INDEX, Action::DETAIL);
+        // The customer's wallet (WALLETS_VIEW; an empty one is created on first open).
+        $wallet = Action::new('customerWallet', 'admin.wallets', 'fa fa-money')
+            ->linkToUrl(fn (User $user): string => $this->generateUrl('admin_wallet_customer', ['id' => $user->getId()]));
+
+        return $actions
+            ->add(Crud::PAGE_INDEX, Action::DETAIL)
+            ->add(Crud::PAGE_DETAIL, $wallet)
+            ->setPermission('customerWallet', AdminPermission::WALLETS_VIEW->value);
     }
 
     public function createIndexQueryBuilder(SearchDto $searchDto, EntityDto $entityDto, FieldCollection $fields, FilterCollection $filters): QueryBuilder

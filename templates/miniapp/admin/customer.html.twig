@@ -31,6 +31,29 @@
         </div>
     </section>
 
+    {% if can.miniapp_admin_customer_wallet %}
+        <section class="card" data-customer-wallet>
+            <h2>👛 {{ 'admin.wallet.title'|trans }}</h2>
+            <div class="stats">
+                <div class="stat"><span class="muted">{{ 'admin.wallet.balance'|trans }}</span><b data-wallet-balance="{{ wallet.balance ?? 0 }}">{{ 'money.toman'|trans({'%amount%': (wallet.balance ?? 0)|number_format}) }}</b></div>
+                <div class="stat"><span class="muted">{{ 'admin.wallet.credit_limit'|trans }}</span><b>{{ 'money.toman'|trans({'%amount%': (wallet.creditLimit ?? 0)|number_format}) }}</b></div>
+                <div class="stat"><span class="muted">{{ 'admin.wallet.status'|trans }}</span><b>{{ ('admin.wallet.status_' ~ (wallet.status ?? 'active'))|trans }}</b></div>
+            </div>
+            <a class="btn secondary small spaced" href="{{ path('miniapp_admin_customer_wallet', {id: c.id}) }}" data-nav data-wallet-ledger>📜 {{ 'admin.wallet.ledger'|trans }}</a>
+            {% if can.miniapp_admin_customer_wallet_adjust %}
+                <form class="form spaced" data-submit="{{ path('miniapp_admin_customer_wallet_adjust', {id: c.id}) }}" data-reload data-wallet-adjust novalidate>
+                    <label class="field"><span>{{ 'admin.wallet.direction'|trans }}</span>
+                        <select name="direction"><option value="credit">{{ 'admin.wallet.credit'|trans }}</option><option value="debit">{{ 'admin.wallet.debit'|trans }}</option></select>
+                    </label>
+                    <label class="field"><span>{{ 'admin.wallet.amount'|trans }}</span><input type="text" name="amount" inputmode="numeric" required dir="ltr"></label>
+                    <label class="field"><span>{{ 'admin.wallet.reason'|trans }}</span><input type="text" name="reason" required minlength="3" maxlength="500"></label>
+                    <p class="field-error" data-form-error hidden></p>
+                    <button type="submit" class="btn">{{ 'admin.wallet.adjust'|trans }}</button>
+                </form>
+            {% endif %}
+        </section>
+    {% endif %}
+
     <section class="card">
         <h2>{{ 'area.services'|trans }}</h2>
         {% if services is empty %}<p class="muted">{{ 'admin.customer.no_services'|trans }}</p>{% endif %}

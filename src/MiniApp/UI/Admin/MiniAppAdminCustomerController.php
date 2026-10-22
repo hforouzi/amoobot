@@ -14,6 +14,7 @@ use App\MiniApp\Security\MiniAppUser;
 use App\MiniApp\UI\MiniAppFragments;
 use App\Payment\Domain\PaymentStatus;
 use App\Provisioning\Domain\VpnServiceStatus;
+use App\Wallet\Application\WalletService;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\Request;
@@ -39,6 +40,7 @@ final class MiniAppAdminCustomerController extends AbstractController
         private readonly AdminLists $lists,
         private readonly AdminRouteAccess $access,
         private readonly MiniAppFragments $fragments,
+        private readonly WalletService $wallets,
     ) {
     }
 
@@ -79,6 +81,8 @@ final class MiniAppAdminCustomerController extends AbstractController
             }
         }
 
+        $can = $this->access->map($user, ['miniapp_admin_service', 'miniapp_admin_order', 'miniapp_admin_payments', 'miniapp_admin_customer_wallet', 'miniapp_admin_customer_wallet_adjust']);
+
         return $this->fragments->render($request, 'miniapp/admin/customer.html.twig', [
             'c' => AdminCustomerView::summary($customer),
             'createdAt' => $customer->getCreatedAt(),
@@ -88,7 +92,9 @@ final class MiniAppAdminCustomerController extends AbstractController
                 ->orderBy('s.id', 'DESC')->getQuery()->getResult(),
             'orders' => $this->entityManager->getRepository(Order::class)->findBy(['user' => $customer], ['id' => 'DESC'], self::RECENT),
             'payments' => $summary,
-            'can' => $this->access->map($user, ['miniapp_admin_service', 'miniapp_admin_order', 'miniapp_admin_payments']),
+            'can' => $can,
+            // Only for admins with WALLETS_VIEW; reading never creates a wallet.
+            'wallet' => $can['miniapp_admin_customer_wallet'] ? $this->wallets->find($customer) : null,
         ]);
     }
 }

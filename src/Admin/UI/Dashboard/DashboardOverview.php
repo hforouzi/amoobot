@@ -15,6 +15,7 @@ use App\Payment\Domain\PaymentStatus;
 use App\Security\AdminAccessPolicy;
 use App\Security\AdminActor;
 use App\Security\AdminPermission;
+use App\Wallet\Application\WalletQueries;
 use Doctrine\ORM\EntityManagerInterface;
 use Psr\Clock\ClockInterface;
 
@@ -35,6 +36,7 @@ final class DashboardOverview
         private readonly EntityManagerInterface $entityManager,
         private readonly AdminAccessPolicy $policy,
         private readonly ClockInterface $clock,
+        private readonly WalletQueries $walletQueries,
     ) {
     }
 
@@ -44,6 +46,7 @@ final class DashboardOverview
      *     today: array{orders: int|null, payments: int|null, revenue: int|null, customers: int|null}|null,
      *     services: list<Card>|null,
      *     panels: list<array{id: int, title: string, active: bool, state: string, badge: string, checkedAt: ?\DateTimeImmutable}>|null,
+     *     wallets: array{outstanding: int, creditUsed: int, creditLimit: int, wallets: int}|null,
      *     shortcuts: list<array{key: string, label: string, icon: string, route: string}>,
      * }
      */
@@ -58,6 +61,8 @@ final class DashboardOverview
                 : null,
             'services' => $can(AdminPermission::SERVICES_VIEW) ? $this->services() : null,
             'panels' => $can(AdminPermission::PANELS_MANAGE) ? $this->panels() : null,
+            // One aggregate query: what customers hold and the credit exposure.
+            'wallets' => $can(AdminPermission::WALLETS_VIEW) ? $this->walletQueries->totals() : null,
             'shortcuts' => array_values(array_filter([
                 $can(AdminPermission::PLANS_MANAGE) ? ['key' => 'add_plan', 'label' => 'dashboard.shortcuts.add_plan', 'icon' => 'fa fa-plus', 'route' => 'admin_plan_new'] : null,
                 $can(AdminPermission::BROADCAST_SEND) ? ['key' => 'broadcast', 'label' => 'dashboard.shortcuts.broadcast', 'icon' => 'fa fa-bullhorn', 'route' => 'admin_broadcast_message_new'] : null,

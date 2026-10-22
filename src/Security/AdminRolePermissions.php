@@ -19,7 +19,8 @@ final class AdminRolePermissions
     {
         return match ($role) {
             AdminUser::ROLE_SUPER_ADMIN => AdminPermission::cases(),
-            // Everything except system configuration; includes APPS_MANAGE (client apps and app downloads).
+            // Everything except system configuration; includes APPS_MANAGE (client apps and app downloads) and
+            // WALLETS_VIEW / WALLETS_MANAGE.
             AdminUser::ROLE_ADMIN => self::allExcept(
                 AdminPermission::GATEWAYS_MANAGE,
                 AdminPermission::PANELS_MANAGE,
@@ -28,13 +29,15 @@ final class AdminRolePermissions
                 AdminPermission::ADMINS_MANAGE,
                 AdminPermission::LOGS_VIEW,
             ),
-            // Read-only, plus the service actions that do not change what the customer paid for; no money actions.
+            // Read-only, plus the service actions that do not change what the customer paid for; no money actions
+            // (wallets: view only).
             AdminUser::ROLE_SUPPORT => [
                 AdminPermission::ORDERS_VIEW,
                 AdminPermission::PAYMENTS_VIEW,
                 AdminPermission::CUSTOMERS_VIEW,
                 AdminPermission::SERVICES_VIEW,
                 AdminPermission::SERVICES_ASSIST,
+                AdminPermission::WALLETS_VIEW,
             ],
             default => [],
         };

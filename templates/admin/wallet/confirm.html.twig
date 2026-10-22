@@ -1,0 +1,30 @@
+{# WalletAdminController::adjust, first step: what the adjustment will do; only "Confirm" writes it. #}
+{% extends '@EasyAdmin/page/content.html.twig' %}
+{% trans_default_domain 'admin' %}
+{% set toman = ('currency.' ~ constant('App\\Payment\\Domain\\Money\\AmountNormalizer::SHOP_CURRENCY'))|trans %}
+{% set after = direction == 'credit' ? wallet.balance + amount : wallet.balance - amount %}
+
+{% block content_title %}{{ 'wallet_admin.confirm.title'|trans }}{% endblock %}
+
+{% block main %}
+    <div class="admin-custom-page" data-adjust-confirm>
+        <div class="admin-form-card">
+            <p>{{ ('wallet_admin.confirm.' ~ direction)|trans({'%amount%': amount|number_format, '%customer%': wallet.user.name ?? ('#' ~ wallet.user.id), '%currency%': toman}) }}</p>
+            <p>{{ 'wallet_admin.confirm.balance'|trans({'%before%': wallet.balance|number_format, '%after%': after|number_format, '%currency%': toman}) }}</p>
+            <p>{{ 'wallet_admin.adjust.reason'|trans }}: {{ reason }}</p>
+            {% if after + wallet.creditLimit < 0 %}<p class="text-danger" data-insufficient>{{ 'wallet_admin.error.wallet_insufficient'|trans }}</p>{% endif %}
+            <form method="post" action="{{ path('admin_wallet_adjust', {id: wallet.id}) }}">
+                <input type="hidden" name="_token" value="{{ csrf_token(csrf) }}">
+                <input type="hidden" name="form_key" value="{{ formKey }}">
+                <input type="hidden" name="direction" value="{{ direction }}">
+                <input type="hidden" name="amount" value="{{ amount }}">
+                <input type="hidden" name="reason" value="{{ reason }}">
+                <input type="hidden" name="confirmed" value="1">
+                <div class="admin-actions">
+                    <button type="submit" class="btn btn-primary" data-confirm-adjust>{{ 'wallet_admin.confirm.submit'|trans }}</button>
+                    <a class="btn btn-secondary" href="{{ path('admin_wallet', {id: wallet.id}) }}">{{ 'common.cancel'|trans }}</a>
+                </div>
+            </form>
+        </div>
+    </div>
+{% endblock %}
