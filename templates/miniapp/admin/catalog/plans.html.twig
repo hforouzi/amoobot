@@ -1,0 +1,48 @@
+{% extends 'miniapp/view/_base.html.twig' %}
+{% import 'miniapp/admin/_macros.html.twig' as ui %}
+{% trans_default_domain 'miniapp' %}
+{# Plans: active / inactive chips, search by name, in the web list's order; each card with price, duration, traffic,
+   inbound, the plausibility badge and its active switch. #}
+{% block section %}admin{% endblock %}
+{% block title %}{{ 'area.plans'|trans }}{% endblock %}
+{% block attributes %} data-back data-main-button-text="{{ 'admin.plan.new'|trans }}" data-main-button-href="{{ path('miniapp_admin_plan_new') }}"{% endblock %}
+{% block content %}
+    <section class="card">
+        <div class="head">
+            <h1>{{ 'area.plans'|trans }}</h1>
+            <a class="btn small fit" href="{{ path('miniapp_admin_plan_new') }}" data-nav data-new-plan>＋ {{ 'admin.plan.new'|trans }}</a>
+        </div>
+        {{ ui.search('miniapp_admin_plans', query, 'admin.plan.search', {tab: tab}) }}
+        <div class="row">
+            {% if can.miniapp_admin_plan_bulk %}<a class="btn secondary small" href="{{ path('miniapp_admin_plan_bulk') }}" data-nav data-bulk-link>٪ {{ 'admin.bulk.title'|trans }}</a>{% endif %}
+            {% if can.miniapp_admin_trial_plans %}<a class="btn secondary small" href="{{ path('miniapp_admin_trial_plans') }}" data-nav data-trials-link>🎁 {{ 'admin.trial.title'|trans }}</a>{% endif %}
+        </div>
+    </section>
+    {{ ui.chips('miniapp_admin_plans', tab, tabs, counts, 'admin.plan.tab.', {}) }}
+    {% if plans is empty %}
+        {{ ui.empty(query ? 'admin.no_results' : 'admin.plan.none') }}
+    {% else %}
+        <div class="list">
+            {% for plan in plans %}
+                <div class="list-item admin-row plan-card" data-plan-id="{{ plan.id }}" data-active="{{ plan.active ? 1 : 0 }}">
+                    <a class="list-main" href="{{ path('miniapp_admin_plan', {id: plan.id}) }}" data-nav>
+                        <span class="head">
+                            <strong>{{ plan.title }}</strong>
+                            {% if warned[loop.index0] %}<span class="badge warn-badge" data-unit-warning>⚠ {{ 'admin.plan.check_price'|trans }}</span>{% endif %}
+                        </span>
+                        <span class="price">{{ 'money.toman'|trans({'%amount%': plan.price|number_format}) }}</span>
+                        <span class="muted">
+                            {{ plan.unlimitedDuration ? 'admin.plan.unlimited_duration'|trans : 'admin.service.days'|trans({'%days%': plan.durationDays}) }}
+                            · {{ plan.trafficGb is null ? 'admin.plan.unlimited_traffic'|trans : 'admin.service.gb'|trans({'%gb%': plan.trafficGb}) }}
+                            {% if plan.inbound %} · {{ plan.inbound.panel.title }} / {{ plan.inbound.title }}{% endif %}
+                        </span>
+                    </a>
+                    {% set toggle = plan.active ? 'miniapp_admin_plan_deactivate' : 'miniapp_admin_plan_activate' %}
+                    {% if can[toggle] %}
+                        <button type="button" class="switch-button{{ plan.active ? ' on' : '' }}" role="switch" aria-checked="{{ plan.active ? 'true' : 'false' }}" aria-label="{{ ('field.is_active')|trans({}, 'admin') }}" data-action="{{ path(toggle, {id: plan.id}) }}" data-reload data-admin-action="{{ plan.active ? 'deactivate' : 'activate' }}"><span></span></button>
+                    {% endif %}
+                </div>
+            {% endfor %}
+        </div>
+    {% endif %}
+{% endblock %}

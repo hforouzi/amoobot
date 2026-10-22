@@ -7,6 +7,7 @@ namespace App\Bot\Application\Admin;
 use App\Entity\Plan;
 use App\Entity\TrialClaim;
 use App\Security\AdminPermission;
+use App\Shop\Application\Catalog\PlanAdminService;
 use App\Shop\Application\PlanPriceAdjustmentService;
 use App\Shop\Application\PlanPriceSanityChecker;
 use Doctrine\ORM\EntityManagerInterface;
@@ -25,6 +26,7 @@ final class AdminPlansHandler implements AdminArea
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
         private readonly PlanPriceAdjustmentService $priceAdjustment,
+        private readonly PlanAdminService $plans,
         private readonly AdminScreen $screen,
     ) {
     }
@@ -165,13 +167,11 @@ final class AdminPlansHandler implements AdminArea
 
             return;
         }
-        if ($plan->isActive() === $active) {
+        if (!$this->plans->setActive($plan, $active)) {
             $this->screen->notice($request, 'admin.state_changed', [], 'admin.pl:v:'.$id);
 
             return;
         }
-        $plan->setIsActive($active)->setUpdatedAt(new \DateTimeImmutable());
-        $this->entityManager->flush();
         $this->screen->audit($request, $active ? 'plan.activate' : 'plan.deactivate', 'Plan', $id, ['title' => $plan->getTitle()]);
         $this->screen->notice($request, 'admin.done', [], 'admin.pl:v:'.$id);
     }
@@ -199,9 +199,7 @@ final class AdminPlansHandler implements AdminArea
 
             return;
         }
-        $before = $plan->getPrice();
-        $plan->setPrice($price)->setUpdatedAt(new \DateTimeImmutable());
-        $this->entityManager->flush();
+        $before = $this->plans->changePrice($plan, $price);
         $this->screen->audit($request, 'plan.price_update', 'Plan', $id, ['before' => $before, 'after' => $price]);
         $this->screen->notice($request, 'admin.plans.price_done', ['title' => $plan->getTitle(), 'old' => AdminScreen::money($before), 'new' => AdminScreen::money($price)], 'admin.pl:v:'.$id);
     }

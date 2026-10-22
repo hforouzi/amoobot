@@ -939,6 +939,7 @@ flash:
   broadcast.cancelled: "پیام همگانی لغو شد."
   broadcast.retry_sent: "ارسال مجدد انجام شد. ارسال‌شده: %sent%، ناموفق: %failed%."
   plan.price_warning: "پلن «%plan%»: %warning%"
+  plan.in_use: "پلن «%plan%» %count% سفارش دارد و حذف نمی‌شود؛ به‌جای آن غیرفعالش کنید."
   plugin.installed: "پلاگین نصب شد."
   plugin.install_failed: "نصب پلاگین ناموفق بود. %error%"
   plugin.enabled: "پلاگین فعال شد."

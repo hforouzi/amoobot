@@ -28,8 +28,8 @@ final class CoreSections implements MiniAppSectionProvider
             ['admin.payments', '💳', AdminPermission::PAYMENTS_VIEW, 'miniapp_admin_payments'],
             ['admin.customers', '👥', AdminPermission::CUSTOMERS_VIEW, 'miniapp_admin_customers'],
             ['admin.services', '📦', AdminPermission::SERVICES_VIEW, 'miniapp_admin_services'],
-            ['admin.plans', '🏷', AdminPermission::PLANS_MANAGE],
-            ['admin.discounts', '🎟', AdminPermission::DISCOUNTS_MANAGE],
+            ['admin.plans', '🏷', AdminPermission::PLANS_MANAGE, 'miniapp_admin_plans'],
+            ['admin.discounts', '🎟', AdminPermission::DISCOUNTS_MANAGE, 'miniapp_admin_discounts'],
             ['admin.broadcast', '📣', AdminPermission::BROADCAST_SEND],
             ['admin.settings', '⚙️', AdminPermission::SETTINGS_MANAGE],
         ];

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Entity;
 
 use Doctrine\ORM\Mapping as ORM;
+use Symfony\Component\Validator\Constraints as Assert;
 
 #[ORM\Entity]
 #[ORM\Index(columns: ['is_active', 'sort_order', 'id'], name: 'idx_trial_plan_active_sort')]
@@ -16,6 +17,8 @@ class TrialPlan
     private ?int $id = null;
 
     #[ORM\Column(length: 255)]
+    #[Assert\NotBlank(message: 'trial_plan.title.required')]
+    #[Assert\Length(max: 255)]
     private string $title;
 
     #[ORM\Column(type: 'text', nullable: true)]
@@ -28,12 +31,15 @@ class TrialPlan
     private int $sortOrder = 0;
 
     #[ORM\Column]
+    #[Assert\Positive]
     private int $durationDays = 1;
 
     #[ORM\Column(nullable: true)]
+    #[Assert\PositiveOrZero]
     private ?int $trafficGb = null;
 
     #[ORM\Column(nullable: true)]
+    #[Assert\PositiveOrZero]
     private ?int $ipLimit = null;
 
     #[ORM\ManyToOne]
@@ -45,12 +51,15 @@ class TrialPlan
     private ?Plan $backingPlan = null;
 
     #[ORM\Column(nullable: true)]
+    #[Assert\PositiveOrZero]
     private ?int $maxClaimsTotal = null;
 
     #[ORM\Column]
+    #[Assert\Positive]
     private int $maxClaimsPerUser = 1;
 
     #[ORM\Column(nullable: true)]
+    #[Assert\PositiveOrZero]
     private ?int $cooldownHours = null;
 
     #[ORM\Column]

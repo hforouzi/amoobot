@@ -1,0 +1,79 @@
+{% extends 'miniapp/view/_base.html.twig' %}
+{% import 'miniapp/admin/catalog/_fields.html.twig' as f %}
+{% trans_default_domain 'miniapp' %}
+{# A discount code's form: the web form's fields; checked live (duplicate code, percent range, dates in order); a
+   random code helper. A used code cannot be deleted (it is deactivated instead, its usage history stays). #}
+{% set isNew = code.id is null %}
+{% block section %}admin{% endblock %}
+{% block title %}{{ isNew ? 'admin.discount.new'|trans : code.code }}{% endblock %}
+{% block attributes %} data-back data-main-button-text="{{ 'admin.form.save'|trans }}" data-main-button-form="discount-form"{% if not isNew %} data-discount-id="{{ code.id }}"{% endif %}{% endblock %}
+{% block content %}
+    <form id="discount-form" class="form" novalidate
+          data-submit="{{ isNew ? path('miniapp_admin_discount_create') : path('miniapp_admin_discount_update', {id: code.id}) }}"
+          data-check-url="{{ path('miniapp_admin_discount_check') }}" data-dirty-guard="{{ 'admin.form.leave_unsaved'|trans }}"{% if not isNew %} data-reload{% endif %}>
+        {% if not isNew %}<input type="hidden" name="id" value="{{ code.id }}">{% endif %}
+        {{ f.section('basics', true) }}{{ 'admin.plan.section.basics'|trans }}</summary>
+            <label class="field" data-field="code">
+                <span>{{ 'field.code'|trans({}, 'admin') }} <span class="req" aria-hidden="true">*</span></span>
+                <span class="inline-field">
+                    <input class="input ltr code" type="text" name="code" value="{{ values.code ?? '' }}" maxlength="64" autocomplete="off" autocapitalize="characters" spellcheck="false" required data-generated-target>
+                    <button type="button" class="btn secondary small fit" data-fill-from="{{ path('miniapp_admin_discount_generate') }}" data-fill-target="code">🎲 {{ 'admin.discount.generate'|trans }}</button>
+                </span>
+                <span class="muted small-print">{{ 'help.discount_code.code'|trans({}, 'admin') }}</span>
+                <p class="field-error" data-error-for="code" hidden></p>
+            </label>
+            {{ f.text('title', values.title ?? '', false, null, 'maxlength="255"') }}
+            {{ f.toggle('isActive', values.isActive ?? true, null) }}
+        </details>
+        {{ f.section('value', true) }}{{ 'admin.discount.section.value'|trans }}</summary>
+            {{ f.select('type', values.type ?? 'percent', types|map(t => {value: t, label: ('discount.type.' ~ t)|trans({}, 'admin')}), true, 'help.discount_code.type') }}
+            {{ f.number('value', values.value ?? null, true, null, null) }}
+            {{ f.number('minAmount', values.minAmount ?? null, false, 'help.plan.toman', 'money.toman_short'|trans) }}
+        </details>
+        {{ f.section('limits', true) }}{{ 'admin.discount.section.limits'|trans }}</summary>
+            {{ f.number('maxUses', values.maxUses ?? null, false, null, null) }}
+            {{ f.number('maxUsesPerUser', values.maxUsesPerUser ?? null, false, null, null) }}
+            {{ f.toggle('firstPurchaseOnly', values.firstPurchaseOnly ?? false, null) }}
+            {% if not isNew %}<p class="muted" data-used-count>{{ 'field.used_count'|trans({}, 'admin') }}: <b>{{ code.usedCount }}</b></p>{% endif %}
+        </details>
+        {{ f.section('scope', false) }}{{ 'admin.discount.section.scope'|trans }}</summary>
+            {{ f.select('appliesTo', values.appliesTo ?? 'all', appliesTo|map(a => {value: a, label: (a == 'all' ? 'discount.applies_to.all' : 'order.type.' ~ a)|trans({}, 'admin')}), true, null) }}
+            {{ f.select('plan', values.plan ?? null, plans|map(p => {value: p.id, label: p.title}), false, null) }}
+        </details>
+        {{ f.section('validity', false) }}{{ 'admin.discount.section.validity'|trans }}</summary>
+            <label class="field" data-field="startsAt">
+                <span>{{ 'field.starts_at'|trans({}, 'admin') }}</span>
+                <input class="input ltr" type="datetime-local" name="startsAt" value="{{ values.startsAt ?? '' }}">
+                <p class="field-error" data-error-for="startsAt" hidden></p>
+            </label>
+            <label class="field" data-field="endsAt">
+                <span>{{ 'field.ends_at'|trans({}, 'admin') }}</span>
+                <input class="input ltr" type="datetime-local" name="endsAt" value="{{ values.endsAt ?? '' }}">
+                <p class="field-error" data-error-for="endsAt" hidden></p>
+            </label>
+        </details>
+        <p class="field-error" data-form-error hidden></p>
+        <button type="submit" class="btn" data-save>{{ 'admin.form.save'|trans }}</button>
+    </form>
+    {% if not isNew %}
+        <section class="card">
+            <div class="row">
+                <a class="btn secondary small" href="{{ path('miniapp_admin_discount_usages', {id: code.id}) }}" data-nav data-usages-link>📊 {{ 'admin.discount.usages'|trans({'%count%': usageCount}) }}</a>
+                {% if code.active %}
+                    <button type="button" class="btn secondary small" data-action="{{ path('miniapp_admin_discount_deactivate', {id: code.id}) }}" data-reload data-admin-action="deactivate">⏸ {{ 'admin.plan.deactivate'|trans }}</button>
+                {% else %}
+                    <button type="button" class="btn secondary small" data-action="{{ path('miniapp_admin_discount_activate', {id: code.id}) }}" data-reload data-admin-action="activate">▶️ {{ 'admin.plan.activate'|trans }}</button>
+                {% endif %}
+            </div>
+        </section>
+        <section class="card danger-zone" data-group="delete">
+            <h2>{{ 'admin.discount.delete'|trans }}</h2>
+            {% if used %}
+                <p class="muted" data-delete-blocked>{{ 'admin.discount.used_cannot_delete'|trans }}</p>
+            {% else %}
+                <p class="muted">{{ 'admin.discount.delete_hint'|trans }}</p>
+                <button type="button" class="btn small danger-solid" data-action="{{ path('miniapp_admin_discount_delete', {id: code.id}) }}" data-admin-action="delete">🗑 {{ 'admin.discount.delete'|trans }}</button>
+            {% endif %}
+        </section>
+    {% endif %}
+{% endblock %}

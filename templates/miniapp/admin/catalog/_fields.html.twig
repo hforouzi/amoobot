@@ -1,0 +1,85 @@
+{# Form fields of the Mini App catalog forms. Labels and help are the web form's (admin domain). Every field has an
+   inline error slot ([data-error-for]) filled by app.js from the server's 422 / live check answer. Numbers are text
+   inputs with the numeric keypad, so Persian digits can be typed (the server normalises them). #}
+{% macro label(name, required) %}{% apply spaceless %}
+    {{ ('field.' ~ name|snake)|trans({}, 'admin') }}{% if required %} <span class="req" aria-hidden="true">*</span>{% endif %}
+{% endapply %}{% endmacro %}
+
+{% macro error(name) %}<p class="field-error" data-error-for="{{ name }}" hidden></p>{% endmacro %}
+
+{% macro help(key) %}{% if key %}<span class="muted small-print">{{ key|trans({}, 'admin') }}</span>{% endif %}{% endmacro %}
+
+{% macro text(name, value, required, help, attrs) %}
+    {% import _self as f %}
+    <label class="field" data-field="{{ name }}">
+        <span>{{ f.label(name, required) }}</span>
+        <input class="input" type="text" name="{{ name }}" value="{{ value }}"{% if required %} required{% endif %} {{ attrs|default('')|raw }}>
+        {{ f.help(help) }}
+        {{ f.error(name) }}
+    </label>
+{% endmacro %}
+
+{% macro textarea(name, value, help) %}
+    {% import _self as f %}
+    <label class="field" data-field="{{ name }}">
+        <span>{{ f.label(name, false) }}</span>
+        <textarea class="input" name="{{ name }}" rows="3">{{ value }}</textarea>
+        {{ f.help(help) }}
+        {{ f.error(name) }}
+    </label>
+{% endmacro %}
+
+{% macro number(name, value, required, help, suffix) %}
+    {% import _self as f %}
+    <label class="field" data-field="{{ name }}">
+        <span>{{ f.label(name, required) }}</span>
+        <span class="inline-field">
+            <input class="input ltr" type="text" name="{{ name }}" value="{{ value is null ? '' : value }}" inputmode="numeric" autocomplete="off" maxlength="12"{% if required %} required{% endif %}>
+            {% if suffix %}<span class="suffix">{{ suffix }}</span>{% endif %}
+        </span>
+        {{ f.help(help) }}
+        {{ f.error(name) }}
+    </label>
+{% endmacro %}
+
+{% macro toggle(name, checked, help) %}
+    {% import _self as f %}
+    <label class="switch-field" data-field="{{ name }}">
+        <input type="checkbox" name="{{ name }}" value="1"{% if checked %} checked{% endif %}>
+        <span class="switch" aria-hidden="true"></span>
+        <span class="switch-label">{{ f.label(name, false) }}{{ f.help(help) }}</span>
+        {{ f.error(name) }}
+    </label>
+{% endmacro %}
+
+{% macro select(name, value, choices, required, help) %}
+    {% import _self as f %}
+    <label class="field" data-field="{{ name }}">
+        <span>{{ f.label(name, required) }}</span>
+        <select class="input" name="{{ name }}">
+            {% if not required %}<option value="">—</option>{% endif %}
+            {% for choice in choices %}<option value="{{ choice.value }}"{% if choice.value ~ '' == value ~ '' %} selected{% endif %}>{{ choice.label }}</option>{% endfor %}
+        </select>
+        {{ f.help(help) }}
+        {{ f.error(name) }}
+    </label>
+{% endmacro %}
+
+{% macro inbound(name, value, groups) %}
+    {% import _self as f %}
+    {% trans_default_domain 'miniapp' %}
+    <label class="field" data-field="{{ name }}">
+        <span>{{ f.label(name, false) }}</span>
+        <select class="input" name="{{ name }}">
+            <option value="">—</option>
+            {% for group in groups %}
+                <optgroup label="{{ group.panel }}">
+                    {% for o in group.options %}<option value="{{ o.id }}"{% if o.id ~ '' == value ~ '' %} selected{% endif %}>{{ o.title }}{% if not o.available %} ({{ 'admin.plan.unavailable'|trans }}){% endif %}</option>{% endfor %}
+                </optgroup>
+            {% endfor %}
+        </select>
+        {{ f.error(name) }}
+    </label>
+{% endmacro %}
+
+{% macro section(key, open) %}<details class="card form-section" data-section="{{ key }}"{% if open %} open{% endif %}><summary>{% endmacro %}

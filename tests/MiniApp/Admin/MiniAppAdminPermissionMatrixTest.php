@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Tests\MiniApp\Admin;
 
+use App\Entity\DiscountCode;
+use App\Entity\TrialPlan;
 use App\MiniApp\Admin\AdminRoutePermissions;
 use App\Security\AdminAccessPolicy;
 use App\Security\AdminPermission;
@@ -21,6 +23,9 @@ use Symfony\Component\Routing\RouterInterface;
  */
 final class MiniAppAdminPermissionMatrixTest extends IntegrationTestCase
 {
+    private TrialPlan $trialPlan;
+    private DiscountCode $discount;
+
     use BotAdminTestTrait;
     use MiniAppAdminFixtures;
     use MiniAppTestTrait;
@@ -35,6 +40,11 @@ final class MiniAppAdminPermissionMatrixTest extends IntegrationTestCase
         self::assertNotNull($panel);
         $panel->setBaseUrl('https://panel-secret.example:2053/x')->setUsername('panel-pass-123')->setSubscriptionBaseUrl('https://panel-secret.example:2096/sub');
         $this->payment->getGateway()?->setConfig(['api_key' => 'gw-api-key-456']);
+        // The catalog records the M3b routes act on.
+        $this->trialPlan = (new TrialPlan())->setTitle('Matrix trial')->setInbound($this->service->getInbound());
+        $this->discount = (new DiscountCode())->setCode('MATRIX10')->setType(DiscountCode::TYPE_PERCENT)->setValue(10);
+        $this->em->persist($this->trialPlan);
+        $this->em->persist($this->discount);
         $this->em->flush();
         $this->startMiniAppClient();
     }
@@ -100,6 +110,9 @@ final class MiniAppAdminPermissionMatrixTest extends IntegrationTestCase
             '/orders/' => $this->payment->getOrder()->getId(),
             '/customers/' => $this->buyer->getId(),
             '/services/' => $this->service->getId(),
+            '/plans/' => $this->payment->getOrder()->getPlan()->getId(),
+            '/trial-plans/' => $this->trialPlan->getId(),
+            '/discounts/' => $this->discount->getId(),
         ];
         $path = $route->getPath();
         foreach ($ids as $segment => $id) {

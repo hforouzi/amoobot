@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Admin\UI\Crud;
 
 use App\Entity\TrialPlan;
+use App\Shop\Application\Catalog\TrialPlanAdminService;
+use Doctrine\ORM\EntityManagerInterface;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Crud;
 use EasyCorp\Bundle\EasyAdminBundle\Controller\AbstractCrudController;
 use EasyCorp\Bundle\EasyAdminBundle\Field\AssociationField;
@@ -17,6 +19,27 @@ use EasyCorp\Bundle\EasyAdminBundle\Field\TextField;
 
 final class TrialPlanCrudController extends AbstractCrudController
 {
+    public function __construct(
+        private readonly TrialPlanAdminService $trialPlans,
+    ) {
+    }
+
+    /** Saving and deleting go through TrialPlanAdminService, as from the Mini App. */
+    public function persistEntity(EntityManagerInterface $entityManager, object $entityInstance): void
+    {
+        $entityInstance instanceof TrialPlan ? $this->trialPlans->save($entityInstance) : parent::persistEntity($entityManager, $entityInstance);
+    }
+
+    public function updateEntity(EntityManagerInterface $entityManager, object $entityInstance): void
+    {
+        $entityInstance instanceof TrialPlan ? $this->trialPlans->save($entityInstance) : parent::updateEntity($entityManager, $entityInstance);
+    }
+
+    public function deleteEntity(EntityManagerInterface $entityManager, object $entityInstance): void
+    {
+        $entityInstance instanceof TrialPlan ? $this->trialPlans->delete($entityInstance) : parent::deleteEntity($entityManager, $entityInstance);
+    }
+
     public static function getEntityFqcn(): string
     {
         return TrialPlan::class;

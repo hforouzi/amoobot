@@ -7,6 +7,8 @@ namespace App\Admin\UI\Crud;
 use App\Admin\UI\DashboardController;
 use App\Admin\UI\Support\AdminFormat;
 use App\Entity\DiscountCode;
+use App\Shop\Application\Catalog\DiscountAdminService;
+use Doctrine\ORM\EntityManagerInterface;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Action;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Actions;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Crud;
@@ -25,7 +27,24 @@ final class DiscountCodeCrudController extends AbstractCrudController
     public function __construct(
         private readonly AdminUrlGeneratorInterface $adminUrlGenerator,
         private readonly AdminFormat $format,
+        private readonly DiscountAdminService $discounts,
     ) {
+    }
+
+    /** Saving and deleting go through DiscountAdminService, as from the bot, the CLI and the Mini App. */
+    public function persistEntity(EntityManagerInterface $entityManager, object $entityInstance): void
+    {
+        $entityInstance instanceof DiscountCode ? $this->discounts->save($entityInstance) : parent::persistEntity($entityManager, $entityInstance);
+    }
+
+    public function updateEntity(EntityManagerInterface $entityManager, object $entityInstance): void
+    {
+        $entityInstance instanceof DiscountCode ? $this->discounts->save($entityInstance) : parent::updateEntity($entityManager, $entityInstance);
+    }
+
+    public function deleteEntity(EntityManagerInterface $entityManager, object $entityInstance): void
+    {
+        $entityInstance instanceof DiscountCode ? $this->discounts->delete($entityInstance) : parent::deleteEntity($entityManager, $entityInstance);
     }
 
     public static function getEntityFqcn(): string

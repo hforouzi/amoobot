@@ -17,10 +17,17 @@ final class PlanPriceAdjustmentService
     /**
      * @return array{plans:int,changes:list<array{plan:Plan,field:string,before:int,after:int}>}
      */
-    public function preview(string $direction, string $field, ?float $percent, ?int $amount): array
+    public function preview(string $direction, string $field, ?float $percent, ?int $amount, ?PlanScope $scope = null): array
     {
+        $criteria = [];
+        if (null !== $scope && $scope->activeOnly) {
+            $criteria['isActive'] = true;
+        }
+        if (null !== $scope && null !== $scope->planIds) {
+            $criteria['id'] = [] === $scope->planIds ? [0] : $scope->planIds;
+        }
         /** @var list<Plan> $plans */
-        $plans = $this->entityManager->getRepository(Plan::class)->findBy([], ['id' => 'ASC']);
+        $plans = $this->entityManager->getRepository(Plan::class)->findBy($criteria, ['id' => 'ASC']);
         $fields = 'all' === $field ? ['price', 'pricePerGb', 'pricePerDay'] : [$field];
         $changes = [];
 

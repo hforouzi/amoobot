@@ -8,6 +8,8 @@ use App\Admin\UI\TranslatedFlashes;
 use App\Admin\UI\Support\AdminFormat;
 use App\Admin\UI\DashboardController;
 use App\Entity\Plan;
+use App\Shop\Application\Catalog\PlanAdminService;
+use App\Shop\Application\Catalog\PlanInUse;
 use App\Shop\Application\PlanPriceSanityChecker;
 use Doctrine\ORM\EntityManagerInterface;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Action;
@@ -35,6 +37,7 @@ class PlanCrudController extends AbstractCrudController
         private readonly AdminUrlGeneratorInterface $adminUrlGenerator,
         private readonly AdminFormat $format,
         private readonly TranslatorInterface $translator,
+        private readonly PlanAdminService $plans,
     ) {
     }
 
@@ -118,16 +121,32 @@ class PlanCrudController extends AbstractCrudController
         ];
     }
 
+    /** Saving and deleting go through PlanAdminService, as from the bot and the Mini App. */
     public function persistEntity(EntityManagerInterface $entityManager, object $entityInstance): void
     {
-        parent::persistEntity($entityManager, $entityInstance);
+        $entityInstance instanceof Plan ? $this->plans->save($entityInstance) : parent::persistEntity($entityManager, $entityInstance);
         $this->flashPriceWarnings($entityInstance);
     }
 
     public function updateEntity(EntityManagerInterface $entityManager, object $entityInstance): void
     {
-        parent::updateEntity($entityManager, $entityInstance);
+        $entityInstance instanceof Plan ? $this->plans->save($entityInstance) : parent::updateEntity($entityManager, $entityInstance);
         $this->flashPriceWarnings($entityInstance);
+    }
+
+    /** A plan that orders refer to stays (PlanInUse): a message instead of the database's refusal. */
+    public function deleteEntity(EntityManagerInterface $entityManager, object $entityInstance): void
+    {
+        if (!$entityInstance instanceof Plan) {
+            parent::deleteEntity($entityManager, $entityInstance);
+
+            return;
+        }
+        try {
+            $this->plans->delete($entityInstance);
+        } catch (PlanInUse $e) {
+            $this->flash('danger', 'flash.plan.in_use', ['%plan%' => $entityInstance->getTitle(), '%count%' => $e->orderCount]);
+        }
     }
 
     private function flashPriceWarnings(object $plan): void

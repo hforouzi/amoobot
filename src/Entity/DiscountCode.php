@@ -6,8 +6,12 @@ namespace App\Entity;
 
 use App\Shop\Domain\OrderType;
 use Doctrine\ORM\Mapping as ORM;
+use Symfony\Bridge\Doctrine\Validator\Constraints\UniqueEntity;
+use Symfony\Component\Validator\Constraints as Assert;
+use Symfony\Component\Validator\Context\ExecutionContextInterface;
 
 #[ORM\Entity]
+#[UniqueEntity(fields: ['code'], message: 'discount.code.taken')]
 #[ORM\Table(name: 'discount_code', uniqueConstraints: [new ORM\UniqueConstraint(name: 'uniq_discount_code', columns: ['code'])])]
 class DiscountCode
 {
@@ -22,12 +26,16 @@ class DiscountCode
     private ?int $id = null;
 
     #[ORM\Column(length: 64)]
+    #[Assert\NotBlank(message: 'discount.code.required')]
+    #[Assert\Length(max: 64)]
+    #[Assert\Regex(pattern: '/^[A-Za-z0-9_-]+$/', message: 'discount.code.characters')]
     private string $code;
 
     #[ORM\Column(length: 255, nullable: true)]
     private ?string $title = null;
 
     #[ORM\Column(length: 20)]
+    #[Assert\Choice(callback: 'allowedTypes')]
     private string $type = self::TYPE_PERCENT;
 
     #[ORM\Column]
@@ -43,18 +51,21 @@ class DiscountCode
     private ?\DateTimeImmutable $endsAt = null;
 
     #[ORM\Column(nullable: true)]
+    #[Assert\Positive]
     private ?int $maxUses = null;
 
     #[ORM\Column]
     private int $usedCount = 0;
 
     #[ORM\Column(nullable: true)]
+    #[Assert\Positive]
     private ?int $maxUsesPerUser = null;
 
     #[ORM\Column]
     private bool $firstPurchaseOnly = false;
 
     #[ORM\Column(length: 30)]
+    #[Assert\Choice(callback: 'allowedAppliesTo')]
     private string $appliesTo = self::APPLIES_ALL;
 
     #[ORM\ManyToOne]
@@ -62,6 +73,7 @@ class DiscountCode
     private ?Plan $plan = null;
 
     #[ORM\Column(nullable: true)]
+    #[Assert\PositiveOrZero]
     private ?int $minAmount = null;
 
     #[ORM\Column]
@@ -294,5 +306,22 @@ class DiscountCode
     public function __toString(): string
     {
         return sprintf('%s (%s)', $this->code ?: '-', $this->title ?: 'Discount');
+    }
+
+    /**
+     * A percent code takes 1-100 %, a fixed one a positive amount; a validity window starts before it ends.
+     */
+    #[Assert\Callback]
+    public function validateRules(ExecutionContextInterface $context): void
+    {
+        if (self::TYPE_PERCENT === $this->type && ($this->value < 1 || $this->value > 100)) {
+            $context->buildViolation('discount.value.percent_range')->atPath('value')->addViolation();
+        }
+        if (self::TYPE_FIXED === $this->type && $this->value <= 0) {
+            $context->buildViolation('discount.value.fixed_positive')->atPath('value')->addViolation();
+        }
+        if (null !== $this->startsAt && null !== $this->endsAt && $this->startsAt >= $this->endsAt) {
+            $context->buildViolation('discount.dates.order')->atPath('endsAt')->addViolation();
+        }
     }
 }

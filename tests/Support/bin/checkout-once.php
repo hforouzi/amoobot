@@ -32,7 +32,7 @@ $lock = fopen(sys_get_temp_dir().'/amoobot-test-proxies.lock', 'c');
 flock($lock, LOCK_EX);
 flock($lock, LOCK_UN);
 
-[$telegramId, $planId, $key, $holdMs] = [(string) $argv[1], (int) $argv[2], (string) $argv[3], (int) $argv[4]];
+[$telegramId, $planId, $key, $holdMs] = [(string) ($argv[1] ?? ''), (int) ($argv[2] ?? 0), (string) ($argv[3] ?? ''), (int) ($argv[4] ?? 0)];
 $account = $entityManager->getRepository(TelegramAccount::class)->findOneBy(['telegramId' => $telegramId]) ?? throw new LogicException('no account');
 $user = new MiniAppUser($account, new MiniAppSession(str_repeat('0', 64), $telegramId, str_repeat('0', 64), new DateTimeImmutable(), new DateTimeImmutable('+1 hour')), null);
 $checkout = $container->get(MiniAppCheckout::class);

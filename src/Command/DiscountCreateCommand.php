@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace App\Command;
 
 use App\Entity\DiscountCode;
-use Doctrine\ORM\EntityManagerInterface;
+use App\Shop\Application\Catalog\DiscountAdminService;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -17,7 +17,7 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 final class DiscountCreateCommand extends Command
 {
     public function __construct(
-        private readonly EntityManagerInterface $entityManager,
+        private readonly DiscountAdminService $discounts,
     ) {
         parent::__construct();
     }
@@ -90,8 +90,7 @@ final class DiscountCreateCommand extends Command
             }
         }
 
-        $existing = $this->entityManager->getRepository(DiscountCode::class)->findOneBy(['code' => $code]);
-        if ($existing instanceof DiscountCode) {
+        if ($this->discounts->codeExists($code)) {
             $io->error('Discount code already exists.');
 
             return Command::FAILURE;
@@ -112,8 +111,7 @@ final class DiscountCreateCommand extends Command
                 ->setEndsAt((new \DateTimeImmutable())->modify(sprintf('+%d days', $daysValid)));
         }
 
-        $this->entityManager->persist($discount);
-        $this->entityManager->flush();
+        $this->discounts->save($discount);
 
         $io->success(sprintf('Discount code %s created.', $discount->getCode()));
 
