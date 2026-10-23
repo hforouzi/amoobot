@@ -8,6 +8,7 @@ use App\Entity\Order;
 use App\Entity\Payment;
 use App\Entity\Wallet;
 use App\Entity\WalletTransaction;
+use App\Payment\Application\AdminPaymentAlerter;
 use App\Payment\Application\Settlement\PaymentSettlementService;
 use App\Payment\Application\Settlement\SettlementOutcome;
 use App\Payment\Application\Settlement\VerifiedPayment;
@@ -419,6 +420,15 @@ final class WalletTopUpTest extends IntegrationTestCase
         self::assertSame(OrderStatus::WAITING_PAYMENT, $this->row('`order`', (int) $order->getId())['status']);
         self::assertSame(0, $this->ledgerRows());
         self::assertSame(0, (int) $this->em->getConnection()->fetchOne('SELECT COUNT(*) FROM payment WHERE status = ?', [PaymentStatus::PROVISIONING_FAILED]));
+
+        // Not silent: the admins are alerted, once per payment however often the gateway retries.
+        $alerts = fn (): int => count(array_filter($this->http->telegramTexts(), static fn (string $text): bool => str_contains($text, AdminPaymentAlerter::WALLET_CREDIT_FAILED_TITLE) && str_contains($text, 'Payment ID: '.$payment->getId())));
+        $alertsAfterFirstFailure = $alerts();
+        self::assertGreaterThan(0, $alertsAfterFirstFailure, 'alerted');
+        self::assertSame(SettlementOutcome::ERROR, $this->confirm($payment, PaymentGatewayType::ZIBAL)->outcome);
+        self::assertSame($alertsAfterFirstFailure, $alerts(), 'not alerted again for the same payment');
+        self::assertNotNull($this->row('payment', (int) $payment->getId())['wallet_credit_alerted_at']);
+        self::assertSame(PaymentStatus::PENDING, $this->row('payment', (int) $payment->getId())['status']);
 
         $listener->fail = false;
         $retry = $this->confirm($payment, PaymentGatewayType::ZIBAL);

@@ -207,6 +207,13 @@ class Payment
     #[ORM\Column(nullable: true)]
     private ?\DateTimeImmutable $refundedAt = null;
 
+    /**
+     * When the admins were alerted that crediting this (wallet top-up) payment failed; set once, by a conditional UPDATE
+     * (AdminPaymentAlerter::walletTopUpCreditFailed()), so retries never alert again. Not a status: nothing else reads it.
+     */
+    #[ORM\Column(nullable: true)]
+    private ?\DateTimeImmutable $walletCreditAlertedAt = null;
+
     public function __construct()
     {
         $this->createdAt = new \DateTimeImmutable();
@@ -239,6 +246,11 @@ class Payment
     public function getRefundedAt(): ?\DateTimeImmutable
     {
         return $this->refundedAt;
+    }
+
+    public function getWalletCreditAlertedAt(): ?\DateTimeImmutable
+    {
+        return $this->walletCreditAlertedAt;
     }
 
     public function setRefundedAt(?\DateTimeImmutable $refundedAt): self

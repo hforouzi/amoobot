@@ -388,6 +388,10 @@ class PaymentSettlementService
             // A wallet top-up never becomes PROVISIONING_FAILED: its credit was rolled back with everything else.
             if (!$fulfilmentStarted || $isWalletTopUp) {
                 $this->logger->error('Payment settlement aborted before fulfilment.', ['payment_id' => $paymentId, 'source' => $source, 'error' => $e->getMessage()]);
+                if ($fulfilmentStarted) {
+                    // Not silent: the money was verified but not credited (once per payment).
+                    $this->adminAlerter->walletTopUpCreditFailed($paymentId, $this->sanitizeError($e));
+                }
 
                 return new SettlementResult(SettlementOutcome::ERROR, 'Payment could not be settled right now; nothing was changed.');
             }
