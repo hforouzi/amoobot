@@ -17,7 +17,14 @@ Every customer can have a wallet: a balance in Toman that is topped up with the 
 - **A wallet payment that did not finish.** If the wallet was debited but confirming the order did not finish (a timeout or an error while the service was being created), the order keeps that one wallet payment. Until it is settled, another payment method cannot be started for the order: the customer is asked to tap "Pay from wallet" again (it reuses the same debit, nothing is taken twice) or to cancel the order (the amount goes back to the wallet). This is deliberate: starting a gateway payment beside a debited wallet payment could charge the customer twice.
 - **No "paid late" for wallet payments.** A wallet payment that was cancelled or expired before it was settled already gave its money back; it is never parked in "Needs review" as a late payment. A wallet payment is confirmed (by itself, by an admin's approval or by a retry) only while its debit is still taken; otherwise the admin sees "Not confirmed: this wallet payment has no wallet debit any more" and should reject it.
 - **Credit limit.** How far below zero a balance may go (0 by default). It cannot be set lower than the credit already in use.
-- **Frozen wallet.** Cannot be used to pay or be topped up by the customer; payments already made are still credited and admins can still adjust.
+- **Frozen wallet.** Cannot be used to pay or be topped up by the customer; payments already made are still credited and admins can still adjust. A wallet payment whose money was already taken before the freeze (its order was not confirmed yet) still completes with that one debit; the money is already out of the wallet, so refusing it would only hold it. Freezing stops every new wallet payment.
+
+## Upgrading (run the migrations)
+
+- `Version20261024090000`: creates `wallet` and `wallet_transaction` (new, empty tables; instant).
+- `Version20261024090100`: makes `order.plan_id` nullable. **It rebuilds the `order` table**: online on MySQL 5.6+ / MariaDB 10.0+ (`ALGORITHM=INPLACE, LOCK=NONE`, orders keep working), but run it off-peak with disk space for a copy of `order`. If the server refuses the online mode, the statement fails without changing anything; then run ``ALTER TABLE `order` MODIFY plan_id INT DEFAULT NULL`` in a maintenance window. **Irreversible once a top-up order exists**: rolling it back is refused while any order has no plan.
+- `Version20261025090000`: adds `payment.wallet_credit_alerted_at` (nullable, no default; instant on MariaDB 10.3+).
+- `Version20261025090100`: the wallet ledger's foreign keys refuse deletes instead of cascading (no data is changed).
 
 ## Admin
 
