@@ -15,6 +15,10 @@ use App\Tests\Support\BotAdminTestTrait;
 use App\Tests\Support\IntegrationTestCase;
 use App\Tests\Support\MiniAppAdminFixtures;
 use App\Tests\Support\MiniAppTestTrait;
+use App\Wallet\Application\WalletActor;
+use App\Wallet\Application\WalletService;
+use App\Wallet\Domain\WalletKeys;
+use App\Wallet\Domain\WalletTransactionType;
 use Symfony\Component\DomCrawler\Crawler;
 
 /**
@@ -86,6 +90,21 @@ final class WalletRevenueReportingTest extends IntegrationTestCase
         self::assertSame(250000, $today['revenue'], 'gateway money only: the wallet payment moved no new money');
         self::assertSame(150000, $today['walletTopUps']);
         self::assertSame(3, $today['payments']);
+    }
+
+    /** Second review, minor 4: a top-up underpaid within tolerance counts what was credited, not the ordered amount. */
+    public function testAnUnderpaidTopUpCountsWhatWasCredited(): void
+    {
+        $topUp = $this->confirmed($this->topUpOrder(50000), 50000);
+        // What the settlement credits for 99.5% received (TopUpCredit), under the top-up's ledger key.
+        self::getContainer()->get(WalletService::class)->credit($this->buyer, 49750, WalletTransactionType::TOPUP, WalletKeys::topUp((int) $topUp->getId()), WalletActor::system());
+        $this->confirmed($this->createOrder($this->buyer, $this->payment->getOrder()->requirePlan()), 100000);
+
+        $today = $this->today();
+
+        self::assertSame(149750, $today['revenue']);
+        self::assertSame(49750, $today['walletTopUps']);
+        self::assertSame(2, $today['payments']);
     }
 
     public function testWithoutWalletPaymentsTheRevenueIsUnchanged(): void
