@@ -71,6 +71,8 @@ class TelegramUpdateHandler
     private const NOWPAYMENTS_WAITING_STATUS_TEXT = 'در انتظار پرداخت';
     /** PaymentStart::KIND_WALLET_PAYMENT_PENDING (also in ServiceManagementService). */
     public const WALLET_PAYMENT_PENDING_TEXT = 'پرداخت این سفارش از کیف پول در جریان است. برای تکمیل، دوباره «پرداخت از کیف پول» را بزنید یا سفارش را لغو کنید تا مبلغ به کیف پول برگردد.';
+    /** PaymentStart::KIND_WALLET_PAYMENT_HELD (also in ServiceManagementService). */
+    public const WALLET_PAYMENT_HELD_TEXT = 'این سفارش از کیف پول شما پرداخت شده و در حال بررسی یا آماده‌سازی سرویس است. نیازی به پرداخت دوباره نیست؛ در صورت نیاز با پشتیبانی تماس بگیرید.';
 
     public function __construct(
         private readonly TelegramUserResolver $telegramUserResolver,
@@ -1297,6 +1299,11 @@ class TelegramUpdateHandler
         }
         if (PaymentStart::KIND_WALLET_PAYMENT_PENDING === $start->kind) {
             $this->showPopupOrMessage($chatId, $callbackId, self::WALLET_PAYMENT_PENDING_TEXT, 'popup_wallet_payment_pending');
+
+            return;
+        }
+        if (PaymentStart::KIND_WALLET_PAYMENT_HELD === $start->kind) {
+            $this->showPopupOrMessage($chatId, $callbackId, self::WALLET_PAYMENT_HELD_TEXT, 'popup_wallet_payment_held');
 
             return;
         }

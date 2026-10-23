@@ -1089,6 +1089,11 @@ class ServiceManagementService
 
             return;
         }
+        if (PaymentStart::KIND_WALLET_PAYMENT_HELD === $start->kind) {
+            $this->showPopupOrMessage($chatId, $callbackId, TelegramUpdateHandler::WALLET_PAYMENT_HELD_TEXT, 'popup_wallet_payment_held');
+
+            return;
+        }
         $payment = $start->payment ?? throw new \LogicException('A started payment has a payment.');
 
         if (PaymentStart::KIND_ONLINE === $start->kind) {

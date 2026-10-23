@@ -77,6 +77,7 @@ case "$*" in
   *"bin/console about"*) printf "%s\n" "${ABOUT_OUT}" ;;
   *"bin/console lint:twig"*) printf "%s\n" "${LINT_OUT}"; exit "${LINT_RC:-0}" ;;
   *"app:telegram:webhook-info"*) printf "%s\n" "${WEBHOOK_INFO}" ;;
+  *"app:wallet:reconcile"*) exit "${RECONCILE_RC:-0}" ;;
   *) exec "'"$REAL_PHP"'" "$@" ;;
 esac'
 stub php-fpm8.4 '[[ "$1" == -i ]] && printf "date.timezone => %s => %s\n" "${FPM_TZ}" "${FPM_TZ}"'
@@ -146,6 +147,15 @@ for c in app-env healthz http-redirect certificate admin-templates admin-login w
 done
 check "  ...exactly 20 checks, one line each" test "$(grep -cE '^(PASS|FAIL|SKIP) ' <<< "$OUT")" -eq 20
 check "no secret value in the output or on any command line" no_secret_anywhere
+check "  ...the wallet ledger is an INFO line (reconcile as the web user)" bash -c \
+  'grep -qE "^INFO +wallet-reconcile +every wallet balance and payment matches the ledger$" <<< "$1" && grep -q "^sudo -H -u www-data -- php .*bin/console app:wallet:reconcile --env=prod" "$2"' _ "$OUT" "$WORK/argv"
+RECONCILE_RC=1 run_check
+check "reconcile finds mismatches -> an INFO WARNING only, RESULT still OK (exit 0)" bash -c \
+  '[[ $1 -eq 0 ]] && grep -q "^RESULT: OK$" <<< "$2" && grep -qE "^INFO +wallet-reconcile +WARNING: mismatches found" <<< "$2"' _ "$RC" "$OUT"
+RECONCILE_RC=255 run_check
+check "reconcile cannot run -> an INFO WARNING only, RESULT still OK (exit 0)" bash -c \
+  '[[ $1 -eq 0 ]] && grep -q "^RESULT: OK$" <<< "$2" && grep -qE "^INFO +wallet-reconcile +WARNING: app:wallet:reconcile could not run [(]exit 255[)]" <<< "$2"' _ "$RC" "$OUT"
+good_env; run_check
 check "the webhook URL with the secret went to curl only through its stdin config" bash -c 'grep -qF -- "/telegram/webhook/$1" "$2"' _ "$SECRET" "$WORK/curl.cfg"
 check "getWebhookInfo URL is shown masked" bash -c 'line=$(grep "telegram-webhook" <<< "$1"); grep -qF "https://bot.example.test/telegram/webhook/***" <<< "$line"' _ "$OUT"
 check "the check changes nothing (no write/restart command run)" not grep -qE '^(systemctl|ufw (allow|deny|enable|delete)|nginx -s|sshd [^-])' "$WORK/argv"
@@ -217,7 +227,7 @@ run_check
 check "password login on and ufw inactive are not failures when not managed -> RESULT: OK" bash -c '[[ $1 -eq 0 ]] && grep -q "^RESULT: OK$" <<< "$2"' _ "$RC" "$OUT"
 check "  ...sshd is an INFO line with the current settings" bash -c 'grep -qE "^INFO +sshd +not managed \(SSH_HARDENING=no\): passwordauthentication yes, permitrootlogin yes$" <<< "$1"' _ "$OUT"
 check "  ...firewall is an INFO line" bash -c 'grep -qE "^INFO +firewall +not managed \(FIREWALL=no\); ufw inactive$" <<< "$1"' _ "$OUT"
-check "  ...18 checks counted, the 2 INFO lines do not count" bash -c '[[ $(grep -cE "^(PASS|FAIL|SKIP) " <<< "$1") -eq 18 && $(grep -cE "^INFO " <<< "$1") -eq 2 ]]' _ "$OUT"
+check "  ...18 checks counted, the 3 INFO lines (sshd, firewall, wallet-reconcile) do not count" bash -c '[[ $(grep -cE "^(PASS|FAIL|SKIP) " <<< "$1") -eq 18 && $(grep -cE "^INFO " <<< "$1") -eq 3 ]]' _ "$OUT"
 check "  ...nothing changed (no ufw or sshd write command)" not grep -qE '^(ufw (allow|deny|enable|delete|reset|default)|sshd [^-]|systemctl)' "$WORK/argv"
 export UFW_OUT=$'Status: active\n\nTo                         Action      From\n--                         ------      ----\n22/tcp                     ALLOW       Anywhere\n2053/tcp                   ALLOW       Anywhere'
 run_check

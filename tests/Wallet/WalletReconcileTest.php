@@ -156,6 +156,23 @@ final class WalletReconcileTest extends IntegrationTestCase
         self::assertStringContainsString(WalletReconciler::PENDING_WALLET_PAYMENT_ORDER_NOT_WAITING, $tester->getDisplay());
     }
 
+    /** Third review, minor: a held debit must be exactly its payment's amount; a given-back one is not checked. */
+    public function testAHeldDebitWhoseAmountIsNotItsPaymentsAmount(): void
+    {
+        $payment = $this->openWalletPayment();
+        $released = $this->openWalletPayment();
+        self::getContainer()->get(PaymentSettlementService::class)->cancelByCustomer($released->getOrder());
+        self::assertSame([], $this->problems(), 'debit equal to the payable amount; a released one: legitimate');
+
+        $this->em->getConnection()->executeStatement('UPDATE payment SET payable_amount = payable_amount + 1 WHERE id IN (?, ?)', [$payment->getId(), $released->getId()]);
+
+        self::assertSame([WalletReconciler::DEBIT_AMOUNT_MISMATCH => [$payment->getId()]], $this->problems());
+        $tester = $this->runCommand();
+        self::assertSame(1, $tester->getStatusCode());
+        self::assertStringContainsString(WalletReconciler::DEBIT_AMOUNT_MISMATCH, $tester->getDisplay());
+        self::assertStringContainsString('held debit of '.self::PRICE.' but the payment is for '.(self::PRICE + 1), $tester->getDisplay());
+    }
+
     public function testTheCommandReportsEveryClassWithIdsAndExitsWithOne(): void
     {
         $topUp = $this->confirmedTopUp();

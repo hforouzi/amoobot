@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #
 # Read-only check of a deployed Amoobot server: one PASS / FAIL / SKIP line per check, never a secret value.
-# INFO lines describe what amoobot does not manage (SSH_HARDENING=no / FIREWALL=no) and do not change the result.
+# INFO lines describe what amoobot does not manage (SSH_HARDENING=no / FIREWALL=no) and the wallet ledger check
+# (app:wallet:reconcile, a WARNING when it finds mismatches); they do not change the result.
 #
 #   sudo /usr/local/lib/amoobot/post-deploy-check.sh [--domain bot.example.com]     # full check (root)
 #   bin/post-deploy-check.sh [--domain ...]                                         # as the deploy user: root-only checks SKIP
@@ -38,7 +39,7 @@ DOMAIN=""
 while (( $# )); do
   case "$1" in
     --domain) DOMAIN="${2:-}"; shift ;;
-    -h|--help) sed -n '2,15p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,16p' "$0"; exit 0 ;;
     *) printf 'Unknown option: %s\n' "$1" >&2; exit 2 ;;
   esac
   shift
@@ -218,6 +219,19 @@ check_webhook_info() {
   esac
 }
 
+# 6a. Wallet ledger: app:wallet:reconcile (read only, as the web user). An INFO line only, never a FAIL: a mismatch needs
+#     a person (an admin adjustment or a payment decision), not a redeploy, and the command never changes anything.
+check_wallet_reconcile() {
+  local rc
+  if ! is_root && [[ "$(id -un)" != "$WEB_USER" ]]; then info wallet-reconcile "not run: needs root (runs bin/console as ${WEB_USER})"; return; fi
+  as_web php "$APP_DIR/bin/console" app:wallet:reconcile --env=prod > /dev/null 2>&1; rc=$?
+  case "$rc" in
+    0) info wallet-reconcile "every wallet balance and payment matches the ledger" ;;
+    1) info wallet-reconcile "WARNING: mismatches found; run 'sudo -u ${WEB_USER} php bin/console app:wallet:reconcile --env=prod' and check each one" ;;
+    *) info wallet-reconcile "WARNING: app:wallet:reconcile could not run (exit ${rc})" ;;
+  esac
+}
+
 # 7. Scheduled jobs (and, as root, the nightly backup's age): bin/check-scheduled-jobs.sh
 check_jobs() {
   local out rc
@@ -391,6 +405,7 @@ check_admin_templates
 check_admin_login
 check_webhook_auth
 check_webhook_info
+check_wallet_reconcile
 check_jobs
 check_backup
 check_ufw

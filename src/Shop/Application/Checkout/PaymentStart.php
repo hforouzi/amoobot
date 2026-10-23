@@ -25,6 +25,11 @@ final class PaymentStart
      * pays from the wallet again (the same debit is reused) or cancels the order (the debit is given back).
      */
     public const KIND_WALLET_PAYMENT_PENDING = 'wallet_payment_pending';
+    /**
+     * The order was paid from the wallet and that payment is in review or its provisioning failed (its debit is held
+     * until an admin retries or rejects it): no gateway payment was started, the customer must not pay again.
+     */
+    public const KIND_WALLET_PAYMENT_HELD = 'wallet_payment_held';
 
     public function __construct(
         public readonly string $kind,
