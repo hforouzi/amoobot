@@ -85,7 +85,8 @@ final class WalletOpenRollbackFailureTest extends IntegrationTestCase
         return ['update_id' => $updateId, 'callback_query' => [
             'id' => 'cb-'.$updateId, 'from' => ['id' => (int) self::CUSTOMER, 'first_name' => 'T'],
             'message' => ['message_id' => 1, 'chat' => ['id' => (int) self::CUSTOMER, 'type' => 'private']],
-            'data' => 'wallet_pay:'.$order->getId(),
+            // The confirmation's "Confirm" button (wallet_pay: only asks; WalletBotHandler).
+            'data' => 'wallet_pay_confirm:'.$order->getId(),
         ]];
     }
 

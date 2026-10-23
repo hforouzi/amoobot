@@ -32,8 +32,18 @@ final class Version20261025090100 extends AbstractMigration
         $this->addSql('ALTER TABLE wallet_transaction ADD CONSTRAINT FK_7DAF972712520F3 FOREIGN KEY (wallet_id) REFERENCES wallet (id) ON DELETE RESTRICT');
     }
 
+    /**
+     * Refused (nothing is changed) while the ledger has any row or a wallet carries state without one (a balance, a
+     * credit limit, a frozen status): with CASCADE again, deleting a customer would silently erase that money, its
+     * history or the admin's freeze. Checked before any foreign key is touched.
+     */
     public function down(Schema $schema): void
     {
+        $movements = (int) $this->connection->fetchOne('SELECT COUNT(*) FROM wallet_transaction');
+        $this->abortIf($movements > 0, sprintf('Irreversible: the wallet ledger has %d movement(s); its foreign keys stay ON DELETE RESTRICT so that deleting a customer can never erase them. Nothing was changed.', $movements));
+        $withState = (int) $this->connection->fetchOne("SELECT COUNT(*) FROM wallet WHERE balance <> 0 OR credit_limit <> 0 OR status <> 'active'");
+        $this->abortIf($withState > 0, sprintf('Irreversible: %d wallet(s) have a balance, a credit limit or are frozen; their foreign keys stay ON DELETE RESTRICT. Nothing was changed.', $withState));
+
         $this->addSql('ALTER TABLE wallet DROP FOREIGN KEY FK_7C68921FA76ED395');
         $this->addSql('ALTER TABLE wallet ADD CONSTRAINT FK_7C68921FA76ED395 FOREIGN KEY (user_id) REFERENCES `user` (id) ON DELETE CASCADE');
         $this->addSql('ALTER TABLE wallet_transaction DROP FOREIGN KEY FK_7DAF97229A0BB4E');

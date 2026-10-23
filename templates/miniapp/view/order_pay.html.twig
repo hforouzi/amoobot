@@ -15,9 +15,10 @@
     <section class="card">
         <h2>{{ 'pay.choose_method'|trans }}</h2>
         {% if walletOffer %}
-            {# Only when the wallet covers the whole amount; partial wallet payment is not offered. #}
+            {# Only when the wallet covers the whole amount; partial wallet payment is not offered. The server asks to confirm
+               (428: amount, balance before / after, read at the tap), nothing is paid before OK. #}
             <div class="methods">
-                <button type="button" class="method" data-pay-wallet data-action="{{ path('miniapp_order_pay_wallet', {id: order.id}) }}" data-confirm="{{ 'pay.wallet_confirm'|trans({'%amount%': walletOffer.amount|number_format}) }}">
+                <button type="button" class="method" data-pay-wallet data-action="{{ path('miniapp_order_pay_wallet', {id: order.id}) }}">
                     <span class="method-icon" aria-hidden="true">👛</span>
                     <span class="list-main">{{ 'pay.wallet'|trans({'%balance%': walletOffer.available|number_format}) }}</span>
                     <span aria-hidden="true">›</span>

@@ -67,6 +67,38 @@ final class WalletPayment
     }
 
     /**
+     * The confirmation step before pay(): what paying the order from the wallet would take, from the database as it is
+     * now (the order and the wallet are re-read: a long-running bot worker may hold older copies). Changes nothing.
+     *
+     * @return array{amount: int, balance: int, after: int} Toman; after = balance - amount (below 0 within a credit limit)
+     *
+     * @throws WalletException wallet_payment_disabled, order_not_payable, wallet_frozen, wallet_insufficient
+     */
+    public function preview(Order $order): array
+    {
+        if (!$this->settings->paymentEnabled()) {
+            throw new WalletException('wallet_payment_disabled');
+        }
+        $this->entityManager->refresh($order);
+        if (!in_array($order->getType(), self::PAYABLE_ORDER_TYPES, true) || OrderStatus::WAITING_PAYMENT !== $order->getStatus()) {
+            throw new WalletException('order_not_payable');
+        }
+        $wallet = $this->wallets->find($order->getUser());
+        if (null !== $wallet) {
+            $this->entityManager->refresh($wallet);
+        }
+        if (true === $wallet?->isFrozen()) {
+            throw new WalletException('wallet_frozen');
+        }
+        $amount = $this->paymentStarter->payableAmount($order);
+        if (null === $wallet || $wallet->getAvailable() < $amount) {
+            throw new WalletException('wallet_insufficient');
+        }
+
+        return ['amount' => $amount, 'balance' => $wallet->getBalance(), 'after' => $wallet->getBalance() - $amount];
+    }
+
+    /**
      * Pays the order from the wallet and settles it.
      *
      * @throws WalletException wallet_payment_disabled, order_not_payable, plan_unavailable, payment_in_progress,

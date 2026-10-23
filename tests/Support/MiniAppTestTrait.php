@@ -84,12 +84,13 @@ trait MiniAppTestTrait
      *
      * @param array{token: string, csrf: string} $session
      * @param array<string, mixed>               $body
+     * @param array<string, string>              $server extra headers, $_SERVER style (e.g. HTTP_X_ADMIN_CONFIRM: the confirm token)
      *
      * @return array<string, mixed>
      */
-    protected function appPostJson(string $path, array $session, array $body = [], ?string $idempotencyKey = null, ?string $csrf = null): array
+    protected function appPostJson(string $path, array $session, array $body = [], ?string $idempotencyKey = null, ?string $csrf = null, array $server = []): array
     {
-        $server = ['HTTP_AUTHORIZATION' => 'Bearer '.$session['token'], 'HTTP_X_CSRF_TOKEN' => $csrf ?? $session['csrf'], 'CONTENT_TYPE' => 'application/json'];
+        $server = ['HTTP_AUTHORIZATION' => 'Bearer '.$session['token'], 'HTTP_X_CSRF_TOKEN' => $csrf ?? $session['csrf'], 'CONTENT_TYPE' => 'application/json'] + $server;
         if (null !== $idempotencyKey) {
             $server['HTTP_IDEMPOTENCY_KEY'] = $idempotencyKey;
         }

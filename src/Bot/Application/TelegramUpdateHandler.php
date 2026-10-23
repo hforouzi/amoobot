@@ -1824,6 +1824,10 @@ class TelegramUpdateHandler
                 $this->showPopupOrMessage($chatId, $callbackId, 'امکان ارسال رسید برای این پرداخت وجود ندارد.', 'popup_payment_submit_receipt_invalid_status');
 
                 return;
+            case ReceiptSubmission::WALLET_PAYMENT_HELD:
+                $this->showPopupOrMessage($chatId, $callbackId, $this->botTextResolver->message('payment.receipt_wallet_held'), 'popup_payment_submit_receipt_wallet_held');
+
+                return;
         }
 
         $this->receiptSubmission->expectReceipt($payment);
@@ -1908,14 +1912,22 @@ class TelegramUpdateHandler
             return;
         }
 
-        $this->receiptSubmission->submitPhoto($openPayment, $fileId);
-        $this->telegramApiClient->sendMessage($chatId, $this->botTextResolver->message('payment.receipt_received'));
+        $this->answerReceipt($this->receiptSubmission->submitPhoto($openPayment, $fileId), $chatId);
     }
 
     private function handleReceiptText(Payment $openPayment, string $text, string $chatId): void
     {
-        $this->receiptSubmission->submitTrackingCode($openPayment, $text);
-        $this->telegramApiClient->sendMessage($chatId, $this->botTextResolver->message('payment.receipt_received'));
+        $this->answerReceipt($this->receiptSubmission->submitTrackingCode($openPayment, $text), $chatId);
+    }
+
+    /** ReceiptSubmission::submit*()'s answer: recorded, or refused (nothing changed). */
+    private function answerReceipt(string $result, string $chatId): void
+    {
+        $this->telegramApiClient->sendMessage($chatId, match ($result) {
+            ReceiptSubmission::READY => $this->botTextResolver->message('payment.receipt_received'),
+            ReceiptSubmission::WALLET_PAYMENT_HELD => $this->botTextResolver->message('payment.receipt_wallet_held'),
+            default => 'امکان ارسال رسید برای این پرداخت وجود ندارد.',
+        });
     }
 
     private function findOpenPayment(TelegramAccount $account): ?Payment

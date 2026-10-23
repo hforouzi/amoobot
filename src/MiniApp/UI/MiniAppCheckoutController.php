@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\MiniApp\UI;
 
+use App\MiniApp\Admin\AdminConfirmTokens;
 use App\MiniApp\Checkout\CheckoutFailure;
 use App\MiniApp\Checkout\CheckoutIdempotency;
 use App\MiniApp\Checkout\CheckoutQuote;
@@ -41,6 +42,7 @@ final class MiniAppCheckoutController extends AbstractController
         private readonly ReceiptUpload $receiptUpload,
         private readonly MiniAppFragments $fragments,
         private readonly TranslatorInterface $translator,
+        private readonly AdminConfirmTokens $confirmTokens,
         #[Autowire(service: 'limiter.miniapp_checkout')]
         private readonly RateLimiterFactory $checkoutLimiter,
         #[Autowire(service: 'limiter.miniapp_receipt')]
@@ -136,11 +138,27 @@ final class MiniAppCheckoutController extends AbstractController
     /**
      * Pays the order from the wallet. Runs once per Idempotency-Key with claimOnce() (the settlement commits on its
      * own); a parallel second tap waits on the order lock and finds the order paid, the debit is never taken twice.
+     *
+     * Confirmation step first: a call without a valid confirm token (AdminConfirmTokens, bound to this session, route
+     * and order) changes nothing and is answered 428 with a token and "Pay X Toman from your wallet? Balance Y -> Z",
+     * computed now from the database; the app shows the confirm dialog and repeats the call with the token (and the
+     * same Idempotency-Key) only on OK. Cancel sends nothing.
      */
     #[Route('/app/api/orders/{id}/pay-wallet', name: 'miniapp_order_pay_wallet', requirements: ['id' => '\d+'], defaults: ['_miniapp_section' => 'orders'], methods: ['POST'])]
     public function payFromWallet(Request $request, #[CurrentUser] MiniAppUser $user, int $id): JsonResponse
     {
         return $this->guarded($request, function () use ($request, $user, $id): JsonResponse {
+            $route = (string) $request->attributes->get('_route');
+            if (!$this->confirmTokens->isValid($user, $route, $id, $request->headers->get(AdminConfirmTokens::HEADER))) {
+                $preview = $this->checkout->walletPaymentPreview($user, $id);
+                $message = $this->translator->trans('pay.wallet_confirm', [
+                    '%amount%' => number_format($preview['amount']),
+                    '%balance%' => number_format($preview['balance']),
+                    '%after%' => number_format($preview['after']),
+                ], 'miniapp', MiniAppLocale::fromRequest($request));
+
+                return $this->ok(['error' => 'confirm_required', 'confirm' => ['token' => $this->confirmTokens->issue($user, $route, $id), 'message' => $message]], Response::HTTP_PRECONDITION_REQUIRED);
+            }
             $this->limit($this->checkoutLimiter, $user);
             $answer = $this->idempotency->claimOnce($user->customer(), $request->headers->get(CheckoutIdempotency::HEADER), 'pay_wallet:'.$id, function () use ($user, $id): array {
                 $result = $this->checkout->payFromWallet($user, $id);

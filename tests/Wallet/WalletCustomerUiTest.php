@@ -126,8 +126,13 @@ final class WalletCustomerUiTest extends IntegrationTestCase
         self::assertCount(1, $pay->filter('[data-pay-wallet]'));
 
         $key = self::newKey();
-        $answer = $this->appPostJson('/app/api/orders/'.$order->getId().'/pay-wallet', $session, [], $key);
-        $repeat = $this->appPostJson('/app/api/orders/'.$order->getId().'/pay-wallet', $session, [], $key);
+        // Fourth review: the server asks to confirm first (428, nothing paid); OK repeats the call with its token.
+        $ask = $this->appPostJson('/app/api/orders/'.$order->getId().'/pay-wallet', $session, [], $key);
+        self::assertSame(428, $this->httpStatus());
+        self::assertSame(200000, $this->balance());
+        $confirm = ['HTTP_X_ADMIN_CONFIRM' => (string) $ask['confirm']['token']];
+        $answer = $this->appPostJson('/app/api/orders/'.$order->getId().'/pay-wallet', $session, [], $key, null, $confirm);
+        $repeat = $this->appPostJson('/app/api/orders/'.$order->getId().'/pay-wallet', $session, [], $key, null, $confirm);
 
         self::assertSame(200, $this->httpStatus(), json_encode($answer, JSON_UNESCAPED_UNICODE) ?: '');
         self::assertEquals($answer, $repeat, 'the same answer for a retry');
@@ -201,7 +206,10 @@ final class WalletCustomerUiTest extends IntegrationTestCase
         self::assertContains('wallet_pay:'.$order->getId(), $this->sentCallbacks());
 
         $this->pressButton(self::CUSTOMER, 'wallet_pay:'.$order->getId());
-        $this->pressButton(self::CUSTOMER, 'wallet_pay:'.$order->getId());
+        self::assertSame(200000, $this->balance(), 'the confirmation step takes nothing');
+        self::assertContains('wallet_pay_confirm:'.$order->getId(), $this->sentCallbacks());
+        $this->pressButton(self::CUSTOMER, 'wallet_pay_confirm:'.$order->getId());
+        $this->pressButton(self::CUSTOMER, 'wallet_pay_confirm:'.$order->getId());
 
         self::assertSame(50000, $this->balance(), 'a double tap debits once');
         self::assertSame(OrderStatus::PROVISIONED, $this->row('`order`', (int) $order->getId())['status']);
@@ -216,7 +224,7 @@ final class WalletCustomerUiTest extends IntegrationTestCase
         $this->em->flush();
         $this->http->onJson('/getChatMember', ['ok' => true, 'result' => ['status' => 'left']]);
 
-        $this->pressButton(self::CUSTOMER, 'wallet_pay:'.$order->getId());
+        $this->pressButton(self::CUSTOMER, 'wallet_pay_confirm:'.$order->getId());
 
         self::assertSame(200000, $this->balance(), 'nothing debited');
         self::assertSame(0, (int) $this->em->getConnection()->fetchOne('SELECT COUNT(*) FROM payment WHERE order_id = ?', [$order->getId()]));
@@ -226,7 +234,7 @@ final class WalletCustomerUiTest extends IntegrationTestCase
         self::assertNotSame([], array_filter($markups, static fn (string $markup): bool => str_contains($markup, 'membership_check:purchase') && str_contains($markup, 'https://t.me/shop_channel')));
 
         $this->http->onJson('/getChatMember', ['ok' => true, 'result' => ['status' => 'member']]);
-        $this->pressButton(self::CUSTOMER, 'wallet_pay:'.$order->getId());
+        $this->pressButton(self::CUSTOMER, 'wallet_pay_confirm:'.$order->getId());
 
         self::assertSame(50000, $this->balance(), 'a member pays');
     }

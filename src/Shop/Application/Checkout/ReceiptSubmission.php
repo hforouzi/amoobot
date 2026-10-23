@@ -9,13 +9,21 @@ use App\Entity\Payment;
 use App\Entity\User;
 use App\Payment\Domain\PaymentGatewayType;
 use App\Payment\Domain\PaymentStatus;
+use App\Shared\Infrastructure\TransactionRollback;
 use App\Shop\Domain\OrderStatus;
+use Doctrine\DBAL\LockMode;
 use Doctrine\ORM\EntityManagerInterface;
 
 /**
  * A card-to-card receipt: the customer sends a photo (stored as its Telegram file id, as the bot always did) or a
  * tracking code; the payment becomes SUBMITTED and the admins who moderate payments are alerted. Only an admin's
  * approval confirms it.
+ *
+ * Refused while a wallet payment of the order holds its debit (PaymentStarter::heldWalletPayment(): pending, in review
+ * or waiting for a retry): the order is being paid, or was paid, from the wallet, and a card transfer on top would
+ * make the customer pay twice. The submission re-checks that under the order's row lock (the lock WalletPayment::open()
+ * takes), so a wallet payment opened at the same moment cannot slip in between. A receipt never moves an order out of
+ * provisioning_failed (a paid order waiting for an admin retry).
  */
 final class ReceiptSubmission
 {
@@ -24,10 +32,13 @@ final class ReceiptSubmission
     public const ALREADY_SUBMITTED = 'already_submitted';
     public const NOT_PENDING = 'not_pending';
     public const NOT_MANUAL = 'not_manual';
+    public const WALLET_PAYMENT_HELD = 'wallet_payment_held';
 
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
         private readonly PaymentReceiptAdminNotifier $adminNotifier,
+        private readonly PaymentStarter $paymentStarter,
+        private readonly TransactionRollback $transactionRollback,
     ) {
     }
 
@@ -45,6 +56,9 @@ final class ReceiptSubmission
         if (PaymentStatus::PENDING !== $payment->getStatus()) {
             return self::NOT_PENDING;
         }
+        if (null !== $this->paymentStarter->heldWalletPayment($payment->getOrder())) {
+            return self::WALLET_PAYMENT_HELD;
+        }
 
         return self::READY;
     }
@@ -58,7 +72,7 @@ final class ReceiptSubmission
     /** The bot's "send your receipt" step: the order is (still) waiting for its payment. */
     public function expectReceipt(Payment $payment): void
     {
-        $payment->getOrder()->setStatus(OrderStatus::WAITING_PAYMENT);
+        self::keepWaiting($payment);
         $this->entityManager->flush();
     }
 
@@ -83,26 +97,78 @@ final class ReceiptSubmission
             ->getOneOrNullResult();
     }
 
-    public function submitPhoto(Payment $payment, string $telegramFileId): void
+    /**
+     * @return string READY when the receipt was recorded, else why not (WALLET_PAYMENT_HELD, NOT_PENDING): nothing changed
+     */
+    public function submitPhoto(Payment $payment, string $telegramFileId): string
     {
-        $payment
-            ->setReceiptFileId($telegramFileId)
-            ->setStatus(PaymentStatus::SUBMITTED)
-            ->setSubmittedAt(new \DateTimeImmutable());
-        $payment->getOrder()->setStatus(OrderStatus::WAITING_PAYMENT);
-        $this->entityManager->flush();
-        $this->adminNotifier->notify($payment, PaymentReceiptAdminNotifier::KIND_RECEIPT_PHOTO);
+        return $this->submit($payment, static function (Payment $payment) use ($telegramFileId): void {
+            $payment->setReceiptFileId($telegramFileId);
+        }, PaymentReceiptAdminNotifier::KIND_RECEIPT_PHOTO);
     }
 
-    public function submitTrackingCode(Payment $payment, string $text): void
+    /**
+     * @return string READY when the receipt was recorded, else why not (WALLET_PAYMENT_HELD, NOT_PENDING): nothing changed
+     */
+    public function submitTrackingCode(Payment $payment, string $text): string
     {
-        $payment
-            ->setTrackingCode($text)
-            ->setReceiptMessage($text)
-            ->setStatus(PaymentStatus::SUBMITTED)
-            ->setSubmittedAt(new \DateTimeImmutable());
-        $payment->getOrder()->setStatus(OrderStatus::WAITING_PAYMENT);
+        return $this->submit($payment, static function (Payment $payment) use ($text): void {
+            $payment->setTrackingCode($text)->setReceiptMessage($text);
+        }, PaymentReceiptAdminNotifier::KIND_TRACKING_CODE);
+    }
+
+    /**
+     * Records the receipt under the order's and the payment's row locks, after checking again that no wallet payment of
+     * the order holds its debit and that the payment still waits for a receipt (pending, or submitted: a new receipt
+     * replaces the earlier one).
+     *
+     * @param \Closure(Payment): void $apply
+     */
+    private function submit(Payment $payment, \Closure $apply, string $kind): string
+    {
+        $connection = $this->entityManager->getConnection();
         $this->entityManager->flush();
-        $this->adminNotifier->notify($payment, PaymentReceiptAdminNotifier::KIND_TRACKING_CODE);
+        $level = $connection->getTransactionNestingLevel();
+        $connection->beginTransaction();
+        try {
+            $this->entityManager->refresh($payment->getOrder(), LockMode::PESSIMISTIC_WRITE);
+            $this->entityManager->refresh($payment, LockMode::PESSIMISTIC_WRITE);
+            $refusal = match (true) {
+                !in_array($payment->getStatus(), [PaymentStatus::PENDING, PaymentStatus::SUBMITTED], true) => self::NOT_PENDING,
+                null !== $this->paymentStarter->heldWalletPayment($payment->getOrder()) => self::WALLET_PAYMENT_HELD,
+                default => null,
+            };
+            if (null !== $refusal) {
+                $connection->commit();
+
+                return $refusal;
+            }
+
+            $apply($payment);
+            $payment
+                ->setStatus(PaymentStatus::SUBMITTED)
+                ->setSubmittedAt(new \DateTimeImmutable());
+            self::keepWaiting($payment);
+            $this->entityManager->flush();
+            $connection->commit();
+        } catch (\Throwable $e) {
+            if (!$this->transactionRollback->rollBack($level) || !$this->entityManager->isOpen()) {
+                $this->transactionRollback->resetEntityManager();
+            }
+
+            throw $e;
+        }
+        $this->adminNotifier->notify($payment, $kind);
+
+        return self::READY;
+    }
+
+    /** The order waits for this payment again, unless it is paid and waits for an admin retry (provisioning_failed). */
+    private static function keepWaiting(Payment $payment): void
+    {
+        $order = $payment->getOrder();
+        if (OrderStatus::PROVISIONING_FAILED !== $order->getStatus()) {
+            $order->setStatus(OrderStatus::WAITING_PAYMENT);
+        }
     }
 }

@@ -12,7 +12,8 @@ use Symfony\Component\DependencyInjection\Attribute\Autowire;
  * The server's half of the confirmation step of money and destructive admin actions. The first call of such an action
  * gets 428 with a token and the text to confirm (AdminActions); the app shows Telegram's confirm dialog and only on
  * "OK" repeats the call with the token in X-Admin-Confirm. The token is an HMAC bound to this session, the action
- * (route) and its target, valid for TTL_SECONDS; nothing is stored.
+ * (route) and its target, valid for TTL_SECONDS; nothing is stored. The customer's "pay from wallet" uses the same
+ * step (MiniAppCheckoutController::payFromWallet()).
  */
 final class AdminConfirmTokens
 {
