@@ -128,9 +128,17 @@ class WalletService
     }
 
     /**
-     * Whether this payment's purchase debit is held, was given back, or was never written. Locking reads (LOCK IN SHARE
-     * MODE): the latest committed ledger rows, never the caller's transaction snapshot, and a reversal cannot be
-     * inserted until the caller's transaction ends.
+     * Whether this payment's purchase debit is held, was given back, or was never written. Call it with the payment's
+     * order and payment rows locked FOR UPDATE (PaymentSettlementService does).
+     *
+     * The debit is read with LOCK IN SHARE MODE: it exists (written in the same transaction as its payment), so only
+     * its own record is locked. The reversal is read WITHOUT a lock on purpose: a locking read of a missing
+     * reversal_of_id takes a GAP lock that, held for the whole settlement (panel call included), blocked other
+     * customers' ledger writes and deadlocked with the same customer's next wallet write. Correctness does not need it:
+     * every path that writes a purchase reversal (customer cancel, admin reject, gateway failure, expiry, the order paid
+     * by another payment) sets the payment to REJECTED in the same transaction, under that payment's FOR UPDATE lock,
+     * so the caller's locked payment status already tells a given-back debit; a second reversal is refused by the unique
+     * reversal_of_id and idempotency keys. This read is the extra check for a reversal written by anything else.
      */
     public function purchaseDebit(int $paymentId): PurchaseDebit
     {
@@ -140,7 +148,7 @@ class WalletService
             return PurchaseDebit::MISSING;
         }
 
-        return false === $connection->fetchOne('SELECT id FROM wallet_transaction WHERE reversal_of_id = ? LOCK IN SHARE MODE', [(int) $debitId])
+        return false === $connection->fetchOne('SELECT id FROM wallet_transaction WHERE reversal_of_id = ?', [(int) $debitId])
             ? PurchaseDebit::HELD
             : PurchaseDebit::REVERSED;
     }

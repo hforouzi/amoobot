@@ -22,6 +22,7 @@ use Psr\Log\LoggerInterface;
 class AdminPaymentAlerter
 {
     public const WALLET_CREDIT_FAILED_TITLE = '🚨 پرداخت شارژ کیف پول تایید شد اما واریز به کیف پول انجام نشد';
+    public const SETTLEMENT_INTERRUPTED_TITLE = '🚨 ثبت پرداخت با خطای پایگاه داده قطع شد؛ وضعیت پرداخت را بررسی کنید';
 
     public function __construct(
         private readonly TelegramApiClient $telegramApiClient,
@@ -70,6 +71,30 @@ class AdminPaymentAlerter
         }
 
         $this->send($payment, self::WALLET_CREDIT_FAILED_TITLE, 'Nothing was changed; the payment is still pending. The next verification retries, or approve it. Error: '.$error, true);
+    }
+
+    /**
+     * A settlement failed AND rolling it back failed (e.g. after a deadlock): the database connection was closed so no
+     * half-known transaction state survives. The payment is reloaded from the database (its status there is what the
+     * alert shows); a payment still pending may hold a wallet debit, so the admins are told to decide it.
+     */
+    public function settlementInterrupted(int $paymentId, string $error): void
+    {
+        try {
+            $payment = $this->entityManager->find(Payment::class, $paymentId);
+            if ($payment instanceof Payment) {
+                $this->entityManager->refresh($payment);
+            }
+        } catch (\Throwable $e) {
+            $this->logger->error('Settlement interruption alert not sent.', ['payment_id' => $paymentId, 'error' => $e->getMessage()]);
+
+            return;
+        }
+        if (!$payment instanceof Payment) {
+            return;
+        }
+
+        $this->send($payment, self::SETTLEMENT_INTERRUPTED_TITLE, 'The settlement was rolled back after a database error and its rollback failed; nothing of it was kept. Check this payment (a pending wallet payment still holds its debit): approve / retry it, or reject it to give the money back. Error: '.$error, true);
     }
 
     private function send(Payment $payment, string $title, string $detail, bool $withActions = false): void

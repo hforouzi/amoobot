@@ -386,7 +386,7 @@ class PaymentSettlementService
             $this->entityManager->flush();
             $connection->commit();
         } catch (\Throwable $e) {
-            $this->rollbackAndReset();
+            $rolledBack = $this->rollbackAndReset();
 
             // A wallet top-up never becomes PROVISIONING_FAILED: its credit was rolled back with everything else.
             if (!$fulfilmentStarted || $isWalletTopUp) {
@@ -394,6 +394,9 @@ class PaymentSettlementService
                 if ($fulfilmentStarted) {
                     // Not silent: the money was verified but not credited (once per payment).
                     $this->adminAlerter->walletTopUpCreditFailed($paymentId, $this->sanitizeError($e));
+                } elseif (!$rolledBack) {
+                    // Not silent either: the payment stays pending (a wallet payment with its debit held).
+                    $this->adminAlerter->settlementInterrupted($paymentId, $this->sanitizeError($e));
                 }
 
                 return new SettlementResult(SettlementOutcome::ERROR, 'Payment could not be settled right now; nothing was changed.');
@@ -645,6 +648,8 @@ class PaymentSettlementService
         } catch (\Throwable $e) {
             $this->rollbackAndReset();
             $this->logger->critical('Could not record provisioning failure.', ['payment_id' => $paymentId, 'error' => $e->getMessage()]);
+            // The payment was verified but stays as it was (a wallet payment: pending with its debit held): never silently.
+            $this->adminAlerter->settlementInterrupted($paymentId, $this->sanitizeError($error).' / recording the failure: '.$this->sanitizeError($e));
 
             return new SettlementResult(SettlementOutcome::ERROR, 'Fulfilment failed and the failure could not be recorded; nothing was changed.');
         }
@@ -713,16 +718,26 @@ class PaymentSettlementService
     /**
      * After a failed attempt the unit of work holds half-applied changes (new service, statuses),
      * so it is discarded: cleared, or rebuilt when the failure closed the entity manager.
+     *
+     * When the rollback itself fails (e.g. the database already rolled the transaction back after a deadlock, so a
+     * savepoint of the ORM's flush no longer exists), the connection is CLOSED: the server drops whatever is left of
+     * the transaction and DBAL's nesting level starts again at 0. Without that, the next "transaction" (e.g. recording
+     * PROVISIONING_FAILED) ran as a savepoint of a transaction that no longer existed and was never committed.
+     *
+     * @return bool false when the rollback failed (the connection was closed; the caller alerts the admins)
      */
-    private function rollbackAndReset(): void
+    private function rollbackAndReset(): bool
     {
         $connection = $this->entityManager->getConnection();
+        $rolledBack = true;
         try {
             while ($connection->isTransactionActive()) {
                 $connection->rollBack();
             }
         } catch (\Throwable $e) {
-            $this->logger->error('Rollback failed.', ['error' => $e->getMessage()]);
+            $rolledBack = false;
+            $this->logger->critical('Rollback failed; the database connection was closed so no transaction state is lost.', ['error' => $e->getMessage()]);
+            $connection->close();
         }
 
         if ($this->entityManager->isOpen()) {
@@ -730,6 +745,8 @@ class PaymentSettlementService
         } else {
             $this->managerRegistry->resetManager();
         }
+
+        return $rolledBack;
     }
 
     private function sanitizeError(\Throwable $error): string
