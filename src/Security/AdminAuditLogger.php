@@ -33,6 +33,29 @@ final class AdminAuditLogger
      */
     public function record(string $action, ?string $targetType = null, string|int|null $targetId = null, array $details = [], ?AdminActor $actor = null): void
     {
+        try {
+            $this->write($action, $targetType, $targetId, $details, $actor);
+        } catch (\Throwable $e) {
+            $this->logger->error('Admin audit log entry could not be written.', ['action' => $action, 'target' => $targetType.'#'.$targetId, 'error' => $e->getMessage()]);
+        }
+    }
+
+    /**
+     * Like record(), but a failure is thrown: for a change that must not exist without its audit entry. Call it inside
+     * the change's own transaction (e.g. WalletService's $onWritten), so a failure rolls the change back too.
+     *
+     * @param array<string, mixed> $details
+     */
+    public function recordOrThrow(string $action, ?string $targetType = null, string|int|null $targetId = null, array $details = [], ?AdminActor $actor = null): void
+    {
+        $this->write($action, $targetType, $targetId, $details, $actor);
+    }
+
+    /**
+     * @param array<string, mixed> $details
+     */
+    private function write(string $action, ?string $targetType, string|int|null $targetId, array $details, ?AdminActor $actor): void
+    {
         $inRequest = null !== $this->requestStack->getCurrentRequest();
         if (null === $actor && $inRequest) {
             $user = $this->security->getUser();
@@ -41,19 +64,15 @@ final class AdminAuditLogger
         $source = $actor->source ?? ($inRequest ? AdminAuditLog::SOURCE_WEB : AdminAuditLog::SOURCE_CLI);
         $label = $actor->label ?? ($inRequest ? 'anonymous' : 'console');
 
-        try {
-            $this->entityManager->persist(new AdminAuditLog(
-                $actor?->adminUserId,
-                $label,
-                $source,
-                $action,
-                $targetType,
-                null === $targetId ? null : (string) $targetId,
-                [] === $details ? null : AdminJsonFormatter::maskSecrets($details),
-            ));
-            $this->entityManager->flush();
-        } catch (\Throwable $e) {
-            $this->logger->error('Admin audit log entry could not be written.', ['action' => $action, 'target' => $targetType.'#'.$targetId, 'error' => $e->getMessage()]);
-        }
+        $this->entityManager->persist(new AdminAuditLog(
+            $actor?->adminUserId,
+            $label,
+            $source,
+            $action,
+            $targetType,
+            null === $targetId ? null : (string) $targetId,
+            [] === $details ? null : AdminJsonFormatter::maskSecrets($details),
+        ));
+        $this->entityManager->flush();
     }
 }

@@ -74,26 +74,29 @@ class WalletService
     /**
      * Adds money. Never refused for a frozen wallet (money already paid must not be lost).
      *
-     * @param int $amount positive, integer Toman
+     * @param int                                   $amount    positive, integer Toman
+     * @param (\Closure(WalletTransaction): void)|null $onWritten called inside this write's transaction, only when the row
+     *                                                         is new (never for a retry); a failure rolls the write back
      */
-    public function credit(User $user, int $amount, string $type, string $idempotencyKey, WalletActor $by, ?string $referenceType = null, ?string $referenceId = null, ?string $note = null): WalletTransaction
+    public function credit(User $user, int $amount, string $type, string $idempotencyKey, WalletActor $by, ?string $referenceType = null, ?string $referenceId = null, ?string $note = null, ?\Closure $onWritten = null): WalletTransaction
     {
         $this->assertMovement($amount, $type, $idempotencyKey);
 
-        return $this->write($this->userId($user), $amount, $type, $idempotencyKey, $by, $referenceType, $referenceId, $note);
+        return $this->write($this->userId($user), $amount, $type, $idempotencyKey, $by, $referenceType, $referenceId, $note, null, $onWritten);
     }
 
     /**
      * Takes money. Refused when balance + credit limit would go below zero (InsufficientWalletBalance), and for a
      * PURCHASE from a frozen wallet (WalletFrozen). Nothing is written when refused.
      *
-     * @param int $amount positive, integer Toman
+     * @param int                                   $amount    positive, integer Toman
+     * @param (\Closure(WalletTransaction): void)|null $onWritten see credit()
      */
-    public function debit(User $user, int $amount, string $type, string $idempotencyKey, WalletActor $by, ?string $referenceType = null, ?string $referenceId = null, ?string $note = null): WalletTransaction
+    public function debit(User $user, int $amount, string $type, string $idempotencyKey, WalletActor $by, ?string $referenceType = null, ?string $referenceId = null, ?string $note = null, ?\Closure $onWritten = null): WalletTransaction
     {
         $this->assertMovement($amount, $type, $idempotencyKey);
 
-        return $this->write($this->userId($user), -$amount, $type, $idempotencyKey, $by, $referenceType, $referenceId, $note);
+        return $this->write($this->userId($user), -$amount, $type, $idempotencyKey, $by, $referenceType, $referenceId, $note, null, $onWritten);
     }
 
     /**
@@ -168,7 +171,10 @@ class WalletService
         return $this->changeWallet($this->userId($user), static fn (Wallet $wallet) => $wallet->changeStatus($status), ['action' => 'status', 'value' => $status, 'source' => $by->source, 'admin_id' => $by->adminId]);
     }
 
-    private function write(int $userId, int $signedAmount, string $type, string $key, WalletActor $by, ?string $referenceType, ?string $referenceId, ?string $note, ?WalletTransaction $reversalOf = null): WalletTransaction
+    /**
+     * @param (\Closure(WalletTransaction): void)|null $onWritten
+     */
+    private function write(int $userId, int $signedAmount, string $type, string $key, WalletActor $by, ?string $referenceType, ?string $referenceId, ?string $note, ?WalletTransaction $reversalOf = null, ?\Closure $onWritten = null): WalletTransaction
     {
         $connection = $this->entityManager->getConnection();
         $nested = $connection->isTransactionActive();
@@ -224,6 +230,9 @@ class WalletService
             $wallet->applyMovement($signedAmount, $createdAt);
             $this->entityManager->flush();
             $transaction = $this->entityManager->find(WalletTransaction::class, $transactionId) ?? throw new \LogicException(sprintf('Wallet transaction #%d was not written.', $transactionId));
+            if (null !== $onWritten) {
+                $onWritten($transaction);
+            }
             $connection->commit();
         } catch (\Throwable $e) {
             $this->rollback($nested, $mutated, $e);

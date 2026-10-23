@@ -19,7 +19,8 @@ use App\Wallet\Domain\WalletTransactionType;
  * (ADJUSTMENT) with a mandatory reason, the credit limit, freeze/unfreeze. Every write goes through WalletService and
  * is audited with its source (web / bot / miniapp). The caller checks the permission and the confirmation.
  *
- * An adjustment carries a key made when its form was shown, so submitting the same form twice applies it once.
+ * An adjustment carries a key made when its form was shown, so submitting the same form twice applies it once; its
+ * audit entry is written in the same transaction (both or neither, once).
  */
 final class WalletAdministration
 {
@@ -66,17 +67,9 @@ final class WalletAdministration
         $reason = trim($reason);
         $key = sprintf('adjust:%d:%s', (int) $customer->getId(), $formKey);
         $by = WalletActor::admin($admin);
-        // A repeated submit gets the first row back from the ledger; it is audited once, when it was written.
-        $alreadyApplied = null !== $this->wallets->findTransaction($key);
-
-        $transaction = self::DIRECTION_CREDIT === $direction
-            ? $this->wallets->credit($customer, $amount, WalletTransactionType::ADJUSTMENT, $key, $by, WalletReferenceType::ADMIN, null === $admin->adminUserId ? null : (string) $admin->adminUserId, $reason)
-            : $this->wallets->debit($customer, $amount, WalletTransactionType::ADJUSTMENT, $key, $by, WalletReferenceType::ADMIN, null === $admin->adminUserId ? null : (string) $admin->adminUserId, $reason);
-
-        if ($alreadyApplied) {
-            return $transaction;
-        }
-        $this->auditLogger->record('wallet.adjust', 'Wallet', $transaction->getWallet()->getId(), [
+        // The audit entry is written inside the adjustment's own transaction, and only when the row is new: both exist
+        // or neither does, and a repeated (or simultaneous) submit gets the first row back without a second entry.
+        $audit = fn (WalletTransaction $transaction) => $this->auditLogger->recordOrThrow('wallet.adjust', 'Wallet', $transaction->getWallet()->getId(), [
             'customer_id' => $customer->getId(),
             'direction' => $direction,
             'amount' => $amount,
@@ -84,8 +77,11 @@ final class WalletAdministration
             'transaction_id' => $transaction->getId(),
             'balance_after' => $transaction->getBalanceAfter(),
         ], $admin);
+        $adminId = null === $admin->adminUserId ? null : (string) $admin->adminUserId;
 
-        return $transaction;
+        return self::DIRECTION_CREDIT === $direction
+            ? $this->wallets->credit($customer, $amount, WalletTransactionType::ADJUSTMENT, $key, $by, WalletReferenceType::ADMIN, $adminId, $reason, $audit)
+            : $this->wallets->debit($customer, $amount, WalletTransactionType::ADJUSTMENT, $key, $by, WalletReferenceType::ADMIN, $adminId, $reason, $audit);
     }
 
     /**
