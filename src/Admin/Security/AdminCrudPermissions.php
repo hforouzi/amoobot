@@ -32,6 +32,7 @@ final class AdminCrudPermissions
         'admin_wallet_credit_limit' => AdminPermission::WALLETS_MANAGE,
         'admin_wallet_freeze' => AdminPermission::WALLETS_MANAGE,
         'admin_wallet_unfreeze' => AdminPermission::WALLETS_MANAGE,
+        'admin_wallet_customer_open' => AdminPermission::WALLETS_MANAGE,
     ];
 
     /** Dashboard, login/logout, locale switch: any admin (access_control ^/admin). */

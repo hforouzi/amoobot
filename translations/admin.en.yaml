@@ -1064,6 +1064,8 @@ wallet_admin:
   detail_title: "Wallet of %customer%"
   search: "Search customer (Telegram id, @username, name, mobile or id)"
   empty: "No wallet yet."
+  none.help: "This customer has no wallet yet; it is created by their first top-up or wallet payment, or when you open it here to adjust it."
+  none.open: "Open a wallet to adjust it"
   previous: "Previous"
   next: "Next"
   back: "All wallets"

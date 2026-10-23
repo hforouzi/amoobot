@@ -21,7 +21,7 @@ Every customer can have a wallet: a balance in Toman that is topped up with the 
 
 ## Admin
 
-- **Customers → Wallets** (web): every wallet with balance, credit limit and last activity, the totals, and each wallet's full ledger. With *manage* permission: manual credit/debit (a reason is required and the change is confirmed on a second screen), credit limit, freeze/unfreeze. Every change is in the audit log.
+- **Customers → Wallets** (web): every wallet with balance, credit limit and last activity, the totals, and each wallet's full ledger. With *manage* permission: manual credit/debit (a reason is required and the change is confirmed on a second screen), credit limit, freeze/unfreeze. Every change is in the audit log, written together with the change. A customer's wallet link (from the customer list) never creates a wallet just by being opened; a customer without one shows an empty wallet and, with *manage* permission, an "Open a wallet" button.
 - **Mini App admin**: the wallet on a customer's page, its ledger, and an adjustment confirmed in Telegram's dialog.
 - **Dashboard**: total customer balance and credit in use / granted.
 - **Permissions**: *Wallets view* (super admin, admin, support) and *Wallets manage* (super admin, admin).
