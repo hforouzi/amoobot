@@ -9,19 +9,9 @@ declare(strict_types=1);
  */
 
 use App\Entity\Order;
-use App\Kernel;
 use App\Payment\Application\Settlement\PaymentSettlementService;
-use Symfony\Component\Dotenv\Dotenv;
 
-require dirname(__DIR__, 3).'/vendor/autoload.php';
-
-$_SERVER['APP_ENV'] = $_ENV['APP_ENV'] = 'test';
-(new Dotenv())->bootEnv(dirname(__DIR__, 3).'/.env');
-
-$kernel = new Kernel('test', true);
-$kernel->boot();
-$container = $kernel->getContainer()->get('test.service_container');
-$entityManager = $container->get('doctrine')->getManager();
+[$container, $entityManager] = require __DIR__.'/boot-test-kernel.php';
 
 // Load the order BEFORE the race, like the bot does when the button is pressed: stale state.
 $order = $entityManager->find(Order::class, (int) ($argv[1] ?? 0));
