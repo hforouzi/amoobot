@@ -69,6 +69,8 @@ class TelegramUpdateHandler
     private const STEP_WAITING_DISCOUNT_CODE = 'waiting_discount_code';
     private const STEP_WAITING_PAYMENT_METHOD = 'waiting_payment_method';
     private const NOWPAYMENTS_WAITING_STATUS_TEXT = 'در انتظار پرداخت';
+    /** PaymentStart::KIND_WALLET_PAYMENT_PENDING (also in ServiceManagementService). */
+    public const WALLET_PAYMENT_PENDING_TEXT = 'پرداخت این سفارش از کیف پول در جریان است. برای تکمیل، دوباره «پرداخت از کیف پول» را بزنید یا سفارش را لغو کنید تا مبلغ به کیف پول برگردد.';
 
     public function __construct(
         private readonly TelegramUserResolver $telegramUserResolver,
@@ -1330,6 +1332,11 @@ class TelegramUpdateHandler
         $start = $this->paymentStarter->start($order, $storePaymentMethod);
         if (PaymentStart::KIND_PLAN_INACTIVE === $start->kind) {
             $this->showPopupOrMessage($chatId, $callbackId, 'این پلن دیگر فعال نیست یا وجود ندارد.', 'popup_invalid_plan_select_payment_method_draft');
+
+            return;
+        }
+        if (PaymentStart::KIND_WALLET_PAYMENT_PENDING === $start->kind) {
+            $this->showPopupOrMessage($chatId, $callbackId, self::WALLET_PAYMENT_PENDING_TEXT, 'popup_wallet_payment_pending');
 
             return;
         }

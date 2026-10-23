@@ -11,6 +11,7 @@ use App\Wallet\Domain\InsufficientWalletBalance;
 use App\Wallet\Domain\WalletException;
 use App\Wallet\Domain\WalletFrozen;
 use App\Wallet\Domain\WalletIdempotencyConflict;
+use App\Wallet\Domain\WalletKeys;
 use App\Wallet\Domain\WalletStatus;
 use App\Wallet\Domain\WalletTransactionType;
 use Doctrine\DBAL\LockMode;
@@ -109,6 +110,16 @@ class WalletService
         }
 
         return $this->write($this->userId($original->getWallet()->getUser()), -$original->getAmount(), WalletTransactionType::REVERSAL, $idempotencyKey, $by, $original->getReferenceType(), $original->getReferenceId(), $note, $original);
+    }
+
+    /**
+     * Gives back the purchase debit written for this payment (WalletKeys::purchase()), once; null when the payment has
+     * no debit (any non-wallet payment). Keyed on the ledger row, never on the payment's method or status, so a debit
+     * is released whatever happened to the payment row.
+     */
+    public function releasePurchase(int $paymentId, WalletActor $by, string $note): ?WalletTransaction
+    {
+        return $this->reverse(WalletKeys::purchase($paymentId), WalletKeys::purchaseReversal($paymentId), $by, $note);
     }
 
     /**

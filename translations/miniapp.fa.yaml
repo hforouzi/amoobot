@@ -687,6 +687,7 @@ checkout.message.wallet_disabled: "کیف پول در حال حاضر فعال �
 checkout.message.wallet_payment_disabled: "پرداخت با کیف پول در حال حاضر ممکن نیست."
 checkout.message.wallet_frozen: "کیف پول شما مسدود است؛ با پشتیبانی تماس بگیرید."
 checkout.message.wallet_insufficient: "موجودی کیف پول برای این سفارش کافی نیست."
+checkout.message.wallet_payment_pending: "پرداخت این سفارش از کیف پول در جریان است. برای تکمیل، دوباره «پرداخت از کیف پول» را بزنید یا سفارش را لغو کنید تا مبلغ به کیف پول برگردد."
 checkout.message.topup_out_of_range: "مبلغ خارج از بازه مجاز شارژ است."
 checkout.message.payment_in_progress: "رسید این سفارش در حال بررسی است."
 checkout.message.wallet_pay_failed: "پرداخت با کیف پول انجام نشد. لطفاً دوباره تلاش کنید."

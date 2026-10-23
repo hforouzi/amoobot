@@ -474,15 +474,12 @@ class PaymentSettlementService
     }
 
     /**
-     * A rejected wallet payment gives its debit back (a REVERSAL), inside the caller's transaction and at most once;
-     * nothing for any other payment, or when nothing was debited.
+     * A rejected payment that has a wallet debit gives it back (a REVERSAL), inside the caller's transaction and at most
+     * once. Keyed on the ledger row (purchase:payment:N), not on payment.method: nothing for a payment without a debit.
      */
     private function releaseWalletDebit(Payment $payment, ?int $adminId, string $note): void
     {
-        if (!$payment->isWalletPayment()) {
-            return;
-        }
-        $this->walletService->reverse(WalletKeys::purchase((int) $payment->getId()), WalletKeys::purchaseReversal((int) $payment->getId()), WalletActor::systemFor($adminId), $note);
+        $this->walletService->releasePurchase((int) $payment->getId(), WalletActor::systemFor($adminId), $note);
     }
 
     private function parkLatePayment(Payment $payment, Order $order, VerifiedPayment $verified, string $source): SettlementResult

@@ -12,7 +12,6 @@ use App\Shop\Domain\OrderDraftStatus;
 use App\Shop\Domain\OrderStatus;
 use App\Wallet\Application\WalletActor;
 use App\Wallet\Application\WalletService;
-use App\Wallet\Domain\WalletKeys;
 use Doctrine\DBAL\LockMode;
 use Doctrine\ORM\EntityManagerInterface;
 
@@ -166,10 +165,9 @@ final class IncompleteOrderExpiryService
                         ->setAdminNote(Payment::NOTE_ORDER_EXPIRY)
                         // A late "paid" for this payment goes to NEEDS_REVIEW (PaymentSettlementService).
                         ->setConfirmationSource(Payment::SOURCE_ORDER_EXPIRY);
-                    if ($payment->isWalletPayment()) {
-                        // Debited but never settled: the money goes back, in this transaction, once.
-                        $this->walletService->reverse(WalletKeys::purchase((int) $payment->getId()), WalletKeys::purchaseReversal((int) $payment->getId()), WalletActor::system(), 'order expired');
-                    }
+                    // A wallet debit that was never settled goes back, in this transaction, once (keyed on the ledger
+                    // row, not on the payment's method; nothing for a payment without a debit).
+                    $this->walletService->releasePurchase((int) $payment->getId(), WalletActor::system(), 'order expired');
                     ++$result['paymentsRejected'];
                 }
             }

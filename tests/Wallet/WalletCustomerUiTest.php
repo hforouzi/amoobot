@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Wallet;
 
+use App\Bot\Application\TelegramUpdateHandler;
 use App\Entity\Order;
 use App\Payment\Domain\PaymentStatus;
 use App\Shop\Domain\OrderStatus;
@@ -13,6 +14,7 @@ use App\Tests\Support\IntegrationTestCase;
 use App\Tests\Support\MiniAppShopFixtures;
 use App\Tests\Support\MiniAppTestTrait;
 use App\Wallet\Application\WalletActor;
+use App\Wallet\Application\WalletPayment;
 use App\Wallet\Application\WalletService;
 use App\Wallet\Application\WalletSettings;
 use App\Wallet\Domain\WalletTransactionType;
@@ -203,5 +205,19 @@ final class WalletCustomerUiTest extends IntegrationTestCase
         self::assertSame(50000, $this->balance(), 'a double tap debits once');
         self::assertSame(OrderStatus::PROVISIONED, $this->row('`order`', (int) $order->getId())['status']);
         self::assertTrue($this->sentTextContains('50,000'));
+    }
+
+    public function testTheBotRefusesAGatewayWhileAWalletPaymentIsDebitedButNotSettled(): void
+    {
+        $this->fund(200000);
+        $order = $this->createOrder($this->user, $this->plan);
+        $walletPayment = self::getContainer()->get(WalletPayment::class)->open($order);
+
+        $this->pressButton(self::CUSTOMER, 'select_store_payment_method:'.$order->getId().':'.$this->methods['zibal']->getId());
+
+        self::assertTrue($this->sentTextContains(TelegramUpdateHandler::WALLET_PAYMENT_PENDING_TEXT));
+        self::assertSame(1, (int) $this->em->getConnection()->fetchOne('SELECT COUNT(*) FROM payment WHERE order_id = ?', [$order->getId()]));
+        self::assertSame('wallet', $this->row('payment', (int) $walletPayment->getId())['method']);
+        self::assertSame(50000, $this->balance());
     }
 }
