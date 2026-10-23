@@ -7,6 +7,7 @@ namespace App\Tests\Wallet;
 use App\Entity\User;
 use App\Entity\Wallet;
 use App\Entity\WalletTransaction;
+use App\Tests\Support\SubprocessAssertions;
 use App\Wallet\Application\WalletActor;
 use App\Wallet\Application\WalletService;
 use App\Wallet\Domain\InsufficientWalletBalance;
@@ -30,6 +31,8 @@ use Symfony\Component\Process\Process;
  */
 final class WalletLedgerTest extends IntegrationTestCase
 {
+    use SubprocessAssertions;
+
     private function wallets(): WalletService
     {
         return self::getContainer()->get(WalletService::class);
@@ -424,8 +427,7 @@ final class WalletLedgerTest extends IntegrationTestCase
         $outcomes = [];
         foreach ($processes as $process) {
             $process->wait();
-            self::assertTrue($process->isSuccessful(), $process->getErrorOutput().$process->getOutput());
-            $outcomes[] = trim($process->getOutput());
+            $outcomes[] = self::assertSubprocessClean($process, 'wallet-debit.php');
         }
 
         return $outcomes;

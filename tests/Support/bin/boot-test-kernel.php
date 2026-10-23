@@ -21,6 +21,13 @@ require dirname(__DIR__, 3).'/vendor/autoload.php';
 $_SERVER['APP_ENV'] = $_ENV['APP_ENV'] = 'test';
 (new Dotenv())->bootEnv(dirname(__DIR__, 3).'/.env');
 
+// Quiet, like the PHPUnit process (phpunit.dist.xml: SHELL_VERBOSITY=-1, which Symfony Process does not pass on: it
+// is only in $_SERVER). Without it the debug kernel sets SHELL_VERBOSITY=3 on boot and the framework's fallback logger
+// (no MonologBundle here) writes every debug/info line through error_log(): into a file where php.ini sets error_log,
+// but onto stderr where it does not (CI). -1 keeps errors only.
+putenv('SHELL_VERBOSITY=-1');
+$_ENV['SHELL_VERBOSITY'] = $_SERVER['SHELL_VERBOSITY'] = -1;
+
 $lock = fopen(sys_get_temp_dir().'/amoobot-test-proxies.lock', 'c') ?: throw new RuntimeException('Cannot open the proxy lock file.');
 flock($lock, LOCK_EX);
 try {

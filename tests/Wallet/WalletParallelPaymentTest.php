@@ -7,6 +7,7 @@ namespace App\Tests\Wallet;
 use App\Shop\Domain\OrderType;
 use App\Tests\Support\IntegrationTestCase;
 use App\Tests\Support\MiniAppShopFixtures;
+use App\Tests\Support\SubprocessAssertions;
 use App\Wallet\Application\WalletActor;
 use App\Wallet\Application\WalletService;
 use App\Wallet\Application\WalletSettings;
@@ -25,6 +26,7 @@ use Symfony\Component\Process\Process;
 #[Group('subprocess')]
 final class WalletParallelPaymentTest extends IntegrationTestCase
 {
+    use SubprocessAssertions;
     use MiniAppShopFixtures;
 
     private const PRICE = 150000;
@@ -91,9 +93,7 @@ final class WalletParallelPaymentTest extends IntegrationTestCase
         $outcomes = [];
         foreach ($processes as $process) {
             $process->wait();
-            self::assertTrue($process->isSuccessful(), $process->getErrorOutput().$process->getOutput());
-            self::assertSame('', trim($process->getErrorOutput()), 'no warnings from the subprocess');
-            $outcomes[] = trim($process->getOutput());
+            $outcomes[] = self::assertSubprocessClean($process, 'wallet-pay.php');
         }
 
         return $outcomes;

@@ -9,6 +9,7 @@ use App\Entity\AdminUser;
 use App\Entity\User;
 use App\Security\AdminActor;
 use App\Tests\Support\IntegrationTestCase;
+use App\Tests\Support\SubprocessAssertions;
 use App\Wallet\Application\WalletAdministration;
 use Doctrine\ORM\Event\OnFlushEventArgs;
 use Doctrine\ORM\Events;
@@ -22,6 +23,8 @@ use Symfony\Component\Process\Process;
  */
 final class WalletAdjustmentAuditTest extends IntegrationTestCase
 {
+    use SubprocessAssertions;
+
     private User $customer;
     private AdminUser $admin;
 
@@ -104,8 +107,7 @@ final class WalletAdjustmentAuditTest extends IntegrationTestCase
         $outputs = [];
         foreach ($processes as $process) {
             $process->wait();
-            self::assertTrue($process->isSuccessful(), $process->getErrorOutput().$process->getOutput());
-            $outputs[] = trim($process->getOutput());
+            $outputs[] = self::assertSubprocessClean($process, 'wallet-adjust.php');
         }
 
         self::assertSame($outputs[0], $outputs[1], 'both get the same ledger row');

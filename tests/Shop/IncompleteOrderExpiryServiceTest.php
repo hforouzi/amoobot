@@ -10,12 +10,15 @@ use App\Payment\Domain\PaymentStatus;
 use App\Shop\Application\IncompleteOrderExpiryService;
 use App\Shop\Domain\OrderStatus;
 use App\Tests\Support\IntegrationTestCase;
+use App\Tests\Support\SubprocessAssertions;
 use PHPUnit\Framework\Attributes\Group;
 use Symfony\Component\Process\PhpExecutableFinder;
 use Symfony\Component\Process\Process;
 
 final class IncompleteOrderExpiryServiceTest extends IntegrationTestCase
 {
+    use SubprocessAssertions;
+
     /**
      * @return array{Order, Payment}
      */
@@ -94,7 +97,7 @@ final class IncompleteOrderExpiryServiceTest extends IntegrationTestCase
         $connection->commit();
         $process->wait();
 
-        self::assertTrue($process->isSuccessful(), $process->getErrorOutput().$process->getOutput());
+        self::assertSubprocessClean($process, 'app:orders:expire-incomplete');
         self::assertSame(OrderStatus::WAITING_PAYMENT, $this->row('`order`', (int) $order->getId())['status']);
         self::assertSame(PaymentStatus::NEEDS_REVIEW, $this->row('payment', (int) $payment->getId())['status']);
     }

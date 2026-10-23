@@ -14,6 +14,7 @@ use App\Payment\Domain\PaymentReturnUrl;
 use App\Payment\Domain\PaymentStatus;
 use App\Shop\Domain\OrderStatus;
 use App\Tests\Support\IntegrationTestCase;
+use App\Tests\Support\SubprocessAssertions;
 use PHPUnit\Framework\Attributes\Group;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Component\Process\PhpExecutableFinder;
@@ -24,6 +25,8 @@ use Symfony\Component\Process\Process;
  */
 final class LatePaymentAfterCancelTest extends IntegrationTestCase
 {
+    use SubprocessAssertions;
+
     private const TELEGRAM_ID = '555002';
     private const IPN_SECRET = 'ipn-secret-for-tests';
 
@@ -180,10 +183,8 @@ final class LatePaymentAfterCancelTest extends IntegrationTestCase
         $settle->wait();
         $cancel->wait();
 
-        self::assertTrue($settle->isSuccessful(), $settle->getErrorOutput());
-        self::assertTrue($cancel->isSuccessful(), $cancel->getErrorOutput());
-        self::assertSame(SettlementOutcome::CONFIRMED->value, trim($settle->getOutput()));
-        self::assertSame(SettlementOutcome::ALREADY_PROCESSED->value, trim($cancel->getOutput()), 'the cancel waited for the lock and saw the confirmation');
+        self::assertSame(SettlementOutcome::CONFIRMED->value, self::assertSubprocessClean($settle, 'settle-payment.php'));
+        self::assertSame(SettlementOutcome::ALREADY_PROCESSED->value, self::assertSubprocessClean($cancel, 'cancel-order.php'), 'the cancel waited for the lock and saw the confirmation');
         self::assertSame(PaymentStatus::CONFIRMED, $this->row('payment', (int) $payment->getId())['status']);
         self::assertSame(OrderStatus::PROVISIONED, $this->row('`order`', (int) $order->getId())['status']);
         self::assertSame(1, $this->countServicesForOrder($order));
@@ -204,7 +205,8 @@ final class LatePaymentAfterCancelTest extends IntegrationTestCase
             $cancel->start();
             $settle->wait();
             $cancel->wait();
-            self::assertTrue($settle->isSuccessful() && $cancel->isSuccessful(), $settle->getErrorOutput().$cancel->getErrorOutput());
+            self::assertSubprocessClean($settle, 'settle-payment.php');
+            self::assertSubprocessClean($cancel, 'cancel-order.php');
 
             $paymentRow = $this->row('payment', (int) $payment->getId());
             $orderStatus = $this->row('`order`', (int) $order->getId())['status'];

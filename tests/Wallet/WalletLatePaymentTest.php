@@ -16,6 +16,7 @@ use App\Shop\Domain\OrderStatus;
 use App\Shop\Domain\OrderType;
 use App\Tests\Support\IntegrationTestCase;
 use App\Tests\Support\MiniAppShopFixtures;
+use App\Tests\Support\SubprocessAssertions;
 use App\Wallet\Application\WalletActor;
 use App\Wallet\Application\WalletPayment;
 use App\Wallet\Application\WalletService;
@@ -38,6 +39,7 @@ use Symfony\Component\Process\Process;
  */
 final class WalletLatePaymentTest extends IntegrationTestCase
 {
+    use SubprocessAssertions;
     use MiniAppShopFixtures;
 
     private const PRICE = 150000;
@@ -213,8 +215,8 @@ final class WalletLatePaymentTest extends IntegrationTestCase
         $cancel->start();
         $pay->wait();
         $cancel->wait();
-        self::assertTrue($pay->isSuccessful(), $pay->getErrorOutput().$pay->getOutput());
-        self::assertTrue($cancel->isSuccessful(), $cancel->getErrorOutput().$cancel->getOutput());
+        self::assertSubprocessClean($pay, 'wallet-pay.php');
+        self::assertSubprocessClean($cancel, 'cancel-order.php');
 
         $connection = $this->em->getConnection();
         $statuses = $connection->fetchFirstColumn('SELECT status FROM payment WHERE order_id = ?', [$order->getId()]);
