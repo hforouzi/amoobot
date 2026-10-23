@@ -169,7 +169,8 @@ final class PaymentCrudController extends AbstractCrudController
                 ->setPermission($action->getAsDto()->getName(), AdminPermission::PAYMENTS_MODERATE->value);
         }
 
-        return $actions;
+        // A payment is never deleted from the admin (the wallet ledger references it): reject it instead.
+        return $actions->disable(Action::DELETE, Action::BATCH_DELETE);
     }
 
     /**

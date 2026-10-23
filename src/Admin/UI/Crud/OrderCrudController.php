@@ -64,7 +64,10 @@ class OrderCrudController extends AbstractCrudController
                 ->generateUrl())
             ->createAsGlobalAction();
 
-        return $actions->add(Crud::PAGE_INDEX, $drafts);
+        return $actions
+            ->add(Crud::PAGE_INDEX, $drafts)
+            // An order is never deleted from the admin: its payments (deleted with it) are referenced by the wallet ledger.
+            ->disable(Action::DELETE, Action::BATCH_DELETE);
     }
 
     public function configureFilters(Filters $filters): Filters

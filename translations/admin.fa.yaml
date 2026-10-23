@@ -922,6 +922,7 @@ field:
   zibal_sandbox: "حالت آزمایشی (Sandbox)"
 
 flash:
+  customer.delete_has_wallet: "مشتری #%id% کیف پول دارد و حذف نمی‌شود: دفتر کیف پول سابقهٔ مالی است. چیزی حذف نشد."
   service.page_link_csrf: "درخواست نامعتبر بود (توکن امنیتی). صفحه را تازه کنید و دوباره امتحان کنید."
   service.page_link_rotated: "لینک صفحه اشتراک سرویس #%id% عوض شد؛ لینک قبلی دیگر کار نمی‌کند."
   error: "خطا: %error%"
