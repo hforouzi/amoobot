@@ -110,6 +110,8 @@ final class SubscriptionPageTest extends IntegrationTestCase
         self::assertStringContainsString('data-external-hint hidden', $html, 'instruction outside a Mini App');
         self::assertStringNotContainsString('initData', str_replace('initData !== undefined', '', $html), 'initData is not read');
         self::assertStringContainsString('frame-ancestors https://web.telegram.org', (string) $this->client->getResponse()->headers->get('Content-Security-Policy'), 'Telegram Web can frame it');
+        self::assertStringContainsString("font-src 'self';", (string) $this->client->getResponse()->headers->get('Content-Security-Policy'), 'the self-hosted Vazirmatn');
+        self::assertStringContainsString('url("/miniapp/fonts/Vazirmatn-wght.woff2', $html);
         self::assertSame([], $this->client->getResponse()->headers->getCookies());
     }
 

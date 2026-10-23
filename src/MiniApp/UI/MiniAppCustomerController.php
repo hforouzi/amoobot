@@ -17,6 +17,8 @@ use App\Subscription\Application\SubscriptionPageUrl;
 use App\Subscription\Application\SubscriptionPageView;
 use App\Subscription\Application\SubscriptionPageViewFactory;
 use App\Subscription\Domain\ClientPlatform;
+use App\Wallet\Application\WalletService;
+use App\Wallet\Application\WalletSettings;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -44,6 +46,8 @@ final class MiniAppCustomerController extends AbstractController
         private readonly ServiceOrderCheckout $serviceOrderCheckout,
         private readonly SalesSettingsProvider $salesSettings,
         private readonly TrafficAddonSettingsProvider $trafficAddonSettings,
+        private readonly WalletSettings $walletSettings,
+        private readonly WalletService $wallets,
         private readonly string $serviceNotifyTrafficThresholds = '80',
     ) {
     }
@@ -55,12 +59,18 @@ final class MiniAppCustomerController extends AbstractController
         $expiring = array_values(array_filter($active, static fn (array $card): bool => null !== $card['view']->daysLeft));
         usort($expiring, static fn (array $a, array $b): int => $a['view']->daysLeft <=> $b['view']->daysLeft);
         $lowTrafficPercent = $this->lowTrafficPercent();
+        // The wallet card, only while the wallet is on: one lookup by user, never created here (no wallet = 0).
+        $walletEnabled = $this->walletSettings->enabled();
+        $wallet = $walletEnabled ? $this->wallets->find($user->customer()) : null;
 
         return $this->fragments->render($request, 'miniapp/view/home.html.twig', [
             'firstName' => (string) $user->account->getFirstName(),
             'activeCount' => count($active),
             'nearest' => $expiring[0] ?? null,
             'lowTraffic' => array_values(array_filter($active, static fn (array $card): bool => null !== $card['view']->usedPercent && $card['view']->usedPercent >= $lowTrafficPercent)),
+            'walletEnabled' => $walletEnabled,
+            'walletBalance' => $wallet?->getBalance() ?? 0,
+            'walletFrozen' => $wallet?->isFrozen() ?? false,
         ]);
     }
 

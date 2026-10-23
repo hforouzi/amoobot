@@ -200,6 +200,8 @@ final class MiniAppAuthTest extends IntegrationTestCase
         self::assertSame([], $headers->getCookies());
         self::assertStringContainsString('no-store', (string) $headers->get('Cache-Control'));
         self::assertStringContainsString("script-src 'self' https://telegram.org", (string) $headers->get('Content-Security-Policy'));
+        self::assertStringContainsString("font-src 'self';", (string) $headers->get('Content-Security-Policy'), 'the self-hosted Vazirmatn');
+        self::assertStringContainsString('<link rel="preload" href="/miniapp/fonts/Vazirmatn-wght.woff2', $html);
         self::assertDoesNotMatchRegularExpression('#<(script|link|img)[^>]+(src|href)="(https?:)?//(?!telegram\.org/)#i', $html, 'no other external assets');
     }
 }

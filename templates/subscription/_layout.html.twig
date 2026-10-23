@@ -25,11 +25,18 @@
                 --track: #263049; --code: #0f1528;
             }
         }
+        /* Vazirmatn, self-hosted with the Mini App (public/miniapp/fonts, OFL); CSP font-src 'self'. */
+        @font-face {
+            font-family: Vazirmatn; font-style: normal; font-weight: 100 900; font-display: swap;
+            src: url("/miniapp/fonts/Vazirmatn-wght.woff2?v=33.003") format("woff2-variations"), url("/miniapp/fonts/Vazirmatn-wght.woff2?v=33.003") format("woff2");
+            unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0600-06FF, U+0750-077F,
+                           U+08A0-08FF, U+200C-200F, U+2010-2027, U+2030-205E, U+20AC, U+2122, U+2212, U+FB50-FDFF, U+FE70-FEFF, U+FEFF, U+FFFD;
+        }
         * { box-sizing: border-box; }
         html { -webkit-text-size-adjust: 100%; }
         body {
             margin: 0; background: var(--bg); color: var(--fg); line-height: 1.7;
-            font-family: Vazirmatn, "Segoe UI", Tahoma, system-ui, -apple-system, Roboto, Arial, sans-serif;
+            font-family: Vazirmatn, system-ui, -apple-system, "Segoe UI", Roboto, Tahoma, Arial, sans-serif;
             padding: max(16px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom));
         }
         main { width: 100%; max-width: 560px; margin: 0 auto; display: grid; gap: 14px; }
@@ -61,7 +68,7 @@
         details { margin-top: 12px; } summary { cursor: pointer; color: var(--accent); font-weight: 600; }
         ol.configs { padding-inline-start: 18px; margin: 10px 0 0; }
         ol.configs li { margin-bottom: 10px; }
-        code { display: block; background: var(--code); border-radius: 8px; padding: 8px; font-size: .8rem; direction: ltr; text-align: left; overflow-wrap: anywhere; white-space: pre-wrap; }
+        code { display: block; background: var(--code); border-radius: 8px; padding: 8px; font: .8rem/1.6 ui-monospace, Menlo, Consolas, monospace; direction: ltr; text-align: left; overflow-wrap: anywhere; white-space: pre-wrap; }
         .apps { display: grid; gap: 10px; }
         .app { border: 1px solid var(--border); border-radius: 12px; padding: 12px; }
         .app-name { font-weight: 700; }

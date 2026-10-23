@@ -31,6 +31,16 @@
             {% endif %}
         {% endif %}
     </section>
+    {% if walletEnabled %}
+        <section class="card wallet-summary" data-home-wallet>
+            <div class="head">
+                <span class="muted">👛 {{ 'home.wallet_balance'|trans }}</span>
+                <b class="amount" data-wallet-balance="{{ walletBalance }}">{{ 'money.toman'|trans({'%amount%': walletBalance|number_format}) }}</b>
+            </div>
+            {% if walletFrozen %}<p class="muted" data-wallet-frozen>{{ 'home.wallet_frozen'|trans }}</p>{% endif %}
+            <a class="btn secondary small" href="{{ path('miniapp_wallet') }}" data-nav data-home-wallet-link>{{ (walletFrozen ? 'home.wallet_history' : 'home.wallet_open')|trans }}</a>
+        </section>
+    {% endif %}
     {% for card in lowTraffic %}
         <section class="card notice" data-low-traffic="{{ card.service.id }}">
             <p>⚠️ {{ 'home.low_traffic'|trans({'%name%': card.view.planName ?? 'service.number'|trans({'%id%': card.service.id}), '%percent%': card.view.usedPercent}) }}</p>
