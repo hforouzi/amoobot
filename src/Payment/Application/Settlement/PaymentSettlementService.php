@@ -23,6 +23,7 @@ use App\Shop\Domain\OrderType;
 use App\Wallet\Application\WalletActor;
 use App\Wallet\Application\WalletService;
 use App\Wallet\Domain\PurchaseDebit;
+use App\Wallet\Domain\TopUpCredit;
 use App\Wallet\Domain\WalletKeys;
 use App\Wallet\Domain\WalletReferenceType;
 use App\Wallet\Domain\WalletTransactionType;
@@ -431,9 +432,10 @@ class PaymentSettlementService
     private function fulfil(Order $order, Payment $payment, string $source): ?VpnService
     {
         if (OrderType::WALLET_TOPUP === $order->getType()) {
-            // Nothing to provision: the ordered amount goes to the customer's wallet, inside this transaction and
-            // once per payment (the payment id is the ledger idempotency key).
-            $this->walletService->credit($order->getUser(), $order->getAmount(), WalletTransactionType::TOPUP, WalletKeys::topUp((int) $payment->getId()), WalletActor::system(), WalletReferenceType::PAYMENT, (string) $payment->getId());
+            // Nothing to provision: what was received (at most the ordered amount, TopUpCredit) goes to the customer's
+            // wallet, inside this transaction and once per payment (the payment id is the ledger idempotency key).
+            $credit = TopUpCredit::for($order->getAmount(), $payment);
+            $this->walletService->credit($order->getUser(), $credit->amount, WalletTransactionType::TOPUP, WalletKeys::topUp((int) $payment->getId()), WalletActor::system(), WalletReferenceType::PAYMENT, (string) $payment->getId(), $credit->note);
 
             return null;
         }
