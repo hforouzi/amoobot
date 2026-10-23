@@ -1,0 +1,20 @@
+{# The reseller profile's editable fields (create and edit forms). #}
+{% trans_default_domain 'admin' %}
+<div class="admin-form-row">
+    <label class="form-label" for="discount_percent">{{ 'reseller_admin.fields.discount'|trans }}</label>
+    <input class="form-control" type="text" inputmode="decimal" dir="ltr" id="discount_percent" name="discount_percent" value="{{ values.discount_percent }}" required>
+    <div class="form-text">{{ 'reseller_admin.help.discount'|trans }}</div>
+</div>
+<div class="admin-form-row">
+    <label class="form-label" for="daily_spend_limit">{{ 'reseller_admin.fields.daily_limit'|trans }}</label>
+    <input class="form-control" type="number" min="1" step="1" dir="ltr" id="daily_spend_limit" name="daily_spend_limit" value="{{ values.daily_spend_limit }}">
+    <div class="form-text">{{ 'reseller_admin.help.daily_limit'|trans }}</div>
+</div>
+<div class="admin-form-row">
+    <label class="form-label" for="display_name">{{ 'reseller_admin.fields.display_name'|trans }}</label>
+    <input class="form-control" type="text" maxlength="64" id="display_name" name="display_name" value="{{ values.display_name }}">
+</div>
+<div class="admin-form-row">
+    <label class="form-label" for="note">{{ 'reseller_admin.fields.note'|trans }}</label>
+    <input class="form-control" type="text" maxlength="255" id="note" name="note" value="{{ values.note }}">
+</div>

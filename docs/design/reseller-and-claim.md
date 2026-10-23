@@ -1,6 +1,6 @@
 # Resellers and service claim links — design
 
-Status: **design for review**, nothing implemented. Persian summary: [docs/fa/design/reseller-and-claim.md](../fa/design/reseller-and-claim.md).
+Status: **S1 (reseller core) implemented** (admin guide: [docs/en/resellers.md](../en/resellers.md)); S2 and S3 not yet. Persian summary: [docs/fa/design/reseller-and-claim.md](../fa/design/reseller-and-claim.md).
 
 Items marked **DECISION NEEDED** are decisions this document takes, with a recommendation, that the owner should
 confirm or change before S1 starts. Everything else is decided.

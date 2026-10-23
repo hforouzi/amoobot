@@ -34,6 +34,7 @@ abstract class IntegrationTestCase extends KernelTestCase
         // plans then fail depending on test order.
         'trial_claim',
         'trial_plan',
+        'reseller_plan_price',
         'wallet_transaction',
         'wallet',
         'discount_usage',
@@ -51,6 +52,8 @@ abstract class IntegrationTestCase extends KernelTestCase
         '`user`',
         'vpn_inbound',
         'vpn_panel',
+        // After order / vpn_service / plan / user (they point at it); keys are off during the purge anyway.
+        'reseller',
     ];
 
     protected EntityManagerInterface $em;
@@ -70,7 +73,7 @@ abstract class IntegrationTestCase extends KernelTestCase
     {
         // Never leave the wallet switched on for a test that does not purge.
         if (isset($this->em) && $this->em->isOpen()) {
-            $this->em->getConnection()->executeStatement("DELETE FROM setting WHERE key_name LIKE 'wallet.%'");
+            $this->em->getConnection()->executeStatement("DELETE FROM setting WHERE key_name LIKE 'wallet.%' OR key_name LIKE 'reseller.%'");
         }
         parent::tearDown();
     }
@@ -82,8 +85,8 @@ abstract class IntegrationTestCase extends KernelTestCase
         foreach (self::PURGED_TABLES as $table) {
             $connection->executeStatement('DELETE FROM '.$table);
         }
-        // The wallet is off unless a test switches it on (settings are not purged otherwise).
-        $connection->executeStatement("DELETE FROM setting WHERE key_name LIKE 'wallet.%'");
+        // The wallet and resellers are off unless a test switches them on (settings are not purged otherwise).
+        $connection->executeStatement("DELETE FROM setting WHERE key_name LIKE 'wallet.%' OR key_name LIKE 'reseller.%'");
         $connection->executeStatement('SET FOREIGN_KEY_CHECKS = 1');
         $this->em->clear();
     }

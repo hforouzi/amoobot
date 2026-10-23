@@ -12,6 +12,8 @@ use App\Bot\Application\ServiceAction\ServiceActionResolver;
 use App\Bot\Infrastructure\TelegramApiClient;
 use App\Entity\Order;
 use App\Wallet\UI\WalletBotHandler;
+use App\Reseller\Application\ResellerCheckout;
+use App\Reseller\UI\ResellerBotHandler;
 use App\Wallet\Application\WalletPayment;
 use App\Entity\OrderDraft;
 use App\Entity\Payment;
@@ -107,7 +109,19 @@ class TelegramUpdateHandler
         private readonly TrialCheckout $trialCheckout,
         private readonly WalletBotHandler $walletBotHandler,
         private readonly WalletPayment $walletPayment,
+        private readonly ResellerBotHandler $resellerBotHandler,
+        private readonly ResellerCheckout $resellerCheckout,
     ) {
+    }
+
+    /**
+     * The main reply keyboard, with the reseller button for an active reseller (reseller.enabled on).
+     *
+     * @return array<string, mixed>
+     */
+    private function mainKeyboard(TelegramAccount $account, bool $isAdmin, bool $hasIncompleteOrder = false, bool $hasTrackableOrder = false): array
+    {
+        return $this->keyboardFactory->mainReplyKeyboard($isAdmin, $hasIncompleteOrder, $hasTrackableOrder, null !== $this->resellerCheckout->resellerFor($account->getUser()));
     }
 
     public function handle(array $update): void
@@ -204,6 +218,12 @@ class TelegramUpdateHandler
             return;
         }
 
+        if ('button.main.reseller' === $replyButtonKey) {
+            $this->resellerBotHandler->showMenu($account, $chatId, null);
+
+            return;
+        }
+
         if ('button.main.downloads' === $replyButtonKey) {
             $this->handleAppDownloads($chatId);
 
@@ -220,7 +240,7 @@ class TelegramUpdateHandler
         if ('button.main.admin' === $replyButtonKey || self::BUTTON_ADMIN_MENU === $text) {
             if (!$isAdmin) {
                 $this->debugLog(sprintf('admin_text_unauthorized actor_id="%s"', $actorId));
-                $this->telegramApiClient->sendMessage($chatId, $this->botTextResolver->message('admin.unauthorized'), $this->keyboardFactory->mainReplyKeyboard(false, $this->hasActiveIncompleteOrder($account), $this->hasTrackableOrders($account)));
+                $this->telegramApiClient->sendMessage($chatId, $this->botTextResolver->message('admin.unauthorized'), $this->mainKeyboard($account, false, $this->hasActiveIncompleteOrder($account), $this->hasTrackableOrders($account)));
 
                 return;
             }
@@ -277,7 +297,7 @@ class TelegramUpdateHandler
         }
 
         if ('' !== $text && !($openPayment instanceof Payment)) {
-            $this->telegramApiClient->sendMessage($chatId, $this->botTextResolver->message('bot.unknown_message'), $this->keyboardFactory->mainReplyKeyboard($isAdmin, $this->hasActiveIncompleteOrder($account), $this->hasTrackableOrders($account)));
+            $this->telegramApiClient->sendMessage($chatId, $this->botTextResolver->message('bot.unknown_message'), $this->mainKeyboard($account, $isAdmin, $this->hasActiveIncompleteOrder($account), $this->hasTrackableOrders($account)));
         }
     }
 
@@ -310,13 +330,19 @@ class TelegramUpdateHandler
             return;
         }
 
+        if ($this->resellerBotHandler->supports($data)) {
+            $this->resellerBotHandler->handle($account, $chatId, $callbackId, $data);
+
+            return;
+        }
+
         $admin = $this->accessPolicy->botActor($actorId);
         $isAdmin = null !== $admin;
 
         if ('main_menu' === $data) {
             $this->acknowledgeCallback($callbackId);
             $hasIncomplete = $this->hasActiveIncompleteOrder($account);
-            $this->telegramApiClient->sendMessage($chatId, $this->botTextResolver->message('bot.main_menu'), $this->keyboardFactory->mainReplyKeyboard($isAdmin, $hasIncomplete, $this->hasTrackableOrders($account)));
+            $this->telegramApiClient->sendMessage($chatId, $this->botTextResolver->message('bot.main_menu'), $this->mainKeyboard($account, $isAdmin, $hasIncomplete, $this->hasTrackableOrders($account)));
             $this->sendIncompleteOrderPromptIfAny($account, $chatId);
 
             return;
@@ -552,7 +578,7 @@ class TelegramUpdateHandler
     private function handleStart(TelegramAccount $account, string $chatId, bool $isAdmin): void
     {
         $hasIncomplete = $this->hasActiveIncompleteOrder($account);
-        $this->telegramApiClient->sendMessage($chatId, $this->botTextResolver->message('bot.welcome'), $this->keyboardFactory->mainReplyKeyboard($isAdmin, $hasIncomplete, $this->hasTrackableOrders($account)));
+        $this->telegramApiClient->sendMessage($chatId, $this->botTextResolver->message('bot.welcome'), $this->mainKeyboard($account, $isAdmin, $hasIncomplete, $this->hasTrackableOrders($account)));
         $this->sendIncompleteOrderPromptIfAny($account, $chatId);
     }
 
@@ -946,7 +972,7 @@ class TelegramUpdateHandler
         }
 
         $this->acknowledgeCallback($callbackId);
-        $this->telegramApiClient->sendMessage($chatId, 'سفارش ناتمام حذف شد.', $this->keyboardFactory->mainReplyKeyboard(false, false, $this->hasTrackableOrders($account)));
+        $this->telegramApiClient->sendMessage($chatId, 'سفارش ناتمام حذف شد.', $this->mainKeyboard($account, false, false, $this->hasTrackableOrders($account)));
     }
 
     private function handleSelectPaymentMethodFromDraft(TelegramAccount $account, string $chatId, string $data, ?string $callbackId = null): void
@@ -2376,7 +2402,7 @@ class TelegramUpdateHandler
             }
         }
 
-        $this->telegramApiClient->sendMessage($chatId, 'سفارش ناتمامی وجود ندارد.', $this->keyboardFactory->mainReplyKeyboard($isAdmin, false, $this->hasTrackableOrders($account)));
+        $this->telegramApiClient->sendMessage($chatId, 'سفارش ناتمامی وجود ندارد.', $this->mainKeyboard($account, $isAdmin, false, $this->hasTrackableOrders($account)));
     }
 
     private function handleTrackOrdersByText(TelegramAccount $account, string $chatId, bool $isAdmin): void
@@ -2384,7 +2410,7 @@ class TelegramUpdateHandler
         $orders = $this->findRecentTrackableOrders($account->getUser(), 5);
         $this->debugLog(sprintf('trackable_order_count user_id=%d count=%d', (int) ($account->getUser()->getId() ?? 0), count($orders)));
         if ([] === $orders) {
-            $this->telegramApiClient->sendMessage($chatId, 'سفارش قابل پیگیری وجود ندارد.', $this->keyboardFactory->mainReplyKeyboard($isAdmin, $this->hasActiveIncompleteOrder($account), false));
+            $this->telegramApiClient->sendMessage($chatId, 'سفارش قابل پیگیری وجود ندارد.', $this->mainKeyboard($account, $isAdmin, $this->hasActiveIncompleteOrder($account), false));
 
             return;
         }
@@ -2472,7 +2498,7 @@ class TelegramUpdateHandler
             return;
         }
 
-        $this->telegramApiClient->sendMessage($chatId, 'سفارش ناتمامی وجود ندارد.', $this->keyboardFactory->mainReplyKeyboard($isAdmin, false, $this->hasTrackableOrders($account)));
+        $this->telegramApiClient->sendMessage($chatId, 'سفارش ناتمامی وجود ندارد.', $this->mainKeyboard($account, $isAdmin, false, $this->hasTrackableOrders($account)));
     }
 
     private function handleIncompleteOrderCancelConfirm(TelegramAccount $account, string $chatId, string $data, ?string $callbackId, bool $isAdmin): void
@@ -2498,7 +2524,7 @@ class TelegramUpdateHandler
         $cancelled = $this->incompleteOrderService->cancelContext($account->getUser(), $context);
         if ($cancelled instanceof IncompleteOrderContext) {
             $this->acknowledgeCallback($callbackId);
-            $this->telegramApiClient->sendMessage($chatId, 'سفارش ناتمام حذف شد.', $this->keyboardFactory->mainReplyKeyboard($isAdmin, false, $this->hasTrackableOrders($account)));
+            $this->telegramApiClient->sendMessage($chatId, 'سفارش ناتمام حذف شد.', $this->mainKeyboard($account, $isAdmin, false, $this->hasTrackableOrders($account)));
 
             return;
         }
@@ -2789,7 +2815,7 @@ class TelegramUpdateHandler
         $this->telegramApiClient->sendMessage(
             $chatId,
             $this->salesDisabledMessage(),
-            $this->keyboardFactory->mainReplyKeyboard($isAdmin, $this->hasActiveIncompleteOrder($account), $this->hasTrackableOrders($account))
+            $this->mainKeyboard($account, $isAdmin, $this->hasActiveIncompleteOrder($account), $this->hasTrackableOrders($account))
         );
     }
 

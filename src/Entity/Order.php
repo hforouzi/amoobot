@@ -10,6 +10,7 @@ use Doctrine\ORM\Mapping as ORM;
 
 #[ORM\Entity]
 #[ORM\Table(name: '`order`')]
+#[ORM\Index(name: 'idx_order_reseller', columns: ['reseller_id', 'status', 'created_at'])]
 class Order
 {
     #[ORM\Id]
@@ -53,6 +54,24 @@ class Order
 
     #[ORM\Column(nullable: true)]
     private ?\DateTimeImmutable $provisionedAt = null;
+
+    /**
+     * The reseller who bought this order at wholesale (new service, renewal, add traffic), or null for a retail order.
+     * Such an order is paid from the reseller's wallet only (ResellerCheckout); no gateway is ever offered for it.
+     */
+    #[ORM\ManyToOne]
+    #[ORM\JoinColumn(nullable: true, onDelete: 'RESTRICT')]
+    private ?Reseller $reseller = null;
+
+    /** Reseller orders: what the reseller pays (= amount), the retail value and the floor at that moment (snapshot). */
+    #[ORM\Column(nullable: true)]
+    private ?int $wholesaleAmount = null;
+
+    #[ORM\Column(nullable: true)]
+    private ?int $retailAmount = null;
+
+    #[ORM\Column(nullable: true)]
+    private ?int $resellerFloorAmount = null;
 
     public function __construct()
     {
@@ -212,6 +231,42 @@ class Order
     public function setProvisionedAt(?\DateTimeImmutable $provisionedAt): self
     {
         $this->provisionedAt = $provisionedAt;
+
+        return $this;
+    }
+
+    public function getReseller(): ?Reseller
+    {
+        return $this->reseller;
+    }
+
+    public function isResellerOrder(): bool
+    {
+        return null !== $this->reseller;
+    }
+
+    public function getWholesaleAmount(): ?int
+    {
+        return $this->wholesaleAmount;
+    }
+
+    public function getRetailAmount(): ?int
+    {
+        return $this->retailAmount;
+    }
+
+    public function getResellerFloorAmount(): ?int
+    {
+        return $this->resellerFloorAmount;
+    }
+
+    /** Marks a new order as a reseller's, with its price snapshot (ResellerCheckout only, before it is persisted). */
+    public function attributeToReseller(Reseller $reseller, int $wholesaleAmount, int $retailAmount, int $floorAmount): self
+    {
+        $this->reseller = $reseller;
+        $this->wholesaleAmount = $wholesaleAmount;
+        $this->retailAmount = $retailAmount;
+        $this->resellerFloorAmount = $floorAmount;
 
         return $this;
     }

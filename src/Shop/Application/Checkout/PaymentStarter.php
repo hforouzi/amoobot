@@ -96,6 +96,10 @@ final class PaymentStarter
      */
     public function start(Order $order, StorePaymentMethod $storePaymentMethod): PaymentStart
     {
+        if ($order->isResellerOrder()) {
+            // methodsFor() offers no method for it (StorePaymentMethodResolver); a caller that got one elsewhere is a bug.
+            throw new \LogicException(sprintf('Reseller order #%d is paid from the wallet only.', (int) $order->getId()));
+        }
         $gateway = $storePaymentMethod->getGateway();
         if (OrderType::NEW_SERVICE === $order->getType() && !$order->requirePlan()->isActive()) {
             return new PaymentStart(PaymentStart::KIND_PLAN_INACTIVE, null, false, null, 0);

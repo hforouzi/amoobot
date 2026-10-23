@@ -1,0 +1,153 @@
+{# ResellerAdminController::show: one reseller: wallet, profile, per-plan rules, orders (with refunds). #}
+{% extends '@EasyAdmin/page/content.html.twig' %}
+{% trans_default_domain 'admin' %}
+{% set toman = ('currency.' ~ constant('App\\Payment\\Domain\\Money\\AmountNormalizer::SHOP_CURRENCY'))|trans %}
+{% set canManage = is_granted('PERM_RESELLERS_MANAGE') %}
+{% set canRefund = canManage and is_granted('PERM_WALLETS_MANAGE') %}
+
+{% block content_title %}{{ 'reseller_admin.detail_title'|trans({'%customer%': reseller.user.name ?? ('#' ~ reseller.user.id)}) }}{% endblock %}
+
+{% block main %}
+    <div class="admin-custom-page admin-reseller-page" data-reseller-id="{{ reseller.id }}">
+        {% if not enabled %}<p class="alert alert-warning" data-resellers-off>{{ 'reseller_admin.feature_off'|trans }}</p>{% endif %}
+        <div class="admin-dashboard-cards">
+            <div class="admin-dashboard-card"><span class="admin-dashboard-card-count" data-status="{{ reseller.status }}">{{ ('reseller_admin.status.' ~ reseller.status)|trans }}</span><span class="admin-dashboard-card-label">{{ 'reseller_admin.fields.status'|trans }}</span></div>
+            <div class="admin-dashboard-card"><span class="admin-dashboard-card-count" data-balance="{{ wallet.balance ?? 0 }}"><bdi>{{ (wallet.balance ?? 0)|number_format }}</bdi> <small>{{ toman }}</small></span><span class="admin-dashboard-card-label">{{ 'reseller_admin.fields.balance'|trans }}</span></div>
+            <div class="admin-dashboard-card"><span class="admin-dashboard-card-count" data-credit-limit="{{ wallet.creditLimit ?? 0 }}"><bdi>{{ (wallet.creditLimit ?? 0)|number_format }}</bdi> <small>{{ toman }}</small></span><span class="admin-dashboard-card-label">{{ 'reseller_admin.fields.credit_limit'|trans }}</span></div>
+            {% if spentToday is not null %}
+                <div class="admin-dashboard-card"><span class="admin-dashboard-card-count" data-spent-today="{{ spentToday }}"><bdi>{{ spentToday|number_format }} / {{ reseller.dailySpendLimit|number_format }}</bdi> <small>{{ toman }}</small></span><span class="admin-dashboard-card-label">{{ 'reseller_admin.fields.spent_today'|trans }}</span></div>
+            {% endif %}
+        </div>
+        <nav class="admin-actions">
+            <a class="btn btn-secondary" href="{{ path('admin_wallet_customer', {id: reseller.user.id}) }}">{{ 'reseller_admin.wallet_link'|trans }}</a>
+            <a class="btn btn-secondary" href="{{ path('admin_reseller_report') }}">{{ 'reseller_admin.report.title'|trans }}</a>
+        </nav>
+
+        {% if canManage %}
+            <form method="post" action="{{ path('admin_reseller_update', {id: reseller.id}) }}" class="admin-form-card" data-update-form>
+                <h2>{{ 'reseller_admin.edit.title'|trans }}</h2>
+                <input type="hidden" name="_token" value="{{ csrf_token(csrf) }}">
+                <div class="admin-form-grid">
+                    {{ include('admin/reseller/_profile_fields.html.twig', {values: {discount_percent: discountPercent, daily_spend_limit: reseller.dailySpendLimit, display_name: reseller.displayName, note: reseller.note}}) }}
+                </div>
+                <div class="admin-actions"><button type="submit" class="btn btn-primary">{{ 'common.save'|trans }}</button></div>
+            </form>
+            <form method="post" action="{{ path(reseller.active ? 'admin_reseller_disable' : 'admin_reseller_enable', {id: reseller.id}) }}" class="admin-form-card" data-status-form>
+                <input type="hidden" name="_token" value="{{ csrf_token(csrf) }}">
+                <p class="form-text">{{ (reseller.active ? 'reseller_admin.help.disable' : 'reseller_admin.help.enable')|trans }}</p>
+                <button type="submit" class="btn {{ reseller.active ? 'btn-danger' : 'btn-primary' }}">{{ (reseller.active ? 'reseller_admin.disable' : 'reseller_admin.enable')|trans }}</button>
+            </form>
+        {% else %}
+            <dl class="admin-form-card">
+                <dt>{{ 'reseller_admin.fields.discount'|trans }}</dt><dd><bdi>{{ discountPercent }}%</bdi></dd>
+                <dt>{{ 'reseller_admin.fields.daily_limit'|trans }}</dt><dd>{% if reseller.dailySpendLimit %}<bdi>{{ reseller.dailySpendLimit|number_format }}</bdi> {{ toman }}{% else %}—{% endif %}</dd>
+                <dt>{{ 'reseller_admin.fields.display_name'|trans }}</dt><dd>{{ reseller.displayName ?? '—' }}</dd>
+                <dt>{{ 'reseller_admin.fields.note'|trans }}</dt><dd>{{ reseller.note ?? '—' }}</dd>
+            </dl>
+        {% endif %}
+
+        <div class="admin-form-card" data-rules>
+            <h2>{{ 'reseller_admin.rules.title'|trans }}</h2>
+            <p class="form-text">{{ 'reseller_admin.rules.help'|trans({'%floor%': floorPercent}) }}</p>
+            {% if rules is empty %}
+                <p class="text-muted" data-no-rules>{{ 'reseller_admin.rules.empty'|trans }}</p>
+            {% else %}
+                <table class="table datagrid">
+                    <thead><tr><th>{{ 'reseller_admin.rules.plan'|trans }}</th><th>{{ 'reseller_admin.rules.rule'|trans }}</th><th></th></tr></thead>
+                    <tbody>
+                    {% for rule in rules %}
+                        <tr data-rule-plan="{{ rule.plan.id }}">
+                            <td>{{ rule.plan.title }}</td>
+                            <td>
+                                {% if rule.fixedAmount is not null %}<bdi>{{ rule.fixedAmount|number_format }}</bdi> {{ toman }}{% else %}<bdi>{{ (rule.discountBp / 100)|number_format(2) }}%</bdi>{% endif %}
+                                {% if clipped[rule.id] %} <span class="badge badge-warning" data-clipped>{{ 'reseller_admin.rules.clipped'|trans }}</span>{% endif %}
+                            </td>
+                            <td>
+                                {% if canManage %}
+                                    <form method="post" action="{{ path('admin_reseller_plan_price_remove', {id: reseller.id, planId: rule.plan.id}) }}">
+                                        <input type="hidden" name="_token" value="{{ csrf_token(csrf) }}">
+                                        <button type="submit" class="btn btn-sm btn-secondary">{{ 'reseller_admin.rules.remove'|trans }}</button>
+                                    </form>
+                                {% endif %}
+                            </td>
+                        </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            {% endif %}
+            {% if canManage %}
+                <form method="post" action="{{ path('admin_reseller_plan_price', {id: reseller.id}) }}" data-rule-form>
+                    <input type="hidden" name="_token" value="{{ csrf_token(csrf) }}">
+                    <div class="admin-form-grid">
+                        <div class="admin-form-row">
+                            <label class="form-label" for="plan_id">{{ 'reseller_admin.rules.plan'|trans }}</label>
+                            <select class="form-control" id="plan_id" name="plan_id">
+                                {% for plan in plans %}<option value="{{ plan.id }}">{{ plan.title }}{% if plan.customizable %} ({{ 'reseller_admin.rules.customizable'|trans }}){% endif %}</option>{% endfor %}
+                            </select>
+                        </div>
+                        <div class="admin-form-row">
+                            <label class="form-label" for="kind">{{ 'reseller_admin.rules.kind'|trans }}</label>
+                            <select class="form-control" id="kind" name="kind">
+                                <option value="percent">{{ 'reseller_admin.rules.kind_percent'|trans }}</option>
+                                <option value="fixed">{{ 'reseller_admin.rules.kind_fixed'|trans }}</option>
+                            </select>
+                        </div>
+                        <div class="admin-form-row">
+                            <label class="form-label" for="value">{{ 'reseller_admin.rules.value'|trans }}</label>
+                            <input class="form-control" type="text" inputmode="decimal" dir="ltr" id="value" name="value" required>
+                        </div>
+                    </div>
+                    <div class="admin-actions"><button type="submit" class="btn btn-primary">{{ 'reseller_admin.rules.save'|trans }}</button></div>
+                </form>
+            {% endif %}
+        </div>
+
+        <div class="admin-form-card" data-orders>
+            <h2>{{ 'reseller_admin.orders.title'|trans }}</h2>
+            {% if orders is empty %}
+                <p class="text-muted" data-no-orders>{{ 'reseller_admin.orders.empty'|trans }}</p>
+            {% else %}
+                <table class="table datagrid">
+                    <thead><tr>
+                        <th>#</th>
+                        <th>{{ 'reseller_admin.orders.type'|trans }}</th>
+                        <th>{{ 'reseller_admin.orders.status'|trans }}</th>
+                        <th>{{ 'reseller_admin.orders.wholesale'|trans }}</th>
+                        <th>{{ 'reseller_admin.orders.retail'|trans }}</th>
+                        <th>{{ 'reseller_admin.orders.created'|trans }}</th>
+                        <th>{{ 'reseller_admin.orders.refund'|trans }}</th>
+                    </tr></thead>
+                    <tbody>
+                    {% for order in orders %}
+                        <tr data-order-id="{{ order.id }}">
+                            <td>{{ order.id }}</td>
+                            <td>{{ ('reseller_admin.order_type.' ~ order.type)|trans }}</td>
+                            <td>{{ order.status }}</td>
+                            <td><bdi>{{ (order.wholesaleAmount ?? order.amount)|number_format }}</bdi> {{ toman }}</td>
+                            <td><bdi>{{ (order.retailAmount ?? 0)|number_format }}</bdi> {{ toman }}</td>
+                            <td>{{ order.createdAt|date('Y-m-d H:i') }}</td>
+                            <td>
+                                {% if refunded[order.id] %}
+                                    <span data-refunded><bdi>{{ refunded[order.id].amount|number_format }}</bdi> {{ toman }}</span>
+                                {% elseif canRefund and refundable[order.id] and order.status == 'provisioned' %}
+                                    <form method="post" action="{{ path('admin_reseller_order_refund', {orderId: order.id}) }}" class="admin-inline-form" data-refund-form>
+                                        <input type="hidden" name="_token" value="{{ csrf_token(csrf) }}">
+                                        <input class="form-control form-control-sm" type="number" min="1" max="{{ refundable[order.id] }}" step="1" name="amount" value="{{ refundable[order.id] }}" dir="ltr" required>
+                                        <input class="form-control form-control-sm" type="text" name="reason" minlength="3" maxlength="500" placeholder="{{ 'reseller_admin.refund.reason'|trans }}" required>
+                                        <button type="submit" class="btn btn-sm btn-secondary">{{ 'reseller_admin.refund.review'|trans }}</button>
+                                    </form>
+                                {% else %}—{% endif %}
+                            </td>
+                        </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+                <nav class="admin-actions">
+                    {% if page > 1 %}<a class="btn btn-secondary" href="{{ path('admin_reseller', {id: reseller.id, page: page - 1}) }}">{{ 'wallet_admin.previous'|trans }}</a>{% endif %}
+                    {% if hasNext %}<a class="btn btn-secondary" href="{{ path('admin_reseller', {id: reseller.id, page: page + 1}) }}">{{ 'wallet_admin.next'|trans }}</a>{% endif %}
+                </nav>
+            {% endif %}
+            <p class="form-text">{{ 'reseller_admin.refund.help'|trans }}</p>
+        </div>
+    </div>
+{% endblock %}

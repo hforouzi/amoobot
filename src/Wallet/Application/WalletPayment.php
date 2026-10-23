@@ -55,10 +55,13 @@ final class WalletPayment
     ) {
     }
 
-    /** Whether to offer "pay from wallet" for this order: switched on, payable, not frozen, and the wallet covers it. */
+    /**
+     * Whether to offer "pay from wallet" for this order: switched on, payable, not frozen, and the wallet covers it.
+     * Never for a reseller's order: that one is paid by ResellerCheckout in the same call that created it.
+     */
     public function canPay(Order $order): bool
     {
-        if (!$this->settings->paymentEnabled() || !in_array($order->getType(), self::PAYABLE_ORDER_TYPES, true) || OrderStatus::WAITING_PAYMENT !== $order->getStatus()) {
+        if (!$this->settings->paymentEnabled() || $order->isResellerOrder() || !in_array($order->getType(), self::PAYABLE_ORDER_TYPES, true) || OrderStatus::WAITING_PAYMENT !== $order->getStatus()) {
             return false;
         }
         $wallet = $this->wallets->find($order->getUser());
@@ -80,7 +83,7 @@ final class WalletPayment
             throw new WalletException('wallet_payment_disabled');
         }
         $this->entityManager->refresh($order);
-        if (!in_array($order->getType(), self::PAYABLE_ORDER_TYPES, true) || OrderStatus::WAITING_PAYMENT !== $order->getStatus()) {
+        if ($order->isResellerOrder() || !in_array($order->getType(), self::PAYABLE_ORDER_TYPES, true) || OrderStatus::WAITING_PAYMENT !== $order->getStatus()) {
             throw new WalletException('order_not_payable');
         }
         $wallet = $this->wallets->find($order->getUser());
@@ -101,12 +104,15 @@ final class WalletPayment
     /**
      * Pays the order from the wallet and settles it.
      *
+     * @param bool $resellerCheckout true only from ResellerCheckout: a reseller's order is paid there, at the price
+     *                               snapshot it was created with, and never through the customer's "pay from wallet"
+     *
      * @throws WalletException wallet_payment_disabled, order_not_payable, plan_unavailable, payment_in_progress,
      *                         wallet_frozen, wallet_insufficient: nothing was debited
      */
-    public function pay(Order $order): SettlementResult
+    public function pay(Order $order, bool $resellerCheckout = false): SettlementResult
     {
-        $payment = $this->open($order);
+        $payment = $this->open($order, $resellerCheckout);
         $debit = $this->wallets->findTransaction(WalletKeys::purchase((int) $payment->getId())) ?? throw new \LogicException('A wallet payment without its debit.');
 
         return $this->settlement->settle($payment, VerifiedPayment::fromGateway(new PaymentVerificationResult(
@@ -121,9 +127,11 @@ final class WalletPayment
     /**
      * The order's wallet payment with its debit, created atomically (or the existing unsettled one, already debited).
      *
+     * @param bool $resellerCheckout see pay()
+     *
      * @throws WalletException see pay()
      */
-    public function open(Order $order): Payment
+    public function open(Order $order, bool $resellerCheckout = false): Payment
     {
         if (!$this->settings->paymentEnabled()) {
             throw new WalletException('wallet_payment_disabled');
@@ -142,7 +150,7 @@ final class WalletPayment
         try {
             $order = $this->entityManager->find(Order::class, $orderId) ?? throw new WalletException('order_not_payable');
             $this->entityManager->refresh($order, LockMode::PESSIMISTIC_WRITE);
-            if (OrderStatus::WAITING_PAYMENT !== $order->getStatus()) {
+            if (OrderStatus::WAITING_PAYMENT !== $order->getStatus() || $order->isResellerOrder() !== $resellerCheckout) {
                 throw new WalletException('order_not_payable');
             }
             if (OrderType::NEW_SERVICE === $order->getType() && !$order->requirePlan()->isActive()) {

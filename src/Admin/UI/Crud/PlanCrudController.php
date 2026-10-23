@@ -116,6 +116,7 @@ class PlanCrudController extends AbstractCrudController
             IntegerField::new('pricePerDay')->hideOnIndex()->setHelp(self::TOMAN_HELP),
             BooleanField::new('allowCustomUsername')->hideOnIndex(),
             BooleanField::new('isUnlimitedDuration')->hideOnIndex()->setHelp('help.plan.is_unlimited_duration'),
+            IntegerField::new('resellerFloorAmount')->hideOnIndex()->setHelp('help.plan.reseller_floor_amount'),
             DateTimeField::new('createdAt')->hideOnForm()->hideOnIndex(),
             DateTimeField::new('updatedAt')->hideOnForm()->hideOnIndex(),
         ];

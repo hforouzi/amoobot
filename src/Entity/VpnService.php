@@ -9,6 +9,7 @@ use Doctrine\ORM\Mapping as ORM;
 
 #[ORM\Entity]
 #[ORM\UniqueConstraint(name: 'uniq_vpn_service_public_token', columns: ['public_token'])]
+#[ORM\Index(name: 'idx_vpn_service_sold_by', columns: ['sold_by_reseller_id', 'status'])]
 class VpnService
 {
     #[ORM\Id]
@@ -102,6 +103,11 @@ class VpnService
     #[ORM\Column(length: 64)]
     private string $publicToken;
 
+    /** The reseller whose order created this service (from order.reseller at provisioning); kept when the owner changes. */
+    #[ORM\ManyToOne]
+    #[ORM\JoinColumn(nullable: true, onDelete: 'RESTRICT')]
+    private ?Reseller $soldByReseller = null;
+
     public function __construct()
     {
         $this->createdAt = new \DateTimeImmutable();
@@ -117,6 +123,18 @@ class VpnService
     public function getPublicToken(): string
     {
         return $this->publicToken;
+    }
+
+    public function getSoldByReseller(): ?Reseller
+    {
+        return $this->soldByReseller;
+    }
+
+    public function setSoldByReseller(?Reseller $soldByReseller): self
+    {
+        $this->soldByReseller = $soldByReseller;
+
+        return $this;
     }
 
     public function rotatePublicToken(): self

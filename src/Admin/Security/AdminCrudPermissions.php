@@ -33,6 +33,14 @@ final class AdminCrudPermissions
         'admin_wallet_freeze' => AdminPermission::WALLETS_MANAGE,
         'admin_wallet_unfreeze' => AdminPermission::WALLETS_MANAGE,
         'admin_wallet_customer_open' => AdminPermission::WALLETS_MANAGE,
+        // Reseller writes (the pages themselves need RESELLERS_VIEW). The refund also checks WALLETS_MANAGE itself.
+        'admin_reseller_create' => AdminPermission::RESELLERS_MANAGE,
+        'admin_reseller_update' => AdminPermission::RESELLERS_MANAGE,
+        'admin_reseller_plan_price' => AdminPermission::RESELLERS_MANAGE,
+        'admin_reseller_plan_price_remove' => AdminPermission::RESELLERS_MANAGE,
+        'admin_reseller_enable' => AdminPermission::RESELLERS_MANAGE,
+        'admin_reseller_disable' => AdminPermission::RESELLERS_MANAGE,
+        'admin_reseller_order_refund' => AdminPermission::RESELLERS_MANAGE,
     ];
 
     /** Dashboard, login/logout, locale switch: any admin (access_control ^/admin). */
@@ -66,6 +74,7 @@ final class AdminCrudPermissions
             \App\Admin\UI\RenewalPricingAdminController::class => $p(AdminPermission::SETTINGS_MANAGE),
             Crud\UserCrudController::class => $p(AdminPermission::CUSTOMERS_VIEW, AdminPermission::CUSTOMERS_MANAGE),
             \App\Admin\UI\WalletAdminController::class => $p(AdminPermission::WALLETS_VIEW, AdminPermission::WALLETS_MANAGE),
+            \App\Admin\UI\ResellerAdminController::class => $p(AdminPermission::RESELLERS_VIEW, AdminPermission::RESELLERS_MANAGE),
             Crud\TelegramAccountCrudController::class => $p(AdminPermission::CUSTOMERS_VIEW, AdminPermission::CUSTOMERS_MANAGE),
             Crud\VpnServiceCrudController::class => $p(AdminPermission::SERVICES_VIEW, AdminPermission::SERVICES_MANAGE, AdminPermission::SERVICES_DELETE),
             // "New subscription page link" of a service.

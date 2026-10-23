@@ -15,6 +15,7 @@ Amoobot یک فروشگاه VPN مبتنی بر تلگرام است که با Sy
 - [اتصال پنل 3x-ui با API Token](panel-connection.md)
 - [اتوماسیون](automation.md)
 - [پرداخت‌ها](payments/overview.md)
+- [نماینده‌ها](resellers.md)
 - [پلاگین‌ها](plugins/overview.md)
 - [عیب‌یابی](troubleshooting/payment-methods-not-showing.md)
 - [توسعه‌دهندگان](development/architecture.md)

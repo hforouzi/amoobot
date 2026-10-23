@@ -156,6 +156,10 @@ final class StorePaymentMethodResolver
 
         foreach ($this->allMethods() as $method) {
             $skipReasons = [];
+            // A reseller's order is paid from his wallet only (ResellerCheckout), never through a gateway or a receipt.
+            if ($order->isResellerOrder()) {
+                $skipReasons[] = 'reseller_order_wallet_only';
+            }
             $gateway = $method->getGateway();
             $gatewayType = trim((string) $gateway->getType());
             $methodCurrency = $this->normalizeCurrency($method->getCurrency());

@@ -1,0 +1,61 @@
+{# ResellerAdminController::index: every reseller profile with its wallet, and (RESELLERS_MANAGE) a new profile. #}
+{% extends '@EasyAdmin/page/content.html.twig' %}
+{% trans_default_domain 'admin' %}
+{% set toman = ('currency.' ~ constant('App\\Payment\\Domain\\Money\\AmountNormalizer::SHOP_CURRENCY'))|trans %}
+
+{% block content_title %}{{ 'reseller_admin.title'|trans }}{% endblock %}
+
+{% block main %}
+    <div class="admin-custom-page admin-resellers-page">
+        {% if not enabled %}<p class="alert alert-warning" data-resellers-off>{{ 'reseller_admin.feature_off'|trans }}</p>{% endif %}
+        <nav class="admin-actions"><a class="btn btn-secondary" href="{{ path('admin_reseller_report') }}">{{ 'reseller_admin.report.title'|trans }}</a></nav>
+
+        {% if resellers is empty %}
+            <p class="admin-page-subtitle" data-no-resellers>{{ 'reseller_admin.empty'|trans }}</p>
+        {% else %}
+            <table class="table datagrid">
+                <thead><tr>
+                    <th>{{ 'reseller_admin.fields.customer'|trans }}</th>
+                    <th>{{ 'reseller_admin.fields.status'|trans }}</th>
+                    <th>{{ 'reseller_admin.fields.discount'|trans }}</th>
+                    <th>{{ 'reseller_admin.fields.balance'|trans }}</th>
+                    <th>{{ 'reseller_admin.fields.credit_limit'|trans }}</th>
+                    <th>{{ 'reseller_admin.fields.daily_limit'|trans }}</th>
+                </tr></thead>
+                <tbody>
+                {% for reseller in resellers %}
+                    {% set wallet = wallets[reseller.id] %}
+                    <tr data-reseller-id="{{ reseller.id }}">
+                        <td><a href="{{ path('admin_reseller', {id: reseller.id}) }}">{{ reseller.user.name ?? ('#' ~ reseller.user.id) }}</a>{% if reseller.displayName %} <span class="text-muted">({{ reseller.displayName }})</span>{% endif %}</td>
+                        <td>{{ ('reseller_admin.status.' ~ reseller.status)|trans }}</td>
+                        <td><bdi>{{ (reseller.discountBp / 100)|number_format(2) }}%</bdi></td>
+                        <td><bdi>{{ (wallet.balance ?? 0)|number_format }}</bdi> {{ toman }}</td>
+                        <td><bdi>{{ (wallet.creditLimit ?? 0)|number_format }}</bdi> {{ toman }}</td>
+                        <td>{% if reseller.dailySpendLimit %}<bdi>{{ reseller.dailySpendLimit|number_format }}</bdi> {{ toman }}{% else %}—{% endif %}</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            <nav class="admin-actions">
+                {% if page > 1 %}<a class="btn btn-secondary" href="{{ path('admin_resellers', {page: page - 1}) }}">{{ 'wallet_admin.previous'|trans }}</a>{% endif %}
+                {% if hasNext %}<a class="btn btn-secondary" href="{{ path('admin_resellers', {page: page + 1}) }}">{{ 'wallet_admin.next'|trans }}</a>{% endif %}
+            </nav>
+        {% endif %}
+
+        {% if is_granted('PERM_RESELLERS_MANAGE') %}
+            <form method="post" action="{{ path('admin_reseller_create') }}" class="admin-form-card" data-create-form>
+                <h2>{{ 'reseller_admin.create.title'|trans }}</h2>
+                <p class="form-text">{{ 'reseller_admin.create.help'|trans }}</p>
+                <input type="hidden" name="_token" value="{{ csrf_token(csrf) }}">
+                <div class="admin-form-grid">
+                    <div class="admin-form-row">
+                        <label class="form-label" for="customer">{{ 'reseller_admin.create.customer'|trans }}</label>
+                        <input class="form-control" type="text" id="customer" name="customer" required dir="ltr">
+                    </div>
+                    {{ include('admin/reseller/_profile_fields.html.twig', {values: {discount_percent: '0', daily_spend_limit: '', display_name: '', note: ''}}) }}
+                </div>
+                <div class="admin-actions"><button type="submit" class="btn btn-primary">{{ 'reseller_admin.create.submit'|trans }}</button></div>
+            </form>
+        {% endif %}
+    </div>
+{% endblock %}

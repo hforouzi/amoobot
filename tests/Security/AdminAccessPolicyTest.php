@@ -17,7 +17,7 @@ use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
  */
 final class AdminAccessPolicyTest extends KernelTestCase
 {
-    private const SUPPORT = ['ORDERS_VIEW', 'PAYMENTS_VIEW', 'CUSTOMERS_VIEW', 'SERVICES_VIEW', 'SERVICES_ASSIST', 'WALLETS_VIEW'];
+    private const SUPPORT = ['ORDERS_VIEW', 'PAYMENTS_VIEW', 'CUSTOMERS_VIEW', 'SERVICES_VIEW', 'SERVICES_ASSIST', 'WALLETS_VIEW', 'RESELLERS_VIEW'];
     private const NOT_FOR_ADMIN = ['GATEWAYS_MANAGE', 'PANELS_MANAGE', 'PLUGINS_MANAGE', 'SETTINGS_MANAGE', 'ADMINS_MANAGE', 'LOGS_VIEW'];
 
     /**

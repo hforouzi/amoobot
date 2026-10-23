@@ -1,0 +1,34 @@
+{# Settings page, "resellers" tab: the reseller switch and the wholesale floor / rounding (docs/design/reseller-and-claim.md). #}
+{% trans_default_domain 'admin' %}
+    <p class="admin-page-subtitle">{{ 'reseller_settings.subtitle'|trans }}</p>
+
+    <form method="post" action="{{ path('admin_settings', {tab: 'resellers'}) }}" class="admin-form-card admin-settings-form">
+        <div class="admin-section">
+            <h2>{{ 'reseller_settings.sections.switches'|trans }}</h2>
+            <div class="admin-checkbox-row">
+                <input type="checkbox" id="reseller_enabled" name="reseller_enabled" {% if values.reseller_enabled %}checked{% endif %}>
+                <label for="reseller_enabled">{{ 'reseller_settings.fields.enabled'|trans }}</label>
+            </div>
+            <div class="form-text">{{ 'reseller_settings.help.enabled'|trans }}</div>
+        </div>
+
+        <div class="admin-section">
+            <h2>{{ 'reseller_settings.sections.pricing'|trans }}</h2>
+            <div class="admin-form-grid">
+                <div class="admin-form-row">
+                    <label class="form-label" for="reseller_floor_percent">{{ 'reseller_settings.fields.floor_percent'|trans }}</label>
+                    <input class="form-control" type="text" inputmode="decimal" dir="ltr" id="reseller_floor_percent" name="reseller_floor_percent" value="{{ values.reseller_floor_percent }}">
+                    <div class="form-text">{{ 'reseller_settings.help.floor_percent'|trans }}</div>
+                </div>
+                <div class="admin-form-row">
+                    <label class="form-label" for="reseller_rounding">{{ 'reseller_settings.fields.rounding'|trans }}</label>
+                    <input class="form-control" type="number" min="1" step="1" dir="ltr" id="reseller_rounding" name="reseller_rounding" value="{{ values.reseller_rounding }}">
+                    <div class="form-text">{{ 'reseller_settings.help.rounding'|trans }}</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="admin-actions">
+            <button type="submit" class="btn btn-primary">{{ 'common.save'|trans }}</button>
+        </div>
+    </form>
