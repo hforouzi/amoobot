@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Wallet\UI;
 
+use App\Entity\Reseller;
 use App\Entity\User;
 use App\Wallet\Application\WalletService;
 use Doctrine\DBAL\ArrayParameterType;
@@ -23,7 +24,8 @@ use Symfony\Component\Translation\TranslatableMessage;
  * The admin's "delete" of a customer who has a wallet (EasyAdmin delete and batch delete): refused before anything is
  * removed, with a clear flash message. The wallet ledger is financial history; the database refuses the delete as well
  * (ON DELETE RESTRICT), but as a raw foreign key error page. A batch delete is refused as a whole, before anything is
- * deleted, when any selected customer has a wallet. Customers without a wallet are deleted as before; the permission
+ * deleted, when any selected customer has a wallet. A customer with a reseller profile is refused the same way (orders
+ * and services point at the profile, ON DELETE RESTRICT). Customers without either are deleted as before; the permission
  * to delete is unchanged.
  */
 final class CustomerWithWalletDeleteGuard implements EventSubscriberInterface
@@ -60,14 +62,18 @@ final class CustomerWithWalletDeleteGuard implements EventSubscriberInterface
         if ([] === $ids) {
             return;
         }
-        $withWallet = $this->entityManager->getConnection()->fetchFirstColumn('SELECT user_id FROM wallet WHERE user_id IN (?) ORDER BY user_id', [$ids], [ArrayParameterType::INTEGER]);
-        if ([] === $withWallet) {
+        $connection = $this->entityManager->getConnection();
+        $withWallet = $connection->fetchFirstColumn('SELECT user_id FROM wallet WHERE user_id IN (?) ORDER BY user_id', [$ids], [ArrayParameterType::INTEGER]);
+        $resellers = [] === $withWallet ? $connection->fetchFirstColumn('SELECT user_id FROM reseller WHERE user_id IN (?) ORDER BY user_id', [$ids], [ArrayParameterType::INTEGER]) : [];
+        if ([] === $withWallet && [] === $resellers) {
             return;
         }
 
         $session = $this->requestStack->getSession();
         if ($session instanceof FlashBagAwareSessionInterface) {
-            $session->getFlashBag()->add('danger', new TranslatableMessage('flash.customer.batch_delete_has_wallet', ['%ids%' => implode(', #', $withWallet)], 'admin'));
+            $session->getFlashBag()->add('danger', [] !== $withWallet
+                ? new TranslatableMessage('flash.customer.batch_delete_has_wallet', ['%ids%' => implode(', #', $withWallet)], 'admin')
+                : new TranslatableMessage('flash.customer.batch_delete_is_reseller', ['%ids%' => implode(', #', $resellers)], 'admin'));
         }
         $event->setResponse(new RedirectResponse($this->urlGenerator->generate('admin_customer_index')));
     }
@@ -75,13 +81,17 @@ final class CustomerWithWalletDeleteGuard implements EventSubscriberInterface
     public function refuseWithWallet(BeforeEntityDeletedEvent $event): void
     {
         $customer = $event->getEntityInstance();
-        if (!$customer instanceof User || null === $this->wallets->find($customer)) {
+        if (!$customer instanceof User) {
+            return;
+        }
+        $hasWallet = null !== $this->wallets->find($customer);
+        if (!$hasWallet && null === $this->entityManager->getRepository(Reseller::class)->findOneBy(['user' => $customer])) {
             return;
         }
 
         $session = $this->requestStack->getSession();
         if ($session instanceof FlashBagAwareSessionInterface) {
-            $session->getFlashBag()->add('danger', new TranslatableMessage('flash.customer.delete_has_wallet', ['%id%' => (string) $customer->getId()], 'admin'));
+            $session->getFlashBag()->add('danger', new TranslatableMessage($hasWallet ? 'flash.customer.delete_has_wallet' : 'flash.customer.delete_is_reseller', ['%id%' => (string) $customer->getId()], 'admin'));
         }
         $event->setResponse(new RedirectResponse($this->urlGenerator->generate('admin_customer_index')));
     }

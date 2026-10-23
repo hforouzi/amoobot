@@ -6,6 +6,7 @@ namespace App\Wallet\Application;
 
 use App\Entity\Payment;
 use App\Payment\Domain\PaymentStatus;
+use App\Provisioning\Domain\VpnServiceStatus;
 use App\Shop\Domain\OrderStatus;
 use App\Shop\Domain\OrderType;
 use App\Wallet\Domain\WalletTransactionType;
@@ -27,6 +28,12 @@ use Doctrine\ORM\EntityManagerInterface;
  * expired: nothing would ever give that debit back), and a wallet payment in provisioning_failed / needs_review whose
  * debit is held while its order failed, was cancelled or expired, or another payment of the order is confirmed.
  *
+ * Reseller orders (docs/design/reseller-and-claim.md, 4.4): one paid any other way than from the wallet; one whose
+ * held wallet debit, amount and wholesale snapshot disagree; one whose wholesale snapshot is below what the pricing
+ * allows (min(floor, retail)); a service whose sold-by reseller is not its order's reseller; and the admin refunds
+ * (refund:order:N): without their reseller order (or credited to another wallet), above what that order's wallet
+ * payment debited, or while the order's service is running again.
+ *
  * report() runs both in one read-only transaction, so every query sees the same snapshot even while payments are
  * being settled (no false alarm from a write that landed between two queries).
  */
@@ -42,6 +49,13 @@ final class WalletReconciler
     public const DEBIT_AMOUNT_MISMATCH = 'debit_amount_mismatch';
     public const HELD_DEBIT_ORDER_CLOSED = 'held_debit_order_closed';
     public const HELD_DEBIT_ORDER_PAID_OTHERWISE = 'held_debit_order_paid_otherwise';
+    public const RESELLER_ORDER_NOT_WALLET_PAID = 'reseller_order_not_wallet_paid';
+    public const RESELLER_DEBIT_SNAPSHOT_MISMATCH = 'reseller_debit_snapshot_mismatch';
+    public const RESELLER_ORDER_BELOW_FLOOR = 'reseller_order_below_floor';
+    public const RESELLER_SERVICE_ATTRIBUTION_MISMATCH = 'reseller_service_attribution_mismatch';
+    public const REFUND_WITHOUT_ORDER = 'refund_without_order';
+    public const REFUND_EXCEEDS_PAID = 'refund_exceeds_paid';
+    public const REFUND_ON_LIVE_SERVICE = 'refund_on_live_service';
 
     public function __construct(private readonly EntityManagerInterface $entityManager)
     {
@@ -123,10 +137,15 @@ final class WalletReconciler
             'orderFailed' => OrderStatus::FAILED,
             'orderCancelled' => OrderStatus::CANCELLED,
             'orderExpired' => OrderStatus::EXPIRED,
+            'refund' => WalletTransactionType::REFUND,
+            'serviceSuspended' => VpnServiceStatus::SUSPENDED,
+            'serviceDeleted' => VpnServiceStatus::DELETED,
         ];
         // The ledger keys of the payment flows (WalletKeys): 'topup:payment:<id>' and 'purchase:payment:<id>'.
         $topUpKey = "CONCAT('topup:payment:', p.id)";
         $purchaseKey = "CONCAT('purchase:payment:', p.id)";
+        // An admin refund of a reseller order (WalletKeys::orderRefund): 'refund:order:<id>' (the id starts at character 14).
+        $refundOrder = "o.id = CAST(SUBSTRING(t.idempotency_key, 14) AS UNSIGNED) AND t.idempotency_key = CONCAT('refund:order:', o.id)";
 
         $checks = [
             self::TOPUP_NOT_CREDITED => "SELECT p.id AS payment_id, NULL AS transaction_id, NULL AS wallet_id, CONCAT('confirmed top-up of order #', o.id, ' has no credit in the ledger') AS detail
@@ -180,6 +199,40 @@ final class WalletReconciler
                  FROM payment p JOIN `order` o ON o.id = p.order_id
                  LEFT JOIN wallet_transaction d ON d.idempotency_key = $purchaseKey
                  WHERE p.method = :wallet AND p.status IN (:pending, :submitted) AND o.status <> :waitingPayment",
+            // A reseller order is paid from the wallet only (no gateway is ever offered for it).
+            self::RESELLER_ORDER_NOT_WALLET_PAID => "SELECT p.id AS payment_id, NULL AS transaction_id, NULL AS wallet_id, CONCAT('reseller order #', o.id, ' has a ', p.method, ' payment (', p.status, ')') AS detail
+                 FROM payment p JOIN `order` o ON o.id = p.order_id
+                 WHERE o.reseller_id IS NOT NULL AND p.method <> :wallet",
+            // The wholesale snapshot is what is paid: the held debit, the order amount and the snapshot are one number.
+            self::RESELLER_DEBIT_SNAPSHOT_MISMATCH => "SELECT p.id AS payment_id, d.id AS transaction_id, d.wallet_id, CONCAT('reseller order #', o.id, ': debit ', -d.amount, ', order amount ', o.amount, ', wholesale snapshot ', COALESCE(o.wholesale_amount, 'missing')) AS detail
+                 FROM payment p JOIN `order` o ON o.id = p.order_id
+                 JOIN wallet_transaction d ON d.idempotency_key = $purchaseKey
+                 LEFT JOIN wallet_transaction r ON r.reversal_of_id = d.id
+                 WHERE o.reseller_id IS NOT NULL AND r.id IS NULL
+                   AND (o.wholesale_amount IS NULL OR -d.amount <> o.wholesale_amount OR o.amount <> o.wholesale_amount)",
+            // ResellerPricing never goes below min(floor, retail): retail wins only during a shop-wide promotion.
+            self::RESELLER_ORDER_BELOW_FLOOR => "SELECT NULL AS payment_id, NULL AS transaction_id, NULL AS wallet_id, CONCAT('reseller order #', o.id, ' (', o.status, '): wholesale ', COALESCE(o.wholesale_amount, 'missing'), ', floor ', COALESCE(o.reseller_floor_amount, 'missing'), ', retail ', COALESCE(o.retail_amount, 'missing'), ', amount ', o.amount) AS detail
+                 FROM `order` o
+                 WHERE o.reseller_id IS NOT NULL
+                   AND (o.wholesale_amount IS NULL OR o.reseller_floor_amount IS NULL OR o.retail_amount IS NULL
+                        OR o.wholesale_amount < LEAST(o.reseller_floor_amount, o.retail_amount) OR o.amount <> o.wholesale_amount)",
+            self::RESELLER_SERVICE_ATTRIBUTION_MISMATCH => "SELECT NULL AS payment_id, NULL AS transaction_id, NULL AS wallet_id, CONCAT('service #', s.id, ' is sold by reseller ', COALESCE(s.sold_by_reseller_id, 'none'), ' but its order #', o.id, ' is of reseller ', COALESCE(o.reseller_id, 'none')) AS detail
+                 FROM vpn_service s JOIN `order` o ON o.id = s.order_id
+                 WHERE NOT (s.sold_by_reseller_id <=> o.reseller_id)",
+            self::REFUND_WITHOUT_ORDER => "SELECT NULL AS payment_id, t.id AS transaction_id, t.wallet_id, CONCAT('refund ', t.idempotency_key, ' has no reseller order of this wallet''s customer') AS detail
+                 FROM wallet_transaction t JOIN wallet w ON w.id = t.wallet_id
+                 LEFT JOIN `order` o ON $refundOrder AND o.reseller_id IS NOT NULL AND o.user_id = w.user_id
+                 WHERE t.idempotency_key LIKE 'refund:order:%' AND o.id IS NULL",
+            self::REFUND_EXCEEDS_PAID => "SELECT p.id AS payment_id, t.id AS transaction_id, t.wallet_id, CONCAT('refund of ', t.amount, ' for order #', o.id, ' but its wallet payment debited ', COALESCE(-d.amount, 0)) AS detail
+                 FROM wallet_transaction t JOIN `order` o ON $refundOrder
+                 LEFT JOIN payment p ON p.order_id = o.id AND p.method = :wallet AND p.status = :confirmed
+                 LEFT JOIN wallet_transaction d ON d.idempotency_key = $purchaseKey
+                 WHERE t.type = :refund AND (d.id IS NULL OR t.amount > -d.amount)",
+            // Refunded because the customer no longer had the service; it is running again (a warning to look at).
+            self::REFUND_ON_LIVE_SERVICE => "SELECT NULL AS payment_id, t.id AS transaction_id, t.wallet_id, CONCAT('refund for order #', o.id, ' but service #', s.id, ' is ', s.status) AS detail
+                 FROM wallet_transaction t JOIN `order` o ON $refundOrder
+                 JOIN vpn_service s ON s.id = COALESCE(o.target_service_id, (SELECT MIN(s2.id) FROM vpn_service s2 WHERE s2.order_id = o.id))
+                 WHERE t.type = :refund AND s.status NOT IN (:serviceSuspended, :serviceDeleted)",
         ];
 
         $mismatches = [];

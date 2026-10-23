@@ -27,4 +27,13 @@ final class WalletKeys
     {
         return 'reversal:payment:'.$paymentId;
     }
+
+    /**
+     * An admin's refund of a provisioned reseller order (ResellerRefunds): at most one per order, at most the wholesale
+     * amount the order's wallet payment debited.
+     */
+    public static function orderRefund(int $orderId): string
+    {
+        return 'refund:order:'.$orderId;
+    }
 }

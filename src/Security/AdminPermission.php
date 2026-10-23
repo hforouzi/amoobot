@@ -44,4 +44,9 @@ enum AdminPermission: string
     case WALLETS_VIEW = 'PERM_WALLETS_VIEW';
     /** Change a wallet: manual credit/debit adjustment, credit limit, freeze/unfreeze (always audited). */
     case WALLETS_MANAGE = 'PERM_WALLETS_MANAGE';
+    /** Resellers: the list, a profile with its rules and sold orders, the report (read only). */
+    case RESELLERS_VIEW = 'PERM_RESELLERS_VIEW';
+    /** Create and edit reseller profiles and their wholesale rules, enable / disable them (always audited). A refund of a
+     * reseller order also needs WALLETS_MANAGE. */
+    case RESELLERS_MANAGE = 'PERM_RESELLERS_MANAGE';
 }

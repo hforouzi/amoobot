@@ -114,6 +114,7 @@ class VpnProvisioningService
         $vpnService = (new VpnService())
             ->setUser($order->getUser())
             ->setOrder($order)
+            ->setSoldByReseller($order->getReseller())
             ->setPanel($panel)
             ->setInbound($planInbound)
             ->setRemoteId($created->remoteId)

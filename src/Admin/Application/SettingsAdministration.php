@@ -8,6 +8,8 @@ use App\Entity\Setting;
 use App\Provisioning\Application\AutomationSettingsProvider;
 use App\Provisioning\Application\RenewalSettingsProvider;
 use App\Provisioning\Application\TrafficAddonSettingsProvider;
+use App\Reseller\Application\ResellerAdministration;
+use App\Reseller\Application\ResellerSettings;
 use App\Shop\Application\IncompleteOrderSettingsProvider;
 use App\Shop\Application\SalesSettingsProvider;
 use App\Wallet\Application\WalletSettings;
@@ -16,7 +18,8 @@ use Doctrine\ORM\EntityManagerInterface;
 /**
  * The settings page's forms (SETTINGS_MANAGE), for the web settings tabs and the Mini App settings: "sales &
  * pricing" (sales switches, the sales-closed message, renewal pricing, traffic add-on), "automation" (automation
- * switches, batch limit, incomplete-order expiry) and "wallet" (wallet switches, top-up range and quick amounts). Only these keys are read or written here; nothing secret is among
+ * switches, batch limit, incomplete-order expiry), "wallet" (wallet switches, top-up range and quick amounts) and "resellers"
+ * (the reseller switch, the wholesale floor and rounding). Only these keys are read or written here; nothing secret is among
  * them. Input is a form's fields by the web form's names, a checkbox being on when its field is present.
  * A refused form saves nothing and names the first problem: the field and its message key (admin domain), in the
  * order the web page checks them. The caller audits.
@@ -60,6 +63,13 @@ final class SettingsAdministration
         'wallet_topup_quick_amounts' => WalletSettings::QUICK_AMOUNTS,
     ];
 
+    /** The resellers form's fields and the setting each one writes. */
+    public const RESELLER_KEYS = [
+        'reseller_enabled' => ResellerSettings::ENABLED,
+        'reseller_floor_percent' => ResellerSettings::FLOOR_BP,
+        'reseller_rounding' => ResellerSettings::ROUNDING,
+    ];
+
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
         private readonly RenewalSettingsProvider $renewalSettingsProvider,
@@ -68,6 +78,7 @@ final class SettingsAdministration
         private readonly IncompleteOrderSettingsProvider $incompleteOrderSettingsProvider,
         private readonly SalesSettingsProvider $salesSettingsProvider,
         private readonly WalletSettings $walletSettings,
+        private readonly ResellerSettings $resellerSettings,
     ) {
     }
 
@@ -256,6 +267,56 @@ final class SettingsAdministration
         $this->set(WalletSettings::TOPUP_MIN, (string) $min, 'number');
         $this->set(WalletSettings::TOPUP_MAX, (string) $max, 'number');
         $this->set(WalletSettings::QUICK_AMOUNTS, implode(',', $quick ?? []), 'text');
+        $this->entityManager->flush();
+
+        return null;
+    }
+
+    /**
+     * The resellers form's current values: the floor as a percent of the base price (two decimals at most).
+     *
+     * @return array<string, bool|int|string>
+     */
+    public function resellerValues(): array
+    {
+        return [
+            'reseller_enabled' => $this->resellerSettings->enabled(),
+            'reseller_floor_percent' => ResellerAdministration::bpToPercent($this->resellerSettings->floorBp()),
+            'reseller_rounding' => $this->resellerSettings->rounding(),
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $form
+     *
+     * @return array{field: string, message: string}|null
+     */
+    public function resellerProblem(array $form): ?array
+    {
+        $rounding = self::text($form, 'reseller_rounding', '');
+
+        return match (true) {
+            null === ResellerAdministration::percentToBp(self::text($form, 'reseller_floor_percent', ''), 10000) => ['field' => 'reseller_floor_percent', 'message' => 'flash.settings.reseller_floor'],
+            1 !== preg_match('/^\d{1,7}$/', $rounding) || (int) $rounding < 1 || (int) $rounding > ResellerSettings::MAX_ROUNDING => ['field' => 'reseller_rounding', 'message' => 'flash.settings.reseller_rounding'],
+            default => null,
+        };
+    }
+
+    /**
+     * @param array<string, mixed> $form
+     *
+     * @return array{field: string, message: string}|null the first problem (nothing saved), or null: saved and flushed
+     */
+    public function saveReseller(array $form): ?array
+    {
+        $problem = $this->resellerProblem($form);
+        if (null !== $problem) {
+            return $problem;
+        }
+
+        $this->set(ResellerSettings::ENABLED, self::checked($form, 'reseller_enabled'), 'boolean');
+        $this->set(ResellerSettings::FLOOR_BP, (string) ResellerAdministration::percentToBp(self::text($form, 'reseller_floor_percent', ''), 10000), 'number');
+        $this->set(ResellerSettings::ROUNDING, (string) (int) self::text($form, 'reseller_rounding', ''), 'number');
         $this->entityManager->flush();
 
         return null;

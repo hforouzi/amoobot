@@ -17,6 +17,7 @@ admin:
   payments_needs_review: Needs review
   payments_provisioning_failed: Provisioning failed
   wallets: "Wallets"
+  resellers: "Resellers"
   dashboard: Dashboard
   menu:
     sales: Sales
@@ -174,6 +175,7 @@ help:
   now_payments_payment_gateway.now_payments_success_url: "Return URL after a successful payment (optional)"
   plan.ip_limit: "Maximum simultaneous IPs/devices. Empty means panel default / unlimited."
   plan.is_unlimited_duration: "If on, the service never expires and buying does not ask for a duration."
+  plan.reseller_floor_amount: "The lowest wholesale price of this plan for any reseller (Toman), on top of the reseller floor percent in Settings. Fixed plans only; empty means none."
   plan.toman: "In Toman. Not Rial, not thousands of Toman."
   required_channel.chat_id: "Numeric chat id like -1001234567890 or a public username like @my_channel."
   required_channel.invite_url: "Used for the \"Join channel\" button. Leave empty if there is none."
@@ -487,6 +489,7 @@ settings_page:
     sales: Sales & renewal pricing
     automation: Automation
     wallet: Wallet
+    resellers: Resellers
     channels: Required channels
     advanced: Advanced
   channels_intro: Channels a customer must join before buying or claiming a trial.
@@ -778,6 +781,7 @@ field:
   is_customizable: "Custom plan"
   is_system: "System"
   is_unlimited_duration: "Unlimited duration"
+  reseller_floor_amount: "Reseller floor price"
   key: "Key"
   key_name: "Key"
   label: "Label"
@@ -924,6 +928,8 @@ field:
 flash:
   customer.delete_has_wallet: "Customer #%id% has a wallet and cannot be deleted: its ledger is financial history. Nothing was deleted."
   customer.batch_delete_has_wallet: "Nothing was deleted: customer(s) #%ids% have a wallet and cannot be deleted (the wallet ledger is financial history). Deselect them and try again."
+  customer.delete_is_reseller: "Customer #%id% is a reseller and cannot be deleted: orders and services point at the profile. Disable the reseller instead. Nothing was deleted."
+  customer.batch_delete_is_reseller: "Nothing was deleted: customer(s) #%ids% are resellers and cannot be deleted. Deselect them and try again."
   service.page_link_csrf: "Invalid request (security token). Reload the page and try again."
   service.page_link_rotated: "The subscription page link of service #%id% was replaced; the old link no longer works."
   error: "Error: %error%"
@@ -939,6 +945,9 @@ flash:
   settings.wallet_saved: "Wallet settings saved."
   settings.wallet_range: "The top-up minimum must be at least 1 and the maximum at least the minimum."
   settings.wallet_quick_amounts: "Quick amounts must be whole numbers within the top-up range, separated by commas."
+  settings.reseller_saved: "Reseller settings saved."
+  settings.reseller_floor: "The floor must be a percent between 0 and 100, with at most two decimals."
+  settings.reseller_rounding: "The rounding must be a whole number of Toman between 1 and 1,000,000."
   bulk_price.invalid: "The form values are not valid."
   bulk_price.positive: "The value must be a positive number."
   bulk_price.confirm: "Tick the final confirmation to apply."
@@ -1130,3 +1139,126 @@ wallet_admin:
   error.wallet_insufficient: "The balance plus the credit limit does not cover this debit."
   error.credit_limit_below_usage: "The credit limit cannot be lower than the credit already in use."
   error.wallet_idempotency_conflict: "This form was already used for another adjustment; open the wallet again."
+
+reseller_settings:
+  subtitle: "Resellers buy at a wholesale price from their own wallet (admins create the profiles on the Resellers page). Off by default: with it off, nothing changes for anybody."
+  sections:
+    switches: Resellers
+    pricing: Wholesale pricing
+  fields:
+    enabled: Enable resellers
+    floor_percent: Floor (percent of the base price)
+    rounding: Round wholesale prices up to (Toman)
+  help:
+    enabled: "With it off, no reseller menu shows and no wholesale purchase can start; profiles and rules are kept."
+    floor_percent: "No reseller pays less than this share of a plan's base price, whatever the discount (plus a plan's own reseller floor price). Default 50."
+    rounding: "Wholesale prices are rounded up to a multiple of this, before the floor is checked. Default 1000."
+
+reseller_admin:
+  title: Resellers
+  detail_title: "Reseller: %customer%"
+  feature_off: "Resellers are switched off in Settings (Resellers tab): profiles can be prepared, but nobody can buy at wholesale yet."
+  empty: No resellers yet.
+  wallet_link: Wallet and credit limit
+  enable: Enable reseller
+  disable: Disable reseller
+  status:
+    active: Active
+    disabled: Disabled
+  fields:
+    customer: Customer
+    status: Status
+    discount: Discount (percent)
+    balance: Wallet balance
+    credit_limit: Credit limit
+    daily_limit: Daily spend cap (Toman)
+    spent_today: Spent today / cap
+    display_name: Name shown to customers
+    note: Admin note
+  help:
+    discount: "Off the plan's base price, up to 90, two decimals at most. Discount codes and the global discount never apply on top."
+    daily_limit: "Empty = no cap. Counts today's open and paid reseller orders."
+    disable: "Disabling stops new purchases at once and signs the reseller out of the Mini App. Services already sold keep running."
+    enable: "The reseller can buy at wholesale again."
+  create:
+    title: New reseller
+    help: "Only for an existing customer: enter their user id, Telegram id or @username. The credit limit is set on the wallet page (0 by default)."
+    customer: Customer (user id, Telegram id or @username)
+    submit: Create reseller
+  edit:
+    title: Profile
+  rules:
+    title: Per-plan rules
+    help: "A plan rule replaces the default discount for that plan: a percent, or a fixed price (fixed plans only). The floor (%floor% percent of the base price, or the plan's own reseller floor price) always wins."
+    empty: "No plan rules: the default discount applies to every plan."
+    plan: Plan
+    rule: Rule
+    kind: Kind
+    kind_percent: Discount percent
+    kind_fixed: Fixed price (Toman)
+    value: Value
+    save: Save rule
+    remove: Remove
+    customizable: customizable
+    clipped: Floor applies
+  orders:
+    title: Orders
+    empty: No orders yet.
+    type: Type
+    status: Status
+    wholesale: Wholesale
+    retail: Retail value
+    created: Created
+    refund: Refund
+  order_type:
+    new_service: New service
+    renewal: Renewal
+    add_traffic: Extra traffic
+  refund:
+    reason: Reason
+    review: Review refund
+    help: "A refund is possible only for a provisioned order whose service is suspended or deleted, once per order, up to what the wallet paid (needs wallet management too)."
+    confirm_title: Confirm refund
+    confirm: "Refund %amount% %currency% of order #%order% (paid %paid% %currency%) to the wallet of %reseller%?"
+    submit: Confirm refund
+    error:
+      not_reseller_order: "This is not a reseller order."
+      not_provisioned: "Only a provisioned order paid from the wallet can be refunded."
+      already_refunded: "This order was already refunded."
+      service_live: "Suspend or delete the order's service first."
+      amount: "The amount must be a whole number from 1 up to what the wallet paid."
+      reason: "Give a reason (3 to 500 characters)."
+  report:
+    title: Reseller report
+    from: From
+    to: To
+    show: Show
+    csv: Download CSV
+    help: "Orders whose wallet payment is confirmed, by payment date. Retail value is what a customer would have paid then; the discount given is retail minus wholesale (not the reseller's profit, which the shop does not know)."
+    empty: Nothing in this period.
+    orders: Orders
+    breakdown: "%new% new, %renewals% renewals, %traffic% traffic"
+    wholesale: Wholesale paid
+    retail: Retail value
+    discount_given: Discount given
+    refunds: Refunds
+  flash:
+    created: Reseller created.
+    updated: Reseller saved.
+    rule_saved: Plan rule saved.
+    rule_removed: Plan rule removed.
+    rule_clipped: "Note: on %plan% this rule is below the floor, so the floor price is charged."
+    enabled: Reseller enabled.
+    disabled: "Reseller disabled; %sessions% Mini App session(s) ended."
+    refunded: Refund credited to the reseller's wallet.
+  error:
+    customer: "No customer found with that user id, Telegram id or username."
+    exists: "This customer is already a reseller."
+    discount: "The discount must be a percent from 0 to 90, two decimals at most."
+    daily_limit: "The daily cap must be a positive whole number of Toman, or empty."
+    display_name: "The name is too long (64 characters at most)."
+    note: "The note is too long (255 characters at most)."
+    plan: "Choose a plan."
+    rule_kind: "Choose percent or fixed price."
+    fixed_amount: "The fixed price must be a positive whole number of Toman."
+    fixed_on_customizable: "A fixed price is only possible for a fixed (non-customizable) plan."

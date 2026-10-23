@@ -14,6 +14,7 @@ Amoobot is a self-hosted Telegram VPN shop built with Symfony. It includes Teleg
 - [Connecting a 3x-ui panel (API token)](panel-connection.md)
 - [Automation](automation.md)
 - [Payments](payments/overview.md)
+- [Resellers](resellers.md)
 - [Plugins](plugins/overview.md)
 - [Troubleshooting](troubleshooting/payment-methods-not-showing.md)
 - [Development](development/architecture.md)

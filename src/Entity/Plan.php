@@ -84,6 +84,10 @@ class Plan
     #[ORM\JoinColumn(nullable: true, onDelete: 'SET NULL')]
     private ?VpnInbound $inbound = null;
 
+    /** The lowest wholesale price of this plan for any reseller (Toman), on top of the reseller.floor_bp rule; null = none. */
+    #[ORM\Column(nullable: true)]
+    private ?int $resellerFloorAmount = null;
+
     #[ORM\Column]
     private \DateTimeImmutable $createdAt;
 
@@ -385,5 +389,17 @@ class Plan
     public function __toString(): string
     {
         return sprintf('%s (%d)', $this->title ?? 'Plan', $this->id ?? 0);
+    }
+
+    public function getResellerFloorAmount(): ?int
+    {
+        return $this->resellerFloorAmount;
+    }
+
+    public function setResellerFloorAmount(?int $resellerFloorAmount): self
+    {
+        $this->resellerFloorAmount = null === $resellerFloorAmount || $resellerFloorAmount <= 0 ? null : $resellerFloorAmount;
+
+        return $this;
     }
 }

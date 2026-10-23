@@ -30,7 +30,7 @@ class TelegramKeyboardFactory
     /**
      * @return array<string, mixed>
      */
-    public function mainReplyKeyboard(bool $isAdmin, bool $hasIncompleteOrder = false, bool $hasTrackableOrder = false): array
+    public function mainReplyKeyboard(bool $isAdmin, bool $hasIncompleteOrder = false, bool $hasTrackableOrder = false, bool $isReseller = false): array
     {
         $keyboard = [];
 
@@ -47,6 +47,10 @@ class TelegramKeyboardFactory
         }
         if ($this->walletSettings->enabled()) {
             $trackRow[] = ['text' => $this->button('button.main.wallet')];
+        }
+        // Only for an active reseller while reseller.enabled is on (the caller knows the account).
+        if ($isReseller) {
+            $trackRow[] = ['text' => $this->button('button.main.reseller')];
         }
         if ([] !== $trackRow) {
             $keyboard[] = $trackRow;

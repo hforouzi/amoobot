@@ -6,16 +6,26 @@ namespace App\Shop\Application;
 
 use App\Entity\Plan;
 use App\Payment\Domain\Money\AmountNormalizer;
+use App\Reseller\Application\ResellerPricing;
+use App\Reseller\Application\ResellerSettings;
 
 /**
  * Flags plan prices that look implausible for the shop unit (Toman, see AmountNormalizer).
  *
  * A price entered in Rial is ten times too high; one entered in thousands of Toman or in USD is far
  * too low. Gateways charge exactly what the plan says (Zibal: Toman x 10 Rial), so such a typo
- * reaches customers directly. The check only warns; it never blocks saving.
+ * reaches customers directly. With resellers on, it also names the reseller rules the floor overrides
+ * (ResellerPricing::clippedRules). The check only warns; it never blocks saving.
  */
 final class PlanPriceSanityChecker
 {
+    /** Optional so the unit tests can build it bare; the container always gives both. */
+    public function __construct(
+        private readonly ?ResellerPricing $resellerPricing = null,
+        private readonly ?ResellerSettings $resellerSettings = null,
+    ) {
+    }
+
     /** Plausible ranges in Toman: [min, max]. */
     public const PRICE_RANGE = [5_000, 20_000_000];
     public const PRICE_PER_GB_RANGE = [500, 200_000];
@@ -39,6 +49,16 @@ final class PlanPriceSanityChecker
                     '%s %s %s looks too high (expected at most %s %s). Prices are in Toman; a Rial value is 10x too high (%s Toman?).',
                     $label, number_format($issue['value']), AmountNormalizer::SHOP_CURRENCY, number_format($issue['max']), AmountNormalizer::SHOP_CURRENCY, number_format(intdiv($issue['value'], 10))
                 );
+        }
+
+        // A reseller rule this plan's floor overrides: the reseller pays the floor, not what his rule says.
+        if (null !== $this->resellerPricing && true === $this->resellerSettings?->enabled()) {
+            foreach ($this->resellerPricing->clippedRules($plan) as $clipped) {
+                $warnings[] = sprintf(
+                    'Reseller "%s": the wholesale rule (%s) gives %s %s, below the reseller floor %s %s; the floor price is charged.',
+                    (string) $clipped['reseller'], $clipped['rule'], number_format($clipped['candidate']), AmountNormalizer::SHOP_CURRENCY, number_format($clipped['floor']), AmountNormalizer::SHOP_CURRENCY
+                );
+            }
         }
 
         return $warnings;

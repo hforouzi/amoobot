@@ -41,6 +41,7 @@ final class AdminTabs
         'sales' => 'settings_page.tabs.sales',
         'automation' => 'settings_page.tabs.automation',
         'wallet' => 'settings_page.tabs.wallet',
+        'resellers' => 'settings_page.tabs.resellers',
         'channels' => 'settings_page.tabs.channels',
         'advanced' => 'settings_page.tabs.advanced',
     ];

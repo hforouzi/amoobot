@@ -1,0 +1,55 @@
+{# ResellerAdminController::report: per reseller, orders paid in the range (wholesale, retail value, discount given, refunds). #}
+{% extends '@EasyAdmin/page/content.html.twig' %}
+{% trans_default_domain 'admin' %}
+{% set toman = ('currency.' ~ constant('App\\Payment\\Domain\\Money\\AmountNormalizer::SHOP_CURRENCY'))|trans %}
+
+{% block content_title %}{{ 'reseller_admin.report.title'|trans }}{% endblock %}
+
+{% block main %}
+    <div class="admin-custom-page admin-reseller-report">
+        <form method="get" action="{{ path('admin_reseller_report') }}" class="admin-form-card">
+            <div class="admin-form-grid">
+                <div class="admin-form-row">
+                    <label class="form-label" for="from">{{ 'reseller_admin.report.from'|trans }}</label>
+                    <input class="form-control" type="date" id="from" name="from" value="{{ from|date('Y-m-d') }}" dir="ltr">
+                </div>
+                <div class="admin-form-row">
+                    <label class="form-label" for="to">{{ 'reseller_admin.report.to'|trans }}</label>
+                    <input class="form-control" type="date" id="to" name="to" value="{{ to|date('Y-m-d') }}" dir="ltr">
+                </div>
+            </div>
+            <div class="admin-actions">
+                <button type="submit" class="btn btn-primary">{{ 'reseller_admin.report.show'|trans }}</button>
+                <a class="btn btn-secondary" href="{{ path('admin_reseller_report', {from: from|date('Y-m-d'), to: to|date('Y-m-d'), format: 'csv'}) }}" data-csv>{{ 'reseller_admin.report.csv'|trans }}</a>
+            </div>
+        </form>
+        <p class="form-text">{{ 'reseller_admin.report.help'|trans }}</p>
+
+        {% if rows is empty %}
+            <p class="admin-page-subtitle" data-no-report>{{ 'reseller_admin.report.empty'|trans }}</p>
+        {% else %}
+            <table class="table datagrid">
+                <thead><tr>
+                    <th>{{ 'reseller_admin.fields.customer'|trans }}</th>
+                    <th>{{ 'reseller_admin.report.orders'|trans }}</th>
+                    <th>{{ 'reseller_admin.report.wholesale'|trans }}</th>
+                    <th>{{ 'reseller_admin.report.retail'|trans }}</th>
+                    <th>{{ 'reseller_admin.report.discount_given'|trans }}</th>
+                    <th>{{ 'reseller_admin.report.refunds'|trans }}</th>
+                </tr></thead>
+                <tbody>
+                {% for row in rows %}
+                    <tr data-report-reseller="{{ row.resellerId }}">
+                        <td><a href="{{ path('admin_reseller', {id: row.resellerId}) }}">{{ row.name }}</a></td>
+                        <td>{{ row.orders }} <span class="text-muted">({{ 'reseller_admin.report.breakdown'|trans({'%new%': row.newServices, '%renewals%': row.renewals, '%traffic%': row.addTraffic}) }})</span></td>
+                        <td data-wholesale="{{ row.wholesale }}"><bdi>{{ row.wholesale|number_format }}</bdi> {{ toman }}</td>
+                        <td data-retail="{{ row.retail }}"><bdi>{{ row.retail|number_format }}</bdi> {{ toman }}</td>
+                        <td data-discount-given="{{ row.discountGiven }}"><bdi>{{ row.discountGiven|number_format }}</bdi> {{ toman }}</td>
+                        <td data-refunds="{{ row.refunds }}"><bdi>{{ row.refunds|number_format }}</bdi> {{ toman }}</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        {% endif %}
+    </div>
+{% endblock %}
