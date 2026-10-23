@@ -22,8 +22,9 @@ use Doctrine\ORM\EntityManagerInterface;
  * paymentMismatches(): payments against the ledger, through the ledger keys the payment flows write (WalletKeys):
  * a confirmed top-up without its credit, a top-up credit whose payment is not confirmed, a live wallet payment without
  * its debit, a rejected payment whose debit was never given back, a debit given back while its payment is still live,
- * a purchase debit without a payment, and a wallet payment still pending (its debit held) while its order is no
- * longer waiting for payment (paid otherwise, cancelled, expired: nothing would ever give that debit back).
+ * a purchase debit without a payment, a held debit whose amount is not its payment's amount, and a wallet payment
+ * still pending (its debit held) while its order is no longer waiting for payment (paid otherwise, cancelled,
+ * expired: nothing would ever give that debit back).
  *
  * report() runs both in one read-only transaction, so every query sees the same snapshot even while payments are
  * being settled (no false alarm from a write that landed between two queries).
@@ -37,6 +38,7 @@ final class WalletReconciler
     public const REVERSAL_OF_LIVE_PAYMENT = 'reversal_of_live_payment';
     public const PURCHASE_WITHOUT_PAYMENT = 'purchase_without_payment';
     public const PENDING_WALLET_PAYMENT_ORDER_NOT_WAITING = 'pending_wallet_payment_order_not_waiting';
+    public const DEBIT_AMOUNT_MISMATCH = 'debit_amount_mismatch';
 
     public function __construct(private readonly EntityManagerInterface $entityManager)
     {
@@ -145,6 +147,12 @@ final class WalletReconciler
                  FROM wallet_transaction d
                  LEFT JOIN payment p ON p.id = CAST(SUBSTRING(d.idempotency_key, 18) AS UNSIGNED) AND d.idempotency_key = $purchaseKey
                  WHERE d.type = :purchase AND p.id IS NULL",
+            // open() debits the payment's payable amount; a held debit of any other amount took the wrong sum.
+            self::DEBIT_AMOUNT_MISMATCH => "SELECT p.id AS payment_id, d.id AS transaction_id, d.wallet_id, CONCAT('held debit of ', -d.amount, ' but the payment is for ', COALESCE(p.payable_amount, p.amount)) AS detail
+                 FROM payment p
+                 JOIN wallet_transaction d ON d.idempotency_key = $purchaseKey
+                 LEFT JOIN wallet_transaction r ON r.reversal_of_id = d.id
+                 WHERE r.id IS NULL AND -d.amount <> COALESCE(p.payable_amount, p.amount)",
             self::PENDING_WALLET_PAYMENT_ORDER_NOT_WAITING => "SELECT p.id AS payment_id, d.id AS transaction_id, d.wallet_id, CONCAT('wallet payment is ', p.status, ' but order #', o.id, ' is ', o.status) AS detail
                  FROM payment p JOIN `order` o ON o.id = p.order_id
                  LEFT JOIN wallet_transaction d ON d.idempotency_key = $purchaseKey
