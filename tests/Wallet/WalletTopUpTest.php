@@ -6,6 +6,7 @@ namespace App\Tests\Wallet;
 
 use App\Entity\Order;
 use App\Entity\Payment;
+use App\Entity\Wallet;
 use App\Entity\WalletTransaction;
 use App\Payment\Application\Settlement\PaymentSettlementService;
 use App\Payment\Application\Settlement\SettlementOutcome;
@@ -399,10 +400,11 @@ final class WalletTopUpTest extends IntegrationTestCase
         $listener = new class {
             public bool $fail = true;
 
+            /** Fails the credit half-way: its ledger row is inserted, the wallet's balance update fails. */
             public function onFlush(OnFlushEventArgs $args): void
             {
-                foreach ($args->getObjectManager()->getUnitOfWork()->getScheduledEntityInsertions() as $entity) {
-                    if ($this->fail && $entity instanceof WalletTransaction) {
+                foreach ($args->getObjectManager()->getUnitOfWork()->getScheduledEntityUpdates() as $entity) {
+                    if ($this->fail && $entity instanceof Wallet) {
                         throw new \RuntimeException('Simulated database failure');
                     }
                 }
