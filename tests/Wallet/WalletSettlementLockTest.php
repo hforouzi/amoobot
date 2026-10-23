@@ -89,10 +89,12 @@ final class WalletSettlementLockTest extends IntegrationTestCase
     }
 
     /**
-     * A fresh ledger (no reversal yet, as on the day the wallet is switched on). With the old gap lock this credit
-     * waited for the whole panel call, but only while the reversal_of_id index held no entry at all: delete-marked
-     * entries left by earlier tests (until InnoDB purges them) narrow the gap, so on a reused test database the old
-     * code may pass here. The cancel and deadlock tests below reproduce the old lock deterministically.
+     * Another customer's top-up credit during the panel call. Its key "other:..." sorts just below the settlement's
+     * debit key "purchase:payment:<id>" in uniq_wallet_transaction_key, so any lock the settlement holds on the gap
+     * below its debit makes this insert wait for the whole panel call. Two did: the locking read of the missing
+     * reversal (reversal_of_id, a gap lock), and, on MariaDB 10.6+ (CI runs 10.11), the "LOCK IN SHARE MODE" read of the
+     * existing debit itself, which takes a next-key lock (record + the gap below it) there; MariaDB 10.8 locks only the
+     * record, so this test can pass on 10.8 with that read and fails on 10.6+.
      */
     public function testAnotherCustomersTopUpCreditDoesNotWaitForTheSettlementsPanelCall(): void
     {
