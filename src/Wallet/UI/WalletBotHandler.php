@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Wallet\UI;
 
 use App\Bot\Application\BotTextResolver;
+use App\Bot\Application\MembershipGatePrompt;
+use App\Bot\Application\TelegramChannelMembershipGate;
 use App\Bot\Application\TelegramKeyboardFactory;
 use App\Bot\Infrastructure\TelegramApiClient;
 use App\Entity\Order;
@@ -13,6 +15,7 @@ use App\Entity\Wallet;
 use App\Entity\WalletTransaction;
 use App\Payment\Application\Settlement\SettlementOutcome;
 use App\Shop\Application\Checkout\PaymentStarter;
+use App\Shop\Domain\OrderType;
 use App\Wallet\Application\WalletPayment;
 use App\Wallet\Application\WalletQueries;
 use App\Wallet\Application\WalletService;
@@ -49,6 +52,7 @@ final class WalletBotHandler
         private readonly WalletPayment $walletPayment,
         private readonly PaymentStarter $paymentStarter,
         private readonly LoggerInterface $logger,
+        private readonly MembershipGatePrompt $membershipGate,
     ) {
     }
 
@@ -190,6 +194,10 @@ final class WalletBotHandler
         if (!$order instanceof Order || $order->getUser()->getId() !== $account->getUser()->getId()) {
             $this->popup($chatId, $callbackId, $this->texts->message('order.not_found'));
 
+            return;
+        }
+        // The same required-channels rule as every other way to buy (and the Mini App's wallet payment).
+        if (OrderType::NEW_SERVICE === $order->getType() && !$this->membershipGate->allowed($account, $chatId, $callbackId, TelegramChannelMembershipGate::CONTEXT_PURCHASE)) {
             return;
         }
 

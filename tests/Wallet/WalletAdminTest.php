@@ -97,6 +97,51 @@ final class WalletAdminTest extends IntegrationTestCase
         self::assertCount(2, $dashboard->filter('[data-card="wallets"]'), $role.' dashboard wallet card');
     }
 
+    /** Looking at a customer's wallet never writes: without a wallet the page shows an empty one. */
+    #[DataProvider('roles')]
+    public function testACustomersWalletPageNeverCreatesAWallet(string $role, bool $manage): void
+    {
+        $this->webAdmin($role);
+        $wallets = fn (): int => (int) $this->em->getConnection()->fetchOne('SELECT COUNT(*) FROM wallet WHERE user_id = ?', [$this->buyer->getId()]);
+
+        $page = $this->web->request('GET', '/admin/wallets/customer/'.$this->buyer->getId());
+
+        self::assertSame(200, $this->web->getResponse()->getStatusCode());
+        self::assertCount(1, $page->filter('[data-no-wallet]'));
+        self::assertSame('0', $page->filter('[data-balance]')->attr('data-balance'));
+        self::assertSame(0, $wallets(), 'a GET writes nothing');
+        self::assertSame($manage, $page->filter('[data-open-wallet-form]')->count() > 0, $role.' may open a wallet');
+
+        // Once the customer has a wallet the same link goes to it.
+        $walletId = $this->walletId($this->buyer);
+        $this->web->request('GET', '/admin/wallets/customer/'.$this->buyer->getId());
+        self::assertTrue($this->web->getResponse()->isRedirect('/admin/wallets/'.$walletId));
+    }
+
+    public function testAManagerOpensAnEmptyWalletWithAPost(): void
+    {
+        $this->webAdmin(AdminUser::ROLE_ADMIN);
+        $form = $this->web->request('GET', '/admin/wallets/customer/'.$this->buyer->getId())->filter('[data-open-wallet-form]');
+
+        $this->web->request('POST', '/admin/wallets/customer/'.$this->buyer->getId().'/open', ['_token' => 'wrong']);
+        self::assertSame(0, (int) $this->em->getConnection()->fetchOne('SELECT COUNT(*) FROM wallet WHERE user_id = ?', [$this->buyer->getId()]), 'a bad token opens nothing');
+
+        $this->web->request('POST', (string) $form->attr('action'), ['_token' => $form->filter('input[name="_token"]')->attr('value')]);
+        $wallet = $this->wallets()->find($this->buyer) ?? throw new \LogicException('no wallet opened');
+        self::assertTrue($this->web->getResponse()->isRedirect('/admin/wallets/'.$wallet->getId()));
+        self::assertSame(0, $wallet->getBalance());
+    }
+
+    public function testSupportCannotOpenAWallet(): void
+    {
+        $this->webAdmin(AdminUser::ROLE_SUPPORT);
+
+        $this->web->request('POST', '/admin/wallets/customer/'.$this->buyer->getId().'/open', ['_token' => 'x']);
+
+        self::assertSame(403, $this->web->getResponse()->getStatusCode());
+        self::assertNull($this->wallets()->find($this->buyer));
+    }
+
     public function testAnAdjustmentIsConfirmedReasonedAppliedOnceAndAudited(): void
     {
         $admin = $this->webAdmin(AdminUser::ROLE_ADMIN);

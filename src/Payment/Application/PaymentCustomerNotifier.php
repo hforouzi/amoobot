@@ -69,18 +69,20 @@ class PaymentCustomerNotifier
         }, $lastMessageKeyboard);
     }
 
-    /** A confirmed wallet top-up: the amount credited and the balance now. */
+    /** A confirmed wallet top-up: the amount credited (what was received, see TopUpCredit) and the balance now. */
     private function walletToppedUp(Payment $payment): void
     {
+        $credited = $this->walletService->findTransaction(WalletKeys::topUp((int) $payment->getId()))?->getAmount() ?? $payment->getOrder()->getAmount();
         $this->deliver($payment, 'wallet_topup', fn (): array => [$this->botTextResolver->message('wallet.topup_confirmed', ['wallet' => [
-            'amount' => number_format($payment->getOrder()->getAmount()),
+            'amount' => number_format($credited),
             'balance' => number_format($this->walletService->find($payment->getOrder()->getUser())?->getBalance() ?? 0),
         ]])]);
     }
 
     public function rejected(Payment $payment): void
     {
-        $reversal = $payment->isWalletPayment() ? $this->walletService->findTransaction(WalletKeys::purchaseReversal((int) $payment->getId())) : null;
+        // Keyed on the ledger (like the release itself), not on the payment's method.
+        $reversal = $this->walletService->findTransaction(WalletKeys::purchaseReversal((int) $payment->getId()));
         if (null !== $reversal) {
             $this->deliver($payment, 'wallet_reversed', fn (): array => [$this->botTextResolver->message('wallet.reversed', ['wallet' => [
                 'amount' => number_format($reversal->getAmount()),

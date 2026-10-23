@@ -32,6 +32,7 @@ final class WalletAdminController extends AbstractController
 
     private const PAGE_SIZE = 25;
     private const CSRF_PREFIX = 'wallet_admin_';
+    private const CSRF_OPEN_PREFIX = 'wallet_admin_open_';
 
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
@@ -74,11 +75,36 @@ final class WalletAdminController extends AbstractController
         ]);
     }
 
-    /** The customer's wallet (an empty one is created on first open, as on first use). */
+    /**
+     * The customer's wallet. Looking never writes: without a wallet this shows an empty one (balance 0), and an admin who
+     * may manage wallets can open it with a POST (customerOpen()) to adjust it.
+     */
     #[AdminRoute(path: '/wallets/customer/{id}', name: 'wallet_customer', options: ['requirements' => ['id' => '\d+']])]
-    public function customer(int $id): RedirectResponse
+    public function customer(int $id): Response
     {
         $user = $this->entityManager->getRepository(User::class)->find($id) ?? throw new NotFoundHttpException();
+        $wallet = $this->wallets->find($user);
+        if ($wallet instanceof Wallet) {
+            return $this->redirectToRoute('admin_wallet', ['id' => $wallet->getId()]);
+        }
+
+        return $this->render('admin/wallet/none.html.twig', [
+            'customer' => $user,
+            'csrf' => self::CSRF_OPEN_PREFIX.$user->getId(),
+        ]);
+    }
+
+    /** Creates the customer's (empty) wallet, so an admin can adjust it before the customer ever used it. */
+    #[AdminRoute(path: '/wallets/customer/{id}/open', name: 'wallet_customer_open', options: ['requirements' => ['id' => '\d+'], 'methods' => ['POST']])]
+    public function customerOpen(Request $request, int $id): RedirectResponse
+    {
+        $user = $this->entityManager->getRepository(User::class)->find($id) ?? throw new NotFoundHttpException();
+        $token = $request->request->get('_token');
+        if (!is_string($token) || !$this->isCsrfTokenValid(self::CSRF_OPEN_PREFIX.$user->getId(), $token)) {
+            $this->flash('danger', 'flash.csrf_expired');
+
+            return $this->redirectToRoute('admin_wallet_customer', ['id' => $user->getId()]);
+        }
 
         return $this->redirectToRoute('admin_wallet', ['id' => $this->wallets->walletFor($user)->getId()]);
     }

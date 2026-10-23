@@ -29,7 +29,8 @@
             <div class="stats">
                 {% if overview.today.orders is not null %}<a class="stat" href="{{ path('miniapp_admin_orders') }}" data-nav><span class="muted">{{ 'admin.home.orders'|trans }}</span><b>{{ overview.today.orders|number_format }}</b></a>{% endif %}
                 {% if overview.today.payments is not null %}<a class="stat" href="{{ path('miniapp_admin_payments', {tab: 'confirmed'}) }}" data-nav><span class="muted">{{ 'admin.home.payments'|trans }}</span><b>{{ overview.today.payments|number_format }}</b></a>{% endif %}
-                {% if overview.today.revenue is not null %}<div class="stat"><span class="muted">{{ 'admin.home.revenue'|trans }}</span><b>{{ 'money.toman'|trans({'%amount%': overview.today.revenue|number_format}) }}</b></div>{% endif %}
+                {% if overview.today.revenue is not null %}<div class="stat" data-revenue="{{ overview.today.revenue }}"><span class="muted">{{ 'admin.home.revenue'|trans }}</span><b>{{ 'money.toman'|trans({'%amount%': overview.today.revenue|number_format}) }}</b></div>{% endif %}
+                {% if overview.today.walletTopUps %}<div class="stat" data-wallet-topups="{{ overview.today.walletTopUps }}"><span class="muted">{{ 'admin.home.wallet_topups'|trans }}</span><b>{{ 'money.toman'|trans({'%amount%': overview.today.walletTopUps|number_format}) }}</b></div>{% endif %}
                 {% if overview.today.customers is not null %}<a class="stat" href="{{ path('miniapp_admin_customers') }}" data-nav><span class="muted">{{ 'admin.home.customers'|trans }}</span><b>{{ overview.today.customers|number_format }}</b></a>{% endif %}
             </div>
         </section>

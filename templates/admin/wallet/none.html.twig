@@ -1,0 +1,24 @@
+{# WalletAdminController::customer: a customer who has no wallet yet. Nothing was written to show this. #}
+{% extends '@EasyAdmin/page/content.html.twig' %}
+{% trans_default_domain 'admin' %}
+{% set toman = ('currency.' ~ constant('App\\Payment\\Domain\\Money\\AmountNormalizer::SHOP_CURRENCY'))|trans %}
+
+{% block content_title %}{{ 'wallet_admin.detail_title'|trans({'%customer%': customer.name ?? ('#' ~ customer.id)}) }}{% endblock %}
+
+{% block main %}
+    <div class="admin-custom-page admin-wallet-page" data-no-wallet>
+        <div class="admin-dashboard-cards">
+            <div class="admin-dashboard-card"><span class="admin-dashboard-card-count" data-balance="0"><bdi>0</bdi> <small>{{ toman }}</small></span><span class="admin-dashboard-card-label">{{ 'wallet_admin.fields.balance'|trans }}</span></div>
+        </div>
+        <p class="text-muted">{{ 'wallet_admin.none.help'|trans }}</p>
+
+        {% if is_granted('PERM_WALLETS_MANAGE') %}
+            <form method="post" action="{{ path('admin_wallet_customer_open', {id: customer.id}) }}" class="admin-form-card" data-open-wallet-form>
+                <input type="hidden" name="_token" value="{{ csrf_token(csrf) }}">
+                <div class="admin-actions"><button type="submit" class="btn btn-primary">{{ 'wallet_admin.none.open'|trans }}</button></div>
+            </form>
+        {% endif %}
+
+        <p><a href="{{ path('admin_wallets') }}">{{ 'wallet_admin.back'|trans }}</a></p>
+    </div>
+{% endblock %}

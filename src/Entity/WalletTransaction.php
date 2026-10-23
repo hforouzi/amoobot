@@ -32,8 +32,9 @@ class WalletTransaction
     private \DateTimeImmutable $createdAt;
 
     public function __construct(
+        // RESTRICT: ledger rows are never deleted, not even by a cascade (WalletLedgerGuard covers the ORM).
         #[ORM\ManyToOne]
-        #[ORM\JoinColumn(nullable: false, onDelete: 'CASCADE')]
+        #[ORM\JoinColumn(nullable: false, onDelete: 'RESTRICT')]
         private Wallet $wallet,
         #[ORM\Column(length: 16)]
         private string $type,
@@ -55,9 +56,8 @@ class WalletTransaction
         private ?string $referenceId = null,
         #[ORM\Column(type: Types::TEXT, nullable: true)]
         private ?string $note = null,
-        // Rows are only ever deleted together with their whole wallet (the customer was deleted).
         #[ORM\ManyToOne]
-        #[ORM\JoinColumn(nullable: true, onDelete: 'CASCADE')]
+        #[ORM\JoinColumn(nullable: true, onDelete: 'RESTRICT')]
         private ?WalletTransaction $reversalOf = null,
     ) {
         $this->createdAt = new \DateTimeImmutable();

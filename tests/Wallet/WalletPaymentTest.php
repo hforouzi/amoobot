@@ -14,6 +14,7 @@ use App\Shop\Domain\OrderStatus;
 use App\Shop\Domain\OrderType;
 use App\Tests\Support\IntegrationTestCase;
 use App\Tests\Support\MiniAppShopFixtures;
+use App\Tests\Support\SubprocessAssertions;
 use App\Wallet\Application\WalletActor;
 use App\Wallet\Application\WalletPayment;
 use App\Wallet\Application\WalletService;
@@ -34,6 +35,7 @@ use Symfony\Component\Process\Process;
  */
 final class WalletPaymentTest extends IntegrationTestCase
 {
+    use SubprocessAssertions;
     use MiniAppShopFixtures;
 
     private const PRICE = 150000;
@@ -226,6 +228,30 @@ final class WalletPaymentTest extends IntegrationTestCase
         self::assertSame(1000000, $this->balance());
     }
 
+    /**
+     * Documented behaviour: freezing stops new wallet payments, but a payment whose debit was already taken before the
+     * freeze (open() committed, its settlement not finished) still settles with that one debit; the money is already
+     * out of the wallet, so refusing it would only leave the order unpaid with the money held.
+     */
+    public function testAWalletFrozenMidCheckoutStillSettlesThePaymentAlreadyDebited(): void
+    {
+        $this->fund(400000);
+        $order = $this->order(OrderType::NEW_SERVICE);
+        $this->walletPayment()->open($order);
+        $this->wallets()->setStatus($this->user, WalletStatus::FROZEN, WalletActor::system());
+
+        $result = $this->walletPayment()->pay($this->reload($order));
+
+        self::assertSame(SettlementOutcome::CONFIRMED, $result->outcome, $result->message);
+        self::assertSame(400000 - self::PRICE, $this->balance(), 'the one debit taken before the freeze');
+        try {
+            $this->walletPayment()->pay($this->order(OrderType::NEW_SERVICE));
+            self::fail('a new payment from a frozen wallet');
+        } catch (WalletException $e) {
+            self::assertSame('wallet_frozen', $e->error);
+        }
+    }
+
     public function testAnOrderWithAReceiptUnderReviewCannotAlsoBePaidFromTheWallet(): void
     {
         $this->fund(1000000);
@@ -393,8 +419,7 @@ final class WalletPaymentTest extends IntegrationTestCase
         $outcomes = [];
         foreach ($processes as $process) {
             $process->wait();
-            self::assertTrue($process->isSuccessful(), $process->getErrorOutput().$process->getOutput());
-            $outcomes[] = trim($process->getOutput());
+            $outcomes[] = self::assertSubprocessClean($process, 'wallet-pay.php');
         }
 
         return $outcomes;

@@ -16,6 +16,7 @@ use App\Tests\Support\BotAdminTestTrait;
 use App\Tests\Support\IntegrationTestCase;
 use App\Tests\Support\MiniAppShopFixtures;
 use App\Tests\Support\MiniAppTestTrait;
+use App\Tests\Support\SubprocessAssertions;
 use Symfony\Component\DomCrawler\Crawler;
 
 /**
@@ -25,6 +26,7 @@ use Symfony\Component\DomCrawler\Crawler;
  */
 final class MiniAppPurchaseTest extends IntegrationTestCase
 {
+    use SubprocessAssertions;
     use BotAdminTestTrait;
     use MiniAppShopFixtures;
     use MiniAppTestTrait;
@@ -236,8 +238,7 @@ final class MiniAppPurchaseTest extends IntegrationTestCase
         $answers = [];
         foreach ($processes as $process) {
             $process->wait();
-            self::assertTrue($process->isSuccessful(), $process->getErrorOutput().$process->getOutput());
-            $answers[] = trim($process->getOutput());
+            $answers[] = self::assertSubprocessClean($process, 'checkout-once.php');
         }
 
         self::assertSame($answers[0], $answers[1], 'both got the first call\'s answer');

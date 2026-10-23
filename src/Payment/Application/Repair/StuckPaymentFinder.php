@@ -63,7 +63,8 @@ class StuckPaymentFinder
         }
 
         $order = $payment->getOrder();
-        // A top-up provisions nothing: it is credited in the confirming transaction (app:wallet:reconcile checks it).
+        // A top-up provisions nothing, so it is never "stuck" here: its credit is written in the confirming transaction.
+        // A confirmed top-up without that credit is reported by app:wallet:reconcile (WalletReconciler::TOPUP_NOT_CREDITED).
         if (OrderType::WALLET_TOPUP === $order->getType()) {
             return null;
         }

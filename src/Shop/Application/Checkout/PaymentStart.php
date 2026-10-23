@@ -20,6 +20,11 @@ final class PaymentStart
     public const KIND_MANUAL_CARD = 'manual_card';
     /** The order's plan was switched off: no payment was started. */
     public const KIND_PLAN_INACTIVE = 'plan_inactive';
+    /**
+     * The order has a wallet payment that is debited but not settled yet: no gateway payment was started. The customer
+     * pays from the wallet again (the same debit is reused) or cancels the order (the debit is given back).
+     */
+    public const KIND_WALLET_PAYMENT_PENDING = 'wallet_payment_pending';
 
     public function __construct(
         public readonly string $kind,

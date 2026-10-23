@@ -601,6 +601,7 @@ dashboard:
   today.orders: "New orders"
   today.payments: "Confirmed payments"
   today.revenue: "Revenue"
+  today.wallet_topups: "Wallet top-ups (included in revenue)"
   today.customers: "New customers"
   services.title: "Services"
   panels.title: "Panels"
@@ -921,6 +922,7 @@ field:
   zibal_sandbox: "Sandbox"
 
 flash:
+  customer.delete_has_wallet: "Customer #%id% has a wallet and cannot be deleted: its ledger is financial history. Nothing was deleted."
   service.page_link_csrf: "Invalid request (security token). Reload the page and try again."
   service.page_link_rotated: "The subscription page link of service #%id% was replaced; the old link no longer works."
   error: "Error: %error%"
@@ -960,6 +962,8 @@ flash:
   payment.provisioning_failed: "Payment confirmed, but the service could not be created. %detail%"
   payment.rejected: "Payment rejected. %detail%"
   payment.order_already_fulfilled: "The order was already fulfilled. %detail%"
+  payment.wallet_debit_missing: "Not confirmed: this wallet payment has no wallet debit any more (it was given back or never taken). Reject it instead. %detail%"
+  payment.topup_nothing_to_credit: "Not confirmed: what was received for this wallet top-up is worth less than 1 Toman, so there is nothing to credit. Reject this payment. %detail%"
   broadcast.only_draft_editable: "Only draft broadcasts can be edited."
   broadcast.recipients_prepared: "Recipients prepared: %new% new, %duplicates% duplicate."
   broadcast.only_draft_sendable: "Only draft broadcasts can be sent now."
@@ -1062,6 +1066,8 @@ wallet_admin:
   detail_title: "Wallet of %customer%"
   search: "Search customer (Telegram id, @username, name, mobile or id)"
   empty: "No wallet yet."
+  none.help: "This customer has no wallet yet; it is created by their first top-up or wallet payment, or when you open it here to adjust it."
+  none.open: "Open a wallet to adjust it"
   previous: "Previous"
   next: "Next"
   back: "All wallets"

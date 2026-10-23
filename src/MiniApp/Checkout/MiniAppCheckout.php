@@ -183,6 +183,9 @@ final class MiniAppCheckout
         if (PaymentStart::KIND_PLAN_INACTIVE === $start->kind) {
             throw new CheckoutFailure('plan_unavailable', 404);
         }
+        if (PaymentStart::KIND_WALLET_PAYMENT_PENDING === $start->kind) {
+            throw new CheckoutFailure('wallet_payment_pending', 409);
+        }
 
         return $start;
     }

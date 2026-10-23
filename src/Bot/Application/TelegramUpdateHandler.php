@@ -69,6 +69,8 @@ class TelegramUpdateHandler
     private const STEP_WAITING_DISCOUNT_CODE = 'waiting_discount_code';
     private const STEP_WAITING_PAYMENT_METHOD = 'waiting_payment_method';
     private const NOWPAYMENTS_WAITING_STATUS_TEXT = 'در انتظار پرداخت';
+    /** PaymentStart::KIND_WALLET_PAYMENT_PENDING (also in ServiceManagementService). */
+    public const WALLET_PAYMENT_PENDING_TEXT = 'پرداخت این سفارش از کیف پول در جریان است. برای تکمیل، دوباره «پرداخت از کیف پول» را بزنید یا سفارش را لغو کنید تا مبلغ به کیف پول برگردد.';
 
     public function __construct(
         private readonly TelegramUserResolver $telegramUserResolver,
@@ -85,6 +87,7 @@ class TelegramUpdateHandler
         private readonly SalesSettingsProvider $salesSettingsProvider,
         private readonly PaymentGatewayRegistry $paymentGatewayRegistry,
         private readonly TelegramChannelMembershipGate $membershipGate,
+        private readonly MembershipGatePrompt $membershipGatePrompt,
         private readonly BotTextResolver $botTextResolver,
         private readonly BotButtonMatcher $botButtonMatcher,
         private readonly AdminAccessPolicy $accessPolicy,
@@ -553,14 +556,7 @@ class TelegramUpdateHandler
 
     private function ensureMembershipGateAllowed(TelegramAccount $account, string $chatId, ?string $callbackId, string $context): bool
     {
-        $result = $this->membershipGate->check($account->getTelegramId(), $context);
-        if ($result->allowed) {
-            return true;
-        }
-
-        $this->sendMembershipGateMessage($chatId, $callbackId, $context, $result);
-
-        return false;
+        return $this->membershipGatePrompt->allowed($account, $chatId, $callbackId, $context);
     }
 
     private function handleMembershipCheck(TelegramAccount $account, string $chatId, string $context, ?string $callbackId): void
@@ -571,7 +567,7 @@ class TelegramUpdateHandler
 
         $result = $this->membershipGate->check($account->getTelegramId(), $context);
         if (!$result->allowed) {
-            $this->sendMembershipGateMessage($chatId, $callbackId, $context, $result);
+            $this->membershipGatePrompt->send($chatId, $callbackId, $context, $result);
 
             return;
         }
@@ -581,40 +577,6 @@ class TelegramUpdateHandler
             ? 'عضویت شما تایید شد. برای ادامه خرید، دوباره روی «خرید سرویس» بزنید.'
             : 'عضویت شما تایید شد.';
         $this->telegramApiClient->sendMessage($chatId, $message);
-    }
-
-    private function sendMembershipGateMessage(string $chatId, ?string $callbackId, string $context, MembershipGateResult $result): void
-    {
-        $this->acknowledgeCallback($callbackId);
-        $lines = ['برای ادامه، ابتدا باید عضو کانال‌های زیر باشید. بعد از عضویت، روی «بررسی عضویت» بزنید.', ''];
-        foreach ($result->missingChannels as $channel) {
-            $lines[] = sprintf('- %s (%s)', $channel->getTitle(), $channel->getChatId());
-        }
-
-        $this->telegramApiClient->sendMessage($chatId, implode("\n", $lines), $this->membershipGateKeyboard($context, $result));
-    }
-
-    private function membershipGateKeyboard(string $context, MembershipGateResult $result): array
-    {
-        $rows = [];
-        foreach ($result->missingChannels as $channel) {
-            $inviteUrl = trim((string) ($channel->getInviteUrl() ?? ''));
-            if ('' === $inviteUrl) {
-                continue;
-            }
-
-            $rows[] = [[
-                'text' => sprintf('عضویت در %s', $channel->getTitle()),
-                'url' => $inviteUrl,
-            ]];
-        }
-
-        $rows[] = [[
-            'text' => '✅ بررسی عضویت',
-            'callback_data' => 'membership_check:'.$context,
-        ]];
-
-        return ['inline_keyboard' => $rows];
     }
 
     private function handleBuyService(TelegramAccount $account, string $chatId, ?string $callbackId = null, bool $isAdmin = false): void
@@ -1330,6 +1292,11 @@ class TelegramUpdateHandler
         $start = $this->paymentStarter->start($order, $storePaymentMethod);
         if (PaymentStart::KIND_PLAN_INACTIVE === $start->kind) {
             $this->showPopupOrMessage($chatId, $callbackId, 'این پلن دیگر فعال نیست یا وجود ندارد.', 'popup_invalid_plan_select_payment_method_draft');
+
+            return;
+        }
+        if (PaymentStart::KIND_WALLET_PAYMENT_PENDING === $start->kind) {
+            $this->showPopupOrMessage($chatId, $callbackId, self::WALLET_PAYMENT_PENDING_TEXT, 'popup_wallet_payment_pending');
 
             return;
         }

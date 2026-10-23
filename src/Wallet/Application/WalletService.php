@@ -8,11 +8,14 @@ use App\Entity\User;
 use App\Entity\Wallet;
 use App\Entity\WalletTransaction;
 use App\Wallet\Domain\InsufficientWalletBalance;
+use App\Wallet\Domain\PurchaseDebit;
 use App\Wallet\Domain\WalletException;
 use App\Wallet\Domain\WalletFrozen;
 use App\Wallet\Domain\WalletIdempotencyConflict;
+use App\Wallet\Domain\WalletKeys;
 use App\Wallet\Domain\WalletStatus;
 use App\Wallet\Domain\WalletTransactionType;
+use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
 use Doctrine\DBAL\LockMode;
 use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\Persistence\ManagerRegistry;
@@ -71,26 +74,29 @@ class WalletService
     /**
      * Adds money. Never refused for a frozen wallet (money already paid must not be lost).
      *
-     * @param int $amount positive, integer Toman
+     * @param int                                   $amount    positive, integer Toman
+     * @param (\Closure(WalletTransaction): void)|null $onWritten called inside this write's transaction, only when the row
+     *                                                         is new (never for a retry); a failure rolls the write back
      */
-    public function credit(User $user, int $amount, string $type, string $idempotencyKey, WalletActor $by, ?string $referenceType = null, ?string $referenceId = null, ?string $note = null): WalletTransaction
+    public function credit(User $user, int $amount, string $type, string $idempotencyKey, WalletActor $by, ?string $referenceType = null, ?string $referenceId = null, ?string $note = null, ?\Closure $onWritten = null): WalletTransaction
     {
         $this->assertMovement($amount, $type, $idempotencyKey);
 
-        return $this->write($this->userId($user), $amount, $type, $idempotencyKey, $by, $referenceType, $referenceId, $note);
+        return $this->write($this->userId($user), $amount, $type, $idempotencyKey, $by, $referenceType, $referenceId, $note, null, $onWritten);
     }
 
     /**
      * Takes money. Refused when balance + credit limit would go below zero (InsufficientWalletBalance), and for a
      * PURCHASE from a frozen wallet (WalletFrozen). Nothing is written when refused.
      *
-     * @param int $amount positive, integer Toman
+     * @param int                                   $amount    positive, integer Toman
+     * @param (\Closure(WalletTransaction): void)|null $onWritten see credit()
      */
-    public function debit(User $user, int $amount, string $type, string $idempotencyKey, WalletActor $by, ?string $referenceType = null, ?string $referenceId = null, ?string $note = null): WalletTransaction
+    public function debit(User $user, int $amount, string $type, string $idempotencyKey, WalletActor $by, ?string $referenceType = null, ?string $referenceId = null, ?string $note = null, ?\Closure $onWritten = null): WalletTransaction
     {
         $this->assertMovement($amount, $type, $idempotencyKey);
 
-        return $this->write($this->userId($user), -$amount, $type, $idempotencyKey, $by, $referenceType, $referenceId, $note);
+        return $this->write($this->userId($user), -$amount, $type, $idempotencyKey, $by, $referenceType, $referenceId, $note, null, $onWritten);
     }
 
     /**
@@ -109,6 +115,46 @@ class WalletService
         }
 
         return $this->write($this->userId($original->getWallet()->getUser()), -$original->getAmount(), WalletTransactionType::REVERSAL, $idempotencyKey, $by, $original->getReferenceType(), $original->getReferenceId(), $note, $original);
+    }
+
+    /**
+     * Gives back the purchase debit written for this payment (WalletKeys::purchase()), once; null when the payment has
+     * no debit (any non-wallet payment). Keyed on the ledger row, never on the payment's method or status, so a debit
+     * is released whatever happened to the payment row.
+     */
+    public function releasePurchase(int $paymentId, WalletActor $by, string $note): ?WalletTransaction
+    {
+        return $this->reverse(WalletKeys::purchase($paymentId), WalletKeys::purchaseReversal($paymentId), $by, $note);
+    }
+
+    /**
+     * Whether this payment's purchase debit is held, was given back, or was never written. Call it with the payment's
+     * order and payment rows locked FOR UPDATE (PaymentSettlementService does).
+     *
+     * Both reads are plain (non-locking) on purpose. The caller holds them inside the settlement transaction, i.e. across
+     * the panel call, and a locking read of the ledger's unique keys locks GAPS there: "reversal_of_id = ? LOCK IN SHARE
+     * MODE" (a missing row) always did, and on MariaDB 10.6+ even "idempotency_key = ? LOCK IN SHARE MODE" of the
+     * EXISTING debit takes a next-key lock (record + the gap below it), so another customer's ledger insert whose key
+     * sorts just below "purchase:payment:<id>" waited for the whole panel call. No lock is needed:
+     * - the debit is inserted in the same transaction as its payment row (WalletPayment::open()), so whenever the
+     *   caller sees the payment, a plain read sees its debit too;
+     * - every path that writes a purchase reversal (customer cancel, admin reject, gateway failure, expiry, the order
+     *   paid by another payment) sets the payment to REJECTED in the same transaction, under that payment's FOR UPDATE
+     *   lock, which the caller holds, so the caller's locked payment status already tells a given-back debit; a second
+     *   reversal is refused by the unique reversal_of_id and idempotency keys. The reversal read is the extra check for
+     *   a reversal written by anything else.
+     */
+    public function purchaseDebit(int $paymentId): PurchaseDebit
+    {
+        $connection = $this->entityManager->getConnection();
+        $debitId = $connection->fetchOne('SELECT id FROM wallet_transaction WHERE idempotency_key = ?', [WalletKeys::purchase($paymentId)]);
+        if (false === $debitId) {
+            return PurchaseDebit::MISSING;
+        }
+
+        return false === $connection->fetchOne('SELECT id FROM wallet_transaction WHERE reversal_of_id = ?', [(int) $debitId])
+            ? PurchaseDebit::HELD
+            : PurchaseDebit::REVERSED;
     }
 
     /**
@@ -137,7 +183,10 @@ class WalletService
         return $this->changeWallet($this->userId($user), static fn (Wallet $wallet) => $wallet->changeStatus($status), ['action' => 'status', 'value' => $status, 'source' => $by->source, 'admin_id' => $by->adminId]);
     }
 
-    private function write(int $userId, int $signedAmount, string $type, string $key, WalletActor $by, ?string $referenceType, ?string $referenceId, ?string $note, ?WalletTransaction $reversalOf = null): WalletTransaction
+    /**
+     * @param (\Closure(WalletTransaction): void)|null $onWritten
+     */
+    private function write(int $userId, int $signedAmount, string $type, string $key, WalletActor $by, ?string $referenceType, ?string $referenceId, ?string $note, ?WalletTransaction $reversalOf = null, ?\Closure $onWritten = null): WalletTransaction
     {
         $connection = $this->entityManager->getConnection();
         $nested = $connection->isTransactionActive();
@@ -148,12 +197,11 @@ class WalletService
         try {
             $wallet = $this->lock($userId);
 
-            // Read after the lock: a writer with this key on this wallet has committed by now.
+            // The usual retry: the row is in this transaction's snapshot. (A row committed after the snapshot of a
+            // caller's outer transaction is not; the insert below finds it.)
             $existing = $this->findTransaction($key);
             if ($existing instanceof WalletTransaction) {
-                if ($existing->getWallet()->getId() !== $wallet->getId() || $existing->getType() !== $type || $existing->getAmount() !== $signedAmount || $existing->getReversalOf()?->getId() !== $reversalOf?->getId()) {
-                    throw new WalletIdempotencyConflict($key);
-                }
+                $this->assertSameMovement($existing, $wallet, $type, $signedAmount, $key, $reversalOf);
                 $connection->commit();
 
                 return $existing;
@@ -176,23 +224,27 @@ class WalletService
             }
 
             $mutated = true;
-            $transaction = new WalletTransaction(
-                $wallet,
-                $type,
-                $signedAmount,
-                $balanceAfter,
-                $key,
-                $by->source,
-                $by->adminId,
-                $by->label,
-                $referenceType,
-                null === $referenceId ? null : mb_substr($referenceId, 0, 64),
-                $note,
-                $reversalOf,
-            );
-            $wallet->applyMovement($signedAmount, $transaction->getCreatedAt());
-            $this->entityManager->persist($transaction);
+            $createdAt = new \DateTimeImmutable();
+            $transactionId = $this->insertRow($wallet, $type, $signedAmount, $balanceAfter, $key, $by, $referenceType, $referenceId, $note, $reversalOf, $createdAt);
+            if (null === $transactionId) {
+                // Another writer committed this key (or this reversal) after the snapshot of the caller's outer
+                // transaction, before we got the lock. Nothing was written here: read that row with a locking read
+                // (it exists now, so only its record is locked, never a gap) and treat this call as its retry.
+                $mutated = false;
+                $existing = $this->committedTwin($key, $reversalOf);
+                if ($existing->getIdempotencyKey() === $key) {
+                    $this->assertSameMovement($existing, $wallet, $type, $signedAmount, $key, $reversalOf);
+                }
+                $connection->commit();
+
+                return $existing;
+            }
+            $wallet->applyMovement($signedAmount, $createdAt);
             $this->entityManager->flush();
+            $transaction = $this->entityManager->find(WalletTransaction::class, $transactionId) ?? throw new \LogicException(sprintf('Wallet transaction #%d was not written.', $transactionId));
+            if (null !== $onWritten) {
+                $onWritten($transaction);
+            }
             $connection->commit();
         } catch (\Throwable $e) {
             $this->rollback($nested, $mutated, $e);
@@ -203,6 +255,66 @@ class WalletService
         $this->logger->info('Wallet movement written.', ['wallet_id' => $wallet->getId(), 'transaction_id' => $transaction->getId(), 'type' => $type, 'amount' => $signedAmount, 'balance_after' => $balanceAfter, 'source' => $by->source]);
 
         return $transaction;
+    }
+
+    /** The same key must mean the same movement; anything else is refused (WalletIdempotencyConflict). */
+    private function assertSameMovement(WalletTransaction $existing, Wallet $wallet, string $type, int $signedAmount, string $key, ?WalletTransaction $reversalOf): void
+    {
+        if ($existing->getWallet()->getId() !== $wallet->getId() || $existing->getType() !== $type || $existing->getAmount() !== $signedAmount || $existing->getReversalOf()?->getId() !== $reversalOf?->getId()) {
+            throw new WalletIdempotencyConflict($key);
+        }
+    }
+
+    /**
+     * Appends the ledger row with a plain INSERT (the entity is loaded afterwards). Null when the unique key or the
+     * unique reversal_of_id is already taken: the database refused a duplicate and nothing was written. Through the ORM
+     * that refusal would close the entity manager and fail the caller's whole transaction instead.
+     *
+     * The columns are those of the WalletTransaction mapping (keep both in step).
+     */
+    private function insertRow(Wallet $wallet, string $type, int $signedAmount, int $balanceAfter, string $key, WalletActor $by, ?string $referenceType, ?string $referenceId, ?string $note, ?WalletTransaction $reversalOf, \DateTimeImmutable $createdAt): ?int
+    {
+        $connection = $this->entityManager->getConnection();
+        try {
+            $connection->insert('wallet_transaction', [
+                'wallet_id' => $wallet->getId(),
+                'reversal_of_id' => $reversalOf?->getId(),
+                'created_at' => $createdAt->format('Y-m-d H:i:s'),
+                'type' => $type,
+                'amount' => $signedAmount,
+                'balance_after' => $balanceAfter,
+                'idempotency_key' => $key,
+                'created_by_source' => $by->source,
+                'created_by_admin_id' => $by->adminId,
+                'created_by_label' => $by->label,
+                'reference_type' => $referenceType,
+                'reference_id' => null === $referenceId ? null : mb_substr($referenceId, 0, 64),
+                'note' => $note,
+            ]);
+        } catch (UniqueConstraintViolationException) {
+            return null;
+        }
+
+        return (int) $connection->lastInsertId();
+    }
+
+    /**
+     * The committed row that made insertRow() refuse: the one with this key, else the existing reversal of the same row.
+     * Locking reads (current committed data, not the snapshot); the row exists, so only its index record is locked.
+     */
+    private function committedTwin(string $key, ?WalletTransaction $reversalOf): WalletTransaction
+    {
+        $connection = $this->entityManager->getConnection();
+        $id = $connection->fetchOne('SELECT id FROM wallet_transaction WHERE idempotency_key = ? LOCK IN SHARE MODE', [$key]);
+        if (false === $id && $reversalOf instanceof WalletTransaction) {
+            $id = $connection->fetchOne('SELECT id FROM wallet_transaction WHERE reversal_of_id = ? LOCK IN SHARE MODE', [$reversalOf->getId()]);
+        }
+        if (false === $id) {
+            throw new \LogicException(sprintf('The ledger refused key "%s" as a duplicate, but no such row is committed.', $key));
+        }
+
+        // A locking find as well: a plain one would read the snapshot again and not see the row.
+        return $this->entityManager->find(WalletTransaction::class, (int) $id, LockMode::PESSIMISTIC_READ) ?? throw new \LogicException(sprintf('Wallet transaction #%d not found.', (int) $id));
     }
 
     /**

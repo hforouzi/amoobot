@@ -15,6 +15,7 @@ use App\Payment\Domain\PaymentStatus;
 use App\Shop\Domain\OrderStatus;
 use App\Shop\Domain\OrderType;
 use App\Tests\Support\IntegrationTestCase;
+use App\Tests\Support\SubprocessAssertions;
 use Doctrine\ORM\Event\OnFlushEventArgs;
 use Doctrine\ORM\Events;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -24,6 +25,8 @@ use Symfony\Component\Process\Process;
 
 final class PaymentSettlementServiceTest extends IntegrationTestCase
 {
+    use SubprocessAssertions;
+
     private const PRICE = 150000; // Toman
 
     private function settlement(): PaymentSettlementService
@@ -156,8 +159,7 @@ final class PaymentSettlementServiceTest extends IntegrationTestCase
         $outcomes = [];
         foreach ($processes as $process) {
             $process->wait();
-            self::assertTrue($process->isSuccessful(), $process->getErrorOutput().$process->getOutput());
-            $outcomes[] = trim($process->getOutput());
+            $outcomes[] = self::assertSubprocessClean($process, 'settle-payment.php');
         }
         sort($outcomes);
 
@@ -187,7 +189,7 @@ final class PaymentSettlementServiceTest extends IntegrationTestCase
         $connection->commit();
         $process->wait();
 
-        self::assertSame(SettlementOutcome::ALREADY_PROCESSED->value, trim($process->getOutput()), $process->getErrorOutput());
+        self::assertSame(SettlementOutcome::ALREADY_PROCESSED->value, self::assertSubprocessClean($process, 'settle-payment.php'));
         self::assertSame(0, $this->countServicesForOrder($order), 'stale in-memory status must not be trusted');
     }
 

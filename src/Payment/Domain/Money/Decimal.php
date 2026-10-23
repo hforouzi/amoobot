@@ -54,6 +54,36 @@ final class Decimal
         return strcmp(str_pad($af, $len, '0'), str_pad($bf, $len, '0')) <=> 0;
     }
 
+    /**
+     * floor($whole * $numerator / $denominator), exactly, capped at $whole and never negative: the largest x in
+     * [0, $whole] with x * $denominator <= $whole * $numerator (binary search over exact products, no division).
+     *
+     * @param int    $whole       a non-negative integer (e.g. an amount in Toman)
+     * @param string $numerator   a canonical non-negative decimal
+     * @param string $denominator a canonical decimal greater than zero
+     */
+    public static function floorShare(int $whole, string $numerator, string $denominator): int
+    {
+        $numerator = self::normalize($numerator);
+        $denominator = self::normalize($denominator);
+        if ($whole < 0 || null === $numerator || null === $denominator || 0 === self::compare($denominator, '0')) {
+            throw new \InvalidArgumentException('floorShare() needs a non-negative whole, a non-negative numerator and a positive denominator.');
+        }
+
+        $target = self::multiply((string) $whole, $numerator);
+        [$low, $high] = [0, $whole];
+        while ($low < $high) {
+            $middle = $low + intdiv($high - $low + 1, 2);
+            if (self::compare(self::multiply((string) $middle, $denominator), $target) <= 0) {
+                $low = $middle;
+            } else {
+                $high = $middle - 1;
+            }
+        }
+
+        return $low;
+    }
+
     public static function divideByPowerOfTen(string $decimal, int $power): string
     {
         [$integer, $fraction] = self::split($decimal);

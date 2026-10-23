@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Shared;
 
 use App\Tests\Support\IntegrationTestCase;
+use App\Tests\Support\SubprocessAssertions;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Component\Process\PhpExecutableFinder;
@@ -16,6 +17,8 @@ use Symfony\Component\Process\Process;
  */
 final class TimezoneTest extends IntegrationTestCase
 {
+    use SubprocessAssertions;
+
     private string $hostTimezone;
 
     protected function setUp(): void
@@ -57,8 +60,7 @@ final class TimezoneTest extends IntegrationTestCase
         $process = new Process([$php, '-d', 'date.timezone=Asia/Tehran', 'bin/console', 'about', '--env=test'], dirname(__DIR__, 2), ['APP_ENV' => 'test'], null, 120);
         $process->run();
 
-        self::assertTrue($process->isSuccessful(), $process->getErrorOutput());
-        self::assertMatchesRegularExpression('/^\s*Timezone\s+UTC\b/m', $process->getOutput());
+        self::assertMatchesRegularExpression('/^\s*Timezone\s+UTC\b/m', self::assertSubprocessClean($process, 'bin/console about'));
     }
 
     public function testStoredTimestampsAreUtcWallClockAsBefore(): void

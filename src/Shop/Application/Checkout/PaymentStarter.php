@@ -15,12 +15,15 @@ use App\Payment\Infrastructure\NowPaymentsGateway;
 use App\Payment\Infrastructure\PaymentGatewayRegistry;
 use App\Shared\Infrastructure\SettingValueProvider;
 use App\Shop\Domain\OrderType;
+use Doctrine\DBAL\LockMode;
 use Doctrine\ORM\EntityManagerInterface;
 
 /**
  * Paying an order: the store payment methods it may use (StorePaymentMethodResolver: active, configured, currency,
  * amount range) and starting a payment with one of them. The order's open payment (pending/submitted) is reused, so
- * choosing again never creates a second one; the gateway's createPayment() fills in its URL / authority. Nothing
+ * choosing again never creates a second one; the gateway's createPayment() fills in its URL / authority. A debited
+ * wallet payment is never reused, and while one is pending no gateway payment is started (KIND_WALLET_PAYMENT_PENDING).
+ * Nothing
  * here verifies or confirms a payment: that is PaymentSettlementService's, after the gateway says so.
  */
 final class PaymentStarter
@@ -95,32 +98,11 @@ final class PaymentStarter
             return new PaymentStart(PaymentStart::KIND_PLAN_INACTIVE, null, false, null, 0);
         }
 
-        $amount = $this->payableAmount($order);
-        $payment = $this->openPayment($order);
-        $paymentWasCreated = false;
-
-        if (!$payment instanceof Payment) {
-            $payment = (new Payment())
-                ->setOrder($order)
-                ->setGateway($gateway)
-                ->setStorePaymentMethod($storePaymentMethod)
-                ->setGatewayType($gateway->getType())
-                ->setMethod($gateway->getType())
-                ->setCurrency($gateway->getCurrency())
-                ->setAmount($amount)
-                ->setPayableAmount($amount)
-                ->setStatus(PaymentStatus::PENDING);
-            $this->entityManager->persist($payment);
-            $this->entityManager->flush();
-            $paymentWasCreated = true;
-        } else {
-            $payment
-                ->setGateway($gateway)
-                ->setStorePaymentMethod($storePaymentMethod)
-                ->setGatewayType($gateway->getType())
-                ->setMethod($gateway->getType())
-                ->setCurrency($gateway->getCurrency());
+        $claimed = $this->claimPayment($order, $storePaymentMethod);
+        if (null === $claimed) {
+            return new PaymentStart(PaymentStart::KIND_WALLET_PAYMENT_PENDING, null, false, null, 0);
         }
+        [$payment, $paymentWasCreated, $amount] = $claimed;
 
         $requestResult = $this->paymentGatewayRegistry
             ->resolve($gateway)
@@ -180,14 +162,88 @@ final class PaymentStarter
         return (int) ($priceSnapshot['finalAmount'] ?? $order->getAmount());
     }
 
+    /**
+     * Under the order's row lock (the lock WalletPayment::open() takes too): the payment to start, i.e. the order's open
+     * gateway payment reused or a new one, flushed. Null while a wallet payment of the order is debited but not settled:
+     * that payment is never taken over (its method would change and its debit could no longer be given back) and no
+     * second payment is started beside it.
+     *
+     * @return array{Payment, bool, int}|null [payment, created, amount]
+     */
+    private function claimPayment(Order $order, StorePaymentMethod $storePaymentMethod): ?array
+    {
+        $gateway = $storePaymentMethod->getGateway();
+        $connection = $this->entityManager->getConnection();
+        $this->entityManager->flush();
+        $connection->beginTransaction();
+        $payment = null;
+        $paymentWasCreated = false;
+
+        try {
+            $this->entityManager->refresh($order, LockMode::PESSIMISTIC_WRITE);
+            if ($this->hasPendingWalletPayment($order)) {
+                $connection->commit();
+
+                return null;
+            }
+
+            $amount = $this->payableAmount($order);
+            $payment = $this->openPayment($order);
+            if (!$payment instanceof Payment) {
+                $payment = (new Payment())
+                    ->setOrder($order)
+                    ->setGateway($gateway)
+                    ->setStorePaymentMethod($storePaymentMethod)
+                    ->setGatewayType($gateway->getType())
+                    ->setMethod($gateway->getType())
+                    ->setCurrency($gateway->getCurrency())
+                    ->setAmount($amount)
+                    ->setPayableAmount($amount)
+                    ->setStatus(PaymentStatus::PENDING);
+                $this->entityManager->persist($payment);
+                $paymentWasCreated = true;
+            } else {
+                $payment
+                    ->setGateway($gateway)
+                    ->setStorePaymentMethod($storePaymentMethod)
+                    ->setGatewayType($gateway->getType())
+                    ->setMethod($gateway->getType())
+                    ->setCurrency($gateway->getCurrency());
+            }
+            $this->entityManager->flush();
+            $connection->commit();
+        } catch (\Throwable $e) {
+            if ($connection->isTransactionActive()) {
+                $connection->rollBack();
+            }
+            if ($paymentWasCreated && $payment instanceof Payment && $this->entityManager->isOpen()) {
+                // Rolled back: the payment row does not exist.
+                $this->entityManager->detach($payment);
+            }
+
+            throw $e;
+        }
+
+        return [$payment, $paymentWasCreated, $amount];
+    }
+
+    /** A payment of method "wallet" that is debited and waiting for its settlement (WalletPayment). */
+    private function hasPendingWalletPayment(Order $order): bool
+    {
+        return null !== $this->entityManager->getRepository(Payment::class)->findOneBy(['order' => $order, 'method' => Payment::METHOD_WALLET, 'status' => PaymentStatus::PENDING]);
+    }
+
+    /** The order's open gateway payment; a wallet payment is never one (it is never handed to a gateway). */
     private function openPayment(Order $order): ?Payment
     {
         return $this->entityManager->getRepository(Payment::class)
             ->createQueryBuilder('p')
             ->where('p.order = :order')
             ->andWhere('p.status IN (:statuses)')
+            ->andWhere('p.method <> :wallet')
             ->setParameter('order', $order)
             ->setParameter('statuses', [PaymentStatus::PENDING, PaymentStatus::SUBMITTED])
+            ->setParameter('wallet', Payment::METHOD_WALLET)
             ->orderBy('p.id', 'DESC')
             ->setMaxResults(1)
             ->getQuery()

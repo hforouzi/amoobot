@@ -56,7 +56,8 @@ final class AdminLists
     public function orders(?string $status, ?string $query, int $page): array
     {
         $qb = $this->entityManager->createQueryBuilder()->select('o', 'u', 't', 'pl')->from(Order::class, 'o')
-            ->join('o.user', 'u')->leftJoin('u.telegramAccount', 't')->join('o.plan', 'pl')->orderBy('o.id', 'DESC');
+            // Left join: a wallet top-up order has no plan and must still be listed.
+            ->join('o.user', 'u')->leftJoin('u.telegramAccount', 't')->leftJoin('o.plan', 'pl')->orderBy('o.id', 'DESC');
         if (null !== $status && in_array($status, OrderStatus::ALL, true)) {
             $qb->andWhere('o.status = :status')->setParameter('status', $status);
         }

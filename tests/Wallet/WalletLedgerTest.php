@@ -7,6 +7,7 @@ namespace App\Tests\Wallet;
 use App\Entity\User;
 use App\Entity\Wallet;
 use App\Entity\WalletTransaction;
+use App\Tests\Support\SubprocessAssertions;
 use App\Wallet\Application\WalletActor;
 use App\Wallet\Application\WalletService;
 use App\Wallet\Domain\InsufficientWalletBalance;
@@ -30,6 +31,8 @@ use Symfony\Component\Process\Process;
  */
 final class WalletLedgerTest extends IntegrationTestCase
 {
+    use SubprocessAssertions;
+
     private function wallets(): WalletService
     {
         return self::getContainer()->get(WalletService::class);
@@ -374,6 +377,39 @@ final class WalletLedgerTest extends IntegrationTestCase
     }
 
     /**
+     * A caller's outer transaction took its snapshot before another process committed the same movement. The ledger
+     * row is then invisible to a plain read, yet it exists: the write returns that committed row (an idempotent retry)
+     * instead of failing on the unique key, and nothing is written twice.
+     */
+    #[Group('subprocess')]
+    public function testAMovementCommittedAfterTheCallersSnapshotIsReturnedNotWrittenAgain(): void
+    {
+        $user = $this->createUser();
+        $this->wallets()->credit($user, 1000, WalletTransactionType::TOPUP, 'test:seed:snapshot', WalletActor::system());
+        $connection = $this->em->getConnection();
+
+        $connection->beginTransaction();
+        try {
+            $connection->fetchOne('SELECT COUNT(*) FROM wallet_transaction'); // the outer transaction's snapshot starts here
+            self::assertSame(['ok'], $this->runParallel([[(string) $user->getId(), '300', 'test:debit:snapshot', '0']]));
+            self::assertFalse($connection->fetchOne('SELECT id FROM wallet_transaction WHERE idempotency_key = ?', ['test:debit:snapshot']), 'invisible to the snapshot');
+
+            $again = $this->wallets()->debit($user, 300, WalletTransactionType::PURCHASE, 'test:debit:snapshot', WalletActor::system());
+            $connection->commit();
+        } catch (\Throwable $e) {
+            $connection->rollBack();
+
+            throw $e;
+        }
+
+        self::assertSame(-300, $again->getAmount());
+        self::assertSame(700, $again->getBalanceAfter(), 'the row the other process wrote');
+        self::assertSame(700, $this->balanceOf($user));
+        self::assertSame(2, $this->countTransactions($user));
+        self::assertSame($this->ledgerSum($user), $this->balanceOf($user));
+    }
+
+    /**
      * @param list<list<string>> $argumentLists
      *
      * @return list<string>
@@ -391,8 +427,7 @@ final class WalletLedgerTest extends IntegrationTestCase
         $outcomes = [];
         foreach ($processes as $process) {
             $process->wait();
-            self::assertTrue($process->isSuccessful(), $process->getErrorOutput().$process->getOutput());
-            $outcomes[] = trim($process->getOutput());
+            $outcomes[] = self::assertSubprocessClean($process, 'wallet-debit.php');
         }
 
         return $outcomes;

@@ -22,6 +22,8 @@ use App\Shop\Domain\OrderStatus;
 use App\Shop\Domain\OrderType;
 use App\Wallet\Application\WalletActor;
 use App\Wallet\Application\WalletService;
+use App\Wallet\Domain\PurchaseDebit;
+use App\Wallet\Domain\TopUpCredit;
 use App\Wallet\Domain\WalletKeys;
 use App\Wallet\Domain\WalletReferenceType;
 use App\Wallet\Domain\WalletTransactionType;
@@ -50,7 +52,9 @@ use Psr\Log\LoggerInterface;
  *
  * A payment of method "wallet" (WalletPayment) is settled like a gateway payment; its debit was written before. Every
  * path that rejects such a payment (admin reject, customer cancel, gateway failure; the expiry job too) gives the
- * debit back in the same transaction, once (releaseWalletDebit()).
+ * debit back in the same transaction, once (releaseWalletDebit()). When any payment of an order is confirmed (or
+ * verified and its provisioning fails), the order's OTHER open wallet payments are closed and their debits given back
+ * in that same transaction (releaseOtherWalletPayments()).
  */
 class PaymentSettlementService
 {
@@ -300,6 +304,12 @@ class PaymentSettlementService
             [$payment, $order] = $this->lock($paymentId);
             $isWalletTopUp = OrderType::WALLET_TOPUP === $order->getType();
 
+            if ($payment->isWalletPayment() && null !== ($refused = $this->refuseWalletPayment($payment, $allowedStatuses))) {
+                $connection->commit();
+
+                return $refused;
+            }
+
             // The customer paid after the payment was cancelled or expired unpaid: never ignore money.
             if ($checkAmount && $payment->isRejectedUnpaid()) {
                 return $this->parkLatePayment($payment, $order, $verified, $source);
@@ -350,6 +360,13 @@ class PaymentSettlementService
                 ), $source, $match);
             }
 
+            // A top-up worth less than 1 Toman has nothing to credit: a terminal answer, not an error to retry forever.
+            if ($isWalletTopUp && ($credit = TopUpCredit::for($order->getAmount(), $payment))->amount <= 0) {
+                $connection->commit();
+
+                return new SettlementResult(SettlementOutcome::TOPUP_NOTHING_TO_CREDIT, sprintf('Top-up payment #%d cannot be confirmed: what was received is worth less than 1 Toman, so there is nothing to credit (%s). Nothing was changed; reject this payment.', $payment->getId() ?? 0, $credit->note ?? '-'), $payment);
+            }
+
             if (null !== $verified->transactionId && null === $payment->getGatewayTransactionId()) {
                 $payment->setGatewayTransactionId($verified->transactionId);
             }
@@ -371,15 +388,23 @@ class PaymentSettlementService
                 ->setPaidAt($order->getPaidAt() ?? $now)
                 ->setProvisionedAt($order->getProvisionedAt() ?? $now);
             $this->markOrderDiscountUsed($order);
+            $released = $this->releaseOtherWalletPayments($order, $payment, $verified->adminId);
 
             $this->entityManager->flush();
             $connection->commit();
         } catch (\Throwable $e) {
-            $this->rollbackAndReset();
+            $rolledBack = $this->rollbackAndReset();
 
             // A wallet top-up never becomes PROVISIONING_FAILED: its credit was rolled back with everything else.
             if (!$fulfilmentStarted || $isWalletTopUp) {
                 $this->logger->error('Payment settlement aborted before fulfilment.', ['payment_id' => $paymentId, 'source' => $source, 'error' => $e->getMessage()]);
+                if ($fulfilmentStarted) {
+                    // Not silent: the money was verified but not credited (once per payment).
+                    $this->adminAlerter->walletTopUpCreditFailed($paymentId, $this->sanitizeError($e));
+                } elseif (!$rolledBack) {
+                    // Not silent either: the payment stays pending (a wallet payment with its debit held).
+                    $this->adminAlerter->settlementInterrupted($paymentId, $this->sanitizeError($e));
+                }
 
                 return new SettlementResult(SettlementOutcome::ERROR, 'Payment could not be settled right now; nothing was changed.');
             }
@@ -388,6 +413,7 @@ class PaymentSettlementService
         }
 
         $this->logger->info('Payment settled.', ['payment_id' => $paymentId, 'source' => $source, 'flag' => $payment->getAmountFlag()]);
+        $this->notifyReleased($released);
         $this->customerNotifier->confirmed($payment, $service);
         if (self::FLAG_OVERPAID === $payment->getAmountFlag()) {
             $this->adminAlerter->overpaid($payment);
@@ -424,9 +450,10 @@ class PaymentSettlementService
     private function fulfil(Order $order, Payment $payment, string $source): ?VpnService
     {
         if (OrderType::WALLET_TOPUP === $order->getType()) {
-            // Nothing to provision: the ordered amount goes to the customer's wallet, inside this transaction and
-            // once per payment (the payment id is the ledger idempotency key).
-            $this->walletService->credit($order->getUser(), $order->getAmount(), WalletTransactionType::TOPUP, WalletKeys::topUp((int) $payment->getId()), WalletActor::system(), WalletReferenceType::PAYMENT, (string) $payment->getId());
+            // Nothing to provision: what was received (at most the ordered amount, TopUpCredit) goes to the customer's
+            // wallet, inside this transaction and once per payment (the payment id is the ledger idempotency key).
+            $credit = TopUpCredit::for($order->getAmount(), $payment);
+            $this->walletService->credit($order->getUser(), $credit->amount, WalletTransactionType::TOPUP, WalletKeys::topUp((int) $payment->getId()), WalletActor::system(), WalletReferenceType::PAYMENT, (string) $payment->getId(), $credit->note);
 
             return null;
         }
@@ -474,15 +501,77 @@ class PaymentSettlementService
     }
 
     /**
-     * A rejected wallet payment gives its debit back (a REVERSAL), inside the caller's transaction and at most once;
-     * nothing for any other payment, or when nothing was debited.
+     * A payment of method "wallet" carries no money of its own: its wallet debit is the payment. So it is never parked
+     * as a late payment (once cancelled/expired its debit was given back; nothing was paid late), and it is confirmed
+     * (settlement, admin approve, retry) only while that debit is held. Null: go on as for any payment.
+     *
+     * @param list<string> $allowedStatuses
+     */
+    private function refuseWalletPayment(Payment $payment, array $allowedStatuses): ?SettlementResult
+    {
+        if ($payment->isRejectedUnpaid()) {
+            return new SettlementResult(SettlementOutcome::ALREADY_PROCESSED, sprintf('Wallet payment #%d was cancelled or expired before it was settled and its debit was given back; nothing to confirm.', $payment->getId() ?? 0), $payment);
+        }
+        if (!in_array($payment->getStatus(), $allowedStatuses, true)) {
+            return null;
+        }
+
+        return match ($this->walletService->purchaseDebit((int) $payment->getId())) {
+            PurchaseDebit::HELD => null,
+            PurchaseDebit::REVERSED => new SettlementResult(SettlementOutcome::WALLET_DEBIT_MISSING, sprintf('Wallet payment #%d cannot be confirmed: its wallet debit was already given back to the customer, so confirming would deliver the order without payment. Reject this payment instead.', $payment->getId() ?? 0), $payment),
+            PurchaseDebit::MISSING => new SettlementResult(SettlementOutcome::WALLET_DEBIT_MISSING, sprintf('Wallet payment #%d cannot be confirmed: it has no wallet debit, so confirming would deliver the order without payment. Reject this payment instead.', $payment->getId() ?? 0), $payment),
+        };
+    }
+
+    /**
+     * A rejected payment that has a wallet debit gives it back (a REVERSAL), inside the caller's transaction and at most
+     * once. Keyed on the ledger row (purchase:payment:N), not on payment.method: nothing for a payment without a debit.
      */
     private function releaseWalletDebit(Payment $payment, ?int $adminId, string $note): void
     {
-        if (!$payment->isWalletPayment()) {
-            return;
+        $this->walletService->releasePurchase((int) $payment->getId(), WalletActor::systemFor($adminId), $note);
+    }
+
+    /**
+     * The order was just paid by $paid: every OTHER open wallet payment of it (debited, settlement never finished, e.g.
+     * the customer then completed an earlier gateway/card payment) is rejected and its debit given back, in the
+     * caller's transaction, once (the reversal key of releaseWalletDebit()). The order lock is held, so no wallet
+     * payment of this order can be opened or settled meanwhile.
+     *
+     * @return list<Payment> the payments closed here (the customer is told after the commit, notifyReleased())
+     */
+    private function releaseOtherWalletPayments(Order $order, Payment $paid, ?int $adminId): array
+    {
+        $released = [];
+        foreach ($this->entityManager->getRepository(Payment::class)->findBy(['order' => $order, 'method' => Payment::METHOD_WALLET], ['id' => 'ASC']) as $other) {
+            if ($other->getId() === $paid->getId()) {
+                continue;
+            }
+            $this->entityManager->refresh($other, LockMode::PESSIMISTIC_WRITE);
+            if (!in_array($other->getStatus(), PaymentStatus::SETTLEABLE, true)) {
+                continue;
+            }
+            $other
+                ->setStatus(PaymentStatus::REJECTED)
+                ->setAdminNote(Payment::NOTE_ORDER_PAID_OTHERWISE)
+                ->setConfirmationSource(Payment::SOURCE_ORDER_PAID_OTHERWISE);
+            $this->releaseWalletDebit($other, $adminId, sprintf('order #%d paid by payment #%d', $order->getId() ?? 0, $paid->getId() ?? 0));
+            $released[] = $other;
         }
-        $this->walletService->reverse(WalletKeys::purchase((int) $payment->getId()), WalletKeys::purchaseReversal((int) $payment->getId()), WalletActor::systemFor($adminId), $note);
+
+        return $released;
+    }
+
+    /**
+     * After the commit: tells the customer the wallet amount of each released payment came back.
+     *
+     * @param list<Payment> $released
+     */
+    private function notifyReleased(array $released): void
+    {
+        foreach ($released as $payment) {
+            $this->customerNotifier->rejected($payment);
+        }
     }
 
     private function parkLatePayment(Payment $payment, Order $order, VerifiedPayment $verified, string $source): SettlementResult
@@ -559,15 +648,20 @@ class PaymentSettlementService
             $order
                 ->setStatus(OrderStatus::PROVISIONING_FAILED)
                 ->setPaidAt($order->getPaidAt() ?? $now);
+            // The order is paid (only provisioning failed): a pending wallet payment of it is not needed either.
+            $released = $this->releaseOtherWalletPayments($order, $payment, $verified->adminId);
             $this->entityManager->flush();
             $connection->commit();
         } catch (\Throwable $e) {
             $this->rollbackAndReset();
             $this->logger->critical('Could not record provisioning failure.', ['payment_id' => $paymentId, 'error' => $e->getMessage()]);
+            // The payment was verified but stays as it was (a wallet payment: pending with its debit held): never silently.
+            $this->adminAlerter->settlementInterrupted($paymentId, $this->sanitizeError($error).' / recording the failure: '.$this->sanitizeError($e));
 
             return new SettlementResult(SettlementOutcome::ERROR, 'Fulfilment failed and the failure could not be recorded; nothing was changed.');
         }
 
+        $this->notifyReleased($released);
         $this->adminAlerter->provisioningFailed($payment);
         $this->customerNotifier->provisioningDelayed($payment);
 
@@ -631,16 +725,26 @@ class PaymentSettlementService
     /**
      * After a failed attempt the unit of work holds half-applied changes (new service, statuses),
      * so it is discarded: cleared, or rebuilt when the failure closed the entity manager.
+     *
+     * When the rollback itself fails (e.g. the database already rolled the transaction back after a deadlock, so a
+     * savepoint of the ORM's flush no longer exists), the connection is CLOSED: the server drops whatever is left of
+     * the transaction and DBAL's nesting level starts again at 0. Without that, the next "transaction" (e.g. recording
+     * PROVISIONING_FAILED) ran as a savepoint of a transaction that no longer existed and was never committed.
+     *
+     * @return bool false when the rollback failed (the connection was closed; the caller alerts the admins)
      */
-    private function rollbackAndReset(): void
+    private function rollbackAndReset(): bool
     {
         $connection = $this->entityManager->getConnection();
+        $rolledBack = true;
         try {
             while ($connection->isTransactionActive()) {
                 $connection->rollBack();
             }
         } catch (\Throwable $e) {
-            $this->logger->error('Rollback failed.', ['error' => $e->getMessage()]);
+            $rolledBack = false;
+            $this->logger->critical('Rollback failed; the database connection was closed so no transaction state is lost.', ['error' => $e->getMessage()]);
+            $connection->close();
         }
 
         if ($this->entityManager->isOpen()) {
@@ -648,6 +752,8 @@ class PaymentSettlementService
         } else {
             $this->managerRegistry->resetManager();
         }
+
+        return $rolledBack;
     }
 
     private function sanitizeError(\Throwable $error): string

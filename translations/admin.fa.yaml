@@ -601,6 +601,7 @@ dashboard:
   today.orders: "سفارش‌های جدید"
   today.payments: "پرداخت‌های تأییدشده"
   today.revenue: "درآمد"
+  today.wallet_topups: "شارژ کیف پول (جزو درآمد)"
   today.customers: "مشتریان جدید"
   services.title: "سرویس‌ها"
   panels.title: "پنل‌ها"
@@ -921,6 +922,7 @@ field:
   zibal_sandbox: "حالت آزمایشی (Sandbox)"
 
 flash:
+  customer.delete_has_wallet: "مشتری #%id% کیف پول دارد و حذف نمی‌شود: دفتر کیف پول سابقهٔ مالی است. چیزی حذف نشد."
   service.page_link_csrf: "درخواست نامعتبر بود (توکن امنیتی). صفحه را تازه کنید و دوباره امتحان کنید."
   service.page_link_rotated: "لینک صفحه اشتراک سرویس #%id% عوض شد؛ لینک قبلی دیگر کار نمی‌کند."
   error: "خطا: %error%"
@@ -960,6 +962,8 @@ flash:
   payment.provisioning_failed: "پرداخت تأیید شد اما ساخت سرویس ناموفق بود. %detail%"
   payment.rejected: "پرداخت رد شد. %detail%"
   payment.order_already_fulfilled: "سفارش قبلاً تحویل شده است. %detail%"
+  payment.wallet_debit_missing: "تایید نشد: این پرداخت کیف پول دیگر برداشتی از کیف پول ندارد (برگشت داده شده یا هرگز کسر نشده). به‌جای آن، پرداخت را رد کنید. %detail%"
+  payment.topup_nothing_to_credit: "تایید نشد: مبلغ دریافت‌شده برای این شارژ کیف پول کمتر از ۱ تومان است و چیزی برای واریز نیست. این پرداخت را رد کنید. %detail%"
   broadcast.only_draft_editable: "فقط پیام‌های پیش‌نویس قابل ویرایش هستند."
   broadcast.recipients_prepared: "گیرندگان آماده شدند: %new% جدید، %duplicates% تکراری."
   broadcast.only_draft_sendable: "فقط پیام‌های پیش‌نویس را می‌توان همین حالا ارسال کرد."
@@ -1062,6 +1066,8 @@ wallet_admin:
   detail_title: "کیف پول %customer%"
   search: "جستجوی مشتری (شناسه تلگرام، @نام‌کاربری، نام، موبایل یا شناسه)"
   empty: "هنوز کیف پولی وجود ندارد."
+  none.help: "این مشتری هنوز کیف پول ندارد؛ با اولین شارژ یا پرداخت از کیف پول ساخته می‌شود، یا وقتی برای اصلاح موجودی آن را اینجا باز کنید."
+  none.open: "باز کردن کیف پول برای اصلاح موجودی"
   previous: "قبلی"
   next: "بعدی"
   back: "همه کیف پول‌ها"

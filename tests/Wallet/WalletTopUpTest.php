@@ -6,11 +6,14 @@ namespace App\Tests\Wallet;
 
 use App\Entity\Order;
 use App\Entity\Payment;
+use App\Entity\Wallet;
 use App\Entity\WalletTransaction;
+use App\Payment\Application\AdminPaymentAlerter;
 use App\Payment\Application\Settlement\PaymentSettlementService;
 use App\Payment\Application\Settlement\SettlementOutcome;
 use App\Payment\Application\Settlement\VerifiedPayment;
 use App\Payment\Domain\Dto\PaymentVerificationResult;
+use App\Payment\Domain\Money\Decimal;
 use App\Payment\Domain\PaymentGatewayType;
 use App\Payment\Domain\PaymentStatus;
 use App\Shop\Application\Checkout\PaymentStarter;
@@ -327,6 +330,56 @@ final class WalletTopUpTest extends IntegrationTestCase
         self::assertSame(self::AMOUNT, $this->balance(), 'the ordered amount; the surplus is the admins\' call, as for any order');
     }
 
+    /** Review finding I1: within the crypto tolerance, the wallet gets what was received, not the ordered amount. */
+    public function testACryptoTopUpUnderpaidWithinToleranceCreditsWhatWasReceived(): void
+    {
+        [, $payment] = $this->startTopUp(PaymentGatewayType::NOWPAYMENTS);
+        $payment = $this->em->find(Payment::class, $payment->getId()) ?? throw new \LogicException();
+        $expected = (string) Decimal::normalize((string) $payment->getExpectedAmount());
+        $paid = Decimal::multiply($expected, '0.995'); // 0.5% short; the crypto default tolerates 1%
+
+        $result = $this->settlement()->settle($payment, VerifiedPayment::fromGateway(new PaymentVerificationResult(success: true, paid: true, transactionId: 'np-1', amount: $paid, currency: (string) $payment->getExpectedCurrency())), 'test_webhook');
+
+        self::assertSame(SettlementOutcome::CONFIRMED, $result->outcome, $result->message);
+        self::assertSame(PaymentSettlementService::FLAG_UNDERPAID_TOLERATED, $this->row('payment', (int) $payment->getId())['amount_flag']);
+        self::assertSame(49750, $this->balance(), 'floor(50000 * received / expected)');
+        $note = (string) $this->em->getConnection()->fetchOne("SELECT note FROM wallet_transaction WHERE type = 'topup'");
+        self::assertStringContainsString('received '.$paid.' '.$payment->getExpectedCurrency().' of '.$expected, $note);
+        self::assertStringContainsString('credited 49750 of 50000 ordered', $note);
+    }
+
+    public function testAFiatTopUpUnderpaidWithinAConfiguredToleranceCreditsWhatWasReceived(): void
+    {
+        $gateway = $this->methods[PaymentGatewayType::ZIBAL]->getGateway();
+        $gateway->setConfig(['underpayment_tolerance_percent' => '2'] + ($gateway->getConfig() ?? []));
+        $this->em->flush();
+        [, $payment] = $this->startTopUp(PaymentGatewayType::ZIBAL);
+
+        $result = $this->confirm($payment, PaymentGatewayType::ZIBAL, '49001');
+
+        self::assertSame(SettlementOutcome::CONFIRMED, $result->outcome, $result->message);
+        self::assertSame(49001, $this->balance());
+    }
+
+    public function testAnAdminApprovingAnUnderpaidTopUpCreditsWhatWasReceived(): void
+    {
+        [, $payment] = $this->startTopUp(PaymentGatewayType::ZIBAL);
+        self::assertSame(SettlementOutcome::NEEDS_REVIEW, $this->confirm($payment, PaymentGatewayType::ZIBAL, '40000')->outcome);
+
+        $approved = $this->settlement()->approveByAdmin($this->em->find(Payment::class, $payment->getId()) ?? throw new \LogicException(), 1, null, 'test_admin');
+
+        self::assertSame(SettlementOutcome::CONFIRMED, $approved->outcome, $approved->message);
+        self::assertSame(40000, $this->balance(), 'what arrived; the rest is a manual adjustment if the admin wants it');
+    }
+
+    public function testAnApprovedCardToCardTopUpWithoutAReportedAmountCreditsTheOrderedAmount(): void
+    {
+        [, $payment] = $this->startTopUp(PaymentGatewayType::MANUAL_CARD);
+
+        self::assertSame(SettlementOutcome::CONFIRMED, $this->confirm($payment, PaymentGatewayType::MANUAL_CARD)->outcome);
+        self::assertSame(self::AMOUNT, $this->balance());
+    }
+
     public function testASecondPaymentForAToppedUpOrderGoesToReviewWithoutASecondCredit(): void
     {
         [$order, $first] = $this->startTopUp(PaymentGatewayType::ZIBAL);
@@ -348,10 +401,11 @@ final class WalletTopUpTest extends IntegrationTestCase
         $listener = new class {
             public bool $fail = true;
 
+            /** Fails the credit half-way: its ledger row is inserted, the wallet's balance update fails. */
             public function onFlush(OnFlushEventArgs $args): void
             {
-                foreach ($args->getObjectManager()->getUnitOfWork()->getScheduledEntityInsertions() as $entity) {
-                    if ($this->fail && $entity instanceof WalletTransaction) {
+                foreach ($args->getObjectManager()->getUnitOfWork()->getScheduledEntityUpdates() as $entity) {
+                    if ($this->fail && $entity instanceof Wallet) {
                         throw new \RuntimeException('Simulated database failure');
                     }
                 }
@@ -366,6 +420,15 @@ final class WalletTopUpTest extends IntegrationTestCase
         self::assertSame(OrderStatus::WAITING_PAYMENT, $this->row('`order`', (int) $order->getId())['status']);
         self::assertSame(0, $this->ledgerRows());
         self::assertSame(0, (int) $this->em->getConnection()->fetchOne('SELECT COUNT(*) FROM payment WHERE status = ?', [PaymentStatus::PROVISIONING_FAILED]));
+
+        // Not silent: the admins are alerted, once per payment however often the gateway retries.
+        $alerts = fn (): int => count(array_filter($this->http->telegramTexts(), static fn (string $text): bool => str_contains($text, AdminPaymentAlerter::WALLET_CREDIT_FAILED_TITLE) && str_contains($text, 'Payment ID: '.$payment->getId())));
+        $alertsAfterFirstFailure = $alerts();
+        self::assertGreaterThan(0, $alertsAfterFirstFailure, 'alerted');
+        self::assertSame(SettlementOutcome::ERROR, $this->confirm($payment, PaymentGatewayType::ZIBAL)->outcome);
+        self::assertSame($alertsAfterFirstFailure, $alerts(), 'not alerted again for the same payment');
+        self::assertNotNull($this->row('payment', (int) $payment->getId())['wallet_credit_alerted_at']);
+        self::assertSame(PaymentStatus::PENDING, $this->row('payment', (int) $payment->getId())['status']);
 
         $listener->fail = false;
         $retry = $this->confirm($payment, PaymentGatewayType::ZIBAL);

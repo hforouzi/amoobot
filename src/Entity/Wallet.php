@@ -29,8 +29,9 @@ class Wallet
     #[ORM\Column]
     private ?int $id = null;
 
+    /** RESTRICT: a customer with a wallet cannot be deleted by the database (the ledger is financial history). */
     #[ORM\ManyToOne]
-    #[ORM\JoinColumn(nullable: false, onDelete: 'CASCADE')]
+    #[ORM\JoinColumn(nullable: false, onDelete: 'RESTRICT')]
     private User $user;
 
     #[ORM\Column(type: Types::BIGINT, options: ['default' => 0])]

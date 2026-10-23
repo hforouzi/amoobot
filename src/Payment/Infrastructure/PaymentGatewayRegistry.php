@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Payment\Infrastructure;
 
+use App\Entity\Payment;
 use App\Entity\PaymentGateway;
 use App\Entity\Plugin;
 use App\Payment\Domain\PaymentGatewayInterface;
@@ -17,6 +18,13 @@ use Symfony\Component\DependencyInjection\Attribute\Autowire;
 
 final class PaymentGatewayRegistry
 {
+    /**
+     * Gateway types no driver and no plugin may answer for. "wallet": payments paid from the customer's wallet
+     * (Payment::METHOD_WALLET) are confirmed by their ledger debit, never by a gateway; a plugin with that code would
+     * otherwise become their "verifier" (bot payment check, return page, webhooks).
+     */
+    public const RESERVED_CODES = [Payment::METHOD_WALLET];
+
     /**
      * @var array<string, PaymentGatewayInterface>
      */
@@ -57,6 +65,7 @@ final class PaymentGatewayRegistry
     public function resolveByType(string $type): PaymentGatewayInterface
     {
         $type = trim($type);
+        self::refuseReserved($type);
         if (isset($this->driversByType[$type])) {
             return $this->driversByType[$type];
         }
@@ -72,6 +81,9 @@ final class PaymentGatewayRegistry
     public function supportsType(string $type): bool
     {
         $type = trim($type);
+        if (in_array($type, self::RESERVED_CODES, true)) {
+            return false;
+        }
         if (isset($this->driversByType[$type])) {
             return true;
         }
@@ -88,6 +100,7 @@ final class PaymentGatewayRegistry
     {
         $pluginCode = trim((string) ($gateway->getPluginCode() ?? ''));
         if ('' !== $pluginCode) {
+            self::refuseReserved($pluginCode);
             $plugin = $this->pluginRegistry->findByCode($pluginCode);
             if (!$plugin instanceof Plugin) {
                 $this->logger->warning('Plugin payment gateway resolution failed: plugin_not_found.', [
@@ -102,6 +115,13 @@ final class PaymentGatewayRegistry
         }
 
         return $this->resolveByType($gateway->getType());
+    }
+
+    private static function refuseReserved(string $code): void
+    {
+        if (in_array($code, self::RESERVED_CODES, true)) {
+            throw new \RuntimeException(sprintf('Gateway type "%s" is reserved: no driver or plugin verifies it.', $code));
+        }
     }
 
     private function createPluginAdapter(Plugin $plugin): PluginPaymentGatewayDriverAdapter

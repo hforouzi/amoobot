@@ -25,7 +25,8 @@
         <h2>{{ 'admin.customer.payments'|trans }}</h2>
         <div class="stats">
             <div class="stat"><span class="muted">{{ 'admin.customer.payments_confirmed'|trans }}</span><b>{{ payments.confirmed|number_format }}</b></div>
-            <div class="stat"><span class="muted">{{ 'admin.customer.payments_total'|trans }}</span><b>{{ 'money.toman'|trans({'%amount%': payments.confirmedAmount|number_format}) }}</b></div>
+            <div class="stat" data-paid-total="{{ payments.confirmedAmount }}"><span class="muted">{{ 'admin.customer.payments_total'|trans }}</span><b>{{ 'money.toman'|trans({'%amount%': payments.confirmedAmount|number_format}) }}</b></div>
+            {% if payments.walletTopUps %}<div class="stat" data-wallet-topups="{{ payments.walletTopUps }}"><span class="muted">{{ 'admin.customer.wallet_topups'|trans }}</span><b>{{ 'money.toman'|trans({'%amount%': payments.walletTopUps|number_format}) }}</b></div>{% endif %}
             <div class="stat"><span class="muted">{{ 'admin.customer.payments_open'|trans }}</span><b>{{ payments.open|number_format }}</b></div>
             <div class="stat"><span class="muted">{{ 'admin.customer.payments_all'|trans }}</span><b>{{ payments.count|number_format }}</b></div>
         </div>
