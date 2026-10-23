@@ -87,6 +87,7 @@ class TelegramUpdateHandler
         private readonly SalesSettingsProvider $salesSettingsProvider,
         private readonly PaymentGatewayRegistry $paymentGatewayRegistry,
         private readonly TelegramChannelMembershipGate $membershipGate,
+        private readonly MembershipGatePrompt $membershipGatePrompt,
         private readonly BotTextResolver $botTextResolver,
         private readonly BotButtonMatcher $botButtonMatcher,
         private readonly AdminAccessPolicy $accessPolicy,
@@ -555,14 +556,7 @@ class TelegramUpdateHandler
 
     private function ensureMembershipGateAllowed(TelegramAccount $account, string $chatId, ?string $callbackId, string $context): bool
     {
-        $result = $this->membershipGate->check($account->getTelegramId(), $context);
-        if ($result->allowed) {
-            return true;
-        }
-
-        $this->sendMembershipGateMessage($chatId, $callbackId, $context, $result);
-
-        return false;
+        return $this->membershipGatePrompt->allowed($account, $chatId, $callbackId, $context);
     }
 
     private function handleMembershipCheck(TelegramAccount $account, string $chatId, string $context, ?string $callbackId): void
@@ -573,7 +567,7 @@ class TelegramUpdateHandler
 
         $result = $this->membershipGate->check($account->getTelegramId(), $context);
         if (!$result->allowed) {
-            $this->sendMembershipGateMessage($chatId, $callbackId, $context, $result);
+            $this->membershipGatePrompt->send($chatId, $callbackId, $context, $result);
 
             return;
         }
@@ -583,40 +577,6 @@ class TelegramUpdateHandler
             ? 'عضویت شما تایید شد. برای ادامه خرید، دوباره روی «خرید سرویس» بزنید.'
             : 'عضویت شما تایید شد.';
         $this->telegramApiClient->sendMessage($chatId, $message);
-    }
-
-    private function sendMembershipGateMessage(string $chatId, ?string $callbackId, string $context, MembershipGateResult $result): void
-    {
-        $this->acknowledgeCallback($callbackId);
-        $lines = ['برای ادامه، ابتدا باید عضو کانال‌های زیر باشید. بعد از عضویت، روی «بررسی عضویت» بزنید.', ''];
-        foreach ($result->missingChannels as $channel) {
-            $lines[] = sprintf('- %s (%s)', $channel->getTitle(), $channel->getChatId());
-        }
-
-        $this->telegramApiClient->sendMessage($chatId, implode("\n", $lines), $this->membershipGateKeyboard($context, $result));
-    }
-
-    private function membershipGateKeyboard(string $context, MembershipGateResult $result): array
-    {
-        $rows = [];
-        foreach ($result->missingChannels as $channel) {
-            $inviteUrl = trim((string) ($channel->getInviteUrl() ?? ''));
-            if ('' === $inviteUrl) {
-                continue;
-            }
-
-            $rows[] = [[
-                'text' => sprintf('عضویت در %s', $channel->getTitle()),
-                'url' => $inviteUrl,
-            ]];
-        }
-
-        $rows[] = [[
-            'text' => '✅ بررسی عضویت',
-            'callback_data' => 'membership_check:'.$context,
-        ]];
-
-        return ['inline_keyboard' => $rows];
     }
 
     private function handleBuyService(TelegramAccount $account, string $chatId, ?string $callbackId = null, bool $isAdmin = false): void

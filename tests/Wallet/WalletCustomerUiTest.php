@@ -6,6 +6,7 @@ namespace App\Tests\Wallet;
 
 use App\Bot\Application\TelegramUpdateHandler;
 use App\Entity\Order;
+use App\Entity\RequiredChannel;
 use App\Payment\Domain\PaymentStatus;
 use App\Shop\Domain\OrderStatus;
 use App\Shop\Domain\OrderType;
@@ -205,6 +206,29 @@ final class WalletCustomerUiTest extends IntegrationTestCase
         self::assertSame(50000, $this->balance(), 'a double tap debits once');
         self::assertSame(OrderStatus::PROVISIONED, $this->row('`order`', (int) $order->getId())['status']);
         self::assertTrue($this->sentTextContains('50,000'));
+    }
+
+    public function testTheBotWalletPaymentAsksForTheRequiredChannelsLikeEveryPurchase(): void
+    {
+        $this->fund(200000);
+        $order = $this->createOrder($this->user, $this->plan);
+        $this->em->persist((new RequiredChannel())->setTitle('کانال ما')->setChatId('@shop_channel')->setInviteUrl('https://t.me/shop_channel')->setIsActive(true)->setRequireForPurchase(true));
+        $this->em->flush();
+        $this->http->onJson('/getChatMember', ['ok' => true, 'result' => ['status' => 'left']]);
+
+        $this->pressButton(self::CUSTOMER, 'wallet_pay:'.$order->getId());
+
+        self::assertSame(200000, $this->balance(), 'nothing debited');
+        self::assertSame(0, (int) $this->em->getConnection()->fetchOne('SELECT COUNT(*) FROM payment WHERE order_id = ?', [$order->getId()]));
+        self::assertTrue($this->sentTextContains('@shop_channel'));
+        // The gate's own buttons (invite link + "check membership"); sentCallbacks() refuses link buttons (admin rule).
+        $markups = array_map(fn (array $request): string => json_encode($this->requestBody($request)['reply_markup'] ?? null, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES), $this->http->requests('/sendMessage'));
+        self::assertNotSame([], array_filter($markups, static fn (string $markup): bool => str_contains($markup, 'membership_check:purchase') && str_contains($markup, 'https://t.me/shop_channel')));
+
+        $this->http->onJson('/getChatMember', ['ok' => true, 'result' => ['status' => 'member']]);
+        $this->pressButton(self::CUSTOMER, 'wallet_pay:'.$order->getId());
+
+        self::assertSame(50000, $this->balance(), 'a member pays');
     }
 
     public function testTheBotRefusesAGatewayWhileAWalletPaymentIsDebitedButNotSettled(): void
