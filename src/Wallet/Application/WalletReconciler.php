@@ -6,6 +6,7 @@ namespace App\Wallet\Application;
 
 use App\Entity\Payment;
 use App\Payment\Domain\PaymentStatus;
+use App\Shop\Domain\OrderStatus;
 use App\Shop\Domain\OrderType;
 use App\Wallet\Domain\WalletTransactionType;
 use Doctrine\DBAL\Connection;
@@ -21,7 +22,8 @@ use Doctrine\ORM\EntityManagerInterface;
  * paymentMismatches(): payments against the ledger, through the ledger keys the payment flows write (WalletKeys):
  * a confirmed top-up without its credit, a top-up credit whose payment is not confirmed, a live wallet payment without
  * its debit, a rejected payment whose debit was never given back, a debit given back while its payment is still live,
- * and a purchase debit without a payment.
+ * a purchase debit without a payment, and a wallet payment still pending (its debit held) while its order is no
+ * longer waiting for payment (paid otherwise, cancelled, expired: nothing would ever give that debit back).
  *
  * report() runs both in one read-only transaction, so every query sees the same snapshot even while payments are
  * being settled (no false alarm from a write that landed between two queries).
@@ -34,6 +36,7 @@ final class WalletReconciler
     public const DEBIT_NOT_RETURNED = 'debit_not_returned';
     public const REVERSAL_OF_LIVE_PAYMENT = 'reversal_of_live_payment';
     public const PURCHASE_WITHOUT_PAYMENT = 'purchase_without_payment';
+    public const PENDING_WALLET_PAYMENT_ORDER_NOT_WAITING = 'pending_wallet_payment_order_not_waiting';
 
     public function __construct(private readonly EntityManagerInterface $entityManager)
     {
@@ -107,6 +110,9 @@ final class WalletReconciler
             'wallet' => Payment::METHOD_WALLET,
             'topup' => WalletTransactionType::TOPUP,
             'purchase' => WalletTransactionType::PURCHASE,
+            'pending' => PaymentStatus::PENDING,
+            'submitted' => PaymentStatus::SUBMITTED,
+            'waitingPayment' => OrderStatus::WAITING_PAYMENT,
         ];
         // The ledger keys of the payment flows (WalletKeys): 'topup:payment:<id>' and 'purchase:payment:<id>'.
         $topUpKey = "CONCAT('topup:payment:', p.id)";
@@ -139,6 +145,10 @@ final class WalletReconciler
                  FROM wallet_transaction d
                  LEFT JOIN payment p ON p.id = CAST(SUBSTRING(d.idempotency_key, 18) AS UNSIGNED) AND d.idempotency_key = $purchaseKey
                  WHERE d.type = :purchase AND p.id IS NULL",
+            self::PENDING_WALLET_PAYMENT_ORDER_NOT_WAITING => "SELECT p.id AS payment_id, d.id AS transaction_id, d.wallet_id, CONCAT('wallet payment is ', p.status, ' but order #', o.id, ' is ', o.status) AS detail
+                 FROM payment p JOIN `order` o ON o.id = p.order_id
+                 LEFT JOIN wallet_transaction d ON d.idempotency_key = $purchaseKey
+                 WHERE p.method = :wallet AND p.status IN (:pending, :submitted) AND o.status <> :waitingPayment",
         ];
 
         $mismatches = [];

@@ -143,6 +143,19 @@ final class WalletReconcileTest extends IntegrationTestCase
         self::assertNotNull($mismatches[0]['transactionId']);
     }
 
+    /** Second review, blocker 1: a held debit nothing would ever give back (the order is no longer payable). */
+    public function testAWalletPaymentPendingWhileItsOrderIsNoLongerWaitingForPayment(): void
+    {
+        $payment = $this->openWalletPayment();
+        self::assertSame([], $this->problems(), 'pending while the order waits for payment: legitimate');
+        $this->em->getConnection()->executeStatement("UPDATE `order` SET status = 'provisioned' WHERE id = ?", [$payment->getOrder()->getId()]);
+
+        self::assertSame([WalletReconciler::PENDING_WALLET_PAYMENT_ORDER_NOT_WAITING => [$payment->getId()]], $this->problems());
+        $tester = $this->runCommand();
+        self::assertSame(1, $tester->getStatusCode());
+        self::assertStringContainsString(WalletReconciler::PENDING_WALLET_PAYMENT_ORDER_NOT_WAITING, $tester->getDisplay());
+    }
+
     public function testTheCommandReportsEveryClassWithIdsAndExitsWithOne(): void
     {
         $topUp = $this->confirmedTopUp();
