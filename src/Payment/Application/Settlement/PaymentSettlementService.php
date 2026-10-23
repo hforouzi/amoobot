@@ -53,8 +53,8 @@ use Psr\Log\LoggerInterface;
  * A payment of method "wallet" (WalletPayment) is settled like a gateway payment; its debit was written before. Every
  * path that rejects such a payment (admin reject, customer cancel, gateway failure; the expiry job too) gives the
  * debit back in the same transaction, once (releaseWalletDebit()). When any payment of an order is confirmed (or
- * verified and its provisioning fails), the order's OTHER open wallet payments are closed and their debits given back
- * in that same transaction (releaseOtherWalletPayments()).
+ * verified and its provisioning fails), the order's OTHER wallet payments, whatever their status (pending, in review,
+ * provisioning_failed), are closed and their debits given back in that same transaction (releaseHeldWalletDebits()).
  */
 class PaymentSettlementService
 {
@@ -533,30 +533,48 @@ class PaymentSettlementService
     }
 
     /**
-     * The order was just paid by $paid: every OTHER open wallet payment of it (debited, settlement never finished, e.g.
-     * the customer then completed an earlier gateway/card payment) is rejected and its debit given back, in the
-     * caller's transaction, once (the reversal key of releaseWalletDebit()). The order lock is held, so no wallet
-     * payment of this order can be opened or settled meanwhile.
+     * The order was just paid by $paid (confirmed, or verified and its provisioning failed): every OTHER wallet payment
+     * of it gives its debit back (releaseHeldWalletDebits()), e.g. one debited whose settlement never finished, or one
+     * whose provisioning failed, when the customer then completed an earlier gateway/card payment.
      *
      * @return list<Payment> the payments closed here (the customer is told after the commit, notifyReleased())
      */
     private function releaseOtherWalletPayments(Order $order, Payment $paid, ?int $adminId): array
     {
+        return $this->releaseHeldWalletDebits($order, $paid, $adminId, Payment::SOURCE_ORDER_PAID_OTHERWISE, Payment::NOTE_ORDER_PAID_OTHERWISE, sprintf('order #%d paid by payment #%d', $order->getId() ?? 0, $paid->getId() ?? 0));
+    }
+
+    /**
+     * The order is paid by another payment or has failed: EVERY wallet payment of it except $except gives its held debit
+     * back, in the caller's transaction, once (the reversal key of releaseWalletDebit()), whatever its status: pending
+     * (debited, settlement never finished), in review, or provisioning_failed (its debit was kept for an admin retry).
+     * A wallet payment still open is rejected with $source / $note. A confirmed one paid the order and keeps its debit
+     * (the order is then fulfilled: a second payment is parked as a duplicate, never confirmed). The order lock is held,
+     * so no wallet payment of this order can be opened or settled meanwhile.
+     *
+     * @return list<Payment> the payments closed here (the customer is told after the commit, notifyReleased())
+     */
+    private function releaseHeldWalletDebits(Order $order, ?Payment $except, ?int $adminId, string $source, string $note, string $why): array
+    {
         $released = [];
         foreach ($this->entityManager->getRepository(Payment::class)->findBy(['order' => $order, 'method' => Payment::METHOD_WALLET], ['id' => 'ASC']) as $other) {
-            if ($other->getId() === $paid->getId()) {
+            if (null !== $except && $other->getId() === $except->getId()) {
                 continue;
             }
             $this->entityManager->refresh($other, LockMode::PESSIMISTIC_WRITE);
-            if (!in_array($other->getStatus(), PaymentStatus::SETTLEABLE, true)) {
+            if (PaymentStatus::CONFIRMED === $other->getStatus()) {
                 continue;
             }
-            $other
-                ->setStatus(PaymentStatus::REJECTED)
-                ->setAdminNote(Payment::NOTE_ORDER_PAID_OTHERWISE)
-                ->setConfirmationSource(Payment::SOURCE_ORDER_PAID_OTHERWISE);
-            $this->releaseWalletDebit($other, $adminId, sprintf('order #%d paid by payment #%d', $order->getId() ?? 0, $paid->getId() ?? 0));
-            $released[] = $other;
+            if (PaymentStatus::REJECTED !== $other->getStatus()) {
+                $other
+                    ->setStatus(PaymentStatus::REJECTED)
+                    ->setAdminNote($note)
+                    ->setConfirmationSource($source);
+                $released[] = $other;
+            }
+            // A rejected one too: its debit was given back when it was rejected, so this finds that reversal and writes
+            // nothing; a debit still held for any reason goes back here.
+            $this->releaseWalletDebit($other, $adminId, $why);
         }
 
         return $released;
@@ -670,6 +688,12 @@ class PaymentSettlementService
 
     /**
      * Another payment that already fulfilled this order (confirmed, or a service exists for it).
+     *
+     * A wallet payment whose provisioning failed (or that is in review) has not fulfilled the order: its debit is held,
+     * nothing was delivered. When another payment of the order is then verified (e.g. an earlier Zibal or card payment
+     * the customer completed anyway), that payment is the one that pays and provisions, and the wallet payment's debit
+     * goes back in the same transaction (releaseOtherWalletPayments()), so the customer never pays twice. Starting a new
+     * payment while such a wallet debit is held is refused (PaymentStarter).
      */
     private function fulfilledByPayment(Order $order): ?Payment
     {

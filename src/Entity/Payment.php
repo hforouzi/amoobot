@@ -22,8 +22,9 @@ class Payment
     public const REVIEW_PREFIX_LATE_PAYMENT = 'paid after ';
 
     /**
-     * confirmationSource / adminNote of a pending wallet payment closed because another payment of its order was
-     * confirmed (or verified and failed provisioning) first: its debit was given back (PaymentSettlementService).
+     * confirmationSource / adminNote of a wallet payment (pending, in review or provisioning_failed) closed because
+     * another payment of its order was confirmed (or verified and failed provisioning): its debit was given back
+     * (PaymentSettlementService).
      */
     public const SOURCE_ORDER_PAID_OTHERWISE = 'order_paid_otherwise';
     public const NOTE_ORDER_PAID_OTHERWISE = 'Order paid by another payment';

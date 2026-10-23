@@ -186,6 +186,9 @@ final class MiniAppCheckout
         if (PaymentStart::KIND_WALLET_PAYMENT_PENDING === $start->kind) {
             throw new CheckoutFailure('wallet_payment_pending', 409);
         }
+        if (PaymentStart::KIND_WALLET_PAYMENT_HELD === $start->kind) {
+            throw new CheckoutFailure('wallet_payment_held', 409);
+        }
 
         return $start;
     }
