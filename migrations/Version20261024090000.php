@@ -29,13 +29,17 @@ final class Version20261024090000 extends AbstractMigration
     }
 
     /**
-     * Refused while the ledger has any row: dropping the tables would delete customers' money and its history. Empty
-     * tables (the wallet never used) are dropped as before.
+     * Refused while the ledger has any row, or a wallet has a balance, a credit limit or is frozen: dropping the tables
+     * would delete customers' money, its history or an admin's decision. Empty tables (the wallet never used, or only
+     * plain active wallets without movements) are dropped as before.
      */
     public function down(Schema $schema): void
     {
         $movements = (int) $this->connection->fetchOne('SELECT COUNT(*) FROM wallet_transaction');
         $this->abortIf($movements > 0, sprintf('Irreversible: the wallet ledger has %d movement(s); dropping wallet / wallet_transaction would delete customers\' balances and their history. Nothing was changed.', $movements));
+        // A wallet without movements can still carry an admin's decision: a credit limit or a freeze.
+        $withState = (int) $this->connection->fetchOne("SELECT COUNT(*) FROM wallet WHERE balance <> 0 OR credit_limit <> 0 OR status <> 'active'");
+        $this->abortIf($withState > 0, sprintf('Irreversible: %d wallet(s) have a balance, a credit limit or are frozen; dropping wallet would lose them. Nothing was changed.', $withState));
 
         $this->addSql('DROP TABLE wallet_transaction');
         $this->addSql('DROP TABLE wallet');

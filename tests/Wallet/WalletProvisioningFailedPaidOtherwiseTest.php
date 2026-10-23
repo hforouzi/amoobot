@@ -160,10 +160,13 @@ final class WalletProvisioningFailedPaidOtherwiseTest extends IntegrationTestCas
     public function testCardToCardApprovedAfterTheWalletPaymentFailedProvisioningReleasesTheDebit(): void
     {
         [$order, $card, $wallet] = $this->walletPaymentFailedAfter(PaymentGatewayType::MANUAL_CARD);
-        // The card payment is still pending: a receipt for it can be sent (the Mini App checks the payment, not the order).
-        self::assertSame(ReceiptSubmission::READY, self::getContainer()->get(ReceiptSubmission::class)->check($this->freshPayment((int) $card->getId()), $this->user));
-        self::getContainer()->get(ReceiptSubmission::class)->submitTrackingCode($this->freshPayment((int) $card->getId()), 'TRACK-1');
+        // Fourth review: no receipt while the wallet debit is held (the customer would pay twice); nothing changes.
+        self::assertSame(ReceiptSubmission::WALLET_PAYMENT_HELD, self::getContainer()->get(ReceiptSubmission::class)->check($this->freshPayment((int) $card->getId()), $this->user));
+        self::assertSame(ReceiptSubmission::WALLET_PAYMENT_HELD, self::getContainer()->get(ReceiptSubmission::class)->submitTrackingCode($this->freshPayment((int) $card->getId()), 'TRACK-1'));
+        self::assertSame(PaymentStatus::PENDING, $this->row('payment', (int) $card->getId())['status']);
 
+        // The money reached the card anyway (e.g. told to support): the admin approves the card payment, which pays the
+        // order and gives the wallet debit back.
         $result = $this->settlement()->approveByAdmin($this->freshPayment((int) $card->getId()), 1, null, 'test_admin');
 
         self::assertSame(SettlementOutcome::CONFIRMED, $result->outcome, $result->message);

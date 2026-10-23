@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Command;
 
 use App\Broadcast\BroadcastSender;
+use App\Payment\Application\StuckPaymentReminder;
 use App\Provisioning\Application\AutomationSettingsProvider;
 use App\Provisioning\Application\ServiceAutoSuspendService;
 use App\Provisioning\Application\ServiceExpiryChecker;
@@ -29,6 +30,7 @@ final class AutomationRunCommand extends Command
         private readonly ServiceAutoSuspendService $serviceAutoSuspendService,
         private readonly ServiceNotificationService $serviceNotificationService,
         private readonly IncompleteOrderExpiryService $incompleteOrderExpiryService,
+        private readonly StuckPaymentReminder $stuckPaymentReminder,
         private readonly BroadcastSender $broadcastSender,
         private readonly LoggerInterface $logger,
     ) {
@@ -74,6 +76,16 @@ final class AutomationRunCommand extends Command
                 $this->logger->info('automation_task_completed', ['task' => 'expire_incomplete_orders', 'summary' => $summary]);
             } else {
                 $this->logger->info('automation_task_skipped_by_setting', ['task' => 'expire_incomplete_orders']);
+            }
+
+            // Not behind a toggle: a payment waiting for an admin (money taken, nothing delivered) must not be forgotten.
+            try {
+                $summary = $this->stuckPaymentReminder->remind($dryRun, $limit);
+                $notified += $summary['reminded'];
+                $this->logger->info('automation_task_completed', ['task' => 'remind_stuck_payments', 'summary' => $summary]);
+            } catch (\Throwable $e) {
+                ++$failed;
+                $this->logger->error('automation_task_failed', ['task' => 'remind_stuck_payments', 'error' => $e->getMessage()]);
             }
         }
 

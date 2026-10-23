@@ -30,15 +30,18 @@ use Psr\Log\LoggerInterface;
  * ledger page by page, a top-up (quick amounts; the order is then paid like any order with the store payment methods,
  * see TelegramUpdateHandler::handleSelectStorePaymentMethod) and "pay from wallet" for an order waiting for payment.
  *
- * Callbacks: wallet, wallet_tx:{page}, wallet_topup, wallet_topup:{amount}, wallet_pay:{orderId}. Everything is
+ * Callbacks: wallet, wallet_tx:{page}, wallet_topup, wallet_topup:{amount}, wallet_pay:{orderId} (asks to confirm:
+ * the amount and the balance before / after, read from the database at that moment) and wallet_pay_confirm:{orderId}
+ * (pays). Cancel is order_payment_methods:{orderId}: the order's payment methods again, nothing changed. Everything is
  * re-checked here (owner, settings, amounts); a double tap is harmless: a top-up creates a new unpaid order at most,
- * a wallet payment is serialized by the order lock and the ledger's idempotency key.
+ * a wallet payment is serialized by the order lock and the ledger's idempotency key (a second confirm finds the order
+ * paid and takes nothing).
  */
 final class WalletBotHandler
 {
     public const TRANSACTIONS_PER_PAGE = 10;
     private const OVERVIEW_TRANSACTIONS = 5;
-    private const PREFIXES = ['wallet_tx:', 'wallet_topup:', 'wallet_pay:'];
+    private const PREFIXES = ['wallet_tx:', 'wallet_topup:', 'wallet_pay:', 'wallet_pay_confirm:'];
 
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
@@ -81,7 +84,8 @@ final class WalletBotHandler
             'wallet_tx' === $parts[0] => $this->showTransactions($account, $chatId, $callbackId, max(1, $argument)),
             'wallet_topup' === $parts[0] && !$hasArgument => $this->askAmount($account, $chatId, $callbackId),
             'wallet_topup' === $parts[0] => $this->startTopUp($account, $chatId, $callbackId, $argument),
-            'wallet_pay' === $parts[0] => $this->pay($account, $chatId, $callbackId, $argument),
+            'wallet_pay' === $parts[0] => $this->confirmPay($account, $chatId, $callbackId, $argument),
+            'wallet_pay_confirm' === $parts[0] => $this->pay($account, $chatId, $callbackId, $argument),
             default => $this->telegram->answerCallbackQuery($callbackId),
         };
     }
@@ -186,6 +190,37 @@ final class WalletBotHandler
             'wallet' => ['amount' => number_format($order->getAmount())],
             'order' => ['trackingCode' => (string) ($order->getTrackingCode() ?? '-')],
         ]), $this->keyboards->paymentGatewaySelectionMenu((int) $order->getId(), $methods, 'wallet', 'order_cancel:'.$order->getId()));
+    }
+
+    /**
+     * "Pay X Toman from your wallet? Balance Y -> Z" with Confirm / Cancel. Nothing is debited here. The balance is read
+     * again from the database (a long-running bot worker may hold an older copy of the wallet).
+     */
+    private function confirmPay(TelegramAccount $account, string $chatId, string $callbackId, int $orderId): void
+    {
+        $order = $orderId > 0 ? $this->entityManager->getRepository(Order::class)->find($orderId) : null;
+        if (!$order instanceof Order || $order->getUser()->getId() !== $account->getUser()->getId()) {
+            $this->popup($chatId, $callbackId, $this->texts->message('order.not_found'));
+
+            return;
+        }
+        try {
+            $preview = $this->walletPayment->preview($order);
+        } catch (WalletException $e) {
+            $this->popup($chatId, $callbackId, $this->refusalText($e->error));
+
+            return;
+        }
+
+        $this->ack($callbackId);
+        $this->telegram->sendMessage($chatId, $this->texts->message('wallet.pay_confirm', ['wallet' => [
+            'amount' => number_format($preview['amount']),
+            'balance' => number_format($preview['balance']),
+            'after' => number_format($preview['after']),
+        ]]), ['inline_keyboard' => [
+            [['text' => $this->texts->button('button.wallet.pay_confirm'), 'callback_data' => 'wallet_pay_confirm:'.$orderId]],
+            [['text' => $this->texts->button('button.wallet.pay_cancel'), 'callback_data' => 'order_payment_methods:'.$orderId]],
+        ]]);
     }
 
     private function pay(TelegramAccount $account, string $chatId, string $callbackId, int $orderId): void

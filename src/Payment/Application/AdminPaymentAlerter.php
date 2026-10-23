@@ -23,6 +23,7 @@ use Psr\Log\LoggerInterface;
 class AdminPaymentAlerter
 {
     public const WALLET_CREDIT_FAILED_TITLE = '🚨 پرداخت شارژ کیف پول تایید شد اما واریز به کیف پول انجام نشد';
+    public const STUCK_REMINDER_TITLE = '⏰ یادآوری: این پرداخت هنوز منتظر تصمیم مدیر است';
     public const SETTLEMENT_INTERRUPTED_TITLE = '🚨 ثبت پرداخت با خطای پایگاه داده قطع شد؛ وضعیت پرداخت را بررسی کنید';
 
     public function __construct(
@@ -42,6 +43,21 @@ class AdminPaymentAlerter
     public function provisioningFailed(Payment $payment): void
     {
         $this->send($payment, '🚨 پرداخت تایید شد اما ساخت سرویس ناموفق بود', (string) ($payment->getProvisioningError() ?? '-'), true);
+    }
+
+    /**
+     * StuckPaymentReminder: the payment is still provisioning_failed (or in review with its wallet debit held) after
+     * $hours hours. Sent again at most once a day.
+     */
+    public function stuckReminder(Payment $payment, int $hours, bool $walletDebitHeld): void
+    {
+        $this->send($payment, self::STUCK_REMINDER_TITLE, sprintf(
+            'Still %s after %d hour(s)%s. Retry / approve it, or reject it (a rejection gives a held wallet debit back). Reason: %s',
+            $payment->getStatus(),
+            $hours,
+            $walletDebitHeld ? '; the customer\'s wallet debit is held' : '',
+            (string) ($payment->getProvisioningError() ?? $payment->getReviewReason() ?? '-')
+        ), true);
     }
 
     public function overpaid(Payment $payment): void

@@ -228,6 +228,13 @@ class Payment
     #[ORM\Column(nullable: true)]
     private ?\DateTimeImmutable $walletCreditAlertedAt = null;
 
+    /**
+     * When the admins were last reminded that this payment is stuck (StuckPaymentReminder): set by a conditional UPDATE,
+     * at most once a day. Not a status: nothing else reads it.
+     */
+    #[ORM\Column(nullable: true)]
+    private ?\DateTimeImmutable $stuckRemindedAt = null;
+
     public function __construct()
     {
         $this->createdAt = new \DateTimeImmutable();
@@ -265,6 +272,11 @@ class Payment
     public function getWalletCreditAlertedAt(): ?\DateTimeImmutable
     {
         return $this->walletCreditAlertedAt;
+    }
+
+    public function getStuckRemindedAt(): ?\DateTimeImmutable
+    {
+        return $this->stuckRemindedAt;
     }
 
     public function setRefundedAt(?\DateTimeImmutable $refundedAt): self

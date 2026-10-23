@@ -28,7 +28,7 @@ final class ReceiptUpload
     }
 
     /**
-     * @throws CheckoutFailure receipt_not_manual, receipt_already_submitted, receipt_not_pending, receipt_missing,
+     * @throws CheckoutFailure receipt_not_manual, receipt_already_submitted, receipt_not_pending, receipt_wallet_payment_held, receipt_missing,
      *                         receipt_too_large, receipt_invalid, receipt_upload_failed
      */
     public function submit(MiniAppUser $user, Payment $payment, ?UploadedFile $file): void
@@ -40,6 +40,7 @@ final class ReceiptUpload
             ReceiptSubmission::NOT_YOURS => throw new CheckoutFailure('payment_not_found', 404),
             ReceiptSubmission::ALREADY_SUBMITTED => throw new CheckoutFailure('receipt_already_submitted', 409),
             ReceiptSubmission::NOT_PENDING => throw new CheckoutFailure('receipt_not_pending', 409),
+            ReceiptSubmission::WALLET_PAYMENT_HELD => throw new CheckoutFailure('receipt_wallet_payment_held', 409),
             default => null,
         };
 
@@ -61,7 +62,11 @@ final class ReceiptUpload
             throw new CheckoutFailure('receipt_upload_failed', 502);
         }
 
-        $this->receiptSubmission->submitPhoto($payment, $fileId);
+        match ($this->receiptSubmission->submitPhoto($payment, $fileId)) {
+            ReceiptSubmission::READY => null,
+            ReceiptSubmission::WALLET_PAYMENT_HELD => throw new CheckoutFailure('receipt_wallet_payment_held', 409),
+            default => throw new CheckoutFailure('receipt_not_pending', 409),
+        };
     }
 
     /** The content (not the name or the browser's type) is a JPEG, PNG or WebP picture of a sane size. */

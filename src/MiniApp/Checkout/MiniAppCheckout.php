@@ -205,6 +205,20 @@ final class MiniAppCheckout
     }
 
     /**
+     * The confirmation step before payFromWallet(): amount, balance and balance after, read now. Changes nothing.
+     *
+     * @return array{amount: int, balance: int, after: int}
+     */
+    public function walletPaymentPreview(MiniAppUser $user, int $orderId): array
+    {
+        try {
+            return $this->walletPayment->preview($this->payableOrder($user->customer(), $orderId));
+        } catch (WalletException $e) {
+            throw new CheckoutFailure($e->error, 409);
+        }
+    }
+
+    /**
      * Pays the order from the wallet (debit + settlement, WalletPayment). Must run outside an outer transaction
      * (CheckoutIdempotency::claimOnce()): the settlement locks and commits on its own.
      */

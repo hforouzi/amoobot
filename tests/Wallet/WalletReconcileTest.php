@@ -6,6 +6,9 @@ namespace App\Tests\Wallet;
 
 use App\Entity\Order;
 use App\Entity\Payment;
+use App\Entity\Plan;
+use App\Entity\StorePaymentMethod;
+use App\Entity\User;
 use App\Payment\Application\Settlement\PaymentSettlementService;
 use App\Payment\Application\Settlement\SettlementOutcome;
 use App\Payment\Application\Settlement\VerifiedPayment;
@@ -171,6 +174,77 @@ final class WalletReconcileTest extends IntegrationTestCase
         self::assertSame(1, $tester->getStatusCode());
         self::assertStringContainsString(WalletReconciler::DEBIT_AMOUNT_MISMATCH, $tester->getDisplay());
         self::assertStringContainsString('held debit of '.self::PRICE.' but the payment is for '.(self::PRICE + 1), $tester->getDisplay());
+    }
+
+    /**
+     * A wallet payment whose provisioning failed: its debit is held for an admin retry (legitimate).
+     *
+     * @return array{Payment, Payment} [wallet payment, the order's earlier Zibal payment (pending)]
+     */
+    private function provisioningFailedWalletPayment(): array
+    {
+        // A failed settlement clears the entity manager: the fixtures are reloaded.
+        $user = $this->em->find(User::class, $this->user->getId()) ?? throw new \LogicException();
+        $plan = $this->em->find(Plan::class, $this->plan->getId()) ?? throw new \LogicException();
+        $method = $this->em->find(StorePaymentMethod::class, $this->methods[PaymentGatewayType::ZIBAL]->getId()) ?? throw new \LogicException();
+        $order = $this->createOrder($user, $plan, OrderType::NEW_SERVICE, self::PRICE);
+        $zibal = self::getContainer()->get(PaymentStarter::class)->start($order, $method)->payment ?? throw new \LogicException();
+        $this->driver()->failNext(1);
+        $order = $this->em->find(Order::class, $order->getId()) ?? throw new \LogicException();
+        $this->em->refresh($order);
+        $result = self::getContainer()->get(WalletPayment::class)->pay($order);
+        self::assertSame(SettlementOutcome::PROVISIONING_FAILED, $result->outcome, $result->message);
+
+        return [$result->payment ?? throw new \LogicException(), $zibal];
+    }
+
+    /**
+     * Fourth review: a wallet payment kept for an admin decision (provisioning_failed / needs_review) still holds its
+     * debit while its order failed, was cancelled or expired (e.g. an edit of the order's status in the admin): nothing
+     * would give that debit back.
+     */
+    public function testAHeldDebitOfAWalletPaymentWhoseOrderIsClosed(): void
+    {
+        self::getContainer()->get(WalletService::class)->credit($this->user, 100000, WalletTransactionType::TOPUP, 'seed:'.random_int(1, PHP_INT_MAX), WalletActor::system());
+        [$failed] = $this->provisioningFailedWalletPayment();
+        [$review] = $this->provisioningFailedWalletPayment();
+        [$released] = $this->provisioningFailedWalletPayment();
+        $released = $this->em->find(Payment::class, $released->getId()) ?? throw new \LogicException();
+        self::getContainer()->get(PaymentSettlementService::class)->reject($released, 'refunded to the wallet', 1, null, 'test_admin', true);
+        self::assertSame([], $this->problems(), 'held for a retry, or given back: legitimate');
+
+        $connection = $this->em->getConnection();
+        $connection->executeStatement("UPDATE payment SET status = 'needs_review' WHERE id = ?", [$review->getId()]);
+        self::assertSame([], $this->problems(), 'in review with its order still in provisioning_failed: legitimate');
+
+        foreach (['failed', 'cancelled', 'expired'] as $status) {
+            $connection->executeStatement('UPDATE `order` SET status = ? WHERE id IN (?, ?, ?)', [$status, $failed->getOrder()->getId(), $review->getOrder()->getId(), $released->getOrder()->getId()]);
+            self::assertSame([WalletReconciler::HELD_DEBIT_ORDER_CLOSED => [$failed->getId(), $review->getId()]], $this->problems(), $status);
+        }
+        $tester = $this->runCommand();
+        self::assertSame(1, $tester->getStatusCode());
+        self::assertStringContainsString(WalletReconciler::HELD_DEBIT_ORDER_CLOSED, $tester->getDisplay());
+        self::assertStringContainsString('wallet payment is provisioning_failed with its debit of '.self::PRICE.' held but order #'.$failed->getOrder()->getId().' is expired', $tester->getDisplay());
+    }
+
+    /** The original B1 state: another payment of the order is confirmed while a wallet payment still holds its debit. */
+    public function testAHeldDebitBesideAConfirmedPaymentOfTheSameOrder(): void
+    {
+        [$wallet, $zibal] = $this->provisioningFailedWalletPayment();
+        self::assertSame([], $this->problems());
+
+        // As the pre-fix code left it (or a hand edit): the Zibal payment confirmed, the wallet debit not given back.
+        $this->em->getConnection()->executeStatement("UPDATE payment SET status = 'confirmed' WHERE id = ?", [$zibal->getId()]);
+        $this->em->getConnection()->executeStatement("UPDATE `order` SET status = 'provisioned' WHERE id = ?", [$wallet->getOrder()->getId()]);
+
+        self::assertSame([WalletReconciler::HELD_DEBIT_ORDER_PAID_OTHERWISE => [$wallet->getId()]], $this->problems());
+        // The same while the wallet payment is in review.
+        $this->em->getConnection()->executeStatement("UPDATE payment SET status = 'needs_review' WHERE id = ?", [$wallet->getId()]);
+        $tester = $this->runCommand();
+        self::assertSame(1, $tester->getStatusCode());
+        self::assertStringContainsString(WalletReconciler::HELD_DEBIT_ORDER_PAID_OTHERWISE, $tester->getDisplay());
+        self::assertStringContainsString('wallet payment is needs_review with its debit of '.self::PRICE.' held but payment #'.$zibal->getId().' of order #'.$wallet->getOrder()->getId().' is confirmed', $tester->getDisplay());
+        self::assertStringNotContainsString(WalletReconciler::HELD_DEBIT_ORDER_CLOSED, $tester->getDisplay());
     }
 
     public function testTheCommandReportsEveryClassWithIdsAndExitsWithOne(): void

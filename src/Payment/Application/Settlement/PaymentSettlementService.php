@@ -45,7 +45,8 @@ use Psr\Log\LoggerInterface;
  *   3. an order that is already fulfilled (second payment for it) -> NEEDS_REVIEW
  *   4. fulfilment: new service / renewal / add-traffic / wallet top-up (credits the wallet, provisions nothing)
  *   5. success: Payment CONFIRMED, Order PROVISIONED, discount usage recorded, commit
- *      failure: rollback, then Payment + Order PROVISIONING_FAILED with the error (retryable); a wallet top-up
+ *      failure: rollback, then Payment + Order PROVISIONING_FAILED with the error (retryable), unless another
+ *      payment fulfilled the order between the rollback and the new locks (closeDuplicateAfterFailure()); a wallet top-up
  *      has nothing to provision, so its failure is rolled back and reported like one before fulfilment (ERROR,
  *      nothing changed, the next verification settles it)
  *   6. after commit: customer messages and admin alerts (never inside the transaction)
@@ -168,8 +169,10 @@ class PaymentSettlementService
 
     /**
      * Admin rejection. Also closes a duplicate payment for an order another payment already
-     * fulfilled: the payment is rejected, the fulfilled order is left as it is. $refunded records that
-     * the money was returned to the customer.
+     * fulfilled: the payment is rejected, the fulfilled order is left as it is. The same while another wallet payment
+     * of the order is in provisioning_failed (paid, waiting for a retry): only this payment is rejected; the order and
+     * that payment's held debit stay for the retry (or its own reject). Otherwise the order fails and every held
+     * wallet debit of it goes back. $refunded records that the money was returned to the customer.
      */
     public function reject(Payment $payment, ?string $reason, ?int $adminId, ?string $adminTelegramId, string $source, bool $refunded = false): SettlementResult
     {
@@ -194,8 +197,10 @@ class PaymentSettlementService
                 ->setRefundedAt($refunded ? new \DateTimeImmutable() : null);
             $this->releaseWalletDebit($payment, $adminId, 'payment rejected by an admin');
             $released = [];
-            // A duplicate payment of a fulfilled order: close the payment, never touch the order.
-            if (!$this->isOrderFulfilled($order)) {
+            // A duplicate payment of a fulfilled order: close the payment, never touch the order. Neither when another
+            // wallet payment of the order is paid and waits for a retry (provisioning_failed): rejecting a sibling
+            // (e.g. a fake card receipt) must not fail an order the customer paid; that payment keeps its debit.
+            if (!$this->isOrderFulfilled($order) && !$this->walletPaymentAwaitsRetry($order, $payment)) {
                 $order->setStatus(OrderStatus::FAILED);
                 // A failed order can no longer be paid, cancelled or expired: no wallet payment of it may keep its debit.
                 $released = $this->releaseHeldWalletDebits($order, $payment, $adminId, Payment::SOURCE_ORDER_FAILED, Payment::NOTE_ORDER_FAILED, sprintf('order #%d failed: payment #%d rejected by an admin', $order->getId() ?? 0, $paymentId));
@@ -655,10 +660,17 @@ class PaymentSettlementService
                 return new SettlementResult(SettlementOutcome::ALREADY_PROCESSED, sprintf('Payment is already %s.', $payment->getStatus()), $payment, $this->serviceFor($order));
             }
 
-            $now = new \DateTimeImmutable();
             if (!$verified->byAdmin) {
                 $payment->setVerifiedMoney($verified->amount, $verified->currency);
             }
+            // The rollback released the locks: another payment of this order (e.g. an admin's retry of a wallet payment
+            // queued on the order lock) may have fulfilled it meanwhile. Recording this failure would move the order
+            // back to provisioning_failed and keep a second payment as paid: it is a duplicate instead.
+            if ($this->isOrderFulfilled($order)) {
+                return $this->closeDuplicateAfterFailure($payment, $order, $verified, $source, $reason);
+            }
+
+            $now = new \DateTimeImmutable();
             $payment
                 ->setStatus(PaymentStatus::PROVISIONING_FAILED)
                 ->setVerifiedAt($payment->getVerifiedAt() ?? $now)
@@ -691,6 +703,41 @@ class PaymentSettlementService
     }
 
     /**
+     * recordProvisioningFailure() under the locks found the order fulfilled by another payment: nothing about the order
+     * changes. A gateway / card payment (money received) is parked in review as a duplicate, for a refund. A wallet
+     * payment gives its debit back (the order is paid otherwise, releaseHeldWalletDebits()). Called inside the
+     * transaction; commits it.
+     */
+    private function closeDuplicateAfterFailure(Payment $payment, Order $order, VerifiedPayment $verified, string $source, string $reason): SettlementResult
+    {
+        $fulfilledBy = $this->fulfilledByPayment($order);
+        $by = $fulfilledBy instanceof Payment ? sprintf(' by payment #%d', $fulfilledBy->getId() ?? 0) : '';
+        $this->logger->warning('Provisioning failure not recorded: the order was fulfilled meanwhile.', ['payment_id' => $payment->getId(), 'order_id' => $order->getId(), 'fulfilled_by' => $fulfilledBy?->getId(), 'error' => $reason]);
+
+        if ($payment->isWalletPayment()) {
+            $payment
+                ->setStatus(PaymentStatus::REJECTED)
+                ->setAdminNote(Payment::NOTE_ORDER_PAID_OTHERWISE)
+                ->setConfirmationSource(Payment::SOURCE_ORDER_PAID_OTHERWISE);
+            $this->releaseWalletDebit($payment, $verified->adminId, sprintf('order #%d fulfilled%s', $order->getId() ?? 0, $by));
+            $this->entityManager->flush();
+            $this->entityManager->getConnection()->commit();
+            $this->notifyReleased([$payment]);
+
+            return new SettlementResult(SettlementOutcome::ALREADY_PROCESSED, sprintf('Order #%d was fulfilled%s while this wallet payment was being provisioned; its debit was given back.', $order->getId() ?? 0, $by), $payment, $this->serviceFor($order));
+        }
+
+        $payment->setVerifiedAt($payment->getVerifiedAt() ?? new \DateTimeImmutable());
+
+        return $this->parkForReview($payment, sprintf(
+            'Order #%d is already fulfilled%s; this payment\'s provisioning failed meanwhile (%s) and it looks like a duplicate payment. Reject it and refund the customer.',
+            $order->getId() ?? 0,
+            $by,
+            mb_substr($reason, 0, 300)
+        ), $source, null);
+    }
+
+    /**
      * Another payment that already fulfilled this order (confirmed, or a service exists for it).
      *
      * A wallet payment whose provisioning failed (or that is in review) has not fulfilled the order: its debit is held,
@@ -710,6 +757,26 @@ class PaymentSettlementService
         }
 
         return null;
+    }
+
+    /**
+     * Another wallet payment of the order is in provisioning_failed: paid from the wallet, waiting for an admin retry.
+     * Each one is re-read with a locking read (the order lock is held): a plain read could see a snapshot taken before
+     * that lock was granted.
+     */
+    private function walletPaymentAwaitsRetry(Order $order, Payment $except): bool
+    {
+        foreach ($this->entityManager->getRepository(Payment::class)->findBy(['order' => $order, 'method' => Payment::METHOD_WALLET], ['id' => 'ASC']) as $other) {
+            if ($other->getId() === $except->getId()) {
+                continue;
+            }
+            $this->entityManager->refresh($other, LockMode::PESSIMISTIC_WRITE);
+            if (PaymentStatus::PROVISIONING_FAILED === $other->getStatus()) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function isOrderFulfilled(Order $order): bool

@@ -22,9 +22,10 @@ use Doctrine\ORM\EntityManagerInterface;
  * paymentMismatches(): payments against the ledger, through the ledger keys the payment flows write (WalletKeys):
  * a confirmed top-up without its credit, a top-up credit whose payment is not confirmed, a live wallet payment without
  * its debit, a rejected payment whose debit was never given back, a debit given back while its payment is still live,
- * a purchase debit without a payment, a held debit whose amount is not its payment's amount, and a wallet payment
+ * a purchase debit without a payment, a held debit whose amount is not its payment's amount, a wallet payment
  * still pending (its debit held) while its order is no longer waiting for payment (paid otherwise, cancelled,
- * expired: nothing would ever give that debit back).
+ * expired: nothing would ever give that debit back), and a wallet payment in provisioning_failed / needs_review whose
+ * debit is held while its order failed, was cancelled or expired, or another payment of the order is confirmed.
  *
  * report() runs both in one read-only transaction, so every query sees the same snapshot even while payments are
  * being settled (no false alarm from a write that landed between two queries).
@@ -39,6 +40,8 @@ final class WalletReconciler
     public const PURCHASE_WITHOUT_PAYMENT = 'purchase_without_payment';
     public const PENDING_WALLET_PAYMENT_ORDER_NOT_WAITING = 'pending_wallet_payment_order_not_waiting';
     public const DEBIT_AMOUNT_MISMATCH = 'debit_amount_mismatch';
+    public const HELD_DEBIT_ORDER_CLOSED = 'held_debit_order_closed';
+    public const HELD_DEBIT_ORDER_PAID_OTHERWISE = 'held_debit_order_paid_otherwise';
 
     public function __construct(private readonly EntityManagerInterface $entityManager)
     {
@@ -115,6 +118,11 @@ final class WalletReconciler
             'pending' => PaymentStatus::PENDING,
             'submitted' => PaymentStatus::SUBMITTED,
             'waitingPayment' => OrderStatus::WAITING_PAYMENT,
+            'provisioningFailed' => PaymentStatus::PROVISIONING_FAILED,
+            'needsReview' => PaymentStatus::NEEDS_REVIEW,
+            'orderFailed' => OrderStatus::FAILED,
+            'orderCancelled' => OrderStatus::CANCELLED,
+            'orderExpired' => OrderStatus::EXPIRED,
         ];
         // The ledger keys of the payment flows (WalletKeys): 'topup:payment:<id>' and 'purchase:payment:<id>'.
         $topUpKey = "CONCAT('topup:payment:', p.id)";
@@ -153,6 +161,21 @@ final class WalletReconciler
                  JOIN wallet_transaction d ON d.idempotency_key = $purchaseKey
                  LEFT JOIN wallet_transaction r ON r.reversal_of_id = d.id
                  WHERE r.id IS NULL AND -d.amount <> COALESCE(p.payable_amount, p.amount)",
+            // A wallet payment kept for an admin decision (retry / review) still holds its debit, but its order can no longer
+            // be paid (failed, cancelled, expired, e.g. after an edit of the order) or another payment of it is confirmed
+            // (the customer paid twice): nothing would ever give that debit back.
+            self::HELD_DEBIT_ORDER_CLOSED => "SELECT p.id AS payment_id, d.id AS transaction_id, d.wallet_id, CONCAT('wallet payment is ', p.status, ' with its debit of ', -d.amount, ' held but order #', o.id, ' is ', o.status) AS detail
+                 FROM payment p JOIN `order` o ON o.id = p.order_id
+                 JOIN wallet_transaction d ON d.idempotency_key = $purchaseKey
+                 LEFT JOIN wallet_transaction r ON r.reversal_of_id = d.id
+                 WHERE p.method = :wallet AND p.status IN (:provisioningFailed, :needsReview) AND r.id IS NULL AND o.status IN (:orderFailed, :orderCancelled, :orderExpired)",
+            self::HELD_DEBIT_ORDER_PAID_OTHERWISE => "SELECT p.id AS payment_id, d.id AS transaction_id, d.wallet_id, CONCAT('wallet payment is ', p.status, ' with its debit of ', -d.amount, ' held but payment #', MIN(c.id), ' of order #', p.order_id, ' is confirmed') AS detail
+                 FROM payment p
+                 JOIN wallet_transaction d ON d.idempotency_key = $purchaseKey
+                 LEFT JOIN wallet_transaction r ON r.reversal_of_id = d.id
+                 JOIN payment c ON c.order_id = p.order_id AND c.id <> p.id AND c.status = :confirmed
+                 WHERE p.method = :wallet AND p.status IN (:provisioningFailed, :needsReview) AND r.id IS NULL
+                 GROUP BY p.id, d.id, d.wallet_id, p.status, d.amount, p.order_id",
             self::PENDING_WALLET_PAYMENT_ORDER_NOT_WAITING => "SELECT p.id AS payment_id, d.id AS transaction_id, d.wallet_id, CONCAT('wallet payment is ', p.status, ' but order #', o.id, ' is ', o.status) AS detail
                  FROM payment p JOIN `order` o ON o.id = p.order_id
                  LEFT JOIN wallet_transaction d ON d.idempotency_key = $purchaseKey

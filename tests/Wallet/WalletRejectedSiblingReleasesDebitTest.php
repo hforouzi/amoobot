@@ -133,21 +133,57 @@ final class WalletRejectedSiblingReleasesDebitTest extends IntegrationTestCase
         $this->assertOrderFailedAndDebitBack($order, $wallet);
     }
 
-    /** The order failing releases a wallet debit whatever its payment's status, provisioning_failed included. */
-    public function testRejectingTheOrdersOtherPaymentReleasesAProvisioningFailedWalletDebitToo(): void
+    /**
+     * Fourth review, F1: rejecting a sibling payment (here an unpaid card payment) while the wallet payment that paid
+     * the order waits for a retry (provisioning_failed) does not fail the order: only the sibling is rejected; the
+     * wallet payment keeps its debit and can be retried. Rejecting the wallet payment itself fails the order and gives
+     * the debit back.
+     */
+    public function testRejectingASiblingKeepsAnOrderWhoseWalletPaymentWaitsForARetry(): void
     {
         $order = $this->createOrder($this->user, $this->plan, OrderType::NEW_SERVICE, self::PRICE);
         $card = self::getContainer()->get(PaymentStarter::class)->start($order, $this->methods[PaymentGatewayType::MANUAL_CARD])->payment ?? throw new \LogicException();
         $this->driver()->failNext(1);
         $paid = self::getContainer()->get(WalletPayment::class)->pay($this->fresh($order));
         self::assertSame(SettlementOutcome::PROVISIONING_FAILED, $paid->outcome);
+        $wallet = $paid->payment ?? throw new \LogicException();
 
-        $result = $this->settlement()->reject($this->freshPayment((int) $card->getId()), 'not needed', 1, null, 'test_admin');
+        $result = $this->settlement()->reject($this->freshPayment((int) $card->getId()), 'fake receipt', 1, null, 'test_admin');
 
         self::assertSame(SettlementOutcome::REJECTED, $result->outcome, $result->message);
-        $this->assertOrderFailedAndDebitBack($order, $paid->payment ?? throw new \LogicException());
-        self::assertSame(SettlementOutcome::ALREADY_PROCESSED, $this->settlement()->retryProvisioning($this->freshPayment((int) $paid->payment->getId()), 1, null, 'test_admin')->outcome);
+        self::assertSame(PaymentStatus::REJECTED, $this->row('payment', (int) $card->getId())['status']);
+        self::assertSame(OrderStatus::PROVISIONING_FAILED, $this->row('`order`', (int) $order->getId())['status'], 'the paid order is not failed');
+        self::assertSame(PaymentStatus::PROVISIONING_FAILED, $this->row('payment', (int) $wallet->getId())['status']);
+        self::assertSame(self::FUNDED - self::PRICE, $this->balance(), 'the debit stays for the retry');
+        self::assertSame(0, (int) $this->em->getConnection()->fetchOne("SELECT COUNT(*) FROM wallet_transaction WHERE type = 'reversal'"));
+        self::assertSame(['balances' => [], 'payments' => []], self::getContainer()->get(WalletReconciler::class)->report());
+
+        $retry = $this->settlement()->retryProvisioning($this->freshPayment((int) $wallet->getId()), 1, null, 'test_admin');
+        self::assertSame(SettlementOutcome::CONFIRMED, $retry->outcome, $retry->message);
+        self::assertSame(OrderStatus::PROVISIONED, $this->row('`order`', (int) $order->getId())['status']);
+        self::assertSame(1, $this->countServicesForOrder($order));
+        self::assertSame(self::FUNDED - self::PRICE, $this->balance());
+        self::assertSame(['balances' => [], 'payments' => []], self::getContainer()->get(WalletReconciler::class)->report());
+    }
+
+    /** The admin rejects the wallet payment that waits for a retry itself: the order fails and the debit comes back once. */
+    public function testRejectingTheWaitingWalletPaymentItselfFailsTheOrderAndGivesTheDebitBack(): void
+    {
+        $order = $this->createOrder($this->user, $this->plan, OrderType::NEW_SERVICE, self::PRICE);
+        self::getContainer()->get(PaymentStarter::class)->start($order, $this->methods[PaymentGatewayType::MANUAL_CARD]);
+        $this->driver()->failNext(1);
+        $paid = self::getContainer()->get(WalletPayment::class)->pay($this->fresh($order));
+        self::assertSame(SettlementOutcome::PROVISIONING_FAILED, $paid->outcome);
+        $wallet = $paid->payment ?? throw new \LogicException();
+
+        $result = $this->settlement()->reject($this->freshPayment((int) $wallet->getId()), 'panel down, refunded to the wallet', 1, null, 'test_admin', true);
+
+        self::assertSame(SettlementOutcome::REJECTED, $result->outcome, $result->message);
+        self::assertSame(OrderStatus::FAILED, $this->row('`order`', (int) $order->getId())['status']);
         self::assertSame(self::FUNDED, $this->balance());
+        self::assertSame(1, (int) $this->em->getConnection()->fetchOne("SELECT COUNT(*) FROM wallet_transaction WHERE type = 'reversal'"));
+        self::assertSame(SettlementOutcome::ALREADY_PROCESSED, $this->settlement()->retryProvisioning($this->freshPayment((int) $wallet->getId()), 1, null, 'test_admin')->outcome);
+        self::assertSame(['balances' => [], 'payments' => []], self::getContainer()->get(WalletReconciler::class)->report());
     }
 
     /** A duplicate payment of a fulfilled order is rejected without touching the order or the wallet payment that paid it. */

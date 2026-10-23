@@ -39,6 +39,8 @@ final class WalletBotTexts
             'wallet.paid' => ['title' => "Order paid from wallet", 'body' => "✅ سفارش با کیف پول پرداخت شد ({{ wallet.amount }} تومان).\nموجودی فعلی: {{ wallet.balance }} تومان", 'category' => 'wallet', 'variables' => ['wallet.amount', 'wallet.balance']],
             'wallet.pay_insufficient' => ['title' => "Wallet balance too low", 'body' => "موجودی کیف پول برای این سفارش کافی نیست. ابتدا کیف پول را شارژ کنید یا روش دیگری انتخاب کنید.", 'category' => 'wallet'],
             'wallet.pay_failed' => ['title' => "Wallet payment failed", 'body' => "پرداخت با کیف پول انجام نشد. لطفاً دوباره تلاش کنید.", 'category' => 'wallet'],
+            'wallet.pay_confirm' => ['title' => "Confirm wallet payment", 'body' => "👛 پرداخت از کیف پول\n\nمبلغ {{ wallet.amount }} تومان از کیف پول شما پرداخت شود؟\nموجودی فعلی: {{ wallet.balance }} تومان\nموجودی پس از پرداخت: {{ wallet.after }} تومان", 'category' => 'wallet', 'variables' => ['wallet.amount', 'wallet.balance', 'wallet.after']],
+            'payment.receipt_wallet_held' => ['title' => "Receipt refused: wallet payment held", 'body' => "برای این سفارش پرداخت از کیف پول ثبت شده است؛ ارسال رسید کارت‌به‌کارت برای آن ممکن نیست و نیازی به پرداخت دوباره نیست. در صورت نیاز با پشتیبانی تماس بگیرید.", 'category' => 'wallet'],
             'wallet.reversed' => ['title' => "Wallet payment returned", 'body' => "↩️ مبلغ {{ wallet.amount }} تومان به کیف پول شما بازگشت.\nموجودی فعلی: {{ wallet.balance }} تومان", 'category' => 'wallet', 'variables' => ['wallet.amount', 'wallet.balance']],
         ];
     }
@@ -54,6 +56,8 @@ final class WalletBotTexts
             'button.wallet.transactions' => ['label' => "📜 تراکنش‌ها", 'buttonType' => 'inline', 'category' => 'wallet'],
             'button.wallet.next_page' => ['label' => "صفحه بعد", 'buttonType' => 'inline', 'category' => 'wallet'],
             'button.wallet.back' => ['label' => "👛 بازگشت به کیف پول", 'buttonType' => 'inline', 'category' => 'wallet'],
+            'button.wallet.pay_confirm' => ['label' => "✅ تایید و پرداخت", 'buttonType' => 'inline', 'category' => 'wallet'],
+            'button.wallet.pay_cancel' => ['label' => "❌ انصراف", 'buttonType' => 'inline', 'category' => 'wallet'],
             'button.payment.wallet' => ['label' => "👛 پرداخت با کیف پول", 'buttonType' => 'inline', 'category' => 'payment'],
         ];
     }

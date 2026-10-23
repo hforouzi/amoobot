@@ -234,9 +234,10 @@ final class PaymentStarter
 
     /**
      * A payment of method "wallet" whose debit is held: waiting for its settlement (pending), in review, or waiting for
-     * an admin retry (provisioning_failed). A confirmed one paid the order; a rejected one gave its debit back.
+     * an admin retry (provisioning_failed). A confirmed one paid the order; a rejected one gave its debit back. Also
+     * used by ReceiptSubmission (no card receipt while such a debit is held).
      */
-    private function heldWalletPayment(Order $order): ?Payment
+    public function heldWalletPayment(Order $order): ?Payment
     {
         return $this->entityManager->getRepository(Payment::class)->findOneBy(['order' => $order, 'method' => Payment::METHOD_WALLET, 'status' => self::HELD_WALLET_STATUSES], ['id' => 'DESC']);
     }
