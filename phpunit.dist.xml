@@ -13,6 +13,10 @@
     <php>
         <ini name="display_errors" value="1" />
         <ini name="error_reporting" value="-1" />
+        <!-- The full suite peaks just above PHP's default 512M (DomCrawler pages, many kernels). Set here so local runs
+             behave like CI (setup-php has no limit); if a php.ini or -d flag still caps it lower, run with
+             `php -d memory_limit=-1 bin/phpunit`. -->
+        <ini name="memory_limit" value="1G" />
         <server name="APP_ENV" value="test" force="true" />
         <server name="SHELL_VERBOSITY" value="-1" />
     </php>
