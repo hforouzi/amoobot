@@ -52,7 +52,9 @@ use Psr\Log\LoggerInterface;
  *
  * A payment of method "wallet" (WalletPayment) is settled like a gateway payment; its debit was written before. Every
  * path that rejects such a payment (admin reject, customer cancel, gateway failure; the expiry job too) gives the
- * debit back in the same transaction, once (releaseWalletDebit()).
+ * debit back in the same transaction, once (releaseWalletDebit()). When any payment of an order is confirmed (or
+ * verified and its provisioning fails), the order's OTHER open wallet payments are closed and their debits given back
+ * in that same transaction (releaseOtherWalletPayments()).
  */
 class PaymentSettlementService
 {
@@ -379,6 +381,7 @@ class PaymentSettlementService
                 ->setPaidAt($order->getPaidAt() ?? $now)
                 ->setProvisionedAt($order->getProvisionedAt() ?? $now);
             $this->markOrderDiscountUsed($order);
+            $released = $this->releaseOtherWalletPayments($order, $payment, $verified->adminId);
 
             $this->entityManager->flush();
             $connection->commit();
@@ -400,6 +403,7 @@ class PaymentSettlementService
         }
 
         $this->logger->info('Payment settled.', ['payment_id' => $paymentId, 'source' => $source, 'flag' => $payment->getAmountFlag()]);
+        $this->notifyReleased($released);
         $this->customerNotifier->confirmed($payment, $service);
         if (self::FLAG_OVERPAID === $payment->getAmountFlag()) {
             $this->adminAlerter->overpaid($payment);
@@ -518,6 +522,48 @@ class PaymentSettlementService
         $this->walletService->releasePurchase((int) $payment->getId(), WalletActor::systemFor($adminId), $note);
     }
 
+    /**
+     * The order was just paid by $paid: every OTHER open wallet payment of it (debited, settlement never finished, e.g.
+     * the customer then completed an earlier gateway/card payment) is rejected and its debit given back, in the
+     * caller's transaction, once (the reversal key of releaseWalletDebit()). The order lock is held, so no wallet
+     * payment of this order can be opened or settled meanwhile.
+     *
+     * @return list<Payment> the payments closed here (the customer is told after the commit, notifyReleased())
+     */
+    private function releaseOtherWalletPayments(Order $order, Payment $paid, ?int $adminId): array
+    {
+        $released = [];
+        foreach ($this->entityManager->getRepository(Payment::class)->findBy(['order' => $order, 'method' => Payment::METHOD_WALLET], ['id' => 'ASC']) as $other) {
+            if ($other->getId() === $paid->getId()) {
+                continue;
+            }
+            $this->entityManager->refresh($other, LockMode::PESSIMISTIC_WRITE);
+            if (!in_array($other->getStatus(), PaymentStatus::SETTLEABLE, true)) {
+                continue;
+            }
+            $other
+                ->setStatus(PaymentStatus::REJECTED)
+                ->setAdminNote(Payment::NOTE_ORDER_PAID_OTHERWISE)
+                ->setConfirmationSource(Payment::SOURCE_ORDER_PAID_OTHERWISE);
+            $this->releaseWalletDebit($other, $adminId, sprintf('order #%d paid by payment #%d', $order->getId() ?? 0, $paid->getId() ?? 0));
+            $released[] = $other;
+        }
+
+        return $released;
+    }
+
+    /**
+     * After the commit: tells the customer the wallet amount of each released payment came back.
+     *
+     * @param list<Payment> $released
+     */
+    private function notifyReleased(array $released): void
+    {
+        foreach ($released as $payment) {
+            $this->customerNotifier->rejected($payment);
+        }
+    }
+
     private function parkLatePayment(Payment $payment, Order $order, VerifiedPayment $verified, string $source): SettlementResult
     {
         [$expectedAmount, $expectedCurrency] = AmountMatcher::expectationFor($payment);
@@ -592,6 +638,8 @@ class PaymentSettlementService
             $order
                 ->setStatus(OrderStatus::PROVISIONING_FAILED)
                 ->setPaidAt($order->getPaidAt() ?? $now);
+            // The order is paid (only provisioning failed): a pending wallet payment of it is not needed either.
+            $released = $this->releaseOtherWalletPayments($order, $payment, $verified->adminId);
             $this->entityManager->flush();
             $connection->commit();
         } catch (\Throwable $e) {
@@ -601,6 +649,7 @@ class PaymentSettlementService
             return new SettlementResult(SettlementOutcome::ERROR, 'Fulfilment failed and the failure could not be recorded; nothing was changed.');
         }
 
+        $this->notifyReleased($released);
         $this->adminAlerter->provisioningFailed($payment);
         $this->customerNotifier->provisioningDelayed($payment);
 
