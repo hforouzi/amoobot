@@ -8,6 +8,7 @@ use App\Entity\User;
 use App\Entity\Wallet;
 use App\Entity\WalletTransaction;
 use App\Wallet\Domain\InsufficientWalletBalance;
+use App\Wallet\Domain\PurchaseDebit;
 use App\Wallet\Domain\WalletException;
 use App\Wallet\Domain\WalletFrozen;
 use App\Wallet\Domain\WalletIdempotencyConflict;
@@ -120,6 +121,24 @@ class WalletService
     public function releasePurchase(int $paymentId, WalletActor $by, string $note): ?WalletTransaction
     {
         return $this->reverse(WalletKeys::purchase($paymentId), WalletKeys::purchaseReversal($paymentId), $by, $note);
+    }
+
+    /**
+     * Whether this payment's purchase debit is held, was given back, or was never written. Locking reads (LOCK IN SHARE
+     * MODE): the latest committed ledger rows, never the caller's transaction snapshot, and a reversal cannot be
+     * inserted until the caller's transaction ends.
+     */
+    public function purchaseDebit(int $paymentId): PurchaseDebit
+    {
+        $connection = $this->entityManager->getConnection();
+        $debitId = $connection->fetchOne('SELECT id FROM wallet_transaction WHERE idempotency_key = ? LOCK IN SHARE MODE', [WalletKeys::purchase($paymentId)]);
+        if (false === $debitId) {
+            return PurchaseDebit::MISSING;
+        }
+
+        return false === $connection->fetchOne('SELECT id FROM wallet_transaction WHERE reversal_of_id = ? LOCK IN SHARE MODE', [(int) $debitId])
+            ? PurchaseDebit::HELD
+            : PurchaseDebit::REVERSED;
     }
 
     /**

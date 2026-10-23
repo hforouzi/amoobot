@@ -22,6 +22,7 @@ use App\Shop\Domain\OrderStatus;
 use App\Shop\Domain\OrderType;
 use App\Wallet\Application\WalletActor;
 use App\Wallet\Application\WalletService;
+use App\Wallet\Domain\PurchaseDebit;
 use App\Wallet\Domain\WalletKeys;
 use App\Wallet\Domain\WalletReferenceType;
 use App\Wallet\Domain\WalletTransactionType;
@@ -300,6 +301,12 @@ class PaymentSettlementService
             [$payment, $order] = $this->lock($paymentId);
             $isWalletTopUp = OrderType::WALLET_TOPUP === $order->getType();
 
+            if ($payment->isWalletPayment() && null !== ($refused = $this->refuseWalletPayment($payment, $allowedStatuses))) {
+                $connection->commit();
+
+                return $refused;
+            }
+
             // The customer paid after the payment was cancelled or expired unpaid: never ignore money.
             if ($checkAmount && $payment->isRejectedUnpaid()) {
                 return $this->parkLatePayment($payment, $order, $verified, $source);
@@ -471,6 +478,29 @@ class PaymentSettlementService
             // the next webhook/retry must not create a second one. Safe: the UUID is derived from the order.
             adoptExisting: true,
         );
+    }
+
+    /**
+     * A payment of method "wallet" carries no money of its own: its wallet debit is the payment. So it is never parked
+     * as a late payment (once cancelled/expired its debit was given back; nothing was paid late), and it is confirmed
+     * (settlement, admin approve, retry) only while that debit is held. Null: go on as for any payment.
+     *
+     * @param list<string> $allowedStatuses
+     */
+    private function refuseWalletPayment(Payment $payment, array $allowedStatuses): ?SettlementResult
+    {
+        if ($payment->isRejectedUnpaid()) {
+            return new SettlementResult(SettlementOutcome::ALREADY_PROCESSED, sprintf('Wallet payment #%d was cancelled or expired before it was settled and its debit was given back; nothing to confirm.', $payment->getId() ?? 0), $payment);
+        }
+        if (!in_array($payment->getStatus(), $allowedStatuses, true)) {
+            return null;
+        }
+
+        return match ($this->walletService->purchaseDebit((int) $payment->getId())) {
+            PurchaseDebit::HELD => null,
+            PurchaseDebit::REVERSED => new SettlementResult(SettlementOutcome::WALLET_DEBIT_MISSING, sprintf('Wallet payment #%d cannot be confirmed: its wallet debit was already given back to the customer, so confirming would deliver the order without payment. Reject this payment instead.', $payment->getId() ?? 0), $payment),
+            PurchaseDebit::MISSING => new SettlementResult(SettlementOutcome::WALLET_DEBIT_MISSING, sprintf('Wallet payment #%d cannot be confirmed: it has no wallet debit, so confirming would deliver the order without payment. Reject this payment instead.', $payment->getId() ?? 0), $payment),
+        };
     }
 
     /**

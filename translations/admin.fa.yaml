@@ -960,6 +960,7 @@ flash:
   payment.provisioning_failed: "پرداخت تأیید شد اما ساخت سرویس ناموفق بود. %detail%"
   payment.rejected: "پرداخت رد شد. %detail%"
   payment.order_already_fulfilled: "سفارش قبلاً تحویل شده است. %detail%"
+  payment.wallet_debit_missing: "تایید نشد: این پرداخت کیف پول دیگر برداشتی از کیف پول ندارد (برگشت داده شده یا هرگز کسر نشده). به‌جای آن، پرداخت را رد کنید. %detail%"
   broadcast.only_draft_editable: "فقط پیام‌های پیش‌نویس قابل ویرایش هستند."
   broadcast.recipients_prepared: "گیرندگان آماده شدند: %new% جدید، %duplicates% تکراری."
   broadcast.only_draft_sendable: "فقط پیام‌های پیش‌نویس را می‌توان همین حالا ارسال کرد."

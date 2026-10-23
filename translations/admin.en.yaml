@@ -960,6 +960,7 @@ flash:
   payment.provisioning_failed: "Payment confirmed, but the service could not be created. %detail%"
   payment.rejected: "Payment rejected. %detail%"
   payment.order_already_fulfilled: "The order was already fulfilled. %detail%"
+  payment.wallet_debit_missing: "Not confirmed: this wallet payment has no wallet debit any more (it was given back or never taken). Reject it instead. %detail%"
   broadcast.only_draft_editable: "Only draft broadcasts can be edited."
   broadcast.recipients_prepared: "Recipients prepared: %new% new, %duplicates% duplicate."
   broadcast.only_draft_sendable: "Only draft broadcasts can be sent now."

@@ -273,6 +273,7 @@ admin.payments.outcome.needs_review: "این پرداخت هنوز نیاز به
 admin.payments.outcome.provisioning_failed: "پرداخت تأیید شد اما ساخت سرویس ناموفق بود. می‌توانید دوباره تلاش کنید."
 admin.payments.outcome.rejected: "پرداخت رد شد."
 admin.payments.outcome.order_already_fulfilled: "این سفارش قبلاً با پرداخت دیگری تحویل شده است. این پرداخت را رد کنید (اگر پول برگشت داده شده، با بازگشت وجه)."
+admin.payments.outcome.wallet_debit_missing: "تایید نشد: این پرداخت کیف پول دیگر برداشتی از کیف پول ندارد (برگشت داده شده یا هرگز کسر نشده). به‌جای آن، پرداخت را رد کنید."
 admin.payments.outcome.error: "الان امکان رسیدگی به پرداخت نیست. کمی بعد دوباره تلاش کنید."
 admin.orders.search: "کد پیگیری یا شماره سفارش"
 admin.order.title: "سفارش #%id%"

@@ -21,6 +21,12 @@ enum SettlementOutcome: string
      * a refund) instead.
      */
     case ORDER_ALREADY_FULFILLED = 'order_already_fulfilled';
+    /**
+     * A payment of method "wallet" was not confirmed (settlement, admin approve or retry): its wallet debit was given
+     * back or never written, so confirming would deliver the order without payment. Nothing changed; the admin should
+     * reject this payment.
+     */
+    case WALLET_DEBIT_MISSING = 'wallet_debit_missing';
     /** Infrastructure error before any state change (e.g. lock timeout). Safe to retry the request. */
     case ERROR = 'error';
 }
