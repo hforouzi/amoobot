@@ -21,11 +21,11 @@ Every customer can have a wallet: a balance in Toman that is topped up with the 
 
 ## Upgrading (run the migrations)
 
-- `Version20261024090000`: creates `wallet` and `wallet_transaction` (new, empty tables; instant).
+- `Version20261024090000`: creates `wallet` and `wallet_transaction` (new, empty tables; instant). **Irreversible once the wallet has been used**: rolling it back is refused while the ledger has any row (dropping the tables would delete every balance and its history).
 - `Version20261024090100`: makes `order.plan_id` nullable. **It rebuilds the `order` table**: online on MySQL 5.6+ / MariaDB 10.0+ (`ALGORITHM=INPLACE, LOCK=NONE`, orders keep working), but run it off-peak with disk space for a copy of `order`. If the server refuses the online mode, the statement fails without changing anything; then run ``ALTER TABLE `order` MODIFY plan_id INT DEFAULT NULL`` in a maintenance window. **Irreversible once a top-up order exists**: rolling it back is refused while any order has no plan.
 - `Version20261025090000`: adds `payment.wallet_credit_alerted_at` (nullable, no default; instant on MariaDB 10.3+).
 - `Version20261025090100`: the wallet ledger's foreign keys refuse deletes instead of cascading (no data is changed).
-- **Rolling back: one version at a time** (`php bin/console doctrine:migrations:migrate prev`, then check, then the next). MariaDB/MySQL cannot roll back schema changes, so a multi-step rollback is not atomic: when one step refuses (e.g. `Version20261024090100` while a top-up order exists), the later migrations it already reverted stay reverted. Take a database backup first.
+- **Rolling back: one version at a time** (`php bin/console doctrine:migrations:migrate prev`, then check, then the next). MariaDB/MySQL cannot roll back schema changes, so a multi-step rollback is not atomic: when one step refuses (e.g. `Version20261024090100` while a top-up order exists), the later migrations it already reverted stay reverted. Take a database backup first. Never roll back past `Version20261024090000` on a server whose wallet was used: it is refused while `wallet_transaction` has rows; to turn the wallet off, switch it off in the settings instead.
 
 ## Admin
 

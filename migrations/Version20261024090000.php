@@ -28,8 +28,15 @@ final class Version20261024090000 extends AbstractMigration
         $this->addSql('ALTER TABLE wallet_transaction ADD CONSTRAINT FK_7DAF97229A0BB4E FOREIGN KEY (reversal_of_id) REFERENCES wallet_transaction (id) ON DELETE CASCADE');
     }
 
+    /**
+     * Refused while the ledger has any row: dropping the tables would delete customers' money and its history. Empty
+     * tables (the wallet never used) are dropped as before.
+     */
     public function down(Schema $schema): void
     {
+        $movements = (int) $this->connection->fetchOne('SELECT COUNT(*) FROM wallet_transaction');
+        $this->abortIf($movements > 0, sprintf('Irreversible: the wallet ledger has %d movement(s); dropping wallet / wallet_transaction would delete customers\' balances and their history. Nothing was changed.', $movements));
+
         $this->addSql('DROP TABLE wallet_transaction');
         $this->addSql('DROP TABLE wallet');
     }
