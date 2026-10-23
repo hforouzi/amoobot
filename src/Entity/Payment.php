@@ -28,6 +28,12 @@ class Payment
      */
     public const SOURCE_ORDER_PAID_OTHERWISE = 'order_paid_otherwise';
     public const NOTE_ORDER_PAID_OTHERWISE = 'Order paid by another payment';
+    /**
+     * confirmationSource / adminNote of a wallet payment closed because an admin rejected another payment of its order
+     * and the order failed: its debit was given back (PaymentSettlementService::reject()).
+     */
+    public const SOURCE_ORDER_FAILED = 'order_failed';
+    public const NOTE_ORDER_FAILED = 'Order failed: another payment of it was rejected';
 
     /** Paid from the customer's wallet (WalletPayment): no gateway; the debit is in the wallet ledger. */
     public const METHOD_WALLET = 'wallet';

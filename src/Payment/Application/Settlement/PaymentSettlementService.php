@@ -193,9 +193,12 @@ class PaymentSettlementService
                 ->setConfirmedBy($adminId, $adminTelegramId)
                 ->setRefundedAt($refunded ? new \DateTimeImmutable() : null);
             $this->releaseWalletDebit($payment, $adminId, 'payment rejected by an admin');
+            $released = [];
             // A duplicate payment of a fulfilled order: close the payment, never touch the order.
             if (!$this->isOrderFulfilled($order)) {
                 $order->setStatus(OrderStatus::FAILED);
+                // A failed order can no longer be paid, cancelled or expired: no wallet payment of it may keep its debit.
+                $released = $this->releaseHeldWalletDebits($order, $payment, $adminId, Payment::SOURCE_ORDER_FAILED, Payment::NOTE_ORDER_FAILED, sprintf('order #%d failed: payment #%d rejected by an admin', $order->getId() ?? 0, $paymentId));
             }
             $this->entityManager->flush();
             $connection->commit();
@@ -207,6 +210,7 @@ class PaymentSettlementService
         }
 
         $this->customerNotifier->rejected($payment);
+        $this->notifyReleased($released);
 
         return new SettlementResult(SettlementOutcome::REJECTED, $refunded ? 'Payment rejected and recorded as refunded.' : 'Payment rejected.', $payment);
     }
