@@ -30,6 +30,10 @@ use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 abstract class IntegrationTestCase extends KernelTestCase
 {
     private const PURGED_TABLES = [
+        // A trial plan left by one test points at an inbound the next purge deletes; the admin pages listing trial
+        // plans then fail depending on test order.
+        'trial_claim',
+        'trial_plan',
         'wallet_transaction',
         'wallet',
         'discount_usage',
