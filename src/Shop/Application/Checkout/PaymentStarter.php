@@ -22,12 +22,15 @@ use Doctrine\ORM\EntityManagerInterface;
  * Paying an order: the store payment methods it may use (StorePaymentMethodResolver: active, configured, currency,
  * amount range) and starting a payment with one of them. The order's open payment (pending/submitted) is reused, so
  * choosing again never creates a second one; the gateway's createPayment() fills in its URL / authority. A debited
- * wallet payment is never reused, and while one is pending no gateway payment is started (KIND_WALLET_PAYMENT_PENDING).
- * Nothing
+ * wallet payment is never reused, and while one holds its debit no gateway payment is started or reused
+ * (KIND_WALLET_PAYMENT_PENDING, KIND_WALLET_PAYMENT_HELD). Nothing
  * here verifies or confirms a payment: that is PaymentSettlementService's, after the gateway says so.
  */
 final class PaymentStarter
 {
+    /** The statuses in which a wallet payment holds its debit (heldWalletPayment()). */
+    private const HELD_WALLET_STATUSES = [PaymentStatus::PENDING, PaymentStatus::SUBMITTED, PaymentStatus::NEEDS_REVIEW, PaymentStatus::PROVISIONING_FAILED];
+
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
         private readonly StorePaymentMethodResolver $methodResolver,
@@ -99,8 +102,8 @@ final class PaymentStarter
         }
 
         $claimed = $this->claimPayment($order, $storePaymentMethod);
-        if (null === $claimed) {
-            return new PaymentStart(PaymentStart::KIND_WALLET_PAYMENT_PENDING, null, false, null, 0);
+        if (is_string($claimed)) {
+            return new PaymentStart($claimed, null, false, null, 0);
         }
         [$payment, $paymentWasCreated, $amount] = $claimed;
 
@@ -164,13 +167,14 @@ final class PaymentStarter
 
     /**
      * Under the order's row lock (the lock WalletPayment::open() takes too): the payment to start, i.e. the order's open
-     * gateway payment reused or a new one, flushed. Null while a wallet payment of the order is debited but not settled:
-     * that payment is never taken over (its method would change and its debit could no longer be given back) and no
-     * second payment is started beside it.
+     * gateway payment reused or a new one, flushed. While a wallet payment of the order holds its debit (pending, in
+     * review, or provisioning_failed) nothing is started or reused: that payment is never taken over (its method would
+     * change and its debit could no longer be given back) and no second payment is started beside it, which would make
+     * the customer pay twice. Then the PaymentStart kind to answer (KIND_WALLET_PAYMENT_PENDING / _HELD).
      *
-     * @return array{Payment, bool, int}|null [payment, created, amount]
+     * @return array{Payment, bool, int}|string [payment, created, amount], or the refusal's PaymentStart kind
      */
-    private function claimPayment(Order $order, StorePaymentMethod $storePaymentMethod): ?array
+    private function claimPayment(Order $order, StorePaymentMethod $storePaymentMethod): array|string
     {
         $gateway = $storePaymentMethod->getGateway();
         $connection = $this->entityManager->getConnection();
@@ -181,10 +185,11 @@ final class PaymentStarter
 
         try {
             $this->entityManager->refresh($order, LockMode::PESSIMISTIC_WRITE);
-            if ($this->hasPendingWalletPayment($order)) {
+            $held = $this->heldWalletPayment($order);
+            if ($held instanceof Payment) {
                 $connection->commit();
 
-                return null;
+                return PaymentStatus::PENDING === $held->getStatus() ? PaymentStart::KIND_WALLET_PAYMENT_PENDING : PaymentStart::KIND_WALLET_PAYMENT_HELD;
             }
 
             $amount = $this->payableAmount($order);
@@ -227,10 +232,13 @@ final class PaymentStarter
         return [$payment, $paymentWasCreated, $amount];
     }
 
-    /** A payment of method "wallet" that is debited and waiting for its settlement (WalletPayment). */
-    private function hasPendingWalletPayment(Order $order): bool
+    /**
+     * A payment of method "wallet" whose debit is held: waiting for its settlement (pending), in review, or waiting for
+     * an admin retry (provisioning_failed). A confirmed one paid the order; a rejected one gave its debit back.
+     */
+    private function heldWalletPayment(Order $order): ?Payment
     {
-        return null !== $this->entityManager->getRepository(Payment::class)->findOneBy(['order' => $order, 'method' => Payment::METHOD_WALLET, 'status' => PaymentStatus::PENDING]);
+        return $this->entityManager->getRepository(Payment::class)->findOneBy(['order' => $order, 'method' => Payment::METHOD_WALLET, 'status' => self::HELD_WALLET_STATUSES], ['id' => 'DESC']);
     }
 
     /** The order's open gateway payment; a wallet payment is never one (it is never handed to a gateway). */
