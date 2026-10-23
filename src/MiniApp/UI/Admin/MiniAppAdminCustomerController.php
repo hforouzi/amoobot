@@ -14,6 +14,7 @@ use App\MiniApp\Security\MiniAppUser;
 use App\MiniApp\UI\MiniAppFragments;
 use App\Payment\Domain\PaymentStatus;
 use App\Provisioning\Domain\VpnServiceStatus;
+use App\Shop\Domain\OrderType;
 use App\Wallet\Application\WalletService;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
@@ -65,17 +66,25 @@ final class MiniAppAdminCustomerController extends AbstractController
             throw new NotFoundHttpException();
         }
 
+        // Amounts are money received: a payment of method "wallet" spends money already counted as its top-up.
         $payments = $this->entityManager->createQueryBuilder()
-            ->select('p.status AS status', 'COUNT(p.id) AS total', 'COALESCE(SUM(p.amount), 0) AS amount')
+            ->select(
+                'p.status AS status',
+                'COUNT(p.id) AS total',
+                'COALESCE(SUM(CASE WHEN p.method <> :wallet THEN p.amount ELSE 0 END), 0) AS amount',
+                'COALESCE(SUM(CASE WHEN p.method <> :wallet AND o.type = :walletTopUp THEN p.amount ELSE 0 END), 0) AS wallet_top_ups',
+            )
             ->from(Payment::class, 'p')->join('p.order', 'o')
             ->where('o.user = :user')->setParameter('user', $customer)
+            ->setParameter('wallet', Payment::METHOD_WALLET)->setParameter('walletTopUp', OrderType::WALLET_TOPUP)
             ->groupBy('p.status')->getQuery()->getArrayResult();
-        $summary = ['count' => 0, 'confirmed' => 0, 'confirmedAmount' => 0, 'open' => 0];
+        $summary = ['count' => 0, 'confirmed' => 0, 'confirmedAmount' => 0, 'walletTopUps' => 0, 'open' => 0];
         foreach ($payments as $row) {
             $summary['count'] += (int) $row['total'];
             if (PaymentStatus::CONFIRMED === $row['status']) {
                 $summary['confirmed'] = (int) $row['total'];
                 $summary['confirmedAmount'] = (int) $row['amount'];
+                $summary['walletTopUps'] = (int) $row['wallet_top_ups'];
             } elseif (in_array($row['status'], [PaymentStatus::PENDING, PaymentStatus::SUBMITTED, PaymentStatus::NEEDS_REVIEW, PaymentStatus::PROVISIONING_FAILED], true)) {
                 $summary['open'] += (int) $row['total'];
             }

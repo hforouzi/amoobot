@@ -601,6 +601,7 @@ dashboard:
   today.orders: "سفارش‌های جدید"
   today.payments: "پرداخت‌های تأییدشده"
   today.revenue: "درآمد"
+  today.wallet_topups: "شارژ کیف پول (جزو درآمد)"
   today.customers: "مشتریان جدید"
   services.title: "سرویس‌ها"
   panels.title: "پنل‌ها"

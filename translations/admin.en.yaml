@@ -601,6 +601,7 @@ dashboard:
   today.orders: "New orders"
   today.payments: "Confirmed payments"
   today.revenue: "Revenue"
+  today.wallet_topups: "Wallet top-ups (included in revenue)"
   today.customers: "New customers"
   services.title: "Services"
   panels.title: "Panels"

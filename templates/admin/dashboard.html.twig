@@ -51,6 +51,12 @@
                             <span class="admin-dashboard-card-count"><bdi>{{ overview.today.revenue|number_format }}</bdi> <small>{{ ('currency.' ~ constant('App\\Payment\\Domain\\Money\\AmountNormalizer::SHOP_CURRENCY'))|trans }}</small></span>
                             <span class="admin-dashboard-card-label">{{ 'dashboard.today.revenue'|trans }}</span>
                         </a>
+                        {% if overview.today.walletTopUps %}
+                            <a class="admin-dashboard-card" href="{{ path('admin_payment_index', {tab: 'confirmed'}) }}" data-card="today" data-tab="wallet_topups">
+                                <span class="admin-dashboard-card-count"><bdi>{{ overview.today.walletTopUps|number_format }}</bdi> <small>{{ ('currency.' ~ constant('App\\Payment\\Domain\\Money\\AmountNormalizer::SHOP_CURRENCY'))|trans }}</small></span>
+                                <span class="admin-dashboard-card-label">{{ 'dashboard.today.wallet_topups'|trans }}</span>
+                            </a>
+                        {% endif %}
                     {% endif %}
                     {% if overview.today.customers is not null %}
                         <a class="admin-dashboard-card" href="{{ path('admin_customer_index') }}" data-card="today" data-tab="customers">

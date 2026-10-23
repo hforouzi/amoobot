@@ -15,6 +15,7 @@ use App\Payment\Domain\PaymentStatus;
 use App\Security\AdminAccessPolicy;
 use App\Security\AdminActor;
 use App\Security\AdminPermission;
+use App\Shop\Domain\OrderType;
 use App\Wallet\Application\WalletQueries;
 use Doctrine\ORM\EntityManagerInterface;
 use Psr\Clock\ClockInterface;
@@ -43,7 +44,7 @@ final class DashboardOverview
     /**
      * @return array{
      *     attention: list<Card>|null,
-     *     today: array{orders: int|null, payments: int|null, revenue: int|null, customers: int|null}|null,
+     *     today: array{orders: int|null, payments: int|null, revenue: int|null, walletTopUps: int|null, customers: int|null}|null,
      *     services: list<Card>|null,
      *     panels: list<array{id: int, title: string, active: bool, state: string, badge: string, checkedAt: ?\DateTimeImmutable}>|null,
      *     wallets: array{outstanding: int, creditUsed: int, creditLimit: int, wallets: int}|null,
@@ -89,9 +90,10 @@ final class DashboardOverview
 
     /**
      * Since midnight (the app's time zone). Revenue: the amounts of the payments confirmed today, in the store
-     * currency, as stored.
+     * currency, as stored, except payments of method "wallet" (money already received as a top-up); walletTopUps: the
+     * part of that revenue that went into wallets.
      *
-     * @return array{orders: int|null, payments: int|null, revenue: int|null, customers: int|null}
+     * @return array{orders: int|null, payments: int|null, revenue: int|null, walletTopUps: int|null, customers: int|null}
      */
     private function today(bool $orders, bool $payments, bool $customers): array
     {
@@ -100,21 +102,28 @@ final class DashboardOverview
             ->select('COUNT(x.id)')->from($entity, 'x')->andWhere(sprintf('x.%s >= :since', $field))->setParameter('since', $midnight)
             ->getQuery()->getSingleScalarResult();
 
-        $confirmed = ['count' => null, 'revenue' => null];
+        $confirmed = ['count' => null, 'revenue' => null, 'walletTopUps' => null];
         if ($payments) {
+            // Revenue is money received: a payment of method "wallet" spends money already counted as its top-up.
             $row = $this->entityManager->createQueryBuilder()
-                ->select('COUNT(p.id) AS total', 'COALESCE(SUM(p.amount), 0) AS revenue')
-                ->from(Payment::class, 'p')
+                ->select(
+                    'COUNT(p.id) AS total',
+                    'COALESCE(SUM(CASE WHEN p.method <> :wallet THEN p.amount ELSE 0 END), 0) AS revenue',
+                    'COALESCE(SUM(CASE WHEN p.method <> :wallet AND o.type = :walletTopUp THEN p.amount ELSE 0 END), 0) AS wallet_top_ups',
+                )
+                ->from(Payment::class, 'p')->join('p.order', 'o')
                 ->andWhere('p.status = :confirmed')->andWhere('p.confirmedAt >= :since')
                 ->setParameter('confirmed', PaymentStatus::CONFIRMED)->setParameter('since', $midnight)
+                ->setParameter('wallet', Payment::METHOD_WALLET)->setParameter('walletTopUp', OrderType::WALLET_TOPUP)
                 ->getQuery()->getSingleResult();
-            $confirmed = ['count' => (int) $row['total'], 'revenue' => (int) $row['revenue']];
+            $confirmed = ['count' => (int) $row['total'], 'revenue' => (int) $row['revenue'], 'walletTopUps' => (int) $row['wallet_top_ups']];
         }
 
         return [
             'orders' => $orders ? $count(Order::class, 'createdAt') : null,
             'payments' => $confirmed['count'],
             'revenue' => $confirmed['revenue'],
+            'walletTopUps' => $confirmed['walletTopUps'],
             'customers' => $customers ? $count(User::class, 'createdAt') : null,
         ];
     }
