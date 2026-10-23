@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Plugin;
 
 use App\Entity\Plugin;
+use App\Payment\Infrastructure\PaymentGatewayRegistry;
 use App\Payment\Plugin\PluginConfigSchemaValidator;
 use Doctrine\ORM\EntityManagerInterface;
 use Psr\Log\LoggerInterface;
@@ -138,6 +139,8 @@ final class PluginManager
             $errors[] = 'code is required.';
         } elseif (!preg_match('/^[a-z0-9_-]+$/', $code)) {
             $errors[] = 'code may only contain lowercase letters, numbers, underscore, and dash.';
+        } elseif (in_array($code, PaymentGatewayRegistry::RESERVED_CODES, true)) {
+            $errors[] = sprintf('code "%s" is reserved.', $code);
         }
 
         $type = $manifest['type'] ?? null;
