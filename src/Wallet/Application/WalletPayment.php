@@ -12,6 +12,7 @@ use App\Payment\Application\Settlement\VerifiedPayment;
 use App\Payment\Domain\Dto\PaymentVerificationResult;
 use App\Payment\Domain\Money\AmountNormalizer;
 use App\Payment\Domain\PaymentStatus;
+use App\Shared\Infrastructure\TransactionRollback;
 use App\Shop\Application\Checkout\PaymentStarter;
 use App\Shop\Domain\OrderStatus;
 use App\Shop\Domain\OrderType;
@@ -21,7 +22,6 @@ use App\Wallet\Domain\WalletReferenceType;
 use App\Wallet\Domain\WalletTransactionType;
 use Doctrine\DBAL\LockMode;
 use Doctrine\ORM\EntityManagerInterface;
-use Doctrine\Persistence\ManagerRegistry;
 
 /**
  * Paying a new service / renewal / add-traffic order from the customer's wallet, as one more payment method.
@@ -47,7 +47,7 @@ final class WalletPayment
 
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
-        private readonly ManagerRegistry $managerRegistry,
+        private readonly TransactionRollback $transactionRollback,
         private readonly WalletSettings $settings,
         private readonly WalletService $wallets,
         private readonly PaymentStarter $paymentStarter,
@@ -103,6 +103,7 @@ final class WalletPayment
         $orderId = (int) $order->getId();
         $connection = $this->entityManager->getConnection();
         $this->entityManager->flush();
+        $level = $connection->getTransactionNestingLevel();
         $connection->beginTransaction();
         $created = null;
 
@@ -144,11 +145,12 @@ final class WalletPayment
             );
             $connection->commit();
         } catch (\Throwable $e) {
-            if ($connection->isTransactionActive()) {
-                $connection->rollBack();
-            }
-            if (!$this->entityManager->isOpen()) {
-                $this->managerRegistry->resetManager();
+            // Back to the level this call started at. When that rollback fails (a deadlock inside the debit's savepoint:
+            // the server already dropped the whole transaction) the connection is closed and the unit of work, which
+            // holds the rolled-back payment, is discarded; otherwise the next operation of a long-running process (the
+            // bot worker) would run inside a transaction the server no longer has (TransactionRollback).
+            if (!$this->transactionRollback->rollBack($level) || !$this->entityManager->isOpen()) {
+                $this->transactionRollback->resetEntityManager();
             } elseif ($created instanceof Payment) {
                 // Rolled back: the payment row does not exist.
                 $this->entityManager->detach($created);

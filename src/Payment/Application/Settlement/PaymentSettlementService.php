@@ -17,6 +17,7 @@ use App\Payment\Domain\PaymentStatus;
 use App\Provisioning\Application\ServiceRenewalService;
 use App\Provisioning\Application\ServiceTrafficAddonService;
 use App\Provisioning\Application\VpnProvisioningService;
+use App\Shared\Infrastructure\TransactionRollback;
 use App\Shop\Application\DiscountCodeService;
 use App\Shop\Domain\OrderStatus;
 use App\Shop\Domain\OrderType;
@@ -29,7 +30,6 @@ use App\Wallet\Domain\WalletReferenceType;
 use App\Wallet\Domain\WalletTransactionType;
 use Doctrine\DBAL\LockMode;
 use Doctrine\ORM\EntityManagerInterface;
-use Doctrine\Persistence\ManagerRegistry;
 use Psr\Log\LoggerInterface;
 
 /**
@@ -69,7 +69,7 @@ class PaymentSettlementService
 
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
-        private readonly ManagerRegistry $managerRegistry,
+        private readonly TransactionRollback $transactionRollback,
         private readonly AmountMatcher $amountMatcher,
         private readonly UnderpaymentTolerancePolicy $tolerancePolicy,
         private readonly VpnProvisioningService $vpnProvisioningService,
@@ -754,32 +754,16 @@ class PaymentSettlementService
      * After a failed attempt the unit of work holds half-applied changes (new service, statuses),
      * so it is discarded: cleared, or rebuilt when the failure closed the entity manager.
      *
-     * When the rollback itself fails (e.g. the database already rolled the transaction back after a deadlock, so a
-     * savepoint of the ORM's flush no longer exists), the connection is CLOSED: the server drops whatever is left of
-     * the transaction and DBAL's nesting level starts again at 0. Without that, the next "transaction" (e.g. recording
-     * PROVISIONING_FAILED) ran as a savepoint of a transaction that no longer existed and was never committed.
+     * When the rollback itself fails (e.g. after a deadlock), the connection is closed (TransactionRollback). Without
+     * that, the next "transaction" (e.g. recording PROVISIONING_FAILED) ran as a savepoint of a transaction that no
+     * longer existed and was never committed.
      *
      * @return bool false when the rollback failed (the connection was closed; the caller alerts the admins)
      */
     private function rollbackAndReset(): bool
     {
-        $connection = $this->entityManager->getConnection();
-        $rolledBack = true;
-        try {
-            while ($connection->isTransactionActive()) {
-                $connection->rollBack();
-            }
-        } catch (\Throwable $e) {
-            $rolledBack = false;
-            $this->logger->critical('Rollback failed; the database connection was closed so no transaction state is lost.', ['error' => $e->getMessage()]);
-            $connection->close();
-        }
-
-        if ($this->entityManager->isOpen()) {
-            $this->entityManager->clear();
-        } else {
-            $this->managerRegistry->resetManager();
-        }
+        $rolledBack = $this->transactionRollback->rollBack();
+        $this->transactionRollback->resetEntityManager();
 
         return $rolledBack;
     }
