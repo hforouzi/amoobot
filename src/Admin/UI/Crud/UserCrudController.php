@@ -68,7 +68,7 @@ class UserCrudController extends AbstractCrudController
 
     public function configureActions(Actions $actions): Actions
     {
-        // The customer's wallet (WALLETS_VIEW; an empty one is created on first open).
+        // The customer's wallet (WALLETS_VIEW). Looking never creates one; an admin with WALLETS_MANAGE opens it by a POST.
         $wallet = Action::new('customerWallet', 'admin.wallets', 'fa fa-money')
             ->linkToUrl(fn (User $user): string => $this->generateUrl('admin_wallet_customer', ['id' => $user->getId()]));
 
