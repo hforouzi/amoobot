@@ -170,7 +170,7 @@ sudo -u www-data php bin/console app:payment:create-default-gateways --env=prod
 Webhook بدون هدر و با رمز URL اشتباه، `getWebhookInfo` (URL ماسک‌شده، بدون `last_error_message`، صف کوچک)، کارهای زمان‌بندی‌شده، بکاپ شبانه
 (تازه و `600`)، ufw، `sshd -T` (با `FIREWALL=no` / `SSH_HARDENING=no` فقط یک خط `INFO` با وضعیت فعلی، که در نتیجه شمرده نمی‌شود؛
 و `FAIL` فقط وقتی ufw فعال است و 80/443 را بسته)، `sql_mode`، دسترسی‌های `/etc/amoobot`، منطقه‌ی زمانی PHP (`UTC` برای CLI و FPM)، `nginx -t`، نبود رشته‌ی شبیه رمز در لاگ‌های nginx، خاموش بودن
-حالت نگهداری و نبود فایل `deploy-in-progress`. با کاربر `deploy` (`bin/post-deploy-check.sh`) بررسی‌هایی که root لازم دارند `SKIP`
+حالت نگهداری و نبود فایل `deploy-in-progress`. یک خط `INFO` هم برای دفتر کیف پول چاپ می‌کند (`app:wallet:reconcile` با کاربر وب؛ اگر مغایرتی پیدا شود `WARNING` می‌گوید، اما در نتیجه شمرده نمی‌شود و چیزی را تغییر نمی‌دهد). با کاربر `deploy` (`bin/post-deploy-check.sh`) بررسی‌هایی که root لازم دارند `SKIP`
 می‌شوند و نتیجه `INCOMPLETE` (کد `1`) است. ترتیب کامل اولین استقرار: [first-deploy-checklist.md](first-deploy-checklist.md).
 
 **تست دود Webhook:** `sudo /usr/local/lib/amoobot/smoke-webhook.sh 999000001` (یک id **جعلی** که مال هیچ کس نیست؛ id ادمین پذیرفته نمی‌شود)

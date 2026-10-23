@@ -19,6 +19,11 @@ Every customer can have a wallet: a balance in Toman that is topped up with the 
 - **Credit limit.** How far below zero a balance may go (0 by default). It cannot be set lower than the credit already in use.
 - **Frozen wallet.** Cannot be used to pay or be topped up by the customer; payments already made are still credited and admins can still adjust. A wallet payment whose money was already taken before the freeze (its order was not confirmed yet) still completes with that one debit; the money is already out of the wallet, so refusing it would only hold it. Freezing stops every new wallet payment.
 
+## Monitoring
+
+- Run `php bin/console app:wallet:reconcile --env=prod` as the web user once a day (e.g. a cron line `sudo -u www-data php /var/www/amoobot/bin/console app:wallet:reconcile --env=prod`) and alert on exit code 1. It only reads; each mismatch it lists is corrected by a person (an admin adjustment or a payment decision).
+- The post-deploy check (`sudo /usr/local/lib/amoobot/post-deploy-check.sh`) runs it too and prints an `INFO wallet-reconcile` line: a `WARNING` when it finds mismatches, which never changes the check's result.
+
 ## Upgrading (run the migrations)
 
 - `Version20261024090000`: creates `wallet` and `wallet_transaction` (new, empty tables; instant). **Irreversible once the wallet has been used**: rolling it back is refused while the ledger has any row (dropping the tables would delete every balance and its history).
