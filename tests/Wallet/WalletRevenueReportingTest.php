@@ -118,5 +118,11 @@ final class WalletRevenueReportingTest extends IntegrationTestCase
         self::assertSame(200, $this->httpStatus());
         self::assertSame('250000', $home->filter('[data-card="today"] [data-revenue]')->attr('data-revenue'));
         self::assertSame('150000', $home->filter('[data-card="today"] [data-wallet-topups]')->attr('data-wallet-topups'));
+
+        $this->client->loginUser($this->adminUser, 'main');
+        $dashboard = $this->client->request('GET', '/admin');
+        self::assertSame(200, $this->client->getResponse()->getStatusCode());
+        self::assertStringContainsString('250,000', $dashboard->filter('[data-tab="revenue"]')->text());
+        self::assertStringContainsString('150,000', $dashboard->filter('[data-tab="wallet_topups"]')->text());
     }
 }
