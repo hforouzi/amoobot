@@ -360,6 +360,13 @@ class PaymentSettlementService
                 ), $source, $match);
             }
 
+            // A top-up worth less than 1 Toman has nothing to credit: a terminal answer, not an error to retry forever.
+            if ($isWalletTopUp && ($credit = TopUpCredit::for($order->getAmount(), $payment))->amount <= 0) {
+                $connection->commit();
+
+                return new SettlementResult(SettlementOutcome::TOPUP_NOTHING_TO_CREDIT, sprintf('Top-up payment #%d cannot be confirmed: what was received is worth less than 1 Toman, so there is nothing to credit (%s). Nothing was changed; reject this payment.', $payment->getId() ?? 0, $credit->note ?? '-'), $payment);
+            }
+
             if (null !== $verified->transactionId && null === $payment->getGatewayTransactionId()) {
                 $payment->setGatewayTransactionId($verified->transactionId);
             }

@@ -282,6 +282,41 @@ final class WalletReviewVariationsTest extends IntegrationTestCase
     }
 
 
+    /**
+     * Second review, minor 1: a top-up "paid" with a tiny amount, approved by an admin from review, floors to 0 Toman.
+     * A clear terminal answer (nothing changed, reject it), never an ERROR "try again" that can never succeed.
+     */
+    public function testApprovingATopUpWorthLessThanOneTomanIsATerminalAnswer(): void
+    {
+        $payment = $this->topUp(50000, PaymentGatewayType::NOWPAYMENTS);
+        $parked = $this->settlement()->settle($payment, $this->paid($payment, '0.00001', (string) $payment->getExpectedCurrency()), 'test_webhook');
+        self::assertSame(SettlementOutcome::NEEDS_REVIEW, $parked->outcome);
+
+        $approved = $this->settlement()->approveByAdmin($this->freshPayment((int) $payment->getId()), 1, null, 'test_admin');
+
+        self::assertSame(SettlementOutcome::TOPUP_NOTHING_TO_CREDIT, $approved->outcome, $approved->message);
+        self::assertSame('needs_review', $this->row('payment', (int) $payment->getId())['status'], 'nothing changed');
+        self::assertSame(0, $this->balance());
+        self::assertSame([], array_filter($this->http->telegramTexts(), static fn (string $text): bool => str_contains($text, \App\Payment\Application\AdminPaymentAlerter::WALLET_CREDIT_FAILED_TITLE)), 'not a credit failure');
+        $rejected = $this->settlement()->reject($this->freshPayment((int) $payment->getId()), 'nothing to credit', 1, null, 'test_admin');
+        self::assertSame(SettlementOutcome::REJECTED, $rejected->outcome, 'the admin can close it');
+    }
+
+    /** Second review, minor 1: the credit-failure alert says where the payment really is (here: in review). */
+    public function testTheCreditFailureAlertOfAPaymentInReviewDoesNotSayPending(): void
+    {
+        $payment = $this->topUp(50000, PaymentGatewayType::NOWPAYMENTS);
+        $this->em->getConnection()->executeStatement("UPDATE payment SET status = 'needs_review' WHERE id = ?", [$payment->getId()]);
+
+        $this->svc(\App\Payment\Application\AdminPaymentAlerter::class)->walletTopUpCreditFailed((int) $payment->getId(), 'test error');
+
+        $alerts = array_values(array_filter($this->http->telegramTexts(), static fn (string $text): bool => str_contains($text, \App\Payment\Application\AdminPaymentAlerter::WALLET_CREDIT_FAILED_TITLE)));
+        self::assertNotSame([], $alerts);
+        self::assertStringNotContainsString('still pending', $alerts[0]);
+        self::assertStringContainsString('still needs_review', $alerts[0]);
+        self::assertStringContainsString('approve it again or reject it', $alerts[0]);
+    }
+
     // ---- the first review's B1 tests, for the fixed behaviour -----------------------------------------------------
 
     /** B1: while a wallet payment is debited and unsettled, a gateway checkout is refused, so nothing is charged twice. */

@@ -27,6 +27,11 @@ enum SettlementOutcome: string
      * reject this payment.
      */
     case WALLET_DEBIT_MISSING = 'wallet_debit_missing';
+    /**
+     * A wallet top-up was not confirmed: what was received is worth less than 1 Toman (TopUpCredit floors it to 0), so
+     * there is nothing to credit. Nothing changed and trying again cannot help; the admin should reject this payment.
+     */
+    case TOPUP_NOTHING_TO_CREDIT = 'topup_nothing_to_credit';
     /** Infrastructure error before any state change (e.g. lock timeout). Safe to retry the request. */
     case ERROR = 'error';
 }

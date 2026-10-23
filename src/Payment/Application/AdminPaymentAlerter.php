@@ -7,6 +7,7 @@ namespace App\Payment\Application;
 use App\Bot\Application\TelegramKeyboardFactory;
 use App\Bot\Infrastructure\TelegramApiClient;
 use App\Entity\Payment;
+use App\Payment\Domain\PaymentStatus;
 use App\Security\AdminAccessPolicy;
 use App\Security\AdminPermission;
 use Doctrine\ORM\EntityManagerInterface;
@@ -61,6 +62,10 @@ class AdminPaymentAlerter
                 [(new \DateTimeImmutable())->format('Y-m-d H:i:s'), $paymentId]
             );
             $payment = 1 === $claimed ? $this->entityManager->find(Payment::class, $paymentId) : null;
+            if ($payment instanceof Payment) {
+                // The status in the database, never a stale in-memory copy.
+                $this->entityManager->refresh($payment);
+            }
         } catch (\Throwable $e) {
             $this->logger->error('Wallet top-up credit alert not sent.', ['payment_id' => $paymentId, 'error' => $e->getMessage()]);
 
@@ -70,7 +75,10 @@ class AdminPaymentAlerter
             return;
         }
 
-        $this->send($payment, self::WALLET_CREDIT_FAILED_TITLE, 'Nothing was changed; the payment is still pending. The next verification retries, or approve it. Error: '.$error, true);
+        // Its real status (pending / submitted / in review): only a payment that is not in review is retried by the
+        // next verification.
+        $next = PaymentStatus::NEEDS_REVIEW === $payment->getStatus() ? 'It is in review: approve it again or reject it.' : 'The next verification retries it, or approve it.';
+        $this->send($payment, self::WALLET_CREDIT_FAILED_TITLE, sprintf('Nothing was changed; the payment is still %s. %s Error: %s', $payment->getStatus(), $next, $error), true);
     }
 
     /**

@@ -962,6 +962,7 @@ flash:
   payment.rejected: "پرداخت رد شد. %detail%"
   payment.order_already_fulfilled: "سفارش قبلاً تحویل شده است. %detail%"
   payment.wallet_debit_missing: "تایید نشد: این پرداخت کیف پول دیگر برداشتی از کیف پول ندارد (برگشت داده شده یا هرگز کسر نشده). به‌جای آن، پرداخت را رد کنید. %detail%"
+  payment.topup_nothing_to_credit: "تایید نشد: مبلغ دریافت‌شده برای این شارژ کیف پول کمتر از ۱ تومان است و چیزی برای واریز نیست. این پرداخت را رد کنید. %detail%"
   broadcast.only_draft_editable: "فقط پیام‌های پیش‌نویس قابل ویرایش هستند."
   broadcast.recipients_prepared: "گیرندگان آماده شدند: %new% جدید، %duplicates% تکراری."
   broadcast.only_draft_sendable: "فقط پیام‌های پیش‌نویس را می‌توان همین حالا ارسال کرد."

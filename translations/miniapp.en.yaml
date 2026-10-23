@@ -275,6 +275,7 @@ admin.payments.outcome.provisioning_failed: "Payment confirmed, but delivering t
 admin.payments.outcome.rejected: "Payment rejected."
 admin.payments.outcome.order_already_fulfilled: "The order was already delivered by another payment. Reject this one (as refunded if you returned the money)."
 admin.payments.outcome.wallet_debit_missing: "Not confirmed: this wallet payment has no wallet debit any more (it was given back or never taken). Reject it instead."
+admin.payments.outcome.topup_nothing_to_credit: "Not confirmed: what was received for this wallet top-up is worth less than 1 Toman, so there is nothing to credit. Reject this payment."
 admin.payments.outcome.error: "The payment could not be handled right now. Try again in a moment."
 admin.orders.search: "Tracking code or number"
 admin.order.title: "Order #%id%"
