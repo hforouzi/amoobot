@@ -111,7 +111,7 @@ final class AdminOrdersHandler implements AdminArea
             'type' => $this->replies->orderType($order->getType()),
             'amount' => AdminScreen::money($order->getAmount()),
             'user' => $this->replies->identity($order->getUser()->getTelegramAccount()),
-            'plan' => $order->getPlan()->getTitle(),
+            'plan' => ($order->getPlan()?->getTitle() ?? '-'),
             'date' => $order->getCreatedAt()->format('Y-m-d H:i'),
         ];
     }

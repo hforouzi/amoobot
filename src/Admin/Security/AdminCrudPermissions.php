@@ -27,6 +27,11 @@ final class AdminCrudPermissions
      */
     private const ROUTES = [
         'admin_bulk_plan_price_adjustment' => AdminPermission::PLANS_MANAGE,
+        // Wallet writes (the pages themselves need WALLETS_VIEW, the controller's permission).
+        'admin_wallet_adjust' => AdminPermission::WALLETS_MANAGE,
+        'admin_wallet_credit_limit' => AdminPermission::WALLETS_MANAGE,
+        'admin_wallet_freeze' => AdminPermission::WALLETS_MANAGE,
+        'admin_wallet_unfreeze' => AdminPermission::WALLETS_MANAGE,
     ];
 
     /** Dashboard, login/logout, locale switch: any admin (access_control ^/admin). */
@@ -59,6 +64,7 @@ final class AdminCrudPermissions
             // Only the bulk price adjustment is left here (PLANS_MANAGE, ROUTES); settings moved to SettingsAdminController.
             \App\Admin\UI\RenewalPricingAdminController::class => $p(AdminPermission::SETTINGS_MANAGE),
             Crud\UserCrudController::class => $p(AdminPermission::CUSTOMERS_VIEW, AdminPermission::CUSTOMERS_MANAGE),
+            \App\Admin\UI\WalletAdminController::class => $p(AdminPermission::WALLETS_VIEW, AdminPermission::WALLETS_MANAGE),
             Crud\TelegramAccountCrudController::class => $p(AdminPermission::CUSTOMERS_VIEW, AdminPermission::CUSTOMERS_MANAGE),
             Crud\VpnServiceCrudController::class => $p(AdminPermission::SERVICES_VIEW, AdminPermission::SERVICES_MANAGE, AdminPermission::SERVICES_DELETE),
             // "New subscription page link" of a service.

@@ -7,6 +7,7 @@ namespace App\Bot\Application;
 use App\Bot\Application\BotTextResolver;
 use App\Bot\Infrastructure\TelegramApiClient;
 use App\Entity\Order;
+use App\Wallet\Application\WalletPayment;
 use App\Entity\OrderDraft;
 use App\Entity\Payment;
 use App\Entity\PaymentGateway;
@@ -75,6 +76,7 @@ class ServiceManagementService
         private readonly ServiceOrderCheckout $serviceOrderCheckout,
         private readonly DiscountApplication $discountApplication,
         private readonly PaymentStarter $paymentStarter,
+        private readonly WalletPayment $walletPayment,
     ) {
     }
 
@@ -841,7 +843,8 @@ class ServiceManagementService
         }
 
         $methods = $this->findAvailableStorePaymentMethods($order);
-        if ([] === $methods) {
+        $offerWallet = $this->walletPayment->canPay($order);
+        if ([] === $methods && !$offerWallet) {
             $this->showPopupOrMessage($chatId, $callbackId, $this->botTextResolver->message('payment.no_methods'), 'no_active_store_method_order_resume');
 
             return true;
@@ -855,7 +858,8 @@ class ServiceManagementService
                 (int) ($order->getId() ?? 0),
                 $methods,
                 'order_summary:'.((int) ($order->getId() ?? 0)),
-                'order_cancel:'.((int) ($order->getId() ?? 0))
+                'order_cancel:'.((int) ($order->getId() ?? 0)),
+                $offerWallet
             )
         );
 
@@ -885,7 +889,8 @@ class ServiceManagementService
         }
 
         $methods = $this->findAvailableStorePaymentMethods($order);
-        if ([] === $methods) {
+        $offerWallet = $this->walletPayment->canPay($order);
+        if ([] === $methods && !$offerWallet) {
             $diagnostics = $this->paymentStarter->diagnostics($order);
             $encodedReasons = json_encode($diagnostics['skippedReasons'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
             $encodedMethods = json_encode($diagnostics['methods'] ?? [], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
@@ -917,7 +922,8 @@ class ServiceManagementService
                 (int) ($order->getId() ?? 0),
                 $methods,
                 'order_summary:'.((int) ($order->getId() ?? 0)),
-                'order_cancel:'.((int) ($order->getId() ?? 0))
+                'order_cancel:'.((int) ($order->getId() ?? 0)),
+                $offerWallet
             )
         );
     }
@@ -1009,7 +1015,7 @@ class ServiceManagementService
                 'trackingCode' => (string) ($order->getTrackingCode() ?? '-'),
             ],
             'plan' => [
-                'title' => $order->getPlan()->getTitle(),
+                'title' => $order->requirePlan()->getTitle(),
             ],
         ];
     }
@@ -1051,7 +1057,7 @@ class ServiceManagementService
             return ((string) ((int) ($metadata['trafficGb'] ?? 0))).' گیگ';
         }
 
-        $planTraffic = $order->getPlan()->getTrafficGb();
+        $planTraffic = $order->requirePlan()->getTrafficGb();
         if (null !== $planTraffic) {
             return ((string) $planTraffic).' گیگ';
         }
@@ -1064,7 +1070,7 @@ class ServiceManagementService
      */
     private function resolveOrderDuration(Order $order, array $metadata): string
     {
-        if ((bool) ($metadata['unlimitedDuration'] ?? false) || $order->getPlan()->isUnlimitedDuration()) {
+        if ((bool) ($metadata['unlimitedDuration'] ?? false) || $order->requirePlan()->isUnlimitedDuration()) {
             return 'نامحدود';
         }
 
@@ -1072,7 +1078,7 @@ class ServiceManagementService
             return ((string) $metadata['durationDays']).' روز';
         }
 
-        return ((string) $order->getPlan()->getDurationDays()).' روز';
+        return ((string) $order->requirePlan()->getDurationDays()).' روز';
     }
 
     private function createOrReuseOrderPayment(Order $order, PaymentGateway $gateway, StorePaymentMethod $storePaymentMethod, string $chatId, ?string $callbackId): void
@@ -1405,7 +1411,7 @@ class ServiceManagementService
             $lines[] = sprintf(
                 "#%d | plan: %s | amount: %d | status: %s",
                 $order->getId(),
-                $order->getPlan()->getTitle(),
+                $order->getPlan()?->getTitle() ?? '-',
                 $order->getAmount(),
                 $order->getStatus()
             );

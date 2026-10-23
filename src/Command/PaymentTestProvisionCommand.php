@@ -48,7 +48,7 @@ final class PaymentTestProvisionCommand extends Command
         }
 
         $order = $payment->getOrder();
-        $plan = $order->getPlan();
+        $plan = $order->requirePlan();
         $inbound = $plan->getInbound();
         $panel = $inbound?->getPanel();
 

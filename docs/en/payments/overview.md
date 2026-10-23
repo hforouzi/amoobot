@@ -25,3 +25,5 @@ Order
 ```
 
 Gateway active status is not enough. A StorePaymentMethod must also be active, match order currency/amount constraints, and have a usable driver.
+
+See also: [Customer Wallet](wallet.md)

@@ -40,6 +40,7 @@ final class AdminTabs
     public const SETTINGS = [
         'sales' => 'settings_page.tabs.sales',
         'automation' => 'settings_page.tabs.automation',
+        'wallet' => 'settings_page.tabs.wallet',
         'channels' => 'settings_page.tabs.channels',
         'advanced' => 'settings_page.tabs.advanced',
     ];

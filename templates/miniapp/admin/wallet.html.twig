@@ -1,0 +1,31 @@
+{% extends 'miniapp/view/_base.html.twig' %}
+{% trans_default_domain 'miniapp' %}
+{# A customer's wallet ledger, newest first (WALLETS_VIEW). #}
+{% block section %}admin{% endblock %}
+{% block title %}{{ 'admin.wallet.ledger'|trans }}{% endblock %}
+{% block attributes %} data-back{% endblock %}
+{% block content %}
+    <section class="card">
+        <h1>👛 {{ customer.name ?: ('#' ~ customer.id) }}</h1>
+        <p>{{ 'admin.wallet.balance'|trans }} <b data-wallet-balance="{{ wallet.balance ?? 0 }}">{{ 'money.toman'|trans({'%amount%': (wallet.balance ?? 0)|number_format}) }}</b></p>
+    </section>
+    <section class="card">
+        {% if transactions is empty %}<p class="muted" data-no-transactions>{{ 'wallet.no_transactions'|trans }}</p>{% endif %}
+        <div class="list">
+            {% for tx in transactions %}
+                <div class="list-item" data-transaction-id="{{ tx.id }}" data-type="{{ tx.type }}">
+                    <span class="list-main">
+                        <span class="head"><strong>{{ ('wallet.type.' ~ tx.type)|trans }}</strong><b class="ltr">{{ tx.amount > 0 ? '+' : '−' }}{{ (tx.amount|abs)|number_format }}</b></span>
+                        <span class="muted">{{ tx.createdAt|sub_date(lang) }} · {{ 'wallet.balance_after'|trans({'%amount%': tx.balanceAfter|number_format}) }}{% if tx.note %} · {{ tx.note }}{% endif %}</span>
+                    </span>
+                </div>
+            {% endfor %}
+        </div>
+    </section>
+    {% if page > 1 or hasNext %}
+        <nav class="row pager">
+            {% if page > 1 %}<a class="btn secondary small" href="{{ path('miniapp_admin_customer_wallet', {id: customer.id, page: page - 1}) }}" data-replace>{{ 'orders.previous'|trans }}</a>{% else %}<span></span>{% endif %}
+            {% if hasNext %}<a class="btn secondary small" href="{{ path('miniapp_admin_customer_wallet', {id: customer.id, page: page + 1}) }}" data-replace>{{ 'orders.next'|trans }}</a>{% endif %}
+        </nav>
+    {% endif %}
+{% endblock %}

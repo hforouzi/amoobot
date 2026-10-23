@@ -1,0 +1,97 @@
+{# WalletAdminController::show: one wallet, its full ledger (paged) and, with WALLETS_MANAGE, the changes. #}
+{% extends '@EasyAdmin/page/content.html.twig' %}
+{% trans_default_domain 'admin' %}
+{% set toman = ('currency.' ~ constant('App\\Payment\\Domain\\Money\\AmountNormalizer::SHOP_CURRENCY'))|trans %}
+{% set canManage = is_granted('PERM_WALLETS_MANAGE') %}
+
+{% block content_title %}{{ 'wallet_admin.detail_title'|trans({'%customer%': wallet.user.name ?? ('#' ~ wallet.user.id)}) }}{% endblock %}
+
+{% block main %}
+    <div class="admin-custom-page admin-wallet-page" data-wallet-id="{{ wallet.id }}">
+        <div class="admin-dashboard-cards">
+            <div class="admin-dashboard-card"><span class="admin-dashboard-card-count" data-balance="{{ wallet.balance }}"><bdi>{{ wallet.balance|number_format }}</bdi> <small>{{ toman }}</small></span><span class="admin-dashboard-card-label">{{ 'wallet_admin.fields.balance'|trans }}</span></div>
+            <div class="admin-dashboard-card"><span class="admin-dashboard-card-count" data-credit-limit="{{ wallet.creditLimit }}"><bdi>{{ wallet.creditLimit|number_format }}</bdi> <small>{{ toman }}</small></span><span class="admin-dashboard-card-label">{{ 'wallet_admin.fields.credit_limit'|trans }}</span></div>
+            <div class="admin-dashboard-card"><span class="admin-dashboard-card-count" data-status="{{ wallet.status }}">{{ ('wallet_admin.status.' ~ wallet.status)|trans }}</span><span class="admin-dashboard-card-label">{{ 'wallet_admin.fields.status'|trans }}</span></div>
+        </div>
+
+        {% if canManage %}
+            <form method="post" action="{{ path('admin_wallet_adjust', {id: wallet.id}) }}" class="admin-form-card" data-adjust-form>
+                <h2>{{ 'wallet_admin.adjust.title'|trans }}</h2>
+                <input type="hidden" name="_token" value="{{ csrf_token(csrf) }}">
+                <input type="hidden" name="form_key" value="{{ formKey }}">
+                <div class="admin-form-grid">
+                    <div class="admin-form-row">
+                        <label class="form-label" for="direction">{{ 'wallet_admin.adjust.direction'|trans }}</label>
+                        <select class="form-control" id="direction" name="direction">
+                            <option value="credit">{{ 'wallet_admin.adjust.credit'|trans }}</option>
+                            <option value="debit">{{ 'wallet_admin.adjust.debit'|trans }}</option>
+                        </select>
+                    </div>
+                    <div class="admin-form-row">
+                        <label class="form-label" for="amount">{{ 'wallet_admin.adjust.amount'|trans }}</label>
+                        <input class="form-control" type="number" min="1" step="1" id="amount" name="amount" required dir="ltr">
+                    </div>
+                    <div class="admin-form-row">
+                        <label class="form-label" for="reason">{{ 'wallet_admin.adjust.reason'|trans }}</label>
+                        <input class="form-control" type="text" id="reason" name="reason" required minlength="3" maxlength="500">
+                    </div>
+                </div>
+                <div class="admin-actions"><button type="submit" class="btn btn-primary">{{ 'wallet_admin.adjust.review'|trans }}</button></div>
+            </form>
+
+            <form method="post" action="{{ path('admin_wallet_credit_limit', {id: wallet.id}) }}" class="admin-form-card" data-credit-limit-form>
+                <h2>{{ 'wallet_admin.credit_limit.title'|trans }}</h2>
+                <input type="hidden" name="_token" value="{{ csrf_token(csrf) }}">
+                <div class="admin-form-row">
+                    <label class="form-label" for="credit_limit">{{ 'wallet_admin.fields.credit_limit'|trans }} ({{ toman }})</label>
+                    <input class="form-control" type="number" min="0" step="1" id="credit_limit" name="credit_limit" value="{{ wallet.creditLimit }}" dir="ltr">
+                    <div class="form-text">{{ 'wallet_admin.credit_limit.help'|trans }}</div>
+                </div>
+                <div class="admin-actions"><button type="submit" class="btn btn-secondary">{{ 'common.save'|trans }}</button></div>
+            </form>
+
+            <form method="post" action="{{ path(wallet.frozen ? 'admin_wallet_unfreeze' : 'admin_wallet_freeze', {id: wallet.id}) }}" class="admin-form-card" data-freeze-form>
+                <input type="hidden" name="_token" value="{{ csrf_token(csrf) }}">
+                <p class="form-text">{{ 'wallet_admin.freeze.help'|trans }}</p>
+                <button type="submit" class="btn {{ wallet.frozen ? 'btn-secondary' : 'btn-danger' }}">{{ (wallet.frozen ? 'wallet_admin.freeze.unfreeze' : 'wallet_admin.freeze.freeze')|trans }}</button>
+            </form>
+        {% endif %}
+
+        <h2>{{ 'wallet_admin.ledger'|trans }}</h2>
+        {% if transactions is empty %}
+            <p class="admin-page-subtitle" data-no-transactions>{{ 'wallet_admin.no_transactions'|trans }}</p>
+        {% else %}
+            <table class="table datagrid">
+                <thead><tr>
+                    <th>#</th>
+                    <th>{{ 'wallet_admin.fields.date'|trans }}</th>
+                    <th>{{ 'wallet_admin.fields.type'|trans }}</th>
+                    <th>{{ 'wallet_admin.fields.amount'|trans }}</th>
+                    <th>{{ 'wallet_admin.fields.balance_after'|trans }}</th>
+                    <th>{{ 'wallet_admin.fields.reference'|trans }}</th>
+                    <th>{{ 'wallet_admin.fields.by'|trans }}</th>
+                    <th>{{ 'wallet_admin.fields.note'|trans }}</th>
+                </tr></thead>
+                <tbody>
+                {% for tx in transactions %}
+                    <tr data-transaction-id="{{ tx.id }}" data-type="{{ tx.type }}">
+                        <td>{{ tx.id }}</td>
+                        <td>{{ tx.createdAt|date('Y-m-d H:i') }}</td>
+                        <td>{{ ('wallet_admin.type.' ~ tx.type)|trans }}{% if tx.reversalOf %} (#{{ tx.reversalOf.id }}){% endif %}</td>
+                        <td><bdi>{{ tx.amount > 0 ? '+' : '−' }}{{ (tx.amount|abs)|number_format }}</bdi></td>
+                        <td><bdi>{{ tx.balanceAfter|number_format }}</bdi></td>
+                        <td>{% if tx.referenceType == 'payment' %}<a href="{{ path('admin_payment_detail', {entityId: tx.referenceId}) }}">{{ 'wallet_admin.reference.payment'|trans }} #{{ tx.referenceId }}</a>{% elseif tx.referenceType %}{{ ('wallet_admin.reference.' ~ tx.referenceType)|trans }}{% if tx.referenceId %} #{{ tx.referenceId }}{% endif %}{% else %}—{% endif %}</td>
+                        <td>{{ tx.createdBySource == 'system' and tx.createdByAdminId is null ? 'wallet_admin.by_system'|trans : (tx.createdByLabel ?? ('#' ~ tx.createdByAdminId)) ~ ' (' ~ tx.createdBySource ~ ')' }}</td>
+                        <td>{{ tx.note ?? '' }}</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        {% endif %}
+        <nav class="admin-actions">
+            {% if page > 1 %}<a class="btn btn-secondary" href="{{ path('admin_wallet', {id: wallet.id, page: page - 1}) }}">{{ 'wallet_admin.previous'|trans }}</a>{% endif %}
+            {% if hasNext %}<a class="btn btn-secondary" href="{{ path('admin_wallet', {id: wallet.id, page: page + 1}) }}">{{ 'wallet_admin.next'|trans }}</a>{% endif %}
+            <a class="btn btn-secondary" href="{{ path('admin_wallets') }}">{{ 'wallet_admin.back'|trans }}</a>
+        </nav>
+    </div>
+{% endblock %}

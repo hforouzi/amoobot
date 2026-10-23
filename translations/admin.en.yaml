@@ -16,6 +16,7 @@ admin:
   order_drafts: Order Drafts
   payments_needs_review: Needs review
   payments_provisioning_failed: Provisioning failed
+  wallets: "Wallets"
   dashboard: Dashboard
   menu:
     sales: Sales
@@ -258,6 +259,21 @@ automation_settings:
     batch_limit: Batch limit
     incomplete_expire_hours: Incomplete order expiry hours
 
+wallet_settings:
+  subtitle: "The customer wallet: top-ups through the store payment methods and paying orders from the balance. Amounts are in Toman."
+  sections:
+    switches: Wallet
+    topup: Top-up
+  fields:
+    enabled: Enable the wallet
+    payment_enabled: Allow paying orders from the wallet
+    topup_min: Minimum top-up (Toman)
+    topup_max: Maximum top-up (Toman)
+    quick_amounts: Quick amounts (Toman)
+  help:
+    payment: "With the wallet off, customers see nothing of it and cannot top up or pay with it; balances are kept."
+    quick_amounts: "Buttons offered for a top-up, comma separated, e.g. 50000,100000,200000. Each must be within the range."
+
 renewal_pricing_settings:
   title: Renewal & Pricing Settings
   sections:
@@ -470,6 +486,7 @@ settings_page:
   tabs:
     sales: Sales & renewal pricing
     automation: Automation
+    wallet: Wallet
     channels: Required channels
     advanced: Advanced
   channels_intro: Channels a customer must join before buying or claiming a trial.
@@ -570,6 +587,10 @@ currency:
   IRT: "Toman"
 
 dashboard:
+  wallets.title: "Wallets"
+  wallets.outstanding: "Total customer balance"
+  wallets.credit_used: "Credit in use (exposure)"
+  wallets.credit_limit: "Credit granted"
   greeting: "Signed in as %name%"
   attention.title: "Needs attention"
   attention.all_clear: "Nothing is waiting: no payment needs review, failed provisioning or approval."
@@ -912,6 +933,9 @@ flash:
   settings.batch_limit: "The batch limit must be greater than zero."
   settings.expire_hours: "The incomplete-order expiry must be greater than zero."
   settings.automation_saved: "Automation settings saved."
+  settings.wallet_saved: "Wallet settings saved."
+  settings.wallet_range: "The top-up minimum must be at least 1 and the maximum at least the minimum."
+  settings.wallet_quick_amounts: "Quick amounts must be whole numbers within the top-up range, separated by commas."
   bulk_price.invalid: "The form values are not valid."
   bulk_price.positive: "The value must be a positive number."
   bulk_price.confirm: "Tick the final confirmation to apply."
@@ -972,6 +996,7 @@ order:
   type.renewal: "Renewal"
   type.add_traffic: "Extra traffic"
   type.trial: "Trial"
+  type.wallet_topup: "Wallet top-up"
 
 panel:
   health.connected: "Connected"
@@ -1031,3 +1056,70 @@ client_app:
   template.invalid_characters: "The link must not contain spaces, quotes or < >."
   template.no_url: "The link must contain {url}, {url_encoded} or {url_base64}."
   platforms.required: "Choose at least one platform."
+
+wallet_admin:
+  title: "Wallets"
+  detail_title: "Wallet of %customer%"
+  search: "Search customer (Telegram id, @username, name, mobile or id)"
+  empty: "No wallet yet."
+  previous: "Previous"
+  next: "Next"
+  back: "All wallets"
+  ledger: "Ledger"
+  no_transactions: "No transactions yet."
+  by_system: "System"
+  totals.outstanding: "Total customer balance"
+  totals.credit_used: "Credit in use"
+  totals.credit_limit: "Credit granted"
+  fields.customer: "Customer"
+  fields.balance: "Balance"
+  fields.credit_limit: "Credit limit"
+  fields.status: "Status"
+  fields.last_activity: "Last activity"
+  fields.date: "Date"
+  fields.type: "Type"
+  fields.amount: "Amount"
+  fields.balance_after: "Balance after"
+  fields.reference: "Reference"
+  fields.by: "By"
+  fields.note: "Note / reason"
+  status.active: "Active"
+  status.frozen: "Frozen"
+  type.topup: "Top-up"
+  type.purchase: "Purchase"
+  type.refund: "Refund"
+  type.adjustment: "Adjustment"
+  type.reward: "Reward"
+  type.reversal: "Reversal"
+  reference.payment: "Payment"
+  reference.order: "Order"
+  reference.admin: "Admin"
+  reference.referral: "Referral"
+  adjust.title: "Manual adjustment"
+  adjust.direction: "Direction"
+  adjust.credit: "Credit (add money)"
+  adjust.debit: "Debit (take money)"
+  adjust.amount: "Amount (Toman)"
+  adjust.reason: "Reason"
+  adjust.review: "Review"
+  credit_limit.title: "Credit limit"
+  credit_limit.help: "How far below zero the balance may go. It cannot be lower than the credit already in use."
+  freeze.help: "A frozen wallet cannot pay or be topped up by the customer; money still comes in for payments already made, and admins can still adjust."
+  freeze.freeze: "Freeze wallet"
+  freeze.unfreeze: "Unfreeze wallet"
+  confirm.title: "Confirm adjustment"
+  confirm.credit: "Add %amount% %currency% to the wallet of %customer%."
+  confirm.debit: "Take %amount% %currency% from the wallet of %customer%."
+  confirm.balance: "Balance: %before% → %after% %currency%"
+  confirm.submit: "Confirm"
+  flash.adjusted: "The adjustment was recorded."
+  flash.credit_limit: "Credit limit saved."
+  flash.frozen: "Wallet frozen."
+  flash.unfrozen: "Wallet unfrozen."
+  error.direction: "Choose credit or debit."
+  error.amount: "Enter a whole amount in Toman greater than zero."
+  error.reason: "A reason (3 to 500 characters) is required."
+  error.form_expired: "The form expired; open the wallet again."
+  error.wallet_insufficient: "The balance plus the credit limit does not cover this debit."
+  error.credit_limit_below_usage: "The credit limit cannot be lower than the credit already in use."
+  error.wallet_idempotency_conflict: "This form was already used for another adjustment; open the wallet again."

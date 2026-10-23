@@ -76,6 +76,23 @@
             </section>
         {% endif %}
 
+        {% if overview.wallets is not null %}
+            {% set toman = ('currency.' ~ constant('App\\Payment\\Domain\\Money\\AmountNormalizer::SHOP_CURRENCY'))|trans %}
+            <section class="admin-dashboard-section" aria-labelledby="dashboard-wallets">
+                <h2 id="dashboard-wallets">{{ 'dashboard.wallets.title'|trans }}</h2>
+                <div class="admin-dashboard-cards">
+                    <a class="admin-dashboard-card" href="{{ path('admin_wallets') }}" data-card="wallets" data-tab="outstanding">
+                        <span class="admin-dashboard-card-count"><bdi>{{ overview.wallets.outstanding|number_format }}</bdi> <small>{{ toman }}</small></span>
+                        <span class="admin-dashboard-card-label">{{ 'dashboard.wallets.outstanding'|trans }}</span>
+                    </a>
+                    <a class="admin-dashboard-card" href="{{ path('admin_wallets') }}" data-card="wallets" data-tab="credit">
+                        <span class="admin-dashboard-card-count"><bdi>{{ overview.wallets.creditUsed|number_format }}</bdi> / <bdi>{{ overview.wallets.creditLimit|number_format }}</bdi> <small>{{ toman }}</small></span>
+                        <span class="admin-dashboard-card-label">{{ 'dashboard.wallets.credit_used'|trans }} / {{ 'dashboard.wallets.credit_limit'|trans }}</span>
+                    </a>
+                </div>
+            </section>
+        {% endif %}
+
         {% if overview.panels is not null %}
             <section class="admin-dashboard-section" aria-labelledby="dashboard-panels">
                 <h2 id="dashboard-panels">{{ 'dashboard.panels.title'|trans }}</h2>

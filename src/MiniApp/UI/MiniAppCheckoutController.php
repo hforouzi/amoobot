@@ -122,6 +122,39 @@ final class MiniAppCheckoutController extends AbstractController
         });
     }
 
+    /** A wallet top-up order of the chosen amount; the answer opens its payment page (the store methods). */
+    #[Route('/app/api/wallet/topup', name: 'miniapp_wallet_topup', defaults: ['_miniapp_section' => 'services'], methods: ['POST'])]
+    public function walletTopUp(Request $request, #[CurrentUser] MiniAppUser $user): JsonResponse
+    {
+        return $this->creating($request, $user, 'wallet_topup', function () use ($request, $user): array {
+            $order = $this->checkout->topUp($user->customer(), $this->body($request)['amount'] ?? null);
+
+            return ['redirect' => $this->generateUrl('miniapp_order_pay', ['id' => $order->getId()])];
+        });
+    }
+
+    /**
+     * Pays the order from the wallet. Runs once per Idempotency-Key with claimOnce() (the settlement commits on its
+     * own); a parallel second tap waits on the order lock and finds the order paid, the debit is never taken twice.
+     */
+    #[Route('/app/api/orders/{id}/pay-wallet', name: 'miniapp_order_pay_wallet', requirements: ['id' => '\d+'], defaults: ['_miniapp_section' => 'orders'], methods: ['POST'])]
+    public function payFromWallet(Request $request, #[CurrentUser] MiniAppUser $user, int $id): JsonResponse
+    {
+        return $this->guarded($request, function () use ($request, $user, $id): JsonResponse {
+            $this->limit($this->checkoutLimiter, $user);
+            $answer = $this->idempotency->claimOnce($user->customer(), $request->headers->get(CheckoutIdempotency::HEADER), 'pay_wallet:'.$id, function () use ($user, $id): array {
+                $result = $this->checkout->payFromWallet($user, $id);
+                if (null === $result->payment) {
+                    throw new CheckoutFailure('wallet_pay_failed', Response::HTTP_CONFLICT);
+                }
+
+                return ['redirect' => $this->generateUrl('miniapp_payment', ['id' => $result->payment->getId()]), 'kind' => 'wallet'];
+            });
+
+            return $this->ok($answer);
+        });
+    }
+
     #[Route('/app/api/orders/{id}/cancel', name: 'miniapp_order_cancel', requirements: ['id' => '\d+'], defaults: ['_miniapp_section' => 'orders'], methods: ['POST'])]
     public function cancel(Request $request, #[CurrentUser] MiniAppUser $user, int $id): JsonResponse
     {

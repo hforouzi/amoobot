@@ -10,12 +10,13 @@ use App\Provisioning\Application\RenewalSettingsProvider;
 use App\Provisioning\Application\TrafficAddonSettingsProvider;
 use App\Shop\Application\IncompleteOrderSettingsProvider;
 use App\Shop\Application\SalesSettingsProvider;
+use App\Wallet\Application\WalletSettings;
 use Doctrine\ORM\EntityManagerInterface;
 
 /**
- * The settings page's two forms (SETTINGS_MANAGE), for the web settings tabs and the Mini App settings: "sales &
- * pricing" (sales switches, the sales-closed message, renewal pricing, traffic add-on) and "automation" (automation
- * switches, batch limit, incomplete-order expiry). Only these keys are read or written here; nothing secret is among
+ * The settings page's forms (SETTINGS_MANAGE), for the web settings tabs and the Mini App settings: "sales &
+ * pricing" (sales switches, the sales-closed message, renewal pricing, traffic add-on), "automation" (automation
+ * switches, batch limit, incomplete-order expiry) and "wallet" (wallet switches, top-up range and quick amounts). Only these keys are read or written here; nothing secret is among
  * them. Input is a form's fields by the web form's names, a checkbox being on when its field is present.
  * A refused form saves nothing and names the first problem: the field and its message key (admin domain), in the
  * order the web page checks them. The caller audits.
@@ -50,6 +51,15 @@ final class SettingsAdministration
         'orders_incomplete_expire_hours' => 'orders.incomplete_expire_hours',
     ];
 
+    /** The wallet form's fields and the setting each one writes. */
+    public const WALLET_KEYS = [
+        'wallet_enabled' => WalletSettings::ENABLED,
+        'wallet_payment_enabled' => WalletSettings::PAYMENT_ENABLED,
+        'wallet_topup_min' => WalletSettings::TOPUP_MIN,
+        'wallet_topup_max' => WalletSettings::TOPUP_MAX,
+        'wallet_topup_quick_amounts' => WalletSettings::QUICK_AMOUNTS,
+    ];
+
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
         private readonly RenewalSettingsProvider $renewalSettingsProvider,
@@ -57,6 +67,7 @@ final class SettingsAdministration
         private readonly TrafficAddonSettingsProvider $trafficAddonSettingsProvider,
         private readonly IncompleteOrderSettingsProvider $incompleteOrderSettingsProvider,
         private readonly SalesSettingsProvider $salesSettingsProvider,
+        private readonly WalletSettings $walletSettings,
     ) {
     }
 
@@ -196,6 +207,60 @@ final class SettingsAdministration
         return null;
     }
 
+    /**
+     * @return array<string, bool|int|string>
+     */
+    public function walletValues(): array
+    {
+        return [
+            'wallet_enabled' => $this->walletSettings->enabled(),
+            'wallet_payment_enabled' => $this->walletSettings->paymentSwitch(),
+            'wallet_topup_min' => $this->walletSettings->topUpMin(),
+            'wallet_topup_max' => $this->walletSettings->topUpMax(),
+            'wallet_topup_quick_amounts' => $this->walletSettings->quickAmountsText(),
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $form
+     *
+     * @return array{field: string, message: string}|null
+     */
+    public function walletProblem(array $form): ?array
+    {
+        [$min, $max, $quick] = self::wallet($form);
+
+        return match (true) {
+            $min < 1 => ['field' => 'wallet_topup_min', 'message' => 'flash.settings.wallet_range'],
+            $max < $min => ['field' => 'wallet_topup_max', 'message' => 'flash.settings.wallet_range'],
+            null === $quick || [] !== array_filter($quick, static fn (int $amount): bool => $amount < $min || $amount > $max) => ['field' => 'wallet_topup_quick_amounts', 'message' => 'flash.settings.wallet_quick_amounts'],
+            default => null,
+        };
+    }
+
+    /**
+     * @param array<string, mixed> $form
+     *
+     * @return array{field: string, message: string}|null the first problem (nothing saved), or null: saved and flushed
+     */
+    public function saveWallet(array $form): ?array
+    {
+        $problem = $this->walletProblem($form);
+        if (null !== $problem) {
+            return $problem;
+        }
+        [$min, $max, $quick] = self::wallet($form);
+
+        $this->set(WalletSettings::ENABLED, self::checked($form, 'wallet_enabled'), 'boolean');
+        $this->set(WalletSettings::PAYMENT_ENABLED, self::checked($form, 'wallet_payment_enabled'), 'boolean');
+        $this->set(WalletSettings::TOPUP_MIN, (string) $min, 'number');
+        $this->set(WalletSettings::TOPUP_MAX, (string) $max, 'number');
+        $this->set(WalletSettings::QUICK_AMOUNTS, implode(',', $quick ?? []), 'text');
+        $this->entityManager->flush();
+
+        return null;
+    }
+
     /** Creates or updates one setting (the caller flushes). */
     public function set(string $keyName, string $value, string $type): void
     {
@@ -245,6 +310,36 @@ final class SettingsAdministration
         $expireHoursRaw = self::text($form, 'orders_incomplete_expire_hours', '24');
 
         return [is_numeric($batchLimitRaw) ? (int) $batchLimitRaw : 0, is_numeric($expireHoursRaw) ? (int) $expireHoursRaw : 0];
+    }
+
+    /**
+     * The wallet form: integer Toman; quick amounts a comma-separated list (null when one is not a whole number).
+     *
+     * @param array<string, mixed> $form
+     *
+     * @return array{int, int, list<int>|null}
+     */
+    private static function wallet(array $form): array
+    {
+        $min = self::text($form, 'wallet_topup_min', '');
+        $max = self::text($form, 'wallet_topup_max', '');
+        $quick = [];
+        foreach (explode(',', str_replace(['،', ' '], [',', ''], self::text($form, 'wallet_topup_quick_amounts', ''))) as $part) {
+            if ('' === $part) {
+                continue;
+            }
+            if (1 !== preg_match('/^\d{1,12}$/', $part)) {
+                $quick = null;
+                break;
+            }
+            $quick[] = (int) $part;
+        }
+
+        return [
+            1 === preg_match('/^\d{1,12}$/', $min) ? (int) $min : 0,
+            1 === preg_match('/^\d{1,12}$/', $max) ? (int) $max : -1,
+            null === $quick ? null : array_values(array_unique($quick)),
+        ];
     }
 
     /**

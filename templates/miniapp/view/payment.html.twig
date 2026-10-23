@@ -11,7 +11,9 @@
         <p class="state-icon" aria-hidden="true">{{ {pending: '⏳', review: '🕵️', paid: '✅', provision_failed: '🛠', failed: '❌', cancelled: '🚫', expired: '⌛'}[state] }}</p>
         <h1 data-state-text>{{ ('payment.state.' ~ state)|trans }}</h1>
         <p class="muted">{{ ('payment.state_hint.' ~ (state == 'pending' ? 'pending_' ~ kind : state))|trans }}</p>
-        {% if state == 'paid' and service %}
+        {% if state == 'paid' and order.walletTopUp and wallet_enabled() %}
+            <a class="btn" href="{{ path('miniapp_wallet') }}" data-nav data-go-wallet>👛 {{ 'wallet.title'|trans }}</a>
+        {% elseif state == 'paid' and service %}
             <a class="btn" href="{{ path('miniapp_subscription', {id: service.id}) }}" data-nav data-go-service>{{ 'payment.go_to_subscription'|trans }}</a>
         {% elseif state in ['failed', 'cancelled', 'expired'] %}
             <a class="btn secondary" href="{{ path('miniapp_shop') }}" data-nav>{{ 'payment.back_to_shop'|trans }}</a>

@@ -63,6 +63,10 @@ class StuckPaymentFinder
         }
 
         $order = $payment->getOrder();
+        // A top-up provisions nothing: it is credited in the confirming transaction (app:wallet:reconcile checks it).
+        if (OrderType::WALLET_TOPUP === $order->getType()) {
+            return null;
+        }
         if (in_array($order->getType(), [OrderType::RENEWAL, OrderType::ADD_TRAFFIC], true)) {
             return $this->classifyRenewal($payment, $order);
         }

@@ -1,0 +1,39 @@
+{# Settings page, "wallet" tab: the customer wallet's switches and top-up limits (amounts in Toman). #}
+{% trans_default_domain 'admin' %}
+    <p class="admin-page-subtitle">{{ 'wallet_settings.subtitle'|trans }}</p>
+
+    <form method="post" action="{{ path('admin_settings', {tab: 'wallet'}) }}" class="admin-form-card admin-settings-form">
+        <div class="admin-section">
+            <h2>{{ 'wallet_settings.sections.switches'|trans }}</h2>
+            {% for field, label in {wallet_enabled: 'wallet_settings.fields.enabled', wallet_payment_enabled: 'wallet_settings.fields.payment_enabled'} %}
+                <div class="admin-checkbox-row">
+                    <input type="checkbox" id="{{ field }}" name="{{ field }}" {% if attribute(values, field) %}checked{% endif %}>
+                    <label for="{{ field }}">{{ label|trans }}</label>
+                </div>
+            {% endfor %}
+            <div class="form-text">{{ 'wallet_settings.help.payment'|trans }}</div>
+        </div>
+
+        <div class="admin-section">
+            <h2>{{ 'wallet_settings.sections.topup'|trans }}</h2>
+            <div class="admin-form-grid">
+                <div class="admin-form-row">
+                    <label class="form-label" for="wallet_topup_min">{{ 'wallet_settings.fields.topup_min'|trans }}</label>
+                    <input class="form-control" type="number" min="1" step="1" id="wallet_topup_min" name="wallet_topup_min" value="{{ values.wallet_topup_min }}">
+                </div>
+                <div class="admin-form-row">
+                    <label class="form-label" for="wallet_topup_max">{{ 'wallet_settings.fields.topup_max'|trans }}</label>
+                    <input class="form-control" type="number" min="1" step="1" id="wallet_topup_max" name="wallet_topup_max" value="{{ values.wallet_topup_max }}">
+                </div>
+                <div class="admin-form-row">
+                    <label class="form-label" for="wallet_topup_quick_amounts">{{ 'wallet_settings.fields.quick_amounts'|trans }}</label>
+                    <input class="form-control" type="text" inputmode="numeric" dir="ltr" id="wallet_topup_quick_amounts" name="wallet_topup_quick_amounts" value="{{ values.wallet_topup_quick_amounts }}">
+                    <div class="form-text">{{ 'wallet_settings.help.quick_amounts'|trans }}</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="admin-actions">
+            <button type="submit" class="btn btn-primary">{{ 'common.save'|trans }}</button>
+        </div>
+    </form>

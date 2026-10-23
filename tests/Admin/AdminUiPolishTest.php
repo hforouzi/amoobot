@@ -53,9 +53,9 @@ final class AdminUiPolishTest extends IntegrationTestCase
         $this->seed();
         $expected = [
             // role => [sections, today cards, shortcuts]
-            AdminUser::ROLE_SUPER_ADMIN => [['attention', 'today', 'services', 'panel'], ['orders', 'payments', 'revenue', 'customers'], ['add_plan', 'broadcast', 'bot_logs']],
-            AdminUser::ROLE_ADMIN => [['attention', 'today', 'services'], ['orders', 'payments', 'revenue', 'customers'], ['add_plan', 'broadcast']],
-            AdminUser::ROLE_SUPPORT => [['attention', 'today', 'services'], ['orders', 'payments', 'revenue', 'customers'], []],
+            AdminUser::ROLE_SUPER_ADMIN => [['attention', 'today', 'services', 'wallets', 'panel'], ['orders', 'payments', 'revenue', 'customers'], ['add_plan', 'broadcast', 'bot_logs']],
+            AdminUser::ROLE_ADMIN => [['attention', 'today', 'services', 'wallets'], ['orders', 'payments', 'revenue', 'customers'], ['add_plan', 'broadcast']],
+            AdminUser::ROLE_SUPPORT => [['attention', 'today', 'services', 'wallets'], ['orders', 'payments', 'revenue', 'customers'], []],
         ];
         foreach ($expected as $role => [$sections, $today, $shortcuts]) {
             $this->client->loginUser($this->admin($role), 'main');

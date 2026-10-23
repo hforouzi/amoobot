@@ -16,3 +16,4 @@ services:
     App\Tests\Support\QueryCounter:
         public: true
         tags: ['doctrine.middleware']
+

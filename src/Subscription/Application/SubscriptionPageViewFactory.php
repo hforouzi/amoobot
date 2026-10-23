@@ -68,7 +68,7 @@ final class SubscriptionPageViewFactory
 
         return new SubscriptionPageView(
             status: $status,
-            planName: $service->getOrder()?->getPlan()->getTitle(),
+            planName: $service->getOrder()?->getPlan()?->getTitle(),
             expiresAt: $expiresAt,
             daysLeft: null === $expiresAt ? null : max(0, intdiv($expiresAt->getTimestamp() - $now->getTimestamp(), 86400)),
             trafficLimitBytes: $limit,
@@ -112,7 +112,7 @@ final class SubscriptionPageViewFactory
     /** The profile name a client app shows: the plan, else the shop-side service number (never the panel username). */
     private function profileName(VpnService $service): string
     {
-        return $service->getOrder()?->getPlan()->getTitle() ?? sprintf('VPN %d', $service->getId() ?? 0);
+        return $service->getOrder()?->getPlan()?->getTitle() ?? sprintf('VPN %d', $service->getId() ?? 0);
     }
 
     private function qr(string $content): ?string

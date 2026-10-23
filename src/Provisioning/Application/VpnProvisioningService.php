@@ -56,7 +56,7 @@ class VpnProvisioningService
      */
     public function provisionOrder(Order $order, array $meta = [], bool $adoptExisting = false): VpnService
     {
-        $planInbound = $order->getPlan()->getInbound();
+        $planInbound = $order->requirePlan()->getInbound();
         if ($planInbound instanceof VpnInbound && !$planInbound->isActive()) {
             throw new \RuntimeException('Selected VPN inbound is inactive.');
         }
@@ -71,14 +71,14 @@ class VpnProvisioningService
         $orderMeta = is_array($order->getMetadata()) ? $order->getMetadata() : [];
         $isCustomOrder = true === ($orderMeta['custom'] ?? false) || array_key_exists('finalUsername', $orderMeta);
         $customFinalUsername = trim((string) ($orderMeta['finalUsername'] ?? ''));
-        $unlimitedDuration = true === ($orderMeta['unlimitedDuration'] ?? false) || $order->getPlan()->isUnlimitedDuration();
+        $unlimitedDuration = true === ($orderMeta['unlimitedDuration'] ?? false) || $order->requirePlan()->isUnlimitedDuration();
         $durationDays = $unlimitedDuration ? 0 : (int) ($orderMeta['durationDays'] ?? 0);
         $trafficLimitGb = (int) ($orderMeta['trafficGb'] ?? 0);
         if (!$unlimitedDuration && $durationDays <= 0) {
-            $durationDays = $order->getPlan()->getDurationDays();
+            $durationDays = $order->requirePlan()->getDurationDays();
         }
         if ($trafficLimitGb <= 0) {
-            $trafficLimitGb = (int) ($order->getPlan()->getTrafficGb() ?? 0);
+            $trafficLimitGb = (int) ($order->requirePlan()->getTrafficGb() ?? 0);
         }
         $trafficLimitValue = $trafficLimitGb > 0 ? $trafficLimitGb : null;
         $username = '' !== $customFinalUsername
@@ -91,13 +91,13 @@ class VpnProvisioningService
             username: $username,
             durationDays: $durationDays,
             trafficLimitGb: $trafficLimitValue,
-            ipLimit: $order->getPlan()->getIpLimit(),
+            ipLimit: $order->requirePlan()->getIpLimit(),
             inbound: $planInbound,
             remoteInboundId: $planInbound?->getRemoteInboundId(),
             meta: array_merge([
                 'orderId' => $order->getId(),
                 'telegramId' => $telegramId,
-                'planId' => $order->getPlan()->getId(),
+                'planId' => $order->requirePlan()->getId(),
                 'planInboundId' => $planInbound?->getId(),
                 'panelId' => $panel?->getId(),
                 'driverType' => $driverType,
@@ -122,7 +122,7 @@ class VpnProvisioningService
             ->setClientUuid($created->clientUuid)
             ->setClientEmail($created->clientEmail)
             ->setSubId($created->subId)
-            ->setIpLimit($created->ipLimit ?? $order->getPlan()->getIpLimit())
+            ->setIpLimit($created->ipLimit ?? $order->requirePlan()->getIpLimit())
             ->setConfigLinks($created->configLinks)
             ->setConfigText($created->configText)
             ->setStatus(VpnServiceStatus::ACTIVE)

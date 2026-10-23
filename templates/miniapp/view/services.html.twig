@@ -16,5 +16,6 @@
             {% endfor %}
         </div>
     {% endif %}
+    {% if wallet_enabled() %}<a class="btn secondary small" href="{{ path('miniapp_wallet') }}" data-nav data-wallet-link>👛 {{ 'wallet.title'|trans }}</a>{% endif %}
     <a class="btn secondary small" href="{{ path('miniapp_orders') }}" data-nav data-orders-link>🧾 {{ 'orders.link'|trans }}</a>
 {% endblock %}

@@ -5,11 +5,13 @@
         <h2>{{ ('order.type.' ~ summary.type)|trans }}</h2>
         {% if order.trackingCode %}<span class="muted">{{ 'order.tracking_code'|trans }}: <b class="ltr" data-tracking-code>{{ order.trackingCode }}</b></span>{% endif %}
     </div>
+    {% if summary.plan %}{# A wallet top-up has no plan, traffic or duration. #}
     <p class="muted">
         {{ summary.plan }}
         {% if summary.trafficGb %} · {{ 'plan.traffic'|trans({'%gb%': summary.trafficGb}) }}{% endif %}
         {% if summary.type != 'add_traffic' %} · {{ summary.unlimitedDuration or not summary.durationDays ? 'plan.duration_unlimited'|trans : 'plan.duration'|trans({'%days%': summary.durationDays}) }}{% endif %}
     </p>
+    {% endif %}
     <dl class="price-lines">
         <div><dt>{{ 'price.base'|trans }}</dt><dd>{{ 'money.toman'|trans({'%amount%': summary.baseAmount|number_format}) }}</dd></div>
         {% if summary.globalDiscountAmount > 0 %}

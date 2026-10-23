@@ -18,6 +18,8 @@ use App\Shop\Application\Checkout\PaymentStarter;
 use App\Shop\Application\Checkout\ReceiptSubmission;
 use App\Shop\Domain\OrderStatus;
 use App\Shop\Domain\OrderType;
+use App\Wallet\Application\WalletPayment;
+use App\Wallet\Application\WalletService;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\Request;
@@ -45,6 +47,8 @@ final class MiniAppOrderController extends AbstractController
         private readonly PaymentStarter $paymentStarter,
         private readonly PaymentProgress $progress,
         private readonly OrderLifecycle $orderLifecycle,
+        private readonly WalletPayment $walletPayment,
+        private readonly WalletService $wallets,
     ) {
     }
 
@@ -62,6 +66,10 @@ final class MiniAppOrderController extends AbstractController
             'order' => $order,
             'summary' => self::summary($order),
             'methods' => $this->paymentStarter->methodsFor($order),
+            'walletOffer' => $this->walletPayment->canPay($order) ? [
+                'amount' => $this->paymentStarter->payableAmount($order),
+                'available' => $this->wallets->find($order->getUser())?->getAvailable() ?? 0,
+            ] : null,
             'openPayment' => null !== $payment && PaymentStatus::PENDING === $payment->getStatus() && null !== $payment->getGateway() ? $payment : null,
         ]);
     }
@@ -80,7 +88,7 @@ final class MiniAppOrderController extends AbstractController
             'summary' => self::summary($order),
             'state' => $state,
             'final' => PaymentDisplayState::isFinal($state),
-            'kind' => null !== $gateway ? PaymentStarter::kindOf($gateway) : 'manual_card',
+            'kind' => null !== $gateway ? PaymentStarter::kindOf($gateway) : ($payment->isWalletPayment() ? 'wallet' : 'manual_card'),
             'card' => ReceiptSubmission::isManual($payment) ? $this->paymentStarter->manualCard($gateway) : null,
             'canUploadReceipt' => ReceiptSubmission::isManual($payment) && PaymentStatus::PENDING === $payment->getStatus(),
             'service' => $this->progress->service($payment),
@@ -126,21 +134,23 @@ final class MiniAppOrderController extends AbstractController
     /**
      * What the order is, from its own metadata (never recomputed): for the summaries.
      *
-     * @return array{type: string, plan: string, trafficGb: ?int, durationDays: ?int, unlimitedDuration: bool, baseAmount: int, globalDiscountAmount: int, discountCode: ?string, discountAmount: int, finalAmount: int, serviceId: ?int}
+     * @return array{type: string, plan: ?string, trafficGb: ?int, durationDays: ?int, unlimitedDuration: bool, baseAmount: int, globalDiscountAmount: int, discountCode: ?string, discountAmount: int, finalAmount: int, serviceId: ?int}
      */
     public static function summary(Order $order): array
     {
         $metadata = is_array($order->getMetadata()) ? $order->getMetadata() : [];
         $snapshot = is_array($metadata['priceSnapshot'] ?? null) ? $metadata['priceSnapshot'] : [];
-        $trafficGb = $metadata['trafficGb'] ?? (OrderType::ADD_TRAFFIC === $order->getType() ? null : $order->getPlan()->getTrafficGb());
-        $durationDays = OrderType::ADD_TRAFFIC === $order->getType() ? null : ($metadata['durationDays'] ?? $order->getPlan()->getDurationDays());
+        // A wallet top-up has no plan: no plan, traffic or duration lines.
+        $plan = $order->getPlan();
+        $trafficGb = $metadata['trafficGb'] ?? (OrderType::ADD_TRAFFIC === $order->getType() ? null : $plan?->getTrafficGb());
+        $durationDays = OrderType::ADD_TRAFFIC === $order->getType() ? null : ($metadata['durationDays'] ?? $plan?->getDurationDays());
 
         return [
             'type' => $order->getType(),
-            'plan' => $order->getPlan()->getTitle(),
+            'plan' => $plan?->getTitle(),
             'trafficGb' => is_numeric($trafficGb) ? (int) $trafficGb : null,
             'durationDays' => is_numeric($durationDays) ? (int) $durationDays : null,
-            'unlimitedDuration' => true === ($metadata['unlimitedDuration'] ?? false) || (OrderType::NEW_SERVICE === $order->getType() && $order->getPlan()->isUnlimitedDuration()),
+            'unlimitedDuration' => true === ($metadata['unlimitedDuration'] ?? false) || (OrderType::NEW_SERVICE === $order->getType() && true === $plan?->isUnlimitedDuration()),
             'baseAmount' => (int) ($snapshot['baseAmount'] ?? $order->getAmount()),
             'globalDiscountAmount' => (int) ($snapshot['globalDiscountAmount'] ?? 0),
             'discountCode' => isset($snapshot['discountCode']) && '' !== (string) $snapshot['discountCode'] ? (string) $snapshot['discountCode'] : null,

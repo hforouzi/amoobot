@@ -124,6 +124,7 @@ class DashboardController extends AbstractDashboardController
             ['admin.menu.customers', 'fa fa-users', [
                 $this->crudLink(UserCrudController::class, 'admin.customers', 'fa fa-users'),
                 $this->crudLink(VpnServiceCrudController::class, 'admin.vpn_services', 'fa fa-link'),
+                MenuItem::linkToRoute('admin.wallets', 'fa fa-money', 'admin_wallets')->setPermission(AdminCrudPermissions::view(WalletAdminController::class)),
             ]],
             ['admin.menu.messaging', 'fa fa-commenting', [
                 $this->crudLink(BroadcastMessageCrudController::class, 'admin.broadcasts', 'fa fa-bullhorn'),

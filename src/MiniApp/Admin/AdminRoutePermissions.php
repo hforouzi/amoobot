@@ -44,6 +44,9 @@ final class AdminRoutePermissions
 
             'miniapp_admin_customers' => AdminPermission::CUSTOMERS_VIEW,
             'miniapp_admin_customer' => AdminPermission::CUSTOMERS_VIEW,
+            // A customer's wallet: the ledger is WALLETS_VIEW (SUPPORT too), the adjustment WALLETS_MANAGE.
+            'miniapp_admin_customer_wallet' => AdminPermission::WALLETS_VIEW,
+            'miniapp_admin_customer_wallet_adjust' => AdminPermission::WALLETS_MANAGE,
 
             'miniapp_admin_services' => AdminPermission::SERVICES_VIEW,
             'miniapp_admin_service' => AdminPermission::SERVICES_VIEW,

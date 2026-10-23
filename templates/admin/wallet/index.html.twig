@@ -1,0 +1,50 @@
+{# WalletAdminController::index: every wallet, most recently active first, with the totals. #}
+{% extends '@EasyAdmin/page/content.html.twig' %}
+{% trans_default_domain 'admin' %}
+{% set toman = ('currency.' ~ constant('App\\Payment\\Domain\\Money\\AmountNormalizer::SHOP_CURRENCY'))|trans %}
+
+{% block content_title %}{{ 'wallet_admin.title'|trans }}{% endblock %}
+
+{% block main %}
+    <div class="admin-custom-page admin-wallets-page">
+        <div class="admin-dashboard-cards" data-wallet-totals>
+            <div class="admin-dashboard-card"><span class="admin-dashboard-card-count"><bdi>{{ totals.outstanding|number_format }}</bdi> <small>{{ toman }}</small></span><span class="admin-dashboard-card-label">{{ 'wallet_admin.totals.outstanding'|trans }}</span></div>
+            <div class="admin-dashboard-card"><span class="admin-dashboard-card-count"><bdi>{{ totals.creditUsed|number_format }}</bdi> <small>{{ toman }}</small></span><span class="admin-dashboard-card-label">{{ 'wallet_admin.totals.credit_used'|trans }}</span></div>
+            <div class="admin-dashboard-card"><span class="admin-dashboard-card-count"><bdi>{{ totals.creditLimit|number_format }}</bdi> <small>{{ toman }}</small></span><span class="admin-dashboard-card-label">{{ 'wallet_admin.totals.credit_limit'|trans }}</span></div>
+        </div>
+
+        <form method="get" action="{{ path('admin_wallets') }}" class="admin-form-card">
+            <label class="form-label" for="wallet-search">{{ 'wallet_admin.search'|trans }}</label>
+            <input class="form-control" id="wallet-search" type="search" name="q" value="{{ search }}">
+        </form>
+
+        {% if wallets is empty %}
+            <p class="admin-page-subtitle" data-no-wallets>{{ 'wallet_admin.empty'|trans }}</p>
+        {% else %}
+            <table class="table datagrid">
+                <thead><tr>
+                    <th>{{ 'wallet_admin.fields.customer'|trans }}</th>
+                    <th>{{ 'wallet_admin.fields.balance'|trans }}</th>
+                    <th>{{ 'wallet_admin.fields.credit_limit'|trans }}</th>
+                    <th>{{ 'wallet_admin.fields.status'|trans }}</th>
+                    <th>{{ 'wallet_admin.fields.last_activity'|trans }}</th>
+                </tr></thead>
+                <tbody>
+                {% for wallet in wallets %}
+                    <tr data-wallet-id="{{ wallet.id }}">
+                        <td><a href="{{ path('admin_wallet', {id: wallet.id}) }}">{{ wallet.user.name ?? ('#' ~ wallet.user.id) }}</a>{% if wallet.user.telegramAccount and wallet.user.telegramAccount.username %} <span class="text-muted">@{{ wallet.user.telegramAccount.username }}</span>{% endif %}</td>
+                        <td><bdi>{{ wallet.balance|number_format }}</bdi> {{ toman }}</td>
+                        <td><bdi>{{ wallet.creditLimit|number_format }}</bdi> {{ toman }}</td>
+                        <td>{{ ('wallet_admin.status.' ~ wallet.status)|trans }}</td>
+                        <td>{{ wallet.lastActivityAt ? wallet.lastActivityAt|date('Y-m-d H:i') : '—' }}</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        {% endif %}
+        <nav class="admin-actions">
+            {% if page > 1 %}<a class="btn btn-secondary" href="{{ path('admin_wallets', {page: page - 1, q: search}) }}">{{ 'wallet_admin.previous'|trans }}</a>{% endif %}
+            {% if hasNext %}<a class="btn btn-secondary" href="{{ path('admin_wallets', {page: page + 1, q: search}) }}">{{ 'wallet_admin.next'|trans }}</a>{% endif %}
+        </nav>
+    </div>
+{% endblock %}

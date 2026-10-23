@@ -20,6 +20,11 @@ use App\Provisioning\Application\VpnProvisioningService;
 use App\Shop\Application\DiscountCodeService;
 use App\Shop\Domain\OrderStatus;
 use App\Shop\Domain\OrderType;
+use App\Wallet\Application\WalletActor;
+use App\Wallet\Application\WalletService;
+use App\Wallet\Domain\WalletKeys;
+use App\Wallet\Domain\WalletReferenceType;
+use App\Wallet\Domain\WalletTransactionType;
 use Doctrine\DBAL\LockMode;
 use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\Persistence\ManagerRegistry;
@@ -36,10 +41,16 @@ use Psr\Log\LoggerInterface;
  *   2. strict amount check for gateway verifications (AmountMatcher, with the gateway's underpayment
  *      tolerance) -> NEEDS_REVIEW on mismatch; the review reason records the shortfall
  *   3. an order that is already fulfilled (second payment for it) -> NEEDS_REVIEW
- *   4. fulfilment: new service / renewal / add-traffic
+ *   4. fulfilment: new service / renewal / add-traffic / wallet top-up (credits the wallet, provisions nothing)
  *   5. success: Payment CONFIRMED, Order PROVISIONED, discount usage recorded, commit
- *      failure: rollback, then Payment + Order PROVISIONING_FAILED with the error (retryable)
+ *      failure: rollback, then Payment + Order PROVISIONING_FAILED with the error (retryable); a wallet top-up
+ *      has nothing to provision, so its failure is rolled back and reported like one before fulfilment (ERROR,
+ *      nothing changed, the next verification settles it)
  *   6. after commit: customer messages and admin alerts (never inside the transaction)
+ *
+ * A payment of method "wallet" (WalletPayment) is settled like a gateway payment; its debit was written before. Every
+ * path that rejects such a payment (admin reject, customer cancel, gateway failure; the expiry job too) gives the
+ * debit back in the same transaction, once (releaseWalletDebit()).
  */
 class PaymentSettlementService
 {
@@ -64,6 +75,7 @@ class PaymentSettlementService
         private readonly PaymentCustomerNotifier $customerNotifier,
         private readonly AdminPaymentAlerter $adminAlerter,
         private readonly LoggerInterface $logger,
+        private readonly WalletService $walletService,
     ) {
     }
 
@@ -134,6 +146,7 @@ class PaymentSettlementService
                         ->setAdminNote(Payment::NOTE_CUSTOMER_CANCEL)
                         // A late "paid" for this payment goes to NEEDS_REVIEW (parkLatePayment).
                         ->setConfirmationSource($source);
+                    $this->releaseWalletDebit($payment, null, 'order cancelled by the customer');
                 }
             }
             $order->setStatus(OrderStatus::CANCELLED);
@@ -175,6 +188,7 @@ class PaymentSettlementService
                 ->setConfirmationSource($source)
                 ->setConfirmedBy($adminId, $adminTelegramId)
                 ->setRefundedAt($refunded ? new \DateTimeImmutable() : null);
+            $this->releaseWalletDebit($payment, $adminId, 'payment rejected by an admin');
             // A duplicate payment of a fulfilled order: close the payment, never touch the order.
             if (!$this->isOrderFulfilled($order)) {
                 $order->setStatus(OrderStatus::FAILED);
@@ -258,6 +272,7 @@ class PaymentSettlementService
                 ->setStatus(PaymentStatus::REJECTED)
                 ->setFailedAt($payment->getFailedAt() ?? new \DateTimeImmutable())
                 ->setConfirmationSource($source);
+            $this->releaseWalletDebit($payment, null, 'payment failed');
             $this->entityManager->flush();
             $connection->commit();
         } catch (\Throwable $e) {
@@ -278,10 +293,12 @@ class PaymentSettlementService
         $paymentId = (int) $payment->getId();
         $connection = $this->entityManager->getConnection();
         $fulfilmentStarted = false;
+        $isWalletTopUp = false;
 
         try {
             $connection->beginTransaction();
             [$payment, $order] = $this->lock($paymentId);
+            $isWalletTopUp = OrderType::WALLET_TOPUP === $order->getType();
 
             // The customer paid after the payment was cancelled or expired unpaid: never ignore money.
             if ($checkAmount && $payment->isRejectedUnpaid()) {
@@ -360,7 +377,8 @@ class PaymentSettlementService
         } catch (\Throwable $e) {
             $this->rollbackAndReset();
 
-            if (!$fulfilmentStarted) {
+            // A wallet top-up never becomes PROVISIONING_FAILED: its credit was rolled back with everything else.
+            if (!$fulfilmentStarted || $isWalletTopUp) {
                 $this->logger->error('Payment settlement aborted before fulfilment.', ['payment_id' => $paymentId, 'source' => $source, 'error' => $e->getMessage()]);
 
                 return new SettlementResult(SettlementOutcome::ERROR, 'Payment could not be settled right now; nothing was changed.');
@@ -403,8 +421,16 @@ class PaymentSettlementService
         return [$payment, $order];
     }
 
-    private function fulfil(Order $order, Payment $payment, string $source): VpnService
+    private function fulfil(Order $order, Payment $payment, string $source): ?VpnService
     {
+        if (OrderType::WALLET_TOPUP === $order->getType()) {
+            // Nothing to provision: the ordered amount goes to the customer's wallet, inside this transaction and
+            // once per payment (the payment id is the ledger idempotency key).
+            $this->walletService->credit($order->getUser(), $order->getAmount(), WalletTransactionType::TOPUP, WalletKeys::topUp((int) $payment->getId()), WalletActor::system(), WalletReferenceType::PAYMENT, (string) $payment->getId());
+
+            return null;
+        }
+
         if (OrderType::RENEWAL === $order->getType() || OrderType::ADD_TRAFFIC === $order->getType()) {
             $target = $order->getTargetService();
             if (!$target instanceof VpnService) {
@@ -428,7 +454,7 @@ class PaymentSettlementService
             return $target;
         }
 
-        $plan = $order->getPlan();
+        $plan = $order->requirePlan();
         $inbound = $plan->getInbound();
 
         return $this->vpnProvisioningService->provisionOrder($order, [
@@ -445,6 +471,18 @@ class PaymentSettlementService
             // the next webhook/retry must not create a second one. Safe: the UUID is derived from the order.
             adoptExisting: true,
         );
+    }
+
+    /**
+     * A rejected wallet payment gives its debit back (a REVERSAL), inside the caller's transaction and at most once;
+     * nothing for any other payment, or when nothing was debited.
+     */
+    private function releaseWalletDebit(Payment $payment, ?int $adminId, string $note): void
+    {
+        if (!$payment->isWalletPayment()) {
+            return;
+        }
+        $this->walletService->reverse(WalletKeys::purchase((int) $payment->getId()), WalletKeys::purchaseReversal((int) $payment->getId()), WalletActor::systemFor($adminId), $note);
     }
 
     private function parkLatePayment(Payment $payment, Order $order, VerifiedPayment $verified, string $source): SettlementResult

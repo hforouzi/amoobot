@@ -21,6 +21,9 @@ class Payment
     /** Review reasons of payments paid after their cancel/expiry start with this. */
     public const REVIEW_PREFIX_LATE_PAYMENT = 'paid after ';
 
+    /** Paid from the customer's wallet (WalletPayment): no gateway; the debit is in the wallet ledger. */
+    public const METHOD_WALLET = 'wallet';
+
     #[ORM\Id]
     #[ORM\GeneratedValue]
     #[ORM\Column]
@@ -308,6 +311,11 @@ class Payment
         $this->order = $order;
 
         return $this;
+    }
+
+    public function isWalletPayment(): bool
+    {
+        return self::METHOD_WALLET === $this->method;
     }
 
     public function getMethod(): string
