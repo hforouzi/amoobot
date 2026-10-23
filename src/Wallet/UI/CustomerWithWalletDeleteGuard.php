@@ -6,6 +6,11 @@ namespace App\Wallet\UI;
 
 use App\Entity\User;
 use App\Wallet\Application\WalletService;
+use Doctrine\DBAL\ArrayParameterType;
+use Doctrine\ORM\EntityManagerInterface;
+use EasyCorp\Bundle\EasyAdminBundle\Config\Action;
+use EasyCorp\Bundle\EasyAdminBundle\Config\Option\EA;
+use EasyCorp\Bundle\EasyAdminBundle\Event\BeforeCrudActionEvent;
 use EasyCorp\Bundle\EasyAdminBundle\Event\BeforeEntityDeletedEvent;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 use Symfony\Component\HttpFoundation\RedirectResponse;
@@ -17,13 +22,15 @@ use Symfony\Component\Translation\TranslatableMessage;
 /**
  * The admin's "delete" of a customer who has a wallet (EasyAdmin delete and batch delete): refused before anything is
  * removed, with a clear flash message. The wallet ledger is financial history; the database refuses the delete as well
- * (ON DELETE RESTRICT), but as a raw foreign key error page. Customers without a wallet are deleted as before; the
- * permission to delete is unchanged.
+ * (ON DELETE RESTRICT), but as a raw foreign key error page. A batch delete is refused as a whole, before anything is
+ * deleted, when any selected customer has a wallet. Customers without a wallet are deleted as before; the permission
+ * to delete is unchanged.
  */
 final class CustomerWithWalletDeleteGuard implements EventSubscriberInterface
 {
     public function __construct(
         private readonly WalletService $wallets,
+        private readonly EntityManagerInterface $entityManager,
         private readonly RequestStack $requestStack,
         private readonly UrlGeneratorInterface $urlGenerator,
     ) {
@@ -32,7 +39,37 @@ final class CustomerWithWalletDeleteGuard implements EventSubscriberInterface
     public static function getSubscribedEvents(): array
     {
         // Before the audit subscriber notes the delete.
-        return [BeforeEntityDeletedEvent::class => ['refuseWithWallet', 10]];
+        return [
+            BeforeEntityDeletedEvent::class => ['refuseWithWallet', 10],
+            BeforeCrudActionEvent::class => ['refuseBatchWithWallet', 10],
+        ];
+    }
+
+    /**
+     * A batch delete deletes the selected customers one by one: refused per customer, the ones before a customer with a
+     * wallet would already be gone. So the whole batch is refused up front, before anything is deleted, when any of the
+     * selected customers has a wallet.
+     */
+    public function refuseBatchWithWallet(BeforeCrudActionEvent $event): void
+    {
+        $context = $event->getAdminContext();
+        if (null === $context || Action::BATCH_DELETE !== $context->getCrud()?->getCurrentAction() || User::class !== $context->getEntity()->getFqcn()) {
+            return;
+        }
+        $ids = array_values(array_filter(array_map('intval', $context->getRequest()->request->all(EA::BATCH_ACTION_ENTITY_IDS)), static fn (int $id): bool => $id > 0));
+        if ([] === $ids) {
+            return;
+        }
+        $withWallet = $this->entityManager->getConnection()->fetchFirstColumn('SELECT user_id FROM wallet WHERE user_id IN (?) ORDER BY user_id', [$ids], [ArrayParameterType::INTEGER]);
+        if ([] === $withWallet) {
+            return;
+        }
+
+        $session = $this->requestStack->getSession();
+        if ($session instanceof FlashBagAwareSessionInterface) {
+            $session->getFlashBag()->add('danger', new TranslatableMessage('flash.customer.batch_delete_has_wallet', ['%ids%' => implode(', #', $withWallet)], 'admin'));
+        }
+        $event->setResponse(new RedirectResponse($this->urlGenerator->generate('admin_customer_index')));
     }
 
     public function refuseWithWallet(BeforeEntityDeletedEvent $event): void

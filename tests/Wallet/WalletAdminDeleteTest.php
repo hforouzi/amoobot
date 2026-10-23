@@ -89,6 +89,64 @@ final class WalletAdminDeleteTest extends IntegrationTestCase
         self::assertSame(0, (int) $this->em->getConnection()->fetchOne("SELECT COUNT(*) FROM admin_audit_log WHERE action LIKE '%delete%'"), 'no delete was audited');
     }
 
+    /**
+     * The customer list's batch delete, as its button posts it.
+     *
+     * @param list<int> $ids
+     */
+    private function batchDelete(array $ids): void
+    {
+        $crawler = $this->client->request('GET', '/admin/customer');
+        self::assertSame(200, $this->client->getResponse()->getStatusCode());
+        $button = $crawler->filter('[data-action-batch][data-action-name="batchDelete"]');
+        self::assertCount(1, $button, 'the customer list offers a batch delete');
+
+        $fields = [
+            'batchActionName' => 'batchDelete',
+            'entityFqcn' => User::class,
+            'batchActionUrl' => (string) $button->attr('data-action-url'),
+            'batchActionCsrfToken' => (string) $button->attr('data-action-csrf-token'),
+        ];
+        foreach ($ids as $i => $id) {
+            $fields['batchActionEntityIds'][$i] = (string) $id;
+        }
+        $this->client->request('POST', (string) $button->attr('data-action-url'), $fields);
+    }
+
+    /** Third review, minor: a batch used to delete the customers selected before the one with a wallet. */
+    public function testABatchWithACustomerWithAWalletDeletesNobody(): void
+    {
+        $before = $this->createUser();
+        self::getContainer()->get(WalletService::class)->credit($this->user, 1000, WalletTransactionType::TOPUP, 'seed:'.random_int(1, PHP_INT_MAX), WalletActor::system());
+        $after = $this->createUser();
+        // EasyAdmin deletes in the posted order: the customer with the wallet comes second.
+        $ids = [(int) $before->getId(), (int) $this->user->getId(), (int) $after->getId()];
+
+        $this->batchDelete($ids);
+
+        self::assertTrue($this->client->getResponse()->isRedirect(), (string) $this->client->getResponse()->getStatusCode());
+        $page = $this->client->followRedirect();
+        // Persian (the admin's default language): "nothing was deleted: customer(s) #N have a wallet".
+        self::assertStringContainsString('چیزی حذف نشد: مشتری(های) #'.$this->user->getId().' کیف پول دارند', $page->text());
+        self::assertSame(3, (int) $this->em->getConnection()->fetchOne('SELECT COUNT(*) FROM `user` WHERE id IN (?, ?, ?)', $ids), 'nobody was deleted');
+        self::assertSame(0, (int) $this->em->getConnection()->fetchOne("SELECT COUNT(*) FROM admin_audit_log WHERE action LIKE '%delete%'"), 'no delete was audited');
+    }
+
+    /**
+     * A batch without a customer with a wallet goes on to EasyAdmin's own batch delete, as before. (One customer: a batch
+     * of several customers with Telegram accounts fails in the ORM on the second one, with or without this guard; a
+     * separate, older issue.)
+     */
+    public function testABatchWithoutACustomerWithAWalletIsDeletedAsBefore(): void
+    {
+        $customerId = (int) $this->createUser()->getId();
+
+        $this->batchDelete([$customerId]);
+
+        self::assertTrue($this->client->getResponse()->isRedirect(), (string) $this->client->getResponse()->getStatusCode());
+        self::assertSame(0, (int) $this->em->getConnection()->fetchOne('SELECT COUNT(*) FROM `user` WHERE id = ?', [$customerId]));
+    }
+
     public function testACustomerWithoutAWalletIsDeletedAsBefore(): void
     {
         $customer = $this->createUser();

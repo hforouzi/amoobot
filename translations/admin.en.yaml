@@ -923,6 +923,7 @@ field:
 
 flash:
   customer.delete_has_wallet: "Customer #%id% has a wallet and cannot be deleted: its ledger is financial history. Nothing was deleted."
+  customer.batch_delete_has_wallet: "Nothing was deleted: customer(s) #%ids% have a wallet and cannot be deleted (the wallet ledger is financial history). Deselect them and try again."
   service.page_link_csrf: "Invalid request (security token). Reload the page and try again."
   service.page_link_rotated: "The subscription page link of service #%id% was replaced; the old link no longer works."
   error: "Error: %error%"
