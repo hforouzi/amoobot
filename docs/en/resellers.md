@@ -27,7 +27,10 @@ Computed on the server only, in whole Toman:
 
 ## Buying (bot)
 
-An active reseller gets a **🧑‍💼 Reseller** button in the main menu (only while the wallet can pay: Settings → Wallet, wallet and wallet payments on): balance, **New service** (fixed plans, with the wholesale price), **Services I sold** (renew and add traffic at wholesale). Every purchase shows "wholesale / retail / balance before → after" and is paid only after **Pay from wallet**.
+An active reseller gets a **🧑‍💼 Reseller** button in the main menu (only while the wallet can pay: Settings → Wallet, wallet and wallet payments on): balance, **New service** (every plan for sale, with its wholesale price; a customizable plan shows its lowest "from" price), **Services I sold** (renew and add traffic at wholesale). Every purchase shows "wholesale / retail / balance before → after" and is paid only after **Pay from wallet**.
+
+- **Customizable plans.** After the plan, the bot asks the traffic (GB) and then the days, each within the plan's range: tap a suggested value or type a whole number (digits only, Persian digits accepted; anything else, including spaces, is refused and asked again; the question expires after 5 minutes). Then it shows the exact price and the usual confirmation. The pay button carries the chosen GB and days, covered by the confirmation's signature.
+- **Nothing to show.** "New service" says why: new sales are closed; no plan is set up; plans exist but none is for sale (an inbound or panel unavailable); or plans are for sale but none can be priced for resellers (a zero price).
 
 - **One tap, one purchase.** The **Pay from wallet** button carries a one-time confirmation of exactly what was shown (that plan or service, GB, and amount). Tapping it twice, or Telegram delivering the same tap again, buys once; the second answer says where the first one stands. A confirmation is valid for 10 minutes; an older one shows a fresh confirmation instead of buying.
 - **Only the confirmed price.** If the price changed after the confirmation was shown (an admin changed the discount, a plan price, the floor, a promotion), nothing is bought: the bot says so and shows a fresh confirmation with the price now.
