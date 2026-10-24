@@ -27,10 +27,14 @@ Computed on the server only, in whole Toman:
 
 ## Buying (bot)
 
-An active reseller gets a **🧑‍💼 Reseller** button in the main menu: balance, **New service** (fixed plans, with the wholesale price), **Services I sold** (renew and add traffic at wholesale). Every purchase shows "wholesale / retail / balance before → after" and is paid only after **Pay from wallet**.
+An active reseller gets a **🧑‍💼 Reseller** button in the main menu (only while the wallet can pay: Settings → Wallet, wallet and wallet payments on): balance, **New service** (fixed plans, with the wholesale price), **Services I sold** (renew and add traffic at wholesale). Every purchase shows "wholesale / retail / balance before → after" and is paid only after **Pay from wallet**.
+
+- **One tap, one purchase.** The **Pay from wallet** button carries a one-time confirmation of exactly what was shown (that plan or service, GB, and amount). Tapping it twice, or Telegram delivering the same tap again, buys once; the second answer says where the first one stands. A confirmation is valid for 10 minutes; an older one shows a fresh confirmation instead of buying.
+- **Only the confirmed price.** If the price changed after the confirmation was shown (an admin changed the discount, a plan price, the floor, a promotion), nothing is bought: the bot says so and shows a fresh confirmation with the price now.
+- **After a failure** the bot says what really happened, read from the database: nothing was taken; or the money is held while the purchase is processed (do not pay again; if it does not finish it goes back to the wallet automatically within the incomplete-order expiry, 24 hours by default; the tracking code is shown for support); or the service could not be created yet (paid, held for the admins' retry); or the amount is back in the wallet.
 
 - The order is created and paid from the wallet in one step. If the wallet (balance + credit limit) does not cover it, nothing is created.
-- The price paid is the one computed when the order is created (stored on the order as its snapshot: wholesale, retail value, floor). A rule changed after the reseller saw the confirmation applies to his next tap.
+- The price paid is the confirmed one, checked again when the order is created and stored on it as its snapshot (wholesale, retail value, floor).
 - A reseller order is never offered a gateway, a card-to-card receipt or the customer's "pay from wallet": it is paid by the reseller flow only.
 - New services are created under the reseller's own account and remember who sold them. Services he did not sell (e.g. his own retail purchases) cannot be renewed at wholesale.
 - The required-channels rule and the sales switches (new orders, renewals, extra traffic) apply as for everybody.
@@ -58,8 +62,8 @@ Customers → Resellers → **Reseller report**: per reseller, the orders whose 
 
 ## Monitoring
 
-`php bin/console app:wallet:reconcile` also checks reseller orders: one paid any other way than from the wallet (`reseller_order_not_wallet_paid`), a held debit / order amount / wholesale snapshot that disagree (`reseller_debit_snapshot_mismatch`), a wholesale snapshot below min(floor, retail) (`reseller_order_below_floor`), a service whose "sold by" differs from its order (`reseller_service_attribution_mismatch`), and refunds without their reseller order (`refund_without_order`), above what was paid (`refund_exceeds_paid`) or for a service that runs again (`refund_on_live_service`).
+`php bin/console app:wallet:reconcile` also checks reseller orders: one paid any other way than from the wallet (`reseller_order_not_wallet_paid`), a held debit / order amount / wholesale snapshot that disagree (`reseller_debit_snapshot_mismatch`), a wholesale snapshot below min(floor, retail) (`reseller_order_below_floor`), a service whose "sold by" differs from its order (`reseller_service_attribution_mismatch`), a reseller order that is not on the reseller's own account (`reseller_order_wrong_customer`), and refunds without their reseller order (`refund_without_order`), above what was paid (`refund_exceeds_paid`) or for a service that runs again (`refund_on_live_service`).
 
 ## Upgrading
 
-Run the migrations (`Version20261027090000`: new tables and nullable columns only; nothing existing is changed). It can be rolled back only while no reseller data exists; otherwise `down()` refuses and changes nothing.
+Run the migrations (`Version20261027090000`: new tables and nullable columns only; `Version20261029090000`: `order.reseller_nonce`, a nullable column and a unique key per reseller). Nothing existing is changed. Roll back newest first, and only while no reseller data exists (no order carries a confirmation nonce for the second, no reseller data for the first); otherwise `down()` refuses and changes nothing.

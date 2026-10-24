@@ -16,6 +16,7 @@ use App\Shop\Application\PlanPricingService;
 use App\Shop\Application\RenewalPriceResult;
 use App\Shop\Application\TrafficAddonPricingService;
 use Doctrine\ORM\EntityManagerInterface;
+use Symfony\Contracts\Service\ResetInterface;
 
 /**
  * The ONLY place a wholesale price is computed (docs/design/reseller-and-claim.md, section 2.2), for the bot and the
@@ -33,10 +34,19 @@ use Doctrine\ORM\EntityManagerInterface;
  * up and comes before the floor, so it can never take the price under the floor. plan.reseller_floor_amount applies
  * to the plan itself (new service, renewal) of a fixed plan; add-traffic and customizable plans use the percent floor.
  */
-class ResellerPricing
+class ResellerPricing implements ResetInterface
 {
     /** A nominal base for checking a percent rule against the floor on a customizable plan (no single price). */
     private const NOMINAL_BASE = 1_000_000;
+
+    /**
+     * The admin warnings' data, loaded once per request (PlanPriceSanityChecker asks for every plan of a list, several
+     * times per row): the active resellers, every per-plan rule by plan, the floor and the rounding. Quotes for a
+     * purchase never use it (they read everything fresh). Cleared between requests (ResetInterface).
+     *
+     * @var array{resellers: list<Reseller>, overrides: array<int, array<int, ResellerPlanPrice>>, floorBp: int, rounding: int}|null
+     */
+    private ?array $warningData = null;
 
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
@@ -152,12 +162,10 @@ class ResellerPricing
         if (null === $plan->getId()) {
             return [];
         }
-        $overrides = [];
-        foreach ($this->entityManager->getRepository(ResellerPlanPrice::class)->findBy(['plan' => $plan]) as $override) {
-            $overrides[(int) $override->getReseller()->getId()] = $override;
-        }
+        $data = $this->warningData();
+        $overrides = $data['overrides'][(int) $plan->getId()] ?? [];
         $clipped = [];
-        foreach ($this->entityManager->getRepository(Reseller::class)->findBy(['status' => ResellerStatus::ACTIVE], ['id' => 'ASC']) as $reseller) {
+        foreach ($data['resellers'] as $reseller) {
             $quote = $this->ruleQuote($reseller, $plan, $overrides[(int) $reseller->getId()] ?? null);
             if ($quote->floorApplied) {
                 $clipped[] = ['reseller' => $reseller, 'rule' => $quote->rule, 'candidate' => $quote->candidateAmount, 'floor' => $quote->floorAmount];
@@ -170,6 +178,8 @@ class ResellerPricing
     /** Whether this rule would be clipped by the floor on this plan (the reseller page's warning). */
     public function isClipped(Reseller $reseller, Plan $plan, ?ResellerPlanPrice $override): bool
     {
+        // Called right after an admin saved a rule, so the reseller and the rule are the ones passed in; only the
+        // settings come from the per-request data.
         return $this->ruleQuote($reseller, $plan, $override)->floorApplied;
     }
 
@@ -198,9 +208,42 @@ class ResellerPricing
         [$rule, $discountBp, $fixedAmount] = $this->rule($reseller, $plan, $override);
         $base = $plan->isCustomizable() ? self::NOMINAL_BASE : max(0, $plan->getPrice());
         $planFloor = $plan->isCustomizable() ? 0 : (int) ($plan->getResellerFloorAmount() ?? 0);
+        $data = $this->warningData();
 
         // Retail is not limiting here: the question is only whether the floor wins over the rule.
-        return self::compute($base, PHP_INT_MAX, $rule, $discountBp, $fixedAmount, $this->settings->floorBp(), $planFloor, $this->settings->rounding());
+        return self::compute($base, PHP_INT_MAX, $rule, $discountBp, $fixedAmount, $data['floorBp'], $planFloor, $data['rounding']);
+    }
+
+    public function reset(): void
+    {
+        $this->warningData = null;
+    }
+
+    /**
+     * @return array{resellers: list<Reseller>, overrides: array<int, array<int, ResellerPlanPrice>>, floorBp: int, rounding: int}
+     */
+    private function warningData(): array
+    {
+        if (null === $this->warningData) {
+            /** @var list<Reseller> $resellers */
+            $resellers = $this->entityManager->getRepository(Reseller::class)->createQueryBuilder('r')
+                // The warnings name the reseller (its user's name); the user's Telegram account is an inverse one-to-one,
+                // which Doctrine loads with every user unless it is joined here.
+                ->join('r.user', 'u')->addSelect('u')
+                ->leftJoin('u.telegramAccount', 'ta')->addSelect('ta')
+                ->where('r.status = :active')->setParameter('active', ResellerStatus::ACTIVE)
+                ->orderBy('r.id', 'ASC')
+                ->getQuery()->getResult();
+            $overrides = [];
+            if ([] !== $resellers) {
+                foreach ($this->entityManager->getRepository(ResellerPlanPrice::class)->findBy(['reseller' => $resellers]) as $override) {
+                    $overrides[(int) $override->getPlan()->getId()][(int) $override->getReseller()->getId()] = $override;
+                }
+            }
+            $this->warningData = ['resellers' => $resellers, 'overrides' => $overrides, 'floorBp' => $this->settings->floorBp(), 'rounding' => $this->settings->rounding()];
+        }
+
+        return $this->warningData;
     }
 
     /**

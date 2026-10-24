@@ -119,7 +119,7 @@ final class ResellerRefundAndReconcileTest extends IntegrationTestCase
      */
     private function bought(): array
     {
-        $this->checkout()->buyNewService($this->user, (int) $this->plan->getId());
+        $this->buy();
         $order = $this->em->getRepository(Order::class)->findOneBy(['reseller' => $this->reseller], ['id' => 'DESC']) ?? self::fail('no order');
         $this->em->refresh($order);
         $service = $this->em->getRepository(VpnService::class)->findOneBy(['order' => $order]) ?? self::fail('no service');

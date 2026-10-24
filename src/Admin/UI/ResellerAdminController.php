@@ -17,6 +17,7 @@ use App\Reseller\Application\ResellerReport;
 use App\Reseller\Application\ResellerSettings;
 use App\Security\AdminActor;
 use App\Security\AdminPermission;
+use App\Wallet\Application\WalletQueries;
 use App\Wallet\Application\WalletService;
 use App\Wallet\Domain\WalletException;
 use App\Wallet\Domain\WalletKeys;
@@ -51,6 +52,7 @@ final class ResellerAdminController extends AbstractController
         private readonly ResellerSettings $settings,
         private readonly ResellerCheckout $checkout,
         private readonly WalletService $wallets,
+        private readonly WalletQueries $walletQueries,
     ) {
     }
 
@@ -60,14 +62,18 @@ final class ResellerAdminController extends AbstractController
         $page = max(1, $request->query->getInt('page', 1));
         /** @var list<Reseller> $rows */
         $rows = $this->entityManager->getRepository(Reseller::class)->createQueryBuilder('r')
+            // The user's Telegram account is an inverse one-to-one: joined, or Doctrine loads it once per row.
             ->join('r.user', 'u')->addSelect('u')
+            ->leftJoin('u.telegramAccount', 'ta')->addSelect('ta')
             ->orderBy('r.status', 'ASC')->addOrderBy('r.id', 'DESC')
             ->setMaxResults(self::PAGE_SIZE + 1)->setFirstResult(($page - 1) * self::PAGE_SIZE)
             ->getQuery()->getResult();
         $resellers = array_slice($rows, 0, self::PAGE_SIZE);
+        // One query for the page's wallets, by reseller.
+        $byUser = $this->walletQueries->forUsers(array_map(static fn (Reseller $r) => $r->getUser(), $resellers));
         $wallets = [];
         foreach ($resellers as $reseller) {
-            $wallets[(int) $reseller->getId()] = $this->wallets->find($reseller->getUser());
+            $wallets[(int) $reseller->getId()] = $byUser[(int) $reseller->getUser()->getId()] ?? null;
         }
 
         return $this->render('admin/reseller/index.html.twig', [
@@ -271,8 +277,7 @@ final class ResellerAdminController extends AbstractController
             }
             $handle = fopen('php://temp', 'r+') ?: throw new \RuntimeException('Cannot open a temporary stream.');
             foreach ($lines as $line) {
-                // A leading = + - @ would start a formula in a spreadsheet: the admin-typed name is quoted with '.
-                fputcsv($handle, array_map(static fn (mixed $v): string => is_string($v) && 1 === preg_match('/^[=+\-@]/', $v) ? "'".$v : (string) $v, $line), escape: '');
+                fputcsv($handle, array_map(self::csvCell(...), $line), escape: '');
             }
             rewind($handle);
             $csv = (string) stream_get_contents($handle);
@@ -289,6 +294,17 @@ final class ResellerAdminController extends AbstractController
             'from' => $from,
             'to' => $to,
         ]);
+    }
+
+    /**
+     * One CSV cell, safe to open in a spreadsheet: a text starting with = + - @ TAB or CR would be read as a formula
+     * (OWASP "CSV injection"), so it gets a leading ' (shown as text). Numbers are written as they are.
+     */
+    public static function csvCell(mixed $value): string
+    {
+        $text = (string) $value;
+
+        return is_string($value) && 1 === preg_match('/^[=+\-@\t\r]/', $text) ? "'".$text : $text;
     }
 
     /**

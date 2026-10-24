@@ -56,6 +56,9 @@ final class Version20261027090000 extends AbstractMigration
      */
     public function down(Schema $schema): void
     {
+        // A later migration put a unique key on order.reseller_id: rolling this one back first would drop half of it.
+        $nonce = false !== $this->connection->fetchOne("SELECT 1 FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'order' AND COLUMN_NAME = 'reseller_nonce'");
+        $this->abortIf($nonce, 'Roll back Version20261029090000 (order.reseller_nonce) first. Nothing was changed.');
         $resellers = (int) $this->connection->fetchOne('SELECT COUNT(*) FROM reseller');
         $this->abortIf($resellers > 0, sprintf('Irreversible: %d reseller profile(s) exist; dropping reseller would lose them and their wholesale rules. Nothing was changed.', $resellers));
         $orders = (int) $this->connection->fetchOne('SELECT COUNT(*) FROM `order` WHERE reseller_id IS NOT NULL OR wholesale_amount IS NOT NULL OR retail_amount IS NOT NULL OR reseller_floor_amount IS NOT NULL');

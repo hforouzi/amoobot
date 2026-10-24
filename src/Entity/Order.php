@@ -11,6 +11,7 @@ use Doctrine\ORM\Mapping as ORM;
 #[ORM\Entity]
 #[ORM\Table(name: '`order`')]
 #[ORM\Index(name: 'idx_order_reseller', columns: ['reseller_id', 'status', 'created_at'])]
+#[ORM\UniqueConstraint(name: 'uniq_order_reseller_nonce', columns: ['reseller_id', 'reseller_nonce'])]
 class Order
 {
     #[ORM\Id]
@@ -72,6 +73,10 @@ class Order
 
     #[ORM\Column(nullable: true)]
     private ?int $resellerFloorAmount = null;
+
+    /** The one-time confirmation this reseller order was created from (ResellerConfirmations); unique per reseller. */
+    #[ORM\Column(length: 32, nullable: true)]
+    private ?string $resellerNonce = null;
 
     public function __construct()
     {
@@ -258,6 +263,19 @@ class Order
     public function getResellerFloorAmount(): ?int
     {
         return $this->resellerFloorAmount;
+    }
+
+    public function getResellerNonce(): ?string
+    {
+        return $this->resellerNonce;
+    }
+
+    /** ResellerCheckout only, before the order is persisted. */
+    public function setResellerNonce(?string $resellerNonce): self
+    {
+        $this->resellerNonce = $resellerNonce;
+
+        return $this;
     }
 
     /** Marks a new order as a reseller's, with its price snapshot (ResellerCheckout only, before it is persisted). */

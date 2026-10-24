@@ -11,63 +11,80 @@ use Symfony\Component\Process\PhpExecutableFinder;
 use Symfony\Component\Process\Process;
 
 /**
- * Migration Version20261027090000 (resellers, S1): additive, so it goes down and up again on a database without reseller
- * data; with any (a profile, an attributed order or service, a plan floor price) down() refuses and changes nothing.
+ * Migrations Version20261027090000 (resellers, S1) and Version20261029090000 (order.reseller_nonce): additive, so they
+ * go down (newest first) and up again on a database without reseller data. With any (a profile, a plan floor price, an
+ * order with a confirmation nonce) down() refuses and changes nothing; S1's down() also refuses while the nonce
+ * migration is still applied (it would drop half of that unique key).
  */
 #[Group('subprocess')]
 final class ResellerMigrationTest extends IntegrationTestCase
 {
-    private const VERSION = 'DoctrineMigrations\\Version20261027090000';
+    private const S1 = 'DoctrineMigrations\\Version20261027090000';
+    private const NONCE = 'DoctrineMigrations\\Version20261029090000';
 
     public function testDownIsRefusedWhileResellerDataExistsAndNothingChanges(): void
     {
-        $plan = $this->createPlan()->setResellerFloorAmount(50000);
-        $this->em->flush();
-        $refusals = [
-            'reseller profile' => fn () => $this->em->persist(new Reseller($this->createUser())),
-            'plan floor price' => fn () => null,
-        ];
-
         try {
-            foreach ($refusals as $what => $create) {
-                $create();
-                $this->em->flush();
-                $down = $this->migrate('down');
-                self::assertStringContainsString('Irreversible', $down->getOutput().$down->getErrorOutput(), $what);
-                self::assertTrue($this->tableExists('reseller'), $what.': nothing was dropped');
-                self::assertTrue($this->columnExists('order', 'reseller_id'), $what);
-                self::assertTrue($this->columnExists('plan', 'reseller_floor_amount'), $what);
-                $this->em->getConnection()->executeStatement('DELETE FROM reseller');
-            }
-            self::assertNotNull($plan->getId());
+            $refused = $this->migrate(self::S1, 'down');
+            self::assertStringContainsString('Roll back Version20261029090000', $refused->getOutput().$refused->getErrorOutput(), 'not before the newer migration');
+            $this->assertSchemaIntact();
+
+            $reseller = new Reseller($this->createUser());
+            $this->em->persist($reseller);
+            $this->em->flush();
+            $this->em->getConnection()->executeStatement('INSERT INTO `order` (user_id, plan_id, amount, type, status, created_at, reseller_id, reseller_nonce) VALUES (?, ?, 1000, ?, ?, NOW(), ?, ?)', [
+                $reseller->getUser()->getId(), $this->createPlan()->getId(), 'new_service', 'cancelled', $reseller->getId(), 'nonce-of-a-tap',
+            ]);
+            $down = $this->migrate(self::NONCE, 'down');
+            self::assertStringContainsString('Irreversible', $down->getOutput().$down->getErrorOutput(), 'an order carries a nonce');
+            $this->assertSchemaIntact();
+
+            $this->em->getConnection()->executeStatement('UPDATE `order` SET reseller_nonce = NULL');
+            self::assertSame(0, $this->migrate(self::NONCE, 'down')->getExitCode());
+            $down = $this->migrate(self::S1, 'down');
+            self::assertStringContainsString('Irreversible', $down->getOutput().$down->getErrorOutput(), 'a reseller profile exists');
+            self::assertTrue($this->tableExists('reseller'));
+            self::assertTrue($this->columnExists('order', 'reseller_id'));
         } finally {
             $this->restore();
         }
     }
 
-    public function testWithoutResellerDataItGoesDownAndUpAgain(): void
+    public function testWithoutResellerDataBothGoDownAndUpAgain(): void
     {
         try {
-            $down = $this->migrate('down');
-            self::assertSame(0, $down->getExitCode(), $down->getOutput().$down->getErrorOutput());
+            foreach ([self::NONCE, self::S1] as $version) {
+                $down = $this->migrate($version, 'down');
+                self::assertSame(0, $down->getExitCode(), $version.': '.$down->getOutput().$down->getErrorOutput());
+            }
             self::assertFalse($this->tableExists('reseller'));
             self::assertFalse($this->columnExists('order', 'reseller_id'));
-            self::assertFalse($this->columnExists('vpn_service', 'sold_by_reseller_id'));
+            self::assertFalse($this->columnExists('order', 'reseller_nonce'));
 
-            $up = $this->migrate('up');
-            self::assertSame(0, $up->getExitCode(), $up->getOutput().$up->getErrorOutput());
-            self::assertTrue($this->tableExists('reseller_plan_price'));
-            self::assertTrue($this->columnExists('order', 'wholesale_amount'));
-            self::assertTrue($this->columnExists('vpn_service', 'sold_by_reseller_id'));
+            foreach ([self::S1, self::NONCE] as $version) {
+                $up = $this->migrate($version, 'up');
+                self::assertSame(0, $up->getExitCode(), $version.': '.$up->getOutput().$up->getErrorOutput());
+            }
+            $this->assertSchemaIntact();
         } finally {
             $this->restore();
         }
     }
 
-    /** Runs the migration in its own console process (Doctrine Migrations freezes its configuration after one run). */
-    private function migrate(string $direction): Process
+    private function assertSchemaIntact(): void
     {
-        $process = new Process([(new PhpExecutableFinder())->find(false) ?: 'php', 'bin/console', 'doctrine:migrations:execute', self::VERSION, '--'.$direction, '--no-interaction', '--env=test'], dirname(__DIR__, 2), ['APP_ENV' => 'test'], null, 120);
+        self::assertTrue($this->tableExists('reseller_plan_price'));
+        self::assertTrue($this->columnExists('order', 'wholesale_amount'));
+        self::assertTrue($this->columnExists('order', 'reseller_nonce'));
+        self::assertTrue($this->columnExists('vpn_service', 'sold_by_reseller_id'));
+        self::assertTrue($this->indexExists('order', 'uniq_order_reseller_nonce'));
+        self::assertNotFalse($this->em->getConnection()->fetchOne("SELECT 1 FROM information_schema.REFERENTIAL_CONSTRAINTS WHERE CONSTRAINT_SCHEMA = DATABASE() AND CONSTRAINT_NAME = 'FK_F529939891E6A19D'"), 'order -> reseller key');
+    }
+
+    /** Runs a migration in its own console process (Doctrine Migrations freezes its configuration after one run). */
+    private function migrate(string $version, string $direction): Process
+    {
+        $process = new Process([(new PhpExecutableFinder())->find(false) ?: 'php', 'bin/console', 'doctrine:migrations:execute', $version, '--'.$direction, '--no-interaction', '--env=test'], dirname(__DIR__, 2), ['APP_ENV' => 'test'], null, 120);
         $process->run();
 
         return $process;
@@ -83,18 +100,32 @@ final class ResellerMigrationTest extends IntegrationTestCase
         return false !== $this->em->getConnection()->fetchOne('SELECT 1 FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?', [$table, $column]);
     }
 
+    private function indexExists(string $table, string $index): bool
+    {
+        return false !== $this->em->getConnection()->fetchOne('SELECT 1 FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ?', [$table, $index]);
+    }
+
     /** Whatever happened above, leave the schema and the migration table as the rest of the suite expects. */
     private function restore(): void
     {
         $connection = $this->em->getConnection();
-        $connection->executeStatement('DELETE FROM reseller');
-        $connection->executeStatement('UPDATE plan SET reseller_floor_amount = NULL');
-        if (!$this->tableExists('reseller')) {
-            $up = $this->migrate('up');
-            self::assertSame(0, $up->getExitCode(), $up->getOutput().$up->getErrorOutput());
+        $connection->executeStatement('SET FOREIGN_KEY_CHECKS = 0');
+        if ($this->columnExists('order', 'reseller_id')) {
+            $connection->executeStatement('DELETE FROM `order` WHERE reseller_id IS NOT NULL');
         }
-        if (false === $connection->fetchOne('SELECT version FROM doctrine_migration_versions WHERE version = ?', [self::VERSION])) {
-            $connection->insert('doctrine_migration_versions', ['version' => self::VERSION, 'executed_at' => (new \DateTimeImmutable())->format('Y-m-d H:i:s'), 'execution_time' => 0]);
+        if ($this->tableExists('reseller')) {
+            $connection->executeStatement('DELETE FROM reseller');
+        }
+        $connection->executeStatement('SET FOREIGN_KEY_CHECKS = 1');
+        foreach ([[self::S1, !$this->tableExists('reseller')], [self::NONCE, !$this->columnExists('order', 'reseller_nonce')]] as [$version, $missing]) {
+            if ($missing) {
+                $connection->executeStatement('DELETE FROM doctrine_migration_versions WHERE version = ?', [$version]);
+                $up = $this->migrate($version, 'up');
+                self::assertSame(0, $up->getExitCode(), $up->getOutput().$up->getErrorOutput());
+            }
+            if (false === $connection->fetchOne('SELECT version FROM doctrine_migration_versions WHERE version = ?', [$version])) {
+                $connection->insert('doctrine_migration_versions', ['version' => $version, 'executed_at' => (new \DateTimeImmutable())->format('Y-m-d H:i:s'), 'execution_time' => 0]);
+            }
         }
     }
 }

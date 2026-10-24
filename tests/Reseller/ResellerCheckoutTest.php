@@ -9,6 +9,7 @@ use App\Entity\Plan;
 use App\Entity\VpnService;
 use App\Payment\Application\Settlement\SettlementOutcome;
 use App\Reseller\Application\ResellerSettings;
+use App\Reseller\Domain\ResellerConfirmation;
 use App\Reseller\Domain\ResellerException;
 use App\Reseller\Domain\ResellerStatus;
 use App\Shop\Application\Checkout\PaymentStarter;
@@ -48,7 +49,7 @@ final class ResellerCheckoutTest extends IntegrationTestCase
     {
         $this->fund(500000);
 
-        $result = $this->checkout()->buyNewService($this->user, (int) $this->plan->getId());
+        $result = $this->buy();
 
         self::assertSame(SettlementOutcome::CONFIRMED, $result->outcome);
         self::assertSame(500000 - 120000, $this->balance(), '150,000 - 20 %');
@@ -80,16 +81,16 @@ final class ResellerCheckoutTest extends IntegrationTestCase
     public function testRenewalAndExtraTrafficOfASoldServiceAreWholesaleToo(): void
     {
         $this->fund(1000000);
-        $this->checkout()->buyNewService($this->user, (int) $this->plan->getId());
+        $this->buy();
         $service = $this->em->getRepository(VpnService::class)->findOneBy(['soldByReseller' => $this->reseller]) ?? self::fail();
         $expires = $service->getExpiresAt();
 
-        $renewal = $this->checkout()->renew($this->user, (int) $service->getId());
+        $renewal = $this->renewSold((int) $service->getId());
         self::assertSame(SettlementOutcome::CONFIRMED, $renewal->outcome);
         $this->em->refresh($service);
         self::assertGreaterThan($expires, $service->getExpiresAt());
 
-        $traffic = $this->checkout()->addTraffic($this->user, (int) $service->getId(), 10);
+        $traffic = $this->addTrafficSold((int) $service->getId(), 10);
         self::assertSame(SettlementOutcome::CONFIRMED, $traffic->outcome);
 
         $orders = $this->em->getRepository(Order::class)->findBy(['reseller' => $this->reseller], ['id' => 'ASC']);
@@ -104,7 +105,7 @@ final class ResellerCheckoutTest extends IntegrationTestCase
     public function testAddTrafficUsesThePlanPercentButNotItsFixedPrice(): void
     {
         $this->fund(1000000);
-        $this->checkout()->buyNewService($this->user, (int) $this->plan->getId());
+        $this->buy();
         $service = $this->em->getRepository(VpnService::class)->findOneBy(['soldByReseller' => $this->reseller]) ?? self::fail();
 
         $this->planRule($this->plan, 3000);
@@ -145,7 +146,7 @@ final class ResellerCheckoutTest extends IntegrationTestCase
     public function testDiscountCodesAndTheGlobalDiscountNeverStack(): void
     {
         $this->fund(1000000);
-        foreach ([fn () => $this->checkout()->buyNewService($this->user, (int) $this->plan->getId(), null, null, 'SUMMER'), fn () => $this->checkout()->quoteNewService($this->user, (int) $this->plan->getId(), null, null, 'SUMMER')] as $call) {
+        foreach ([fn () => $this->checkout()->buyNewService($this->user, (int) $this->plan->getId(), new ResellerConfirmation(120000, 'unused'), null, null, 'SUMMER'), fn () => $this->checkout()->quoteNewService($this->user, (int) $this->plan->getId(), null, null, 'SUMMER')] as $call) {
             try {
                 $call();
                 self::fail('a code was accepted');
@@ -172,7 +173,7 @@ final class ResellerCheckoutTest extends IntegrationTestCase
     {
         $this->fund(119999);
         try {
-            $this->checkout()->buyNewService($this->user, (int) $this->plan->getId());
+            $this->buy();
             self::fail('paid without the money');
         } catch (WalletException $e) {
             self::assertSame('wallet_insufficient', $e->error);
@@ -183,7 +184,7 @@ final class ResellerCheckoutTest extends IntegrationTestCase
 
         // The wallet credit limit (0 by default, set per reseller by an admin) counts.
         $this->wallets()->setCreditLimit($this->user, 1, WalletActor::system());
-        self::assertSame(SettlementOutcome::CONFIRMED, $this->checkout()->buyNewService($this->user, (int) $this->plan->getId())->outcome);
+        self::assertSame(SettlementOutcome::CONFIRMED, $this->buy()->outcome);
         self::assertSame(-1, $this->balance());
     }
 
@@ -216,9 +217,9 @@ final class ResellerCheckoutTest extends IntegrationTestCase
         $this->reseller->setDailySpendLimit(250000);
         $this->em->flush();
 
-        $this->checkout()->buyNewService($this->user, (int) $this->plan->getId());
+        $this->buy();
         self::assertSame(130000, $this->checkout()->remainingToday($this->reseller));
-        $this->checkout()->buyNewService($this->user, (int) $this->plan->getId());
+        $this->buy();
         $this->assertRefused('daily_limit_reached');
         self::assertSame(2, $this->sqlInt('SELECT COUNT(*) FROM `order`'));
 
@@ -226,10 +227,10 @@ final class ResellerCheckoutTest extends IntegrationTestCase
         $connection = $this->em->getConnection();
         $connection->executeStatement("UPDATE `order` SET status = 'cancelled' WHERE id = (SELECT MIN(id) FROM (SELECT id FROM `order`) o)");
         self::assertSame(130000, $this->checkout()->remainingToday($this->reseller));
-        self::assertSame(SettlementOutcome::CONFIRMED, $this->checkout()->buyNewService($this->user, (int) $this->plan->getId())->outcome);
+        self::assertSame(SettlementOutcome::CONFIRMED, $this->buy()->outcome);
         $this->assertRefused('daily_limit_reached');
         $connection->executeStatement('UPDATE `order` SET created_at = DATE_SUB(NOW(), INTERVAL 2 DAY) WHERE reseller_id = ?', [$this->reseller->getId()]);
-        self::assertSame(SettlementOutcome::CONFIRMED, $this->checkout()->buyNewService($this->user, (int) $this->plan->getId())->outcome);
+        self::assertSame(SettlementOutcome::CONFIRMED, $this->buy()->outcome);
     }
 
     public function testOnlyServicesHeSoldCanBeRenewed(): void
@@ -239,7 +240,7 @@ final class ResellerCheckoutTest extends IntegrationTestCase
         $own->setOrder($this->createOrder($this->user, $this->plan));
         $this->em->flush();
 
-        foreach ([fn () => $this->checkout()->renew($this->user, (int) $own->getId()), fn () => $this->checkout()->addTraffic($this->user, (int) $own->getId(), 10), fn () => $this->checkout()->renew($this->user, 999999)] as $call) {
+        foreach ([fn () => $this->renewSold((int) $own->getId()), fn () => $this->addTrafficSold((int) $own->getId(), 10), fn () => $this->renewSold(999999)] as $call) {
             try {
                 $call();
                 self::fail('renewed a service he did not sell');
@@ -251,19 +252,27 @@ final class ResellerCheckoutTest extends IntegrationTestCase
     }
 
     /**
-     * Section 2.4: the confirmation shows a quote, the purchase quotes again under the lock (a rule changed in between
-     * is what is charged); a payment opened at the old price settles at its snapshot; a reseller order is never paid
-     * any other way (no gateway, no "pay from wallet").
+     * Section 2.4 with review item B2: the purchase quotes again under the lock and charges only the confirmed price
+     * (a rule changed in between is refused with price_changed and the price now); a payment opened at the old price
+     * settles at its snapshot; a reseller order is never paid any other way (no gateway, no "pay from wallet").
      */
     public function testThePriceIsTheSnapshotOfTheMomentTheOrderIsCreated(): void
     {
         $this->fund(1000000);
-        [, , $shown] = $this->checkout()->quoteNewService($this->user, (int) $this->plan->getId());
+        [, , $shown, $confirmation] = $this->checkout()->quoteNewService($this->user, (int) $this->plan->getId());
         self::assertSame(120000, $shown->wholesaleAmount);
         $this->reseller->setDiscountBp(3000);
         $this->em->flush();
-        $this->checkout()->buyNewService($this->user, (int) $this->plan->getId());
-        self::assertSame(105000, $this->onlyOrder()->getAmount(), 'the price when the order was created, not the one shown before');
+        try {
+            $this->checkout()->buyNewService($this->user, (int) $this->plan->getId(), $confirmation);
+            self::fail('charged a price the reseller did not confirm');
+        } catch (ResellerException $e) {
+            self::assertSame('price_changed', $e->error);
+            self::assertSame(105000, $e->quote?->wholesaleAmount, 'the price now, for a fresh confirmation');
+        }
+        self::assertSame(0, $this->sqlInt('SELECT COUNT(*) FROM `order`'));
+        $this->buy();
+        self::assertSame(105000, $this->onlyOrder()->getAmount(), 'the freshly confirmed price');
 
         // An order opened (debited) at its snapshot, then the discount changes: it settles at the snapshot, once.
         $order = (new Order())->setUser($this->user)->setPlan($this->plan)->setType(OrderType::NEW_SERVICE)->setAmount(105000)->setStatus(OrderStatus::WAITING_PAYMENT)
@@ -305,7 +314,7 @@ final class ResellerCheckoutTest extends IntegrationTestCase
     private function assertRefused(string $error): void
     {
         try {
-            $this->checkout()->buyNewService($this->user, (int) $this->plan->getId());
+            $this->buy();
             self::fail('bought while it should be refused: '.$error);
         } catch (ResellerException|WalletException $e) {
             self::assertSame($error, $e->error);
