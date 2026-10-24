@@ -155,11 +155,15 @@ class TelegramUpdateHandler
         $replyButtonKey = $this->botButtonMatcher->matchReplyButton($text);
 
         // An admin asked for a value (price, setting, search) answers with plain text; a command or a menu button
-        // leaves the prompt and is handled as usual. Customers never have a prompt.
+        // leaves the prompt and is handled as usual. A reseller asked for the traffic / days of a customizable plan
+        // answers the same way; his answer is read exactly as sent (not the trimmed $text). Customers never have one.
         if ('' !== $text) {
             if (str_starts_with($text, '/') || null !== $replyButtonKey || in_array($text, self::REPLY_BUTTONS, true)) {
                 $this->adminBotHandler->dropPrompt($actorId);
+                $this->resellerBotHandler->dropPrompt($actorId);
             } elseif ($this->adminBotHandler->answerPrompt($actorId, $chatId, $text)) {
+                return;
+            } elseif ($this->resellerBotHandler->answerPrompt($account, $chatId, (string) ($message['text'] ?? ''))) {
                 return;
             }
         }

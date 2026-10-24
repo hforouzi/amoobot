@@ -19,7 +19,6 @@ use App\Reseller\Application\ResellerCheckout;
 use App\Reseller\Domain\ResellerConfirmation;
 use App\Reseller\Domain\ResellerException;
 use App\Reseller\Domain\WholesaleQuote;
-use App\Shop\Application\Checkout\PlanCatalog;
 use App\Shop\Application\IncompleteOrderSettingsProvider;
 use App\Wallet\Application\WalletService;
 use App\Wallet\Application\WalletSettings;
@@ -44,21 +43,28 @@ use Psr\Log\LoggerInterface;
 final class ResellerBotHandler
 {
     public const SOLD_PER_PAGE = 8;
-    private const PREFIXES = ['rs_plan:', 'rs_buy:', 'rs_sold:', 'rs_svc:', 'rs_renew:', 'rs_renew_ok:', 'rs_tr:', 'rs_tr_gb:', 'rs_tr_ok:'];
+    private const PREFIXES = ['rs_plan:', 'rs_buy:', 'rs_cg:', 'rs_cd:', 'rs_buyc:', 'rs_sold:', 'rs_svc:', 'rs_renew:', 'rs_renew_ok:', 'rs_tr:', 'rs_tr_gb:', 'rs_tr_ok:'];
     private const TRAFFIC_CHOICES = [10, 20, 50, 100];
+    /** Suggested buttons for a customizable plan (only those inside the plan's range are shown, with its min and max). */
+    private const PLAN_TRAFFIC_CHOICES = [10, 20, 30, 50, 100, 200];
+    private const PLAN_DAY_CHOICES = [30, 60, 90, 180, 365];
+    public const PROMPT_TRAFFIC = 'traffic';
+    public const PROMPT_DAYS = 'days';
+    /** The number of parts each customizable-plan callback must have (anything else is ignored). */
+    private const EXACT_PARTS = ['rs_cg' => 3, 'rs_cd' => 4, 'rs_buyc' => 6];
 
     public function __construct(
         private readonly TelegramApiClient $telegram,
         private readonly BotTextResolver $texts,
         private readonly TelegramKeyboardFactory $keyboards,
         private readonly ResellerCheckout $checkout,
-        private readonly PlanCatalog $planCatalog,
         private readonly WalletService $wallets,
         private readonly TrafficAddonSettingsProvider $trafficAddonSettings,
         private readonly MembershipGatePrompt $membershipGate,
         private readonly LoggerInterface $logger,
         private readonly IncompleteOrderSettingsProvider $incompleteOrders,
         private readonly WalletSettings $walletSettings,
+        private readonly ResellerPromptStore $prompts,
     ) {
     }
 
@@ -84,17 +90,28 @@ final class ResellerBotHandler
 
             return;
         }
+        // Any reseller button ends a pending "type a number" prompt (the ask steps start a new one).
+        $this->prompts->clear($account->getTelegramId());
         $parts = explode(':', $data);
+        if (isset(self::EXACT_PARTS[$parts[0]]) && count($parts) !== self::EXACT_PARTS[$parts[0]]) {
+            $this->ack($callbackId);
+
+            return;
+        }
         $int = static fn (int $i): int => isset($parts[$i]) && ctype_digit($parts[$i]) && strlen($parts[$i]) <= 15 ? (int) $parts[$i] : 0;
         $first = $int(1);
         $second = $int(2);
+        $third = $int(3);
         // The pay buttons: what was confirmed (amount, nonce) follows the ids.
         $confirmed = static fn (int $amountAt): ResellerConfirmation => new ResellerConfirmation($int($amountAt), (string) ($parts[$amountAt + 1] ?? ''));
 
         match ($parts[0]) {
             'reseller' => $this->showMenu($account, $chatId, $callbackId),
             'rs_new' => $this->showPlans($account, $chatId, $callbackId),
-            'rs_plan' => $this->confirmNew($account, $chatId, $callbackId, $first),
+            'rs_plan' => $this->choosePlan($account, $chatId, $callbackId, $first),
+            'rs_cg' => $this->trafficChosen($account, $chatId, $callbackId, $first, $second),
+            'rs_cd' => $this->confirmCustom($account, $chatId, $callbackId, $first, $second, $third),
+            'rs_buyc' => $this->buyCustom($account, $reseller, $chatId, $callbackId, $first, $second, $third, $confirmed(4)),
             'rs_buy' => $this->buyNew($account, $reseller, $chatId, $callbackId, $first, $confirmed(2)),
             'rs_sold' => $this->showSold($reseller, $chatId, $callbackId, max(1, $first)),
             'rs_svc' => $this->showService($account, $chatId, $callbackId, $first),
@@ -146,29 +163,230 @@ final class ResellerBotHandler
         ]]);
     }
 
+    /**
+     * The plans with their wholesale price ("from" for a customizable plan). When none can be shown, the reason:
+     * sales closed, nothing configured, nothing for sale, or nothing priceable for resellers.
+     */
     private function showPlans(TelegramAccount $account, string $chatId, string $callbackId): void
     {
-        $buttons = [];
-        foreach ($this->planCatalog->forSale() as $plan) {
-            if ($plan->isCustomizable()) {
-                continue;
-            }
-            try {
-                [, , $quote] = $this->checkout->quoteNewService($account->getUser(), (int) $plan->getId());
-            } catch (ResellerException) {
-                continue;
-            }
-            $buttons[] = ['text' => sprintf('%s — %s', $plan->getTitle(), number_format($quote->wholesaleAmount)), 'callback_data' => 'rs_plan:'.$plan->getId()];
-        }
-        if ([] === $buttons) {
-            $this->popup($chatId, $callbackId, $this->texts->message('reseller.plans_empty'));
+        try {
+            $result = $this->checkout->newServiceOffers($account->getUser());
+        } catch (ResellerException $e) {
+            $this->popup($chatId, $callbackId, $this->refusal($e->error));
 
             return;
+        }
+        if (null !== $result['reason']) {
+            $this->popup($chatId, $callbackId, $this->texts->message(match ($result['reason']) {
+                ResellerCheckout::OFFERS_SALES_CLOSED => 'reseller.error.sales_closed',
+                ResellerCheckout::OFFERS_NO_PLANS => 'reseller.plans_empty',
+                ResellerCheckout::OFFERS_NOT_FOR_SALE => 'reseller.plans_not_for_sale',
+                default => 'reseller.plans_no_wholesale',
+            }));
+
+            return;
+        }
+        $buttons = [];
+        foreach ($result['offers'] as $offer) {
+            $price = number_format($offer['quote']->wholesaleAmount);
+            $buttons[] = [
+                'text' => $offer['from']
+                    ? $this->texts->message('reseller.plan_button_from', ['plan' => ['title' => $offer['plan']->getTitle()], 'reseller' => ['wholesale' => $price]])
+                    : sprintf('%s — %s', $offer['plan']->getTitle(), $price),
+                'callback_data' => 'rs_plan:'.$offer['plan']->getId(),
+            ];
         }
         $this->ack($callbackId);
         $rows = $this->keyboards->inlineKeyboardRows($buttons, 1);
         $rows[] = [['text' => $this->texts->button('button.reseller.back'), 'callback_data' => 'reseller']];
         $this->telegram->sendMessage($chatId, $this->texts->message('reseller.plans_title'), ['inline_keyboard' => $rows]);
+    }
+
+    /** A fixed plan goes straight to its confirmation; a customizable one first asks its traffic and/or days. */
+    private function choosePlan(TelegramAccount $account, string $chatId, string $callbackId, int $planId): void
+    {
+        try {
+            $choices = $this->checkout->planChoices($account->getUser(), $planId);
+        } catch (ResellerException $e) {
+            $this->popup($chatId, $callbackId, $this->refusal($e->error));
+
+            return;
+        }
+        match (true) {
+            $choices['asksTraffic'] => $this->askTraffic($account, $chatId, $callbackId, $planId, $choices),
+            $choices['asksDuration'] => $this->askDays($account, $chatId, $callbackId, $planId, 0, $choices),
+            default => $this->confirmNew($account, $chatId, $callbackId, $planId),
+        };
+    }
+
+    /**
+     * @param array{minTraffic: int|null, maxTraffic: int|null} $choices
+     */
+    private function askTraffic(TelegramAccount $account, string $chatId, ?string $callbackId, int $planId, array $choices): void
+    {
+        $min = (int) $choices['minTraffic'];
+        $max = (int) $choices['maxTraffic'];
+        $this->ack($callbackId);
+        $this->prompts->start($account->getTelegramId(), self::PROMPT_TRAFFIC, (string) $planId);
+        $buttons = array_map(static fn (int $gb): array => ['text' => $gb.' GB', 'callback_data' => sprintf('rs_cg:%d:%d', $planId, $gb)], self::suggestions($min, $max, self::PLAN_TRAFFIC_CHOICES));
+        $rows = $this->keyboards->inlineKeyboardRows($buttons, 3);
+        $rows[] = [['text' => $this->texts->button('button.reseller.back'), 'callback_data' => 'rs_new']];
+        $this->telegram->sendMessage($chatId, $this->texts->message('reseller.ask_traffic', ['range' => ['min' => $min, 'max' => $max]]), ['inline_keyboard' => $rows]);
+    }
+
+    private function trafficChosen(TelegramAccount $account, string $chatId, ?string $callbackId, int $planId, int $trafficGb): void
+    {
+        try {
+            $choices = $this->checkout->planChoices($account->getUser(), $planId);
+        } catch (ResellerException $e) {
+            $this->popup($chatId, $callbackId, $this->refusal($e->error));
+
+            return;
+        }
+        if (!$choices['asksTraffic'] || $trafficGb < (int) $choices['minTraffic'] || $trafficGb > (int) $choices['maxTraffic']) {
+            $this->popup($chatId, $callbackId, $this->refusal('invalid_options'));
+
+            return;
+        }
+        $choices['asksDuration']
+            ? $this->askDays($account, $chatId, $callbackId, $planId, $trafficGb, $choices)
+            : $this->confirmCustom($account, $chatId, $callbackId, $planId, $trafficGb, 0);
+    }
+
+    /**
+     * @param array{minDays: int|null, maxDays: int|null} $choices
+     */
+    private function askDays(TelegramAccount $account, string $chatId, ?string $callbackId, int $planId, int $trafficGb, array $choices): void
+    {
+        $min = (int) $choices['minDays'];
+        $max = (int) $choices['maxDays'];
+        $this->ack($callbackId);
+        $this->prompts->start($account->getTelegramId(), self::PROMPT_DAYS, $planId.':'.$trafficGb);
+        $buttons = array_map(static fn (int $days): array => ['text' => (string) $days, 'callback_data' => sprintf('rs_cd:%d:%d:%d', $planId, $trafficGb, $days)], self::suggestions($min, $max, self::PLAN_DAY_CHOICES));
+        $rows = $this->keyboards->inlineKeyboardRows($buttons, 3);
+        $rows[] = [['text' => $this->texts->button('button.reseller.back'), 'callback_data' => 'rs_new']];
+        $this->telegram->sendMessage($chatId, $this->texts->message('reseller.ask_days', ['range' => ['min' => $min, 'max' => $max]]), ['inline_keyboard' => $rows]);
+    }
+
+    /**
+     * The quote and confirmation of a customizable plan with these choices (0 = not asked). The server checks the range
+     * and prices it (ResellerCheckout / ResellerPricing); the pay button carries plan, GB, days, amount and nonce, the
+     * nonce being signed over all of them.
+     *
+     * @param string|null $notice a message key shown above the confirmation
+     */
+    private function confirmCustom(TelegramAccount $account, string $chatId, ?string $callbackId, int $planId, int $trafficGb, int $days, ?string $notice = null): void
+    {
+        try {
+            [, $plan, $quote, $confirmation] = $this->checkout->quoteNewService($account->getUser(), $planId, 0 === $trafficGb ? null : $trafficGb, 0 === $days ? null : $days);
+        } catch (ResellerException $e) {
+            $this->popup($chatId, $callbackId, $this->refusal($e->error));
+
+            return;
+        }
+        $pay = sprintf('rs_buyc:%d:%d:%d:%d:%s', $planId, $trafficGb, $days, $confirmation->amount, $confirmation->nonce);
+        if (strlen($pay) > 64) {
+            // Telegram refuses longer callback data: never send a button that cannot work.
+            $this->popup($chatId, $callbackId, $this->texts->message('reseller.failed'));
+
+            return;
+        }
+        $this->ack($callbackId);
+        $this->sendConfirmation($chatId, $notice, $this->texts->message('reseller.confirm_custom', [
+            'plan' => ['title' => $plan->getTitle()],
+            'order' => ['trafficGb' => 0 === $trafficGb ? '-' : $trafficGb, 'days' => 0 === $days ? '-' : $days],
+        ] + $this->quoteVariables($account, $quote)), $pay, 'rs_new');
+    }
+
+    private function buyCustom(TelegramAccount $account, Reseller $reseller, string $chatId, string $callbackId, int $planId, int $trafficGb, int $days, ResellerConfirmation $confirmation): void
+    {
+        if (!$this->membershipGate->allowed($account, $chatId, $callbackId, TelegramChannelMembershipGate::CONTEXT_PURCHASE)) {
+            return;
+        }
+        $this->settle($account, $reseller, $chatId, $callbackId, $confirmation->nonce,
+            fn (): SettlementResult => $this->checkout->buyNewService($account->getUser(), $planId, $confirmation, 0 === $trafficGb ? null : $trafficGb, 0 === $days ? null : $days),
+            fn (string $notice) => $this->confirmCustom($account, $chatId, $callbackId, $planId, $trafficGb, $days, $notice));
+    }
+
+    /**
+     * A typed message while the reseller was asked for a number (traffic or days of a customizable plan). False when
+     * there is no such prompt. The text is taken exactly as sent: digits only (ASCII, Persian or Arabic-Indic), no
+     * spaces or other characters, nothing trimmed; anything else is refused and asked again.
+     */
+    public function answerPrompt(TelegramAccount $account, string $chatId, string $rawText): bool
+    {
+        $prompt = $this->prompts->get($account->getTelegramId());
+        if (null === $prompt) {
+            return false;
+        }
+        if ($prompt['expired'] || null === $this->checkout->resellerFor($account->getUser())) {
+            $this->prompts->clear($account->getTelegramId());
+            $this->telegram->sendMessage($chatId, $this->texts->message('reseller.prompt_expired'));
+
+            return true;
+        }
+        $target = explode(':', $prompt['target']);
+        $planId = ctype_digit($target[0]) ? (int) $target[0] : 0;
+        try {
+            $choices = $this->checkout->planChoices($account->getUser(), $planId);
+        } catch (ResellerException $e) {
+            $this->prompts->clear($account->getTelegramId());
+            $this->telegram->sendMessage($chatId, $this->refusal($e->error));
+
+            return true;
+        }
+        [$min, $max] = self::PROMPT_TRAFFIC === $prompt['kind'] ? [(int) $choices['minTraffic'], (int) $choices['maxTraffic']] : [(int) $choices['minDays'], (int) $choices['maxDays']];
+        $value = self::parseNumber($rawText);
+        if (null === $value || $value < $min || $value > $max) {
+            // The prompt stays: the reseller types again.
+            $this->telegram->sendMessage($chatId, $this->texts->message(null === $value ? 'reseller.prompt_not_a_number' : 'reseller.prompt_out_of_range', ['range' => ['min' => $min, 'max' => $max]]));
+
+            return true;
+        }
+        $this->prompts->clear($account->getTelegramId());
+        if (self::PROMPT_TRAFFIC === $prompt['kind']) {
+            $this->trafficChosen($account, $chatId, null, $planId, $value);
+        } else {
+            $trafficGb = isset($target[1]) && ctype_digit($target[1]) ? (int) $target[1] : 0;
+            $this->confirmCustom($account, $chatId, null, $planId, $trafficGb, $value);
+        }
+
+        return true;
+    }
+
+    /** Leaves a pending prompt (a command or a menu button was sent instead of a number). */
+    public function dropPrompt(string $telegramUserId): void
+    {
+        $this->prompts->clear($telegramUserId);
+    }
+
+    /**
+     * A whole number typed exactly: 1 to 6 digits (0-9, ۰-۹ or ٠-٩), nothing before or after (no spaces, no newline:
+     * /D anchors the very end), else null.
+     */
+    public static function parseNumber(string $text): ?int
+    {
+        if (1 !== preg_match('/^[0-9\x{06F0}-\x{06F9}\x{0660}-\x{0669}]{1,6}$/uD', $text)) {
+            return null;
+        }
+        $ascii = strtr($text, ['۰' => '0', '۱' => '1', '۲' => '2', '۳' => '3', '۴' => '4', '۵' => '5', '۶' => '6', '۷' => '7', '۸' => '8', '۹' => '9', '٠' => '0', '١' => '1', '٢' => '2', '٣' => '3', '٤' => '4', '٥' => '5', '٦' => '6', '٧' => '7', '٨' => '8', '٩' => '9']);
+
+        return (int) $ascii;
+    }
+
+    /**
+     * The buttons: the plan's min, the usual values inside the range, and its max.
+     *
+     * @param list<int> $usual
+     *
+     * @return list<int>
+     */
+    private static function suggestions(int $min, int $max, array $usual): array
+    {
+        $values = array_values(array_unique(array_filter([$min, ...$usual, $max], static fn (int $v): bool => $v >= $min && $v <= $max && $v > 0)));
+        sort($values);
+
+        return $values;
     }
 
     /**

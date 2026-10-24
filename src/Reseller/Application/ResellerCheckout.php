@@ -98,6 +98,74 @@ class ResellerCheckout
         return $reseller instanceof Reseller && $reseller->isActive() ? $reseller : null;
     }
 
+    public const OFFERS_SALES_CLOSED = 'sales_closed';
+    public const OFFERS_NO_PLANS = 'no_plans';
+    public const OFFERS_NOT_FOR_SALE = 'not_for_sale';
+    public const OFFERS_NO_WHOLESALE = 'no_wholesale';
+
+    /**
+     * The plans this reseller can buy now, each with its wholesale price (for a customizable plan: its lowest choice, a
+     * "from" price; the exact price is quoted once the traffic and days are chosen). When none, why (OFFERS_*): new
+     * sales closed, no active plan configured at all, plans configured but none for sale (inactive inbound, degraded
+     * panel), or plans for sale but none priceable for resellers. Nothing is written; no confirmation is issued.
+     *
+     * @return array{offers: list<array{plan: Plan, quote: WholesaleQuote, from: bool}>, reason: string|null}
+     *
+     * @throws ResellerException reseller_unavailable
+     */
+    public function newServiceOffers(User $user): array
+    {
+        $reseller = $this->resellerFor($user) ?? throw new ResellerException('reseller_unavailable');
+        if (!$this->salesSettings->newOrdersEnabled()) {
+            return ['offers' => [], 'reason' => self::OFFERS_SALES_CLOSED];
+        }
+        $forSale = $this->planCatalog->forSale();
+        if ([] === $forSale) {
+            $configured = (int) $this->entityManager->getRepository(Plan::class)->count(['isActive' => true]);
+
+            return ['offers' => [], 'reason' => 0 === $configured ? self::OFFERS_NO_PLANS : self::OFFERS_NOT_FOR_SALE];
+        }
+        $offers = [];
+        foreach ($forSale as $plan) {
+            $customizable = $this->planOptions->asksTraffic($plan) || $this->planOptions->asksDuration($plan);
+            $traffic = $this->planOptions->asksTraffic($plan) ? $plan->getMinTrafficGb() : $this->planOptions->defaultTrafficGb($plan);
+            $days = $this->planOptions->asksDuration($plan) ? $plan->getMinDurationDays() : $this->planOptions->defaultDurationDays($plan);
+            try {
+                $offers[] = ['plan' => $plan, 'quote' => $this->pricing->quoteNewService($reseller, $plan, $traffic, $days), 'from' => $customizable];
+            } catch (ResellerException) {
+                // Not priceable for resellers (zero price): not offered.
+            }
+        }
+
+        return ['offers' => $offers, 'reason' => [] === $offers ? self::OFFERS_NO_WHOLESALE : null];
+    }
+
+    /**
+     * What the reseller must choose for a new service of this plan: traffic and/or days within the plan's range
+     * (PlanOptions, the customer dialogue's rules), or nothing for a fixed plan.
+     *
+     * @return array{asksTraffic: bool, asksDuration: bool, minTraffic: int|null, maxTraffic: int|null, minDays: int|null, maxDays: int|null}
+     *
+     * @throws ResellerException reseller_unavailable, sales_closed, plan_unavailable
+     */
+    public function planChoices(User $user, int $planId): array
+    {
+        $this->resellerFor($user) ?? throw new ResellerException('reseller_unavailable');
+        if (!$this->salesSettings->newOrdersEnabled()) {
+            throw new ResellerException('sales_closed');
+        }
+        $plan = $this->planCatalog->findForSale($planId) ?? throw new ResellerException('plan_unavailable');
+
+        return [
+            'asksTraffic' => $this->planOptions->asksTraffic($plan),
+            'asksDuration' => $this->planOptions->asksDuration($plan),
+            'minTraffic' => $plan->getMinTrafficGb(),
+            'maxTraffic' => $plan->getMaxTrafficGb(),
+            'minDays' => $plan->getMinDurationDays(),
+            'maxDays' => $plan->getMaxDurationDays(),
+        ];
+    }
+
     /**
      * What a new service of this plan costs the reseller now, with the one-time confirmation of that price (for the
      * confirmation step; nothing is written).
