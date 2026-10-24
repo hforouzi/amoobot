@@ -48,8 +48,9 @@ class TelegramKeyboardFactory
         if ($this->walletSettings->enabled()) {
             $trackRow[] = ['text' => $this->button('button.main.wallet')];
         }
-        // Only for an active reseller while reseller.enabled is on (the caller knows the account).
-        if ($isReseller) {
+        // Only for an active reseller while reseller.enabled is on (the caller knows the account), and only while the
+        // wallet can pay: every reseller purchase is a wallet payment.
+        if ($isReseller && $this->walletSettings->paymentEnabled()) {
             $trackRow[] = ['text' => $this->button('button.main.reseller')];
         }
         if ([] !== $trackRow) {

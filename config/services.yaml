@@ -113,6 +113,10 @@ services:
         arguments:
             $appSecret: '%env(APP_SECRET)%'
 
+    App\Reseller\Application\ResellerConfirmations:
+        arguments:
+            $appSecret: '%env(APP_SECRET)%'
+
     # How the session token travels (the one seam to switch to a cookie): see BearerTokenTransport.
     App\MiniApp\Session\SessionTokenTransport:
         alias: App\MiniApp\Session\BearerTokenTransport

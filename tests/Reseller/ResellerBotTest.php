@@ -72,8 +72,9 @@ final class ResellerBotTest extends IntegrationTestCase
         self::assertTrue($this->sentTextContains('380,000'), 'balance after');
         self::assertSame(0, $this->sqlInt('SELECT COUNT(*) FROM `order`'), 'the confirmation writes nothing');
 
+        $pay = $this->sentCallback('rs_buy:'.$this->plan->getId().':120000:');
         $this->http->reset();
-        $this->pressButton(self::CUSTOMER, 'rs_buy:'.$this->plan->getId());
+        $this->pressButton(self::CUSTOMER, $pay);
         $order = $this->em->getRepository(Order::class)->findOneBy(['reseller' => $this->reseller]) ?? self::fail('not bought');
         self::assertSame(120000, $order->getAmount());
         self::assertSame(380000, $this->balance());
@@ -86,7 +87,7 @@ final class ResellerBotTest extends IntegrationTestCase
         $this->setting('traffic_addon.min_gb', '1');
         $this->setting('traffic_addon.max_gb', '100');
         $this->setting('traffic_addon.price_per_gb', '3000');
-        $this->checkout()->buyNewService($this->user, (int) $this->plan->getId());
+        $this->buy();
         $serviceId = (int) $this->em->getConnection()->fetchOne('SELECT id FROM vpn_service WHERE sold_by_reseller_id = ?', [$this->reseller->getId()]);
 
         $this->http->reset();
@@ -95,11 +96,11 @@ final class ResellerBotTest extends IntegrationTestCase
         $this->pressButton(self::CUSTOMER, 'rs_svc:'.$serviceId);
         self::assertContains('rs_renew:'.$serviceId, $this->sentCallbacks());
         $this->pressButton(self::CUSTOMER, 'rs_renew:'.$serviceId);
-        $this->pressButton(self::CUSTOMER, 'rs_renew_ok:'.$serviceId);
+        $this->pressButton(self::CUSTOMER, $this->sentCallback('rs_renew_ok:'.$serviceId.':120000:'));
         $this->pressButton(self::CUSTOMER, 'rs_tr:'.$serviceId);
         self::assertContains(sprintf('rs_tr_gb:%d:10', $serviceId), $this->sentCallbacks());
         $this->pressButton(self::CUSTOMER, sprintf('rs_tr_gb:%d:10', $serviceId));
-        $this->pressButton(self::CUSTOMER, sprintf('rs_tr_ok:%d:10', $serviceId));
+        $this->pressButton(self::CUSTOMER, $this->sentCallback(sprintf('rs_tr_ok:%d:10:24000:', $serviceId)));
 
         self::assertSame(['new_service', 'renewal', 'add_traffic'], array_map('strval', $this->em->getConnection()->fetchFirstColumn('SELECT type FROM `order` ORDER BY id')));
         self::assertSame(500000 - 120000 - 120000 - 24000, $this->balance());
@@ -118,6 +119,15 @@ final class ResellerBotTest extends IntegrationTestCase
         self::assertSame(0, $this->sqlInt('SELECT COUNT(*) FROM `order`'));
         self::assertTrue($this->sentTextContains($this->botText('reseller.unavailable')));
         self::assertSame(500000, $this->balance());
+    }
+
+    /** The last inline button sent whose callback data starts with this (the pay button carries amount and nonce). */
+    private function sentCallback(string $prefix): string
+    {
+        $matching = array_values(array_filter($this->sentCallbacks(), static fn (string $data): bool => str_starts_with($data, $prefix)));
+        self::assertNotSame([], $matching, 'no button '.$prefix.'…');
+
+        return $matching[count($matching) - 1];
     }
 
     /**

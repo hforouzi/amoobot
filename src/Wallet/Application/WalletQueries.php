@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Wallet\Application;
 
+use App\Entity\User;
 use App\Entity\Wallet;
 use App\Entity\WalletTransaction;
 use Doctrine\ORM\EntityManagerInterface;
@@ -29,6 +30,26 @@ final class WalletQueries
         $rows = $this->entityManager->getRepository(WalletTransaction::class)->findBy(['wallet' => $wallet], ['id' => 'DESC'], $perPage + 1, ($page - 1) * $perPage);
 
         return ['items' => array_slice($rows, 0, $perPage), 'hasNext' => count($rows) > $perPage];
+    }
+
+    /**
+     * The wallets of these customers, by user id, in one query (a customer without a wallet is missing; read only).
+     *
+     * @param list<User> $users
+     *
+     * @return array<int, Wallet>
+     */
+    public function forUsers(array $users): array
+    {
+        if ([] === $users) {
+            return [];
+        }
+        $wallets = [];
+        foreach ($this->entityManager->getRepository(Wallet::class)->findBy(['user' => $users]) as $wallet) {
+            $wallets[(int) $wallet->getUser()->getId()] = $wallet;
+        }
+
+        return $wallets;
     }
 
     /**

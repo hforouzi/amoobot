@@ -31,6 +31,7 @@ final class ResellerPlanSanityTest extends IntegrationTestCase
         self::assertCount(0, $checker->warnings($this->plan), '20 % of 150,000 is above the 50 % floor');
 
         $this->planRule($this->plan, 7000);
+        $this->newRequest();
         $warnings = $checker->warnings($this->plan);
         self::assertCount(1, $warnings);
         self::assertStringContainsString('45,000', $warnings[0], 'what the rule gives');
@@ -38,11 +39,13 @@ final class ResellerPlanSanityTest extends IntegrationTestCase
         self::assertSame([], $checker->issues($this->plan), 'the Mini App list is about units only');
 
         $this->setting(ResellerSettings::ENABLED, 'false');
+        $this->newRequest();
         self::assertSame([], $checker->warnings($this->plan));
         $this->setting(ResellerSettings::ENABLED, 'true');
 
         $this->reseller->setStatus(ResellerStatus::DISABLED);
         $this->em->flush();
+        $this->newRequest();
         self::assertSame([], $checker->warnings($this->plan), 'a disabled reseller buys nothing');
     }
 
@@ -53,8 +56,16 @@ final class ResellerPlanSanityTest extends IntegrationTestCase
 
         $this->plan->setResellerFloorAmount(130000);
         $this->em->flush();
+        $this->newRequest();
         $clipped = $pricing->clippedRules($this->plan);
         self::assertCount(1, $clipped);
         self::assertSame(['reseller', 120000, 130000], [$clipped[0]['rule'], $clipped[0]['candidate'], $clipped[0]['floor']]);
+    }
+
+    /** What the kernel does between two requests: the per-request warning data is read again. */
+    private function newRequest(): void
+    {
+        self::getContainer()->get(ResellerPricing::class)->reset();
+        self::getContainer()->get(PlanPriceSanityChecker::class)->reset();
     }
 }

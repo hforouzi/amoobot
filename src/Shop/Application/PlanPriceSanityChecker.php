@@ -8,6 +8,7 @@ use App\Entity\Plan;
 use App\Payment\Domain\Money\AmountNormalizer;
 use App\Reseller\Application\ResellerPricing;
 use App\Reseller\Application\ResellerSettings;
+use Symfony\Contracts\Service\ResetInterface;
 
 /**
  * Flags plan prices that look implausible for the shop unit (Toman, see AmountNormalizer).
@@ -17,8 +18,10 @@ use App\Reseller\Application\ResellerSettings;
  * reaches customers directly. With resellers on, it also names the reseller rules the floor overrides
  * (ResellerPricing::clippedRules). The check only warns; it never blocks saving.
  */
-final class PlanPriceSanityChecker
+final class PlanPriceSanityChecker implements ResetInterface
 {
+    private ?bool $resellersEnabled = null;
+
     /** Optional so the unit tests can build it bare; the container always gives both. */
     public function __construct(
         private readonly ?ResellerPricing $resellerPricing = null,
@@ -52,7 +55,7 @@ final class PlanPriceSanityChecker
         }
 
         // A reseller rule this plan's floor overrides: the reseller pays the floor, not what his rule says.
-        if (null !== $this->resellerPricing && true === $this->resellerSettings?->enabled()) {
+        if (null !== $this->resellerPricing && $this->resellersEnabled()) {
             foreach ($this->resellerPricing->clippedRules($plan) as $clipped) {
                 $warnings[] = sprintf(
                     'Reseller "%s": the wholesale rule (%s) gives %s %s, below the reseller floor %s %s; the floor price is charged.',
@@ -62,6 +65,17 @@ final class PlanPriceSanityChecker
         }
 
         return $warnings;
+    }
+
+    public function reset(): void
+    {
+        $this->resellersEnabled = null;
+    }
+
+    /** reseller.enabled, read once per request (the plan list asks for every row). */
+    private function resellersEnabled(): bool
+    {
+        return $this->resellersEnabled ??= true === $this->resellerSettings?->enabled();
     }
 
     /**

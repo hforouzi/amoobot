@@ -10,8 +10,15 @@ namespace App\Reseller\Domain;
  */
 final class ResellerException extends \RuntimeException
 {
-    public function __construct(public readonly string $error)
-    {
+    /**
+     * @param WholesaleQuote|null $quote   price_changed: the price now (the caller shows a fresh confirmation)
+     * @param int|null            $orderId already_processed: the order the first delivery created
+     */
+    public function __construct(
+        public readonly string $error,
+        public readonly ?WholesaleQuote $quote = null,
+        public readonly ?int $orderId = null,
+    ) {
         parent::__construct($error);
     }
 }

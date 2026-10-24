@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Support;
 
 use App\Entity\Plan;
+use App\Payment\Application\Settlement\SettlementResult;
 use App\Entity\Reseller;
 use App\Entity\ResellerPlanPrice;
 use App\Reseller\Application\ResellerCheckout;
@@ -37,6 +38,29 @@ trait ResellerFixtures
     protected function checkout(): ResellerCheckout
     {
         return self::getContainer()->get(ResellerCheckout::class);
+    }
+
+    /** A new service bought as the bot does it: quote (with its confirmation), then pay with that confirmation. */
+    protected function buy(?int $planId = null): SettlementResult
+    {
+        $planId ??= (int) $this->plan->getId();
+        [, , , $confirmation] = $this->checkout()->quoteNewService($this->user, $planId);
+
+        return $this->checkout()->buyNewService($this->user, $planId, $confirmation);
+    }
+
+    protected function renewSold(int $serviceId): SettlementResult
+    {
+        [, , , $confirmation] = $this->checkout()->quoteRenewal($this->user, $serviceId);
+
+        return $this->checkout()->renew($this->user, $serviceId, $confirmation);
+    }
+
+    protected function addTrafficSold(int $serviceId, int $trafficGb): SettlementResult
+    {
+        [, , , $confirmation] = $this->checkout()->quoteAddTraffic($this->user, $serviceId, $trafficGb);
+
+        return $this->checkout()->addTraffic($this->user, $serviceId, $trafficGb, $confirmation);
     }
 
     protected function wallets(): WalletService

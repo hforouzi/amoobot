@@ -13,10 +13,12 @@ use App\Payment\Application\Settlement\SettlementResult;
 use App\Provisioning\Application\RenewalSettingsProvider;
 use App\Provisioning\Application\TrafficAddonSettingsProvider;
 use App\Provisioning\Domain\VpnServiceStatus;
+use App\Reseller\Domain\ResellerConfirmation;
 use App\Reseller\Domain\ResellerException;
 use App\Reseller\Domain\ResellerStatus;
 use App\Reseller\Domain\WholesaleQuote;
 use App\Shared\Infrastructure\TransactionRollback;
+use App\Shop\Application\Checkout\PaymentStarter;
 use App\Shop\Application\Checkout\PlanCatalog;
 use App\Shop\Application\Checkout\PlanOptions;
 use App\Shop\Application\OrderTrackingCodeService;
@@ -25,6 +27,7 @@ use App\Shop\Domain\OrderStatus;
 use App\Shop\Domain\OrderType;
 use App\Wallet\Application\WalletPayment;
 use App\Wallet\Domain\WalletException;
+use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
 use Doctrine\ORM\EntityManagerInterface;
 
 /**
@@ -45,11 +48,24 @@ use Doctrine\ORM\EntityManagerInterface;
  * Lock order: reseller, then (inside open()) order, payment, user, wallet: the order settlement already uses after
  * the order, so this never deadlocks with it; disabling a reseller takes the same reseller lock first.
  *
+ * Every purchase carries the reseller's confirmation (ResellerConfirmations: the amount he was shown and a one-time
+ * nonce; the quote*() methods issue it). Under the lock: a nonce already on one of his orders is a second delivery of the
+ * same tap (double tap, Telegram redelivery) and changes nothing (already_processed, with that order); an expired one
+ * is refused (confirmation_expired); a price that differs from the confirmed one is refused (price_changed, with the
+ * price now, for a fresh confirmation). The amount from the client is only compared, never charged. The nonce is stored
+ * on the order (unique per reseller, the database's backstop).
+ *
  * Discount codes never apply to reseller orders (discount_not_for_resellers); the global discount never stacks either
  * (the wholesale price starts from the base price, ResellerPricing).
  */
 class ResellerCheckout
 {
+    public const STATE_NONE = 'none';
+    public const STATE_HELD = 'held';
+    public const STATE_DONE = 'done';
+    public const STATE_FAILED = 'failed';
+    public const STATE_RELEASED = 'released';
+
     /** The order statuses that no longer count towards the daily cap (nothing was or will be paid). */
     private const CLOSED_STATUSES = [OrderStatus::CANCELLED, OrderStatus::EXPIRED, OrderStatus::FAILED];
 
@@ -65,6 +81,8 @@ class ResellerCheckout
         private readonly RenewalSettingsProvider $renewalSettings,
         private readonly OrderTrackingCodeService $trackingCodes,
         private readonly TransactionRollback $transactionRollback,
+        private readonly ResellerConfirmations $confirmations,
+        private readonly PaymentStarter $paymentStarter,
     ) {
     }
 
@@ -80,9 +98,10 @@ class ResellerCheckout
     }
 
     /**
-     * What a new service of this plan costs the reseller now (for the confirmation step; nothing is written).
+     * What a new service of this plan costs the reseller now, with the one-time confirmation of that price (for the
+     * confirmation step; nothing is written).
      *
-     * @return array{Reseller, Plan, WholesaleQuote}
+     * @return array{Reseller, Plan, WholesaleQuote, ResellerConfirmation}
      *
      * @throws ResellerException reseller_unavailable, sales_closed, plan_unavailable, invalid_options, price_unavailable,
      *                           discount_not_for_resellers
@@ -95,22 +114,25 @@ class ResellerCheckout
             throw new ResellerException('sales_closed');
         }
         $plan = $this->planCatalog->findForSale($planId) ?? throw new ResellerException('plan_unavailable');
-        [$trafficGb, $durationDays] = $this->options($plan, $trafficGb, $durationDays);
+        [$traffic, $days] = $this->options($plan, $trafficGb, $durationDays);
+        $quote = $this->pricing->quoteNewService($reseller, $plan, $traffic, $days);
 
-        return [$reseller, $plan, $this->pricing->quoteNewService($reseller, $plan, $trafficGb, $durationDays)];
+        // Signed over the request as the caller will send it again with the purchase (not the plan's defaults).
+        return [$reseller, $plan, $quote, $this->confirmations->issue($reseller, ResellerConfirmations::KIND_NEW, (int) $plan->getId(), (int) $trafficGb, (int) $durationDays, $quote->wholesaleAmount)];
     }
 
     /**
-     * Buys a new service at wholesale from the reseller's wallet.
+     * Buys a new service at wholesale from the reseller's wallet, for the price he confirmed.
      *
-     * @throws ResellerException see quoteNewService(), and daily_limit_reached
+     * @throws ResellerException see quoteNewService(), and daily_limit_reached, confirmation_invalid,
+     *                           confirmation_expired, price_changed (with the price now), already_processed (with the order)
      * @throws WalletException   wallet_payment_disabled, wallet_frozen, wallet_insufficient: nothing was written
      */
-    public function buyNewService(User $user, int $planId, ?int $trafficGb = null, ?int $durationDays = null, ?string $discountCode = null): SettlementResult
+    public function buyNewService(User $user, int $planId, ResellerConfirmation $confirmation, ?int $trafficGb = null, ?int $durationDays = null, ?string $discountCode = null): SettlementResult
     {
         self::refuseDiscountCode($discountCode);
 
-        return $this->purchase($user, function (Reseller $reseller) use ($planId, $trafficGb, $durationDays): Order {
+        return $this->purchase($user, ResellerConfirmations::KIND_NEW, $planId, (int) $trafficGb, (int) $durationDays, $confirmation, function (Reseller $reseller) use ($planId, $trafficGb, $durationDays): array {
             if (!$this->salesSettings->newOrdersEnabled()) {
                 throw new ResellerException('sales_closed');
             }
@@ -118,7 +140,7 @@ class ResellerCheckout
             [$traffic, $days] = $this->options($plan, $trafficGb, $durationDays);
             $quote = $this->pricing->quoteNewService($reseller, $plan, $traffic, $days);
 
-            return (new Order())
+            return [$quote, (new Order())
                 ->setUser($reseller->getUser())
                 ->setPlan($plan)
                 ->setType(OrderType::NEW_SERVICE)
@@ -134,14 +156,14 @@ class ResellerCheckout
                     'priceSnapshot' => self::priceSnapshot($quote, $reseller),
                     'orderType' => OrderType::NEW_SERVICE,
                     'resellerOrder' => true,
-                ]);
+                ])];
         });
     }
 
     /**
-     * What renewing this service costs the reseller now (nothing is written).
+     * What renewing this service costs the reseller now, with its one-time confirmation (nothing is written).
      *
-     * @return array{Reseller, VpnService, WholesaleQuote}
+     * @return array{Reseller, VpnService, WholesaleQuote, ResellerConfirmation}
      *
      * @throws ResellerException reseller_unavailable, sales_closed, service_not_sold_by_you, price_unavailable
      */
@@ -152,28 +174,30 @@ class ResellerCheckout
             throw new ResellerException('sales_closed');
         }
         $service = $this->soldService($reseller, $serviceId);
+        $quote = $this->pricing->quoteRenewal($reseller, $service)[0];
 
-        return [$reseller, $service, $this->pricing->quoteRenewal($reseller, $service)[0]];
+        return [$reseller, $service, $quote, $this->confirmations->issue($reseller, ResellerConfirmations::KIND_RENEWAL, $serviceId, 0, 0, $quote->wholesaleAmount)];
     }
 
     /**
-     * Renews a service this reseller sold, at wholesale, from his wallet.
+     * Renews a service this reseller sold, at wholesale, from his wallet, for the price he confirmed.
      *
-     * @throws ResellerException see quoteRenewal(), discount_not_for_resellers, daily_limit_reached
+     * @throws ResellerException see quoteRenewal(), discount_not_for_resellers, daily_limit_reached, and the
+     *                           confirmation errors of buyNewService()
      * @throws WalletException   see buyNewService()
      */
-    public function renew(User $user, int $serviceId, ?string $discountCode = null): SettlementResult
+    public function renew(User $user, int $serviceId, ResellerConfirmation $confirmation, ?string $discountCode = null): SettlementResult
     {
         self::refuseDiscountCode($discountCode);
 
-        return $this->purchase($user, function (Reseller $reseller) use ($serviceId): Order {
+        return $this->purchase($user, ResellerConfirmations::KIND_RENEWAL, $serviceId, 0, 0, $confirmation, function (Reseller $reseller) use ($serviceId): array {
             if (!$this->salesSettings->renewalsEnabled()) {
                 throw new ResellerException('sales_closed');
             }
             $service = $this->soldService($reseller, $serviceId);
             [$quote, $renewal, $plan] = $this->pricing->quoteRenewal($reseller, $service);
 
-            return (new Order())
+            return [$quote, (new Order())
                 ->setUser($reseller->getUser())
                 ->setPlan($plan)
                 ->setTargetService($service)
@@ -193,14 +217,14 @@ class ResellerCheckout
                     ],
                     'priceSnapshot' => self::priceSnapshot($quote, $reseller),
                     'resellerOrder' => true,
-                ]);
+                ])];
         });
     }
 
     /**
-     * What this much extra traffic costs the reseller now (nothing is written).
+     * What this much extra traffic costs the reseller now, with its one-time confirmation (nothing is written).
      *
-     * @return array{Reseller, VpnService, WholesaleQuote}
+     * @return array{Reseller, VpnService, WholesaleQuote, ResellerConfirmation}
      *
      * @throws ResellerException reseller_unavailable, sales_closed, invalid_options, service_not_sold_by_you, price_unavailable
      */
@@ -209,27 +233,29 @@ class ResellerCheckout
         $reseller = $this->resellerFor($user) ?? throw new ResellerException('reseller_unavailable');
         $this->assertAddTrafficOpen($trafficGb);
         $service = $this->soldService($reseller, $serviceId);
+        $quote = $this->pricing->quoteAddTraffic($reseller, $service, $trafficGb);
 
-        return [$reseller, $service, $this->pricing->quoteAddTraffic($reseller, $service, $trafficGb)];
+        return [$reseller, $service, $quote, $this->confirmations->issue($reseller, ResellerConfirmations::KIND_TRAFFIC, $serviceId, $trafficGb, 0, $quote->wholesaleAmount)];
     }
 
     /**
-     * Adds traffic to a service this reseller sold, at wholesale, from his wallet.
+     * Adds traffic to a service this reseller sold, at wholesale, from his wallet, for the price he confirmed.
      *
-     * @throws ResellerException see quoteAddTraffic(), discount_not_for_resellers, daily_limit_reached
+     * @throws ResellerException see quoteAddTraffic(), discount_not_for_resellers, daily_limit_reached, and the
+     *                           confirmation errors of buyNewService()
      * @throws WalletException   see buyNewService()
      */
-    public function addTraffic(User $user, int $serviceId, int $trafficGb, ?string $discountCode = null): SettlementResult
+    public function addTraffic(User $user, int $serviceId, int $trafficGb, ResellerConfirmation $confirmation, ?string $discountCode = null): SettlementResult
     {
         self::refuseDiscountCode($discountCode);
 
-        return $this->purchase($user, function (Reseller $reseller) use ($serviceId, $trafficGb): Order {
+        return $this->purchase($user, ResellerConfirmations::KIND_TRAFFIC, $serviceId, $trafficGb, 0, $confirmation, function (Reseller $reseller) use ($serviceId, $trafficGb): array {
             $this->assertAddTrafficOpen($trafficGb);
             $service = $this->soldService($reseller, $serviceId);
             $quote = $this->pricing->quoteAddTraffic($reseller, $service, $trafficGb);
             $plan = $service->getOrder()?->getPlan() ?? throw new ResellerException('price_unavailable');
 
-            return (new Order())
+            return [$quote, (new Order())
                 ->setUser($reseller->getUser())
                 ->setPlan($plan)
                 ->setTargetService($service)
@@ -243,8 +269,33 @@ class ResellerCheckout
                     'addTraffic' => true,
                     'priceSnapshot' => self::priceSnapshot($quote, $reseller),
                     'resellerOrder' => true,
-                ]);
+                ])];
         });
+    }
+
+    /**
+     * Where the purchase of this confirmation stands, read from the database now (for the reseller's message after a
+     * failure or a second delivery): none (no order: nothing was taken), held (the wallet payment holds the money while
+     * the order is being processed; an unfinished one is released by the incomplete-order expiry), done (provisioned),
+     * released (the order closed without service; the money went back to the wallet) or failed (provisioning failed;
+     * the money is held for the admin's retry).
+     *
+     * @return array{string, Order|null}
+     */
+    public function purchaseState(Reseller $reseller, string $nonce): array
+    {
+        $order = '' === $nonce ? null : $this->entityManager->getRepository(Order::class)->findOneBy(['reseller' => $reseller, 'resellerNonce' => $nonce]);
+        if (!$order instanceof Order) {
+            return [self::STATE_NONE, null];
+        }
+        $this->entityManager->refresh($order);
+
+        return [match (true) {
+            OrderStatus::PROVISIONED === $order->getStatus() => self::STATE_DONE,
+            OrderStatus::PROVISIONING_FAILED === $order->getStatus() => self::STATE_FAILED,
+            null !== $this->paymentStarter->heldWalletPayment($order) => self::STATE_HELD,
+            default => self::STATE_RELEASED,
+        }, $order];
     }
 
     /**
@@ -290,11 +341,12 @@ class ResellerCheckout
     }
 
     /**
-     * @param \Closure(Reseller): Order $build builds the (unpersisted) order under the reseller lock
+     * @param \Closure(Reseller): array{WholesaleQuote, Order} $build quotes now and builds the (unpersisted) order, under
+     *                                                              the reseller lock
      *
      * @throws ResellerException|WalletException nothing was written
      */
-    private function purchase(User $user, \Closure $build): SettlementResult
+    private function purchase(User $user, string $kind, int $targetId, int $trafficGb, int $durationDays, ResellerConfirmation $confirmation, \Closure $build): SettlementResult
     {
         if (null === $this->resellerFor($user)) {
             throw new ResellerException('reseller_unavailable');
@@ -317,7 +369,20 @@ class ResellerCheckout
                 throw new ResellerException('reseller_unavailable');
             }
 
-            $order = $build($reseller);
+            // The confirmation: ours and for exactly this purchase; used once (a second delivery finds the first order and
+            // changes nothing); not expired; and the price now is the one the reseller confirmed.
+            $this->confirmations->assertAuthentic($reseller, $kind, $targetId, $trafficGb, $durationDays, $confirmation);
+            $first = $connection->fetchOne('SELECT id FROM `order` WHERE reseller_id = ? AND reseller_nonce = ?', [$resellerId, $confirmation->nonce]);
+            if (false !== $first) {
+                throw new ResellerException('already_processed', null, (int) $first);
+            }
+            $this->confirmations->assertFresh($confirmation);
+            [$quote, $order] = $build($reseller);
+            if ($quote->wholesaleAmount !== $confirmation->amount) {
+                $order = null;
+                throw new ResellerException('price_changed', $quote);
+            }
+            $order->setResellerNonce($confirmation->nonce);
             $limit = $reseller->getDailySpendLimit();
             if (null !== $limit && $this->spentToday($reseller) + $order->getAmount() > $limit) {
                 throw new ResellerException('daily_limit_reached');
@@ -335,6 +400,11 @@ class ResellerCheckout
             } elseif ($order instanceof Order && $this->entityManager->contains($order)) {
                 // Rolled back: the order row does not exist.
                 $this->entityManager->detach($order);
+            }
+            // The unique (reseller, nonce) key: another delivery of this confirmation got there first (a backstop: the
+            // reseller lock already serializes them and the check above finds the first order).
+            if ($e instanceof UniqueConstraintViolationException) {
+                throw new ResellerException('already_processed');
             }
 
             throw $e;

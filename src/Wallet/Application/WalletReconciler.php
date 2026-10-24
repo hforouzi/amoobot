@@ -28,7 +28,8 @@ use Doctrine\ORM\EntityManagerInterface;
  * expired: nothing would ever give that debit back), and a wallet payment in provisioning_failed / needs_review whose
  * debit is held while its order failed, was cancelled or expired, or another payment of the order is confirmed.
  *
- * Reseller orders (docs/design/reseller-and-claim.md, 4.4): one paid any other way than from the wallet; one whose
+ * Reseller orders (docs/design/reseller-and-claim.md, 4.4): one whose customer is not the reseller's own account (his
+ * price on someone else's order, paid from that wallet); one paid any other way than from the wallet; one whose
  * held wallet debit, amount and wholesale snapshot disagree; one whose wholesale snapshot is below what the pricing
  * allows (min(floor, retail)); a service whose sold-by reseller is not its order's reseller; and the admin refunds
  * (refund:order:N): without their reseller order (or credited to another wallet), above what that order's wallet
@@ -53,6 +54,7 @@ final class WalletReconciler
     public const RESELLER_DEBIT_SNAPSHOT_MISMATCH = 'reseller_debit_snapshot_mismatch';
     public const RESELLER_ORDER_BELOW_FLOOR = 'reseller_order_below_floor';
     public const RESELLER_SERVICE_ATTRIBUTION_MISMATCH = 'reseller_service_attribution_mismatch';
+    public const RESELLER_ORDER_WRONG_CUSTOMER = 'reseller_order_wrong_customer';
     public const REFUND_WITHOUT_ORDER = 'refund_without_order';
     public const REFUND_EXCEEDS_PAID = 'refund_exceeds_paid';
     public const REFUND_ON_LIVE_SERVICE = 'refund_on_live_service';
@@ -216,6 +218,11 @@ final class WalletReconciler
                  WHERE o.reseller_id IS NOT NULL
                    AND (o.wholesale_amount IS NULL OR o.reseller_floor_amount IS NULL OR o.retail_amount IS NULL
                         OR o.wholesale_amount < LEAST(o.reseller_floor_amount, o.retail_amount) OR o.amount <> o.wholesale_amount)",
+            // A reseller buys for himself (ResellerCheckout puts his own account on the order): anything else is his price
+            // on someone else's order.
+            self::RESELLER_ORDER_WRONG_CUSTOMER => "SELECT NULL AS payment_id, NULL AS transaction_id, NULL AS wallet_id, CONCAT('reseller order #', o.id, ' belongs to customer #', o.user_id, ' but reseller #', r.id, ' is customer #', r.user_id) AS detail
+                 FROM `order` o JOIN reseller r ON r.id = o.reseller_id
+                 WHERE o.user_id <> r.user_id",
             self::RESELLER_SERVICE_ATTRIBUTION_MISMATCH => "SELECT NULL AS payment_id, NULL AS transaction_id, NULL AS wallet_id, CONCAT('service #', s.id, ' is sold by reseller ', COALESCE(s.sold_by_reseller_id, 'none'), ' but its order #', o.id, ' is of reseller ', COALESCE(o.reseller_id, 'none')) AS detail
                  FROM vpn_service s JOIN `order` o ON o.id = s.order_id
                  WHERE NOT (s.sold_by_reseller_id <=> o.reseller_id)",
