@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Reseller;
 
-use App\Admin\UI\ResellerAdminController;
+use App\Admin\UI\Support\CsvCell;
 use App\Entity\AdminUser;
 use App\Entity\Order;
 use App\Entity\Reseller;
@@ -150,7 +150,7 @@ final class ResellerReviewFixesTest extends IntegrationTestCase
     #[DataProvider('cells')]
     public function testCsvCells(mixed $value, string $expected): void
     {
-        self::assertSame($expected, ResellerAdminController::csvCell($value));
+        self::assertSame($expected, CsvCell::of($value));
     }
 
     /** S5. */

@@ -9,6 +9,7 @@ use App\Entity\Plan;
 use App\Entity\Reseller;
 use App\Entity\User;
 use App\Entity\VpnService;
+use App\Kernel;
 use App\Payment\Application\Settlement\SettlementResult;
 use App\Provisioning\Application\RenewalSettingsProvider;
 use App\Provisioning\Application\TrafficAddonSettingsProvider;
@@ -288,14 +289,21 @@ class ResellerCheckout
         if (!$order instanceof Order) {
             return [self::STATE_NONE, null];
         }
+
+        return [$this->orderState($order), $order];
+    }
+
+    /** Where this reseller order stands now (see purchaseState()); read from the database. */
+    public function orderState(Order $order): string
+    {
         $this->entityManager->refresh($order);
 
-        return [match (true) {
+        return match (true) {
             OrderStatus::PROVISIONED === $order->getStatus() => self::STATE_DONE,
             OrderStatus::PROVISIONING_FAILED === $order->getStatus() => self::STATE_FAILED,
             null !== $this->paymentStarter->heldWalletPayment($order) => self::STATE_HELD,
             default => self::STATE_RELEASED,
-        }, $order];
+        };
     }
 
     /**
@@ -413,12 +421,17 @@ class ResellerCheckout
         return $this->walletPayment->pay($order, true);
     }
 
-    /** Today's wholesale of this reseller's orders that are open or paid (app timezone). */
+    /**
+     * Today's wholesale of this reseller's orders that are open or paid. "Today" is the day in the application timezone
+     * (Kernel::TIMEZONE, UTC): the daily cap restarts at 00:00 UTC, the same zone order.created_at is stored in.
+     */
     private function spentToday(Reseller $reseller): int
     {
+        $dayStart = new \DateTimeImmutable('today', new \DateTimeZone(Kernel::TIMEZONE));
+
         return (int) $this->entityManager->getConnection()->fetchOne(
             'SELECT COALESCE(SUM(amount), 0) FROM `order` WHERE reseller_id = ? AND created_at >= ? AND status NOT IN (?, ?, ?)',
-            [$reseller->getId(), (new \DateTimeImmutable('today'))->format('Y-m-d H:i:s'), ...self::CLOSED_STATUSES],
+            [$reseller->getId(), $dayStart->format('Y-m-d H:i:s'), ...self::CLOSED_STATUSES],
         );
     }
 

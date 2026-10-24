@@ -1138,6 +1138,7 @@ wallet_admin:
   error.form_expired: "The form expired; open the wallet again."
   error.wallet_insufficient: "The balance plus the credit limit does not cover this debit."
   error.credit_limit_below_usage: "The credit limit cannot be lower than the credit already in use."
+  error.busy: "The wallet is busy right now (another payment on it was being processed). Nothing was changed; please try again."
   error.wallet_idempotency_conflict: "This form was already used for another adjustment; open the wallet again."
 
 reseller_settings:

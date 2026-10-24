@@ -20,6 +20,7 @@ use App\Wallet\Application\WalletService;
 use App\Wallet\Domain\WalletKeys;
 use App\Wallet\Domain\WalletReferenceType;
 use App\Wallet\Domain\WalletTransactionType;
+use Doctrine\DBAL\ArrayParameterType;
 use Doctrine\ORM\EntityManagerInterface;
 
 /**
@@ -84,6 +85,45 @@ final class ResellerRefunds
     }
 
     /**
+     * For a page of orders, in two queries whatever its size (the reseller page): each order's refund already made
+     * (refund:order:N, its amount) and, for the others, what may still be refunded (paidAmount()).
+     *
+     * @param list<Order> $orders
+     *
+     * @return array{refunded: array<int, int>, refundable: array<int, int>} by order id; missing = none
+     */
+    public function overview(array $orders): array
+    {
+        $ids = array_values(array_filter(array_map(static fn (Order $o): int => (int) $o->getId(), $orders)));
+        if ([] === $ids) {
+            return ['refunded' => [], 'refundable' => []];
+        }
+        $connection = $this->entityManager->getConnection();
+        $orderByKey = [];
+        foreach ($ids as $id) {
+            $orderByKey[WalletKeys::orderRefund($id)] = $id;
+        }
+        $refunded = [];
+        foreach ($connection->fetchAllAssociative('SELECT idempotency_key, amount FROM wallet_transaction WHERE idempotency_key IN (?)', [array_keys($orderByKey)], [ArrayParameterType::STRING]) as $row) {
+            $refunded[$orderByKey[(string) $row['idempotency_key']]] = (int) $row['amount'];
+        }
+        $refundable = [];
+        foreach ($connection->fetchAllAssociative(
+            "SELECT p.order_id, -d.amount AS paid FROM payment p
+             JOIN wallet_transaction d ON d.idempotency_key = CONCAT('purchase:payment:', p.id)
+             LEFT JOIN wallet_transaction r ON r.reversal_of_id = d.id
+             WHERE p.order_id IN (?) AND p.method = ? AND p.status = ? AND r.id IS NULL
+             ORDER BY p.id",
+            [$ids, Payment::METHOD_WALLET, PaymentStatus::CONFIRMED],
+            [ArrayParameterType::INTEGER],
+        ) as $row) {
+            $refundable[(int) $row['order_id']] ??= (int) $row['paid'];
+        }
+
+        return ['refunded' => $refunded, 'refundable' => array_diff_key($refundable, $refunded)];
+    }
+
+    /**
      * @throws \InvalidArgumentException a problem() key: nothing was written
      */
     public function refund(Order $order, mixed $amount, string $reason, AdminActor $admin): WalletTransaction
@@ -144,15 +184,20 @@ final class ResellerRefunds
         $service = OrderType::NEW_SERVICE === $order->getType()
             ? $this->entityManager->getRepository(VpnService::class)->findOneBy(['order' => $order])
             : $order->getTargetService();
+        if (!$service instanceof VpnService) {
+            return false;
+        }
+        // The status as the database has it now (an earlier copy in this entity manager may be out of date).
+        $this->entityManager->refresh($service);
 
-        return $service instanceof VpnService && in_array($service->getStatus(), [VpnServiceStatus::SUSPENDED, VpnServiceStatus::DELETED], true);
+        return in_array($service->getStatus(), [VpnServiceStatus::SUSPENDED, VpnServiceStatus::DELETED], true);
     }
 
     /** A positive whole number of Toman (up to WalletService::MAX_AMOUNT), else null. */
     private static function amount(mixed $amount): ?int
     {
         $value = is_int($amount) ? (string) $amount : (is_string($amount) ? trim(str_replace([',', '٬', ' '], '', $amount)) : '');
-        if (1 !== preg_match('/^\d{1,13}$/', $value) || (int) $value <= 0 || (int) $value > WalletService::MAX_AMOUNT) {
+        if (1 !== preg_match('/^\d{1,13}$/D', $value) || (int) $value <= 0 || (int) $value > WalletService::MAX_AMOUNT) {
             return null;
         }
 

@@ -189,7 +189,7 @@ final class ResellerAdministration
     public static function percentToBp(string $percent, int $max): ?int
     {
         $percent = str_replace(['٫', ','], '.', trim($percent));
-        if (1 !== preg_match('/^(\d{1,3})(?:\.(\d{1,2}))?$/', $percent, $m)) {
+        if (1 !== preg_match('/^(\d{1,3})(?:\.(\d{1,2}))?$/D', $percent, $m)) {
             return null;
         }
         $bp = (int) $m[1] * 100 + (int) str_pad($m[2] ?? '', 2, '0');
@@ -258,7 +258,7 @@ final class ResellerAdministration
     {
         $value = str_replace([',', '٬', ' '], '', trim($value));
 
-        return 1 === preg_match('/^\d{1,13}$/', $value) && (int) $value > 0 ? (int) $value : null;
+        return 1 === preg_match('/^\d{1,13}$/D', $value) && (int) $value > 0 ? (int) $value : null;
     }
 
     /**

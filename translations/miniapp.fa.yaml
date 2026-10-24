@@ -723,4 +723,5 @@ admin.wallet.error.direction: "افزایش یا کاهش را انتخاب کن
 admin.wallet.error.amount: "یک مبلغ صحیح بیشتر از صفر به تومان وارد کنید."
 admin.wallet.error.reason: "دلیل (۳ تا ۵۰۰ نویسه) الزامی است."
 admin.wallet.error.wallet_insufficient: "موجودی به‌علاوه سقف اعتبار برای این برداشت کافی نیست."
+admin.wallet.error.busy: "کیف پول در این لحظه مشغول است (پرداخت دیگری روی آن در حال پردازش بود). چیزی تغییر نکرد؛ لطفاً دوباره تلاش کنید."
 admin.wallet.error.wallet_idempotency_conflict: "این درخواست قبلاً برای اصلاح دیگری استفاده شده است."

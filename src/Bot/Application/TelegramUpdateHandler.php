@@ -2148,6 +2148,14 @@ class TelegramUpdateHandler
             return;
         }
 
+        // A reseller's order is paid from his wallet only: never a payment-method or card-to-card screen; its state
+        // (money held while processed, with Cancel) as the reseller menu words it.
+        if ($order->isResellerOrder()) {
+            $this->resellerBotHandler->showHeldOrder($order, $chatId, $callbackId);
+
+            return;
+        }
+
         if (OrderType::NEW_SERVICE === $order->getType() && !$this->ensureMembershipGateAllowed($account, $chatId, $callbackId, TelegramChannelMembershipGate::CONTEXT_PURCHASE)) {
             return;
         }
