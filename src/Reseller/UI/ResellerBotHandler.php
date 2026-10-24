@@ -9,6 +9,7 @@ use App\Bot\Application\MembershipGatePrompt;
 use App\Bot\Application\TelegramChannelMembershipGate;
 use App\Bot\Application\TelegramKeyboardFactory;
 use App\Bot\Infrastructure\TelegramApiClient;
+use App\Entity\Order;
 use App\Entity\Reseller;
 use App\Entity\TelegramAccount;
 use App\Payment\Application\Settlement\SettlementOutcome;
@@ -343,6 +344,30 @@ final class ResellerBotHandler
     public function failureText(Reseller $reseller, string $nonce, bool $repeated = false): string
     {
         [$state, $order] = $this->checkout->purchaseState($reseller, $nonce);
+
+        return $this->stateText($state, $order, $repeated);
+    }
+
+    /**
+     * A reseller order opened from the customer menus ("continue my incomplete order", order tracking): never the
+     * card-to-card summary of a retail order; the same wording as after a failure (the money is held while it is
+     * processed, done, ...). While its money is held, Cancel (the usual confirmation) closes it and gives the money
+     * back once (PaymentSettlementService::cancelByCustomer).
+     */
+    public function showHeldOrder(Order $order, string $chatId, ?string $callbackId): void
+    {
+        $this->ack($callbackId);
+        $state = $this->checkout->orderState($order);
+        $rows = [];
+        if (ResellerCheckout::STATE_HELD === $state) {
+            $rows[] = [['text' => $this->texts->button('button.main.cancel_incomplete_order'), 'callback_data' => 'cancel_incomplete_order:'.$order->getId()]];
+        }
+        $rows[] = [['text' => $this->texts->button('button.reseller.back'), 'callback_data' => 'reseller']];
+        $this->telegram->sendMessage($chatId, $this->stateText($state, $order), ['inline_keyboard' => $rows]);
+    }
+
+    private function stateText(string $state, ?Order $order, bool $repeated = false): string
+    {
         $variables = ['order' => [
             'trackingCode' => (string) ($order?->getTrackingCode() ?? '-'),
             'amount' => number_format((int) ($order?->getAmount() ?? 0)),
@@ -396,7 +421,8 @@ final class ResellerBotHandler
         return match ($error) {
             'reseller_unavailable' => $this->texts->message('reseller.unavailable'),
             'sales_closed', 'plan_unavailable', 'invalid_options', 'price_unavailable', 'service_not_sold_by_you', 'daily_limit_reached', 'discount_not_for_resellers' => $this->texts->message('reseller.error.'.$error),
-            'wallet_insufficient' => $this->texts->message('wallet.pay_insufficient'),
+            // Not the customer's "choose another method": a reseller pays from his wallet only.
+            'wallet_insufficient' => $this->texts->message('reseller.error.wallet_insufficient'),
             'wallet_frozen' => $this->texts->message('wallet.frozen'),
             'wallet_disabled', 'wallet_payment_disabled' => $this->texts->message('wallet.disabled'),
             default => $this->texts->message('reseller.failed'),

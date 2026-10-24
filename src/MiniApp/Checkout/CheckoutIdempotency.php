@@ -20,7 +20,8 @@ use Doctrine\ORM\EntityManagerInterface;
 final class CheckoutIdempotency
 {
     public const HEADER = 'Idempotency-Key';
-    private const KEY_PATTERN = '/^[A-Za-z0-9_-]{16,64}$/';
+    // /D: no trailing newline (it would be another key for the same request).
+    private const KEY_PATTERN = '/^[A-Za-z0-9_-]{16,64}$/D';
 
     public function __construct(private readonly EntityManagerInterface $entityManager)
     {

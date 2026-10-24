@@ -276,7 +276,7 @@ final class ResellerCheckoutTest extends IntegrationTestCase
 
         // An order opened (debited) at its snapshot, then the discount changes: it settles at the snapshot, once.
         $order = (new Order())->setUser($this->user)->setPlan($this->plan)->setType(OrderType::NEW_SERVICE)->setAmount(105000)->setStatus(OrderStatus::WAITING_PAYMENT)
-            ->attributeToReseller($this->reseller, 105000, 150000, 75000)
+            ->attributeToReseller($this->reseller, 105000, 150000, 75000)->setResellerNonce('opened-at-the-old-price')
             ->setMetadata(['trafficGb' => 50, 'durationDays' => 30, 'priceSnapshot' => ['finalAmount' => 105000, 'reseller' => ['wholesaleAmount' => 105000]]]);
         $this->em->persist($order);
         $this->em->flush();

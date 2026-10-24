@@ -29,7 +29,8 @@ class ResellerConfirmations
     public const KIND_TRAFFIC = 'traffic';
     public const TTL_SECONDS = 600;
 
-    private const PATTERN = '/^([0-9a-z]{7})([0-9a-f]{6})([A-Za-z0-9_-]{10})$/';
+    // /D: $ is the very end (without it "…\n" would match: another nonce for the unique key, signature still valid).
+    private const PATTERN = '/^([0-9a-z]{7})([0-9a-f]{6})([A-Za-z0-9_-]{10})$/D';
 
     public function __construct(
         private readonly ClockInterface $clock,

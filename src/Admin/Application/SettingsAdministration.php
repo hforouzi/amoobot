@@ -297,7 +297,7 @@ final class SettingsAdministration
 
         return match (true) {
             null === ResellerAdministration::percentToBp(self::text($form, 'reseller_floor_percent', ''), 10000) => ['field' => 'reseller_floor_percent', 'message' => 'flash.settings.reseller_floor'],
-            1 !== preg_match('/^\d{1,7}$/', $rounding) || (int) $rounding < 1 || (int) $rounding > ResellerSettings::MAX_ROUNDING => ['field' => 'reseller_rounding', 'message' => 'flash.settings.reseller_rounding'],
+            1 !== preg_match('/^\d{1,7}$/D', $rounding) || (int) $rounding < 1 || (int) $rounding > ResellerSettings::MAX_ROUNDING => ['field' => 'reseller_rounding', 'message' => 'flash.settings.reseller_rounding'],
             default => null,
         };
     }

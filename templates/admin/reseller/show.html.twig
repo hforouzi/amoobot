@@ -127,9 +127,9 @@
                             <td><bdi>{{ (order.retailAmount ?? 0)|number_format }}</bdi> {{ toman }}</td>
                             <td>{{ order.createdAt|date('Y-m-d H:i') }}</td>
                             <td>
-                                {% if refunded[order.id] %}
-                                    <span data-refunded><bdi>{{ refunded[order.id].amount|number_format }}</bdi> {{ toman }}</span>
-                                {% elseif canRefund and refundable[order.id] and order.status == 'provisioned' %}
+                                {% if refunded[order.id] is defined %}
+                                    <span data-refunded><bdi>{{ refunded[order.id]|number_format }}</bdi> {{ toman }}</span>
+                                {% elseif canRefund and refundable[order.id] is defined and order.status == 'provisioned' %}
                                     <form method="post" action="{{ path('admin_reseller_order_refund', {orderId: order.id}) }}" class="admin-inline-form" data-refund-form>
                                         <input type="hidden" name="_token" value="{{ csrf_token(csrf) }}">
                                         <input class="form-control form-control-sm" type="number" min="1" max="{{ refundable[order.id] }}" step="1" name="amount" value="{{ refundable[order.id] }}" dir="ltr" required>

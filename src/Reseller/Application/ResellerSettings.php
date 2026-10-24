@@ -45,6 +45,6 @@ class ResellerSettings
     {
         $value = trim((string) $this->settings->get($key, (string) $default));
 
-        return 1 === preg_match('/^\d{1,12}$/', $value) ? (int) $value : $default;
+        return 1 === preg_match('/^\d{1,12}$/D', $value) ? (int) $value : $default;
     }
 }

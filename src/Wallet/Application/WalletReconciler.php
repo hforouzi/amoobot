@@ -29,7 +29,8 @@ use Doctrine\ORM\EntityManagerInterface;
  * debit is held while its order failed, was cancelled or expired, or another payment of the order is confirmed.
  *
  * Reseller orders (docs/design/reseller-and-claim.md, 4.4): one whose customer is not the reseller's own account (his
- * price on someone else's order, paid from that wallet); one paid any other way than from the wallet; one whose
+ * price on someone else's order, paid from that wallet); one without its confirmation nonce (not created by
+ * ResellerCheckout, so not protected against a second delivery); one paid any other way than from the wallet; one whose
  * held wallet debit, amount and wholesale snapshot disagree; one whose wholesale snapshot is below what the pricing
  * allows (min(floor, retail)); a service whose sold-by reseller is not its order's reseller; and the admin refunds
  * (refund:order:N): without their reseller order (or credited to another wallet), above what that order's wallet
@@ -55,6 +56,7 @@ final class WalletReconciler
     public const RESELLER_ORDER_BELOW_FLOOR = 'reseller_order_below_floor';
     public const RESELLER_SERVICE_ATTRIBUTION_MISMATCH = 'reseller_service_attribution_mismatch';
     public const RESELLER_ORDER_WRONG_CUSTOMER = 'reseller_order_wrong_customer';
+    public const RESELLER_ORDER_WITHOUT_NONCE = 'reseller_order_without_nonce';
     public const REFUND_WITHOUT_ORDER = 'refund_without_order';
     public const REFUND_EXCEEDS_PAID = 'refund_exceeds_paid';
     public const REFUND_ON_LIVE_SERVICE = 'refund_on_live_service';
@@ -223,6 +225,10 @@ final class WalletReconciler
             self::RESELLER_ORDER_WRONG_CUSTOMER => "SELECT NULL AS payment_id, NULL AS transaction_id, NULL AS wallet_id, CONCAT('reseller order #', o.id, ' belongs to customer #', o.user_id, ' but reseller #', r.id, ' is customer #', r.user_id) AS detail
                  FROM `order` o JOIN reseller r ON r.id = o.reseller_id
                  WHERE o.user_id <> r.user_id",
+            // ResellerCheckout stores the confirmation's nonce on every reseller order (unique per reseller).
+            self::RESELLER_ORDER_WITHOUT_NONCE => "SELECT NULL AS payment_id, NULL AS transaction_id, NULL AS wallet_id, CONCAT('reseller order #', o.id, ' (', o.status, ') has no confirmation nonce') AS detail
+                 FROM `order` o
+                 WHERE o.reseller_id IS NOT NULL AND o.reseller_nonce IS NULL",
             self::RESELLER_SERVICE_ATTRIBUTION_MISMATCH => "SELECT NULL AS payment_id, NULL AS transaction_id, NULL AS wallet_id, CONCAT('service #', s.id, ' is sold by reseller ', COALESCE(s.sold_by_reseller_id, 'none'), ' but its order #', o.id, ' is of reseller ', COALESCE(o.reseller_id, 'none')) AS detail
                  FROM vpn_service s JOIN `order` o ON o.id = s.order_id
                  WHERE NOT (s.sold_by_reseller_id <=> o.reseller_id)",

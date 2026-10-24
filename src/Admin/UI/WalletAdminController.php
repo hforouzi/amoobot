@@ -185,7 +185,11 @@ final class WalletAdminController extends AbstractController
         if (!$this->validToken($wallet, $request)) {
             return $this->back($wallet, 'flash.csrf_expired', 'danger');
         }
-        $this->administration->setFrozen($wallet->getUser(), $frozen, $this->admin());
+        try {
+            $this->administration->setFrozen($wallet->getUser(), $frozen, $this->admin());
+        } catch (WalletException $e) {
+            return $this->back($wallet, 'wallet_admin.error.'.$e->error, 'danger');
+        }
 
         return $this->back($wallet, $frozen ? 'wallet_admin.flash.frozen' : 'wallet_admin.flash.unfrozen', 'success');
     }

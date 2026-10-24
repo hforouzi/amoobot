@@ -40,7 +40,8 @@ class WalletService
 {
     /** 1,000,000,000,000 Toman: a sanity bound, far above any real amount. */
     public const MAX_AMOUNT = 1_000_000_000_000;
-    private const KEY_PATTERN = '/^[A-Za-z0-9:._-]{1,128}$/';
+    // /D: no trailing newline (it would be another unique key for the same movement).
+    private const KEY_PATTERN = '/^[A-Za-z0-9:._-]{1,128}$/D';
 
     public function __construct(
         private readonly EntityManagerInterface $entityManager,

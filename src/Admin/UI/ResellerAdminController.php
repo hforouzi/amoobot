@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Admin\UI;
 
+use App\Admin\UI\Support\CsvCell;
 use App\Entity\AdminUser;
 use App\Entity\Order;
 use App\Entity\Plan;
@@ -20,7 +21,6 @@ use App\Security\AdminPermission;
 use App\Wallet\Application\WalletQueries;
 use App\Wallet\Application\WalletService;
 use App\Wallet\Domain\WalletException;
-use App\Wallet\Domain\WalletKeys;
 use Doctrine\ORM\EntityManagerInterface;
 use EasyCorp\Bundle\EasyAdminBundle\Attribute\AdminRoute;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
@@ -113,13 +113,14 @@ final class ResellerAdminController extends AbstractController
         /** @var list<Order> $rows */
         $rows = $this->entityManager->getRepository(Order::class)->findBy(['reseller' => $reseller], ['id' => 'DESC'], self::PAGE_SIZE + 1, ($page - 1) * self::PAGE_SIZE);
         $orders = array_slice($rows, 0, self::PAGE_SIZE);
-        $refundable = [];
-        $refunded = [];
-        foreach ($orders as $order) {
-            $refunded[(int) $order->getId()] = $this->wallets->findTransaction(WalletKeys::orderRefund((int) $order->getId()));
-            $refundable[(int) $order->getId()] = null === $refunded[(int) $order->getId()] ? $this->refunds->paidAmount($order) : null;
-        }
-        $rules = $this->entityManager->getRepository(ResellerPlanPrice::class)->findBy(['reseller' => $reseller], ['id' => 'ASC']);
+        // Refunds and refundable amounts of the whole page in two queries; the rules with their plans in one.
+        $refunds = $this->refunds->overview($orders);
+        /** @var list<ResellerPlanPrice> $rules */
+        $rules = $this->entityManager->getRepository(ResellerPlanPrice::class)->createQueryBuilder('rp')
+            ->join('rp.plan', 'p')->addSelect('p')
+            ->where('rp.reseller = :reseller')->setParameter('reseller', $reseller)
+            ->orderBy('rp.id', 'ASC')
+            ->getQuery()->getResult();
         $clipped = [];
         foreach ($rules as $rule) {
             $clipped[(int) $rule->getId()] = $this->pricing->isClipped($reseller, $rule->getPlan(), $rule);
@@ -134,8 +135,8 @@ final class ResellerAdminController extends AbstractController
             'clipped' => $clipped,
             'plans' => $this->entityManager->getRepository(Plan::class)->findBy([], ['title' => 'ASC']),
             'orders' => $orders,
-            'refundable' => $refundable,
-            'refunded' => $refunded,
+            'refundable' => $refunds['refundable'],
+            'refunded' => $refunds['refunded'],
             'hasNext' => count($rows) > self::PAGE_SIZE,
             'page' => $page,
             'enabled' => $this->settings->enabled(),
@@ -277,7 +278,7 @@ final class ResellerAdminController extends AbstractController
             }
             $handle = fopen('php://temp', 'r+') ?: throw new \RuntimeException('Cannot open a temporary stream.');
             foreach ($lines as $line) {
-                fputcsv($handle, array_map(self::csvCell(...), $line), escape: '');
+                fputcsv($handle, array_map(CsvCell::of(...), $line), escape: '');
             }
             rewind($handle);
             $csv = (string) stream_get_contents($handle);
@@ -297,17 +298,6 @@ final class ResellerAdminController extends AbstractController
     }
 
     /**
-     * One CSV cell, safe to open in a spreadsheet: a text starting with = + - @ TAB or CR would be read as a formula
-     * (OWASP "CSV injection"), so it gets a leading ' (shown as text). Numbers are written as they are.
-     */
-    public static function csvCell(mixed $value): string
-    {
-        $text = (string) $value;
-
-        return is_string($value) && 1 === preg_match('/^[=+\-@\t\r]/', $text) ? "'".$text : $text;
-    }
-
-    /**
      * The report's dates (inclusive), this month by default.
      *
      * @return array{\DateTimeImmutable, \DateTimeImmutable}
@@ -315,7 +305,7 @@ final class ResellerAdminController extends AbstractController
     private static function range(Request $request): array
     {
         $parse = static function (mixed $value): ?\DateTimeImmutable {
-            $date = is_string($value) && 1 === preg_match('/^\d{4}-\d{2}-\d{2}$/', $value) ? \DateTimeImmutable::createFromFormat('!Y-m-d', $value) : false;
+            $date = is_string($value) && 1 === preg_match('/^\d{4}-\d{2}-\d{2}$/D', $value) ? \DateTimeImmutable::createFromFormat('!Y-m-d', $value) : false;
 
             return false === $date ? null : $date;
         };
