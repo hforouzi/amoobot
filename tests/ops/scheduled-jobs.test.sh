@@ -216,10 +216,10 @@ if have systemd-analyze; then
     out="$(systemd-analyze calendar "$JOB_CALENDAR" 2>&1)"
     check "OnCalendar '${JOB_CALENDAR}' (${JOB_NAME}) is valid" grep -q 'Next elapse' <<< "$out"
   done
-  check "6 jobs rendered" test "$(ls "$units"/*.timer | wc -l)" -eq 6
+  check "7 jobs rendered" test "$(ls "$units"/*.timer | wc -l)" -eq 7
   check "no job schedules repair-stuck" bash -c '! grep -l repair-stuck "$1"/*.service' _ "$units"
-  check "every job runs as www-data" bash -c '[[ $(grep -l "^User=www-data$" "$1"/*.service | wc -l) -eq 6 ]]' _ "$units"
-  check "every job has OnFailure alert" bash -c '[[ $(grep -l "^OnFailure=amoobot-job-alert@%N.service$" "$1"/*.service | wc -l) -eq 6 ]]' _ "$units"
+  check "every job runs as www-data" bash -c '[[ $(grep -l "^User=www-data$" "$1"/*.service | wc -l) -eq 7 ]]' _ "$units"
+  check "every job has OnFailure alert" bash -c '[[ $(grep -l "^OnFailure=amoobot-job-alert@%N.service$" "$1"/*.service | wc -l) -eq 7 ]]' _ "$units"
   # verify: only diagnostics about our units count (the host's own units may warn), and complaints about
   # binaries/paths that exist on the server but not here are ignored.
   verify="$(cd "$units" && systemd-analyze verify --man=no ./*.timer ./*.service 2>&1 | grep 'amoobot-job' \
@@ -261,7 +261,7 @@ EOF
   check "dry-run shows each new timer file" grep -q '+ OnCalendar=\*:5/15' <<< "$jobs_part"
   check "dry-run shows the alert unit and logrotate" bash -c 'grep -q "amoobot-job-alert@.service" <<< "$1" && grep -q "+     rotate 14" <<< "$1"' _ "$jobs_part"
   check "dry-run shows the manifest" grep -q '+ sync 4200 \*:0/15' <<< "$jobs_part"
-  check "dry-run would enable every timer" test "$(grep -c 'systemctl enable --now amoobot-job-' <<< "$jobs_part")" -eq 6
+  check "dry-run would enable every timer" test "$(grep -c 'systemctl enable --now amoobot-job-' <<< "$jobs_part")" -eq 7
   check "dry-run pauses jobs before the checkout" grep -q 'pause scheduled jobs' <<< "$out"
   leak=0
   while IFS='=' read -r k v; do
@@ -273,7 +273,7 @@ EOF
   check "preflight refuses to schedule repair-stuck" bash -c '[[ $1 -ne 0 ]] && grep -q "must never be scheduled" <<< "$2"' _ "$rc" "$out"
   sed 's/app:payments:repair-stuck --apply/app:plans:adjust-prices --percent=50/' "$WORK/deploy-bad.sh" > "$WORK/deploy-destructive.sh"
   out="$(dry_run "$WORK/deploy-destructive.sh" "$WORK/prod.env")"; rc=$?
-  check "preflight refuses other unreviewed commands" bash -c '[[ $1 -ne 0 ]] && grep -q "only the six reviewed automation tasks" <<< "$2"' _ "$rc" "$out"
+  check "preflight refuses other unreviewed commands" bash -c '[[ $1 -ne 0 ]] && grep -q "only the seven reviewed automation tasks" <<< "$2"' _ "$rc" "$out"
 
   # write_file for real (as the current user): new -> changed, same content -> unchanged, edit -> changed.
   eval "$(sed -n '/^FILE_CHANGED=0$/,/^}/p' "$ROOT/deploy.sh")"

@@ -74,6 +74,7 @@ final class MenuStructureTest extends IntegrationTestCase
                 $this->path(VpnServiceCrudController::class),
                 '/admin/wallets',
                 '/admin/resellers',
+                '/admin/claims',
             ],
         ], $this->menuFor($support));
 
@@ -184,6 +185,7 @@ final class MenuStructureTest extends IntegrationTestCase
                 $this->path(VpnServiceCrudController::class),
                 '/admin/wallets',
                 '/admin/resellers',
+                '/admin/claims',
             ],
             $this->trans('admin.menu.messaging') => [
                 $this->path(BroadcastMessageCrudController::class),

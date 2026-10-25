@@ -327,6 +327,18 @@ class TelegramApiClient
         return $this->callApi('setChatMenuButton', ['menu_button' => $menuButton]);
     }
 
+    /**
+     * The bot's own user (id, username, ...).
+     *
+     * @return array<string, mixed>
+     */
+    public function getMe(): array
+    {
+        $result = $this->callApi('getMe', [])['result'] ?? [];
+
+        return is_array($result) ? $result : [];
+    }
+
     public function getWebhookInfo(): array
     {
         return $this->callApi('getWebhookInfo', []);

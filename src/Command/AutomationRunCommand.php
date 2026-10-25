@@ -11,6 +11,7 @@ use App\Provisioning\Application\ServiceAutoSuspendService;
 use App\Provisioning\Application\ServiceExpiryChecker;
 use App\Provisioning\Application\ServiceNotificationService;
 use App\Provisioning\Application\ServiceUsageSyncService;
+use App\Reseller\Application\ClaimMaintenance;
 use App\Shop\Application\IncompleteOrderExpiryService;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\Console\Attribute\AsCommand;
@@ -33,6 +34,7 @@ final class AutomationRunCommand extends Command
         private readonly StuckPaymentReminder $stuckPaymentReminder,
         private readonly BroadcastSender $broadcastSender,
         private readonly LoggerInterface $logger,
+        private readonly ClaimMaintenance $claimMaintenance,
     ) {
         parent::__construct();
     }
@@ -42,7 +44,7 @@ final class AutomationRunCommand extends Command
         $this
             ->addOption('dry-run', null, InputOption::VALUE_NONE, 'Show automation results without saving/sending')
             ->addOption('limit', null, InputOption::VALUE_REQUIRED, 'Max services to process per task; falls back to automation.batch_limit', null)
-            ->addOption('only', null, InputOption::VALUE_REQUIRED, 'Run only orders|sync|expiry|notifications|suspend|broadcasts|all', 'all');
+            ->addOption('only', null, InputOption::VALUE_REQUIRED, 'Run only orders|sync|expiry|notifications|suspend|broadcasts|claims|all', 'all');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
@@ -50,10 +52,10 @@ final class AutomationRunCommand extends Command
         $io = new SymfonyStyle($input, $output);
         $dryRun = (bool) $input->getOption('dry-run');
         $only = strtolower(trim((string) $input->getOption('only')));
-        $onlyOptions = ['orders', 'sync', 'expiry', 'notifications', 'suspend', 'broadcasts', 'all'];
+        $onlyOptions = ['orders', 'sync', 'expiry', 'notifications', 'suspend', 'broadcasts', 'claims', 'all'];
 
         if (!in_array($only, $onlyOptions, true)) {
-            $io->error('--only option must be one of: orders, sync, expiry, notifications, suspend, broadcasts, all.');
+            $io->error('--only option must be one of: orders, sync, expiry, notifications, suspend, broadcasts, claims, all.');
 
             return Command::FAILURE;
         }
@@ -164,6 +166,20 @@ final class AutomationRunCommand extends Command
                 $this->logger->info('automation_task_completed', ['task' => 'broadcasts', 'summary' => $summary->toArray()]);
             } else {
                 $this->logger->info('automation_task_skipped_by_setting', ['task' => 'broadcasts']);
+            }
+        }
+
+        // Claim links (app:claims:expire): expire links past their time, retry pending panel updates. Not behind an
+        // automation switch and run whatever reseller.claims_enabled says: it only tidies up (nothing when unused).
+        if ($this->shouldRun($only, 'claims')) {
+            try {
+                $expired = $this->claimMaintenance->expire($limit, $dryRun);
+                $sync = $this->claimMaintenance->retryPanelSync($limit, $dryRun);
+                $updated += $expired + $sync['synced'];
+                $this->logger->info('automation_task_completed', ['task' => 'claims', 'summary' => ['expired' => $expired] + $sync]);
+            } catch (\Throwable $e) {
+                ++$failed;
+                $this->logger->error('automation_task_failed', ['task' => 'claims', 'error' => $e->getMessage()]);
             }
         }
 

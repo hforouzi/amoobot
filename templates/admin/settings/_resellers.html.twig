@@ -1,4 +1,4 @@
-{# Settings page, "resellers" tab: the reseller switch and the wholesale floor / rounding (docs/design/reseller-and-claim.md). #}
+{# Settings page, "resellers" tab: the reseller switch, the wholesale floor / rounding and the claim links (docs/design/reseller-and-claim.md). #}
 {% trans_default_domain 'admin' %}
     <p class="admin-page-subtitle">{{ 'reseller_settings.subtitle'|trans }}</p>
 
@@ -24,6 +24,22 @@
                     <label class="form-label" for="reseller_rounding">{{ 'reseller_settings.fields.rounding'|trans }}</label>
                     <input class="form-control" type="number" min="1" step="1" dir="ltr" id="reseller_rounding" name="reseller_rounding" value="{{ values.reseller_rounding }}">
                     <div class="form-text">{{ 'reseller_settings.help.rounding'|trans }}</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="admin-section" data-claim-settings>
+            <h2>{{ 'reseller_settings.sections.claims'|trans }}</h2>
+            <div class="admin-checkbox-row">
+                <input type="checkbox" id="reseller_claims_enabled" name="reseller_claims_enabled" {% if values.reseller_claims_enabled %}checked{% endif %}>
+                <label for="reseller_claims_enabled">{{ 'reseller_settings.fields.claims_enabled'|trans }}</label>
+            </div>
+            <div class="form-text">{{ 'reseller_settings.help.claims_enabled'|trans }}</div>
+            <div class="admin-form-grid">
+                <div class="admin-form-row">
+                    <label class="form-label" for="reseller_claim_ttl_hours">{{ 'reseller_settings.fields.claim_ttl_hours'|trans }}</label>
+                    <input class="form-control" type="number" min="1" max="{{ constant('App\\Reseller\\Application\\ResellerSettings::MAX_CLAIM_TTL_HOURS') }}" step="1" dir="ltr" id="reseller_claim_ttl_hours" name="reseller_claim_ttl_hours" value="{{ values.reseller_claim_ttl_hours }}">
+                    <div class="form-text">{{ 'reseller_settings.help.claim_ttl_hours'|trans }}</div>
                 </div>
             </div>
         </div>

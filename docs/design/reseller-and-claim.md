@@ -1,6 +1,6 @@
 # Resellers and service claim links — design
 
-Status: **S1 (reseller core) implemented** (admin guide: [docs/en/resellers.md](../en/resellers.md)); S2 and S3 not yet. Persian summary: [docs/fa/design/reseller-and-claim.md](../fa/design/reseller-and-claim.md).
+Status: **S1 (reseller core) and S2 (claim links) implemented** (admin guide: [docs/en/resellers.md](../en/resellers.md)); S3 not yet. Persian summary: [docs/fa/design/reseller-and-claim.md](../fa/design/reseller-and-claim.md). D4 and D5 were confirmed as recommended. Where S2 differs from the text below, see "S2 as built" at the end of section 7.
 
 Items marked **DECISION NEEDED** are decisions this document takes, with a recommendation, that the owner should
 confirm or change before S1 starts. Everything else is decided.
@@ -131,7 +131,7 @@ Index `(sold_by_reseller_id, status)`.
 | `token_hash` | char(64), **UNIQUE** | `sha256(token)` hex; the token itself is never stored or logged |
 | `status` | varchar(16) | `open` \| `claimed` \| `revoked` \| `expired` |
 | `open_service_id` | int NULL, **UNIQUE** | `= service_id` while `open`, NULL otherwise: at most one open link per service (MySQL/MariaDB have no partial index) |
-| `expires_at` | datetime | Default now + 72 h; max 30 days (setting `reseller.claim_ttl_hours`) |
+| `expires_at` | datetime | Default now + 168 h (7 days); max 30 days (setting `reseller.claim_ttl_hours`) |
 | `created_at`, `claimed_at`, `revoked_at` | datetime | |
 | `claimed_by_user_id` | int NULL FK `user.id` | |
 | `claimed_by_telegram_id` | varchar(32) NULL | As seen at claim time |
@@ -361,6 +361,7 @@ expired / claimed. The reseller's real resale price is unknown to the shop, so t
 | `refund_without_order` / `refund_exceeds_paid` | A `refund:order:N` row with no order N, or above that order's confirmed wallet debit |
 | `refund_on_live_service` | A refund whose service is still active (warning) |
 | `claim_owner_mismatch` | A `claimed` claim whose service owner differs from `claimed_by_user_id` with no later ownership event |
+| `claim_open_owner_changed`, `claim_open_service_mismatch`, `claim_open_reseller_disabled`, `claim_without_ownership_event`, `ownership_event_owner_mismatch` | S2 as built (section 7): an open link that can never be used, an `open_service_id` out of step, an open link of a disabled reseller, a claim without its event, an owner other than the last event's |
 
 ## 5. Abuse and fraud
 
@@ -434,7 +435,7 @@ Customer and reseller events live in `service_claim` and `service_ownership_even
 
 ## 7. Phases (each a small PR, off by default)
 
-Settings: `reseller.enabled` (S1, default **false**) and `reseller.claim_enabled` (S2, default **false**). With them
+Settings: `reseller.enabled` (S1, default **false**) and `reseller.claims_enabled` (S2, default **false**). With them
 off, every new route returns 404, no menu shows, and no behaviour changes.
 
 ### S1 — reseller core
@@ -470,6 +471,23 @@ off, every new route returns 404, no menu shows, and no behaviour changes.
 - **Review checklist:** lock order claim → service, no money rows touched; no token in logs; one generic error;
   `public_token` rotated; ownership check (`CustomerServiceFinder`) is the only gate for the new owner; reseller loses
   link/config access after the claim.
+
+#### S2 as built
+
+Differences from the plan above, all decided while implementing it:
+
+- Settings: `reseller.claims_enabled` (not `claim_enabled`) and `reseller.claim_ttl_hours`, default **168 h (7 days)**, 1..720. Claims work only with `reseller.enabled` on too.
+- `service_claim` also has `from_user_id` (the owner the link moves the service away from, checked again at claim time: for an admin-made link the current owner) and, instead of `panel_synced_at` alone, `panel_sync_status` (pending / synced / skipped / failed), `panel_sync_attempts`, `panel_sync_next_at`, `panel_sync_error`, plus `expired_at` and `revoke_reason`. `reseller_id` is NULL for an admin-made link (a reseller disable revokes only his own links). CHECK constraints: the status values, and `open_service_id` set exactly while open.
+- Confirm step: the preview looks the claim up by `token_hash`; the confirm button / Mini App form then carries the claim id and a **ticket** (HMAC over claim id, Telegram user id, token hash and issue time; 30 minutes), never the token. The claim transaction therefore locks the `service_claim` row **by id**, then `vpn_service`: the same lock order. A second delivery of the claimer's own confirmation answers "already yours" without writing.
+- "In settlement" (`ServiceOrdersInFlight`): the service's own order or an order targeting it is paid / processing / payment_pending / provisioning_failed, or waits for payment with a payment submitted, in review or provisioning_failed, or a wallet payment pending (debit held). The claim answers `service_busy`, which is not the generic error (the person holds a valid link).
+- Unknown or malformed payloads, and payloads whose handler is off, are **not routed**: the bot then does exactly what it did before (a plain `/start` is unchanged; `/start <anything else>` gets what any unknown text gets), so with claims off nothing changes.
+- D4 "Reset my connection links": there was no credential rotation in the code, so drivers gained `CredentialRotationDriverInterface` (modern 3x-ui: new UUID and subId through `clients/update`, read back; password-based clients are refused); the links are then rebuilt by `ServiceConfigRegenerator`. Only for the owner whose ownership came from a claim, VLESS / VMess, no order in settlement.
+- D5 enforcement: `PaymentCustomerNotifier` sends a renewal / add-traffic confirmation **without links** to a payer who no longer owns the service, and the usual message to the owner.
+- The panel owner update is `ClientOwnerDriverInterface::updateClientOwner()` (modern driver: `updateAndVerify` with tgId and comment). Retries back off 5 min × 2^n up to 6 h, given up after 12 attempts.
+- Tokens are masked in `bot_message_log` (`ClaimToken::redact`, in `BotMessageLogger`).
+- Reconcile codes: `claim_open_owner_changed`, `claim_open_service_mismatch`, `claim_open_reseller_disabled`, `claim_without_ownership_event`, `claim_owner_mismatch`, `ownership_event_owner_mismatch`, reported with the payments by `app:wallet:reconcile`.
+- Admin pages are `ClaimAdminController` (SERVICES_VIEW / SERVICES_MANAGE), not part of EasyAdmin CRUD. The "info line in the admin log channel" is a Telegram message to admins with LOGS_VIEW plus a log line.
+- Not built: claim history in the reseller report (claims made / open / expired / claimed counts), the claimer's reset in the Mini App (bot only), a table row for a claimer's link reset (logged only).
 
 ### S3 — reseller Mini App
 

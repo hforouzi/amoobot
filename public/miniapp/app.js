@@ -34,6 +34,9 @@
  *   button[data-fill-from] fetches {code} from that URL into the form's field [name=data-fill-target]
  *   button[data-copy]      copies its value
  *   button[data-close-app] closes the Mini App (back to the chat)
+ *
+ * Deep links: opened with startapp=<payload>, the app signs in again (even with a stored session) and opens the section
+ * the /app/auth answer names in "start" (a claim link's screen), with Home behind it.
  *   .view-root[data-main-button-text][data-main-button-href|data-main-button-form]  Telegram's MainButton
  */
 (function () {
@@ -47,6 +50,8 @@
     var lang = body.getAttribute('data-lang') === 'en' ? 'en' : 'fa';
     var session = null;
     var stack = [];
+    // The section a deep link (startapp=claim_...) opens first, from the /app/auth answer; used once.
+    var startTarget = null;
     var mainButtonHandler = null;
 
     /* ---------- Telegram integration ---------- */
@@ -249,6 +254,9 @@
                     throw error;
                 }
                 saveSession({token: data.token, csrfToken: data.csrfToken, expiresAt: data.expiresAt});
+                if (typeof data.start === 'string' && /^\/app\/view\/[A-Za-z0-9\/_-]{1,200}$/.test(data.start)) {
+                    startTarget = data.start;
+                }
             });
         });
     }
@@ -279,7 +287,7 @@
         return fetch(withLang(url), {method: method, headers: headers, body: payload, credentials: 'omit'}).then(function (response) {
             if (response.status === 401 && !retried) {
                 saveSession(null);
-                return signIn().then(function () { return api(method, url, options, true); });
+                return signIn().then(function () { startTarget = null; return api(method, url, options, true); });
             }
             return response;
         });
@@ -802,10 +810,31 @@
 
     /* ---------- start ---------- */
 
+    /* Opened from a deep link (initData has start_param): sign in again so the server routes it, even with a session. */
+    function hasStartParam() {
+        try {
+            return !!new URLSearchParams(tg.initData).get('start_param');
+        } catch (e) {
+            return false;
+        }
+    }
+
     function start() {
         showState('loading');
-        session = loadSession();
+        session = hasStartParam() ? null : loadSession();
         (session ? Promise.resolve() : signIn()).then(loadNav).then(function () {
+            // A deep link's section (a claim link): that section, with Home behind the BackButton.
+            if (startTarget) {
+                var target = startTarget;
+                startTarget = null;
+                stack = ['/app/view/home'];
+                return navigate(target, true).then(function () {
+                    if (!view.querySelector('.view-root')) {
+                        stack = [];
+                        return navigate('/app/view/home', true);
+                    }
+                });
+            }
             // ?service=ID (the bot's "View in the app" button): that service, with Home behind the BackButton.
             var service = new URLSearchParams(window.location.search).get('service');
             if (service && /^[0-9]{1,10}$/.test(service)) {

@@ -1,0 +1,12 @@
+{% extends 'miniapp/view/_base.html.twig' %}
+{% trans_default_domain 'miniapp' %}
+{# A claim link that cannot be used (one message for every reason of that kind: no oracle), or a limit was reached. #}
+{% block section %}services{% endblock %}
+{% block title %}{{ 'claim.title'|trans }}{% endblock %}
+{% block content %}
+    <section class="card" data-claim-failed>
+        <p class="state-icon" aria-hidden="true">🔗</p>
+        <p>{{ messageKey|trans }}</p>
+        <a class="btn secondary small" href="{{ path('miniapp_services') }}" data-nav>{{ 'claim.my_services'|trans }}</a>
+    </section>
+{% endblock %}

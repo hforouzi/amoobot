@@ -7,6 +7,8 @@ namespace App\Wallet\Application;
 use App\Entity\Payment;
 use App\Payment\Domain\PaymentStatus;
 use App\Provisioning\Domain\VpnServiceStatus;
+use App\Reseller\Domain\ClaimStatus;
+use App\Reseller\Domain\ResellerStatus;
 use App\Shop\Domain\OrderStatus;
 use App\Shop\Domain\OrderType;
 use App\Wallet\Domain\WalletTransactionType;
@@ -36,6 +38,13 @@ use Doctrine\ORM\EntityManagerInterface;
  * (refund:order:N): without their reseller order (or credited to another wallet), above what that order's wallet
  * payment debited, or while the order's service is running again.
  *
+ * Claim links (S2, docs/design/reseller-and-claim.md 4.4; listed with the payments, no money involved): an open link
+ * whose service is no longer owned by the link's owner (it can never be used), an open link whose open_service_id is
+ * not its service (or a closed one that still holds it), an open link of a disabled reseller (the disable revokes them),
+ * a claimed link without its ownership event or whose event names other users, a claimed link whose service has
+ * another owner with no later ownership event (claim_owner_mismatch), and a service whose current owner is not the one
+ * its last ownership event moved it to.
+ *
  * report() runs both in one read-only transaction, so every query sees the same snapshot even while payments are
  * being settled (no false alarm from a write that landed between two queries).
  */
@@ -60,6 +69,12 @@ final class WalletReconciler
     public const REFUND_WITHOUT_ORDER = 'refund_without_order';
     public const REFUND_EXCEEDS_PAID = 'refund_exceeds_paid';
     public const REFUND_ON_LIVE_SERVICE = 'refund_on_live_service';
+    public const CLAIM_OPEN_OWNER_CHANGED = 'claim_open_owner_changed';
+    public const CLAIM_OPEN_SERVICE_MISMATCH = 'claim_open_service_mismatch';
+    public const CLAIM_OPEN_RESELLER_DISABLED = 'claim_open_reseller_disabled';
+    public const CLAIM_WITHOUT_OWNERSHIP_EVENT = 'claim_without_ownership_event';
+    public const CLAIM_OWNER_MISMATCH = 'claim_owner_mismatch';
+    public const OWNERSHIP_EVENT_OWNER_MISMATCH = 'ownership_event_owner_mismatch';
 
     public function __construct(private readonly EntityManagerInterface $entityManager)
     {
@@ -144,6 +159,9 @@ final class WalletReconciler
             'refund' => WalletTransactionType::REFUND,
             'serviceSuspended' => VpnServiceStatus::SUSPENDED,
             'serviceDeleted' => VpnServiceStatus::DELETED,
+            'claimOpen' => ClaimStatus::OPEN,
+            'claimClaimed' => ClaimStatus::CLAIMED,
+            'resellerDisabled' => ResellerStatus::DISABLED,
         ];
         // The ledger keys of the payment flows (WalletKeys): 'topup:payment:<id>' and 'purchase:payment:<id>'.
         $topUpKey = "CONCAT('topup:payment:', p.id)";
@@ -246,6 +264,28 @@ final class WalletReconciler
                  FROM wallet_transaction t JOIN `order` o ON $refundOrder
                  JOIN vpn_service s ON s.id = COALESCE(o.target_service_id, (SELECT MIN(s2.id) FROM vpn_service s2 WHERE s2.order_id = o.id))
                  WHERE t.type = :refund AND s.status NOT IN (:serviceSuspended, :serviceDeleted)",
+            // Claim links. An open link is only usable while the service still belongs to the link's owner.
+            self::CLAIM_OPEN_OWNER_CHANGED => "SELECT NULL AS payment_id, NULL AS transaction_id, NULL AS wallet_id, CONCAT('open claim link #', c.id, ' of service #', s.id, ' is from customer #', c.from_user_id, ' but the service belongs to customer #', s.user_id) AS detail
+                 FROM service_claim c JOIN vpn_service s ON s.id = c.service_id
+                 WHERE c.status = :claimOpen AND s.user_id <> c.from_user_id",
+            self::CLAIM_OPEN_SERVICE_MISMATCH => "SELECT NULL AS payment_id, NULL AS transaction_id, NULL AS wallet_id, CONCAT('claim link #', c.id, ' is ', c.status, ' with open_service_id ', COALESCE(c.open_service_id, 'NULL'), ' (service #', c.service_id, ')') AS detail
+                 FROM service_claim c
+                 WHERE (c.status = :claimOpen AND NOT (c.open_service_id <=> c.service_id)) OR (c.status <> :claimOpen AND c.open_service_id IS NOT NULL)",
+            self::CLAIM_OPEN_RESELLER_DISABLED => "SELECT NULL AS payment_id, NULL AS transaction_id, NULL AS wallet_id, CONCAT('open claim link #', c.id, ' of disabled reseller #', r.id) AS detail
+                 FROM service_claim c JOIN reseller r ON r.id = c.reseller_id
+                 WHERE c.status = :claimOpen AND r.status = :resellerDisabled",
+            self::CLAIM_WITHOUT_OWNERSHIP_EVENT => "SELECT NULL AS payment_id, NULL AS transaction_id, NULL AS wallet_id, CONCAT('claimed link #', c.id, ' of service #', c.service_id, ' has no matching ownership event') AS detail
+                 FROM service_claim c
+                 LEFT JOIN service_ownership_event e ON e.claim_id = c.id AND e.service_id = c.service_id AND e.from_user_id = c.from_user_id AND e.to_user_id = c.claimed_by_user_id
+                 WHERE c.status = :claimClaimed AND e.id IS NULL",
+            self::CLAIM_OWNER_MISMATCH => "SELECT NULL AS payment_id, NULL AS transaction_id, NULL AS wallet_id, CONCAT('service #', s.id, ' was claimed by customer #', c.claimed_by_user_id, ' (link #', c.id, ') but belongs to customer #', s.user_id, ' with no later ownership change') AS detail
+                 FROM service_claim c JOIN vpn_service s ON s.id = c.service_id
+                 JOIN service_ownership_event e ON e.claim_id = c.id
+                 WHERE c.status = :claimClaimed AND s.user_id <> c.claimed_by_user_id
+                   AND NOT EXISTS (SELECT 1 FROM service_ownership_event l WHERE l.service_id = s.id AND l.id > e.id)",
+            self::OWNERSHIP_EVENT_OWNER_MISMATCH => "SELECT NULL AS payment_id, NULL AS transaction_id, NULL AS wallet_id, CONCAT('service #', s.id, ' belongs to customer #', s.user_id, ' but its last ownership event #', e.id, ' moved it to customer #', e.to_user_id) AS detail
+                 FROM service_ownership_event e JOIN vpn_service s ON s.id = e.service_id
+                 WHERE e.id = (SELECT MAX(l.id) FROM service_ownership_event l WHERE l.service_id = e.service_id) AND s.user_id <> e.to_user_id",
         ];
 
         $mismatches = [];

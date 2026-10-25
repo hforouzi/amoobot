@@ -1485,7 +1485,7 @@ out="$( (m8_env; DRY_RUN=0 DEPLOY_MARKER="$WORK/m8state/deploy-in-progress" chan
 check "resume: marker removed and watchdog cancelled before the timers start" bash -c \
   '[[ ! -e "$1/m8state/deploy-in-progress" ]] && grep -q "MARKER=0" <<< "$2" && w=$(grep -n "stop amoobot-deploy-watchdog.timer" "$3" | cut -d: -f1) && t=$(grep -n "enable --now amoobot-job-" "$3" | head -1 | cut -d: -f1) && [[ $w -lt $t ]]' _ "$WORK" "$out" "$WORK/m8.calls"
 check "resume: every job timer enabled, the check timer restarted (first check 1 h later)" bash -c \
-  '[[ $(grep -c "enable --now amoobot-job-" "$1") -eq 6 ]] && grep -q "^systemctl restart amoobot-check-jobs.timer$" "$1"' _ "$WORK/m8.calls"
+  '[[ $(grep -c "enable --now amoobot-job-" "$1") -eq 7 ]] && grep -q "^systemctl restart amoobot-check-jobs.timer$" "$1"' _ "$WORK/m8.calls"
 out="$( (m8_env; DRY_RUN=0 DEPLOY_MARKER="$WORK/m8state/deploy-in-progress" changed_timers=() JOB_LOCK_FDS=(); resume_scheduled_jobs; resume_scheduled_jobs; echo OK) 2>&1)"
 check "resume is safe to run twice" grep -qx OK <<< "$out"
 out="$( (JOBS_PAUSED=0 DEPLOY_MARKER_SET=1 MAINTENANCE_ON=0; on_exit 1) 2>&1)"

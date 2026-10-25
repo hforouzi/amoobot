@@ -7,6 +7,9 @@ namespace App\Bot\Application;
 use App\Provisioning\Domain\PublicUrlPolicy;
 use App\Subscription\Application\AppDownloadCatalog;
 use App\Bot\Application\Admin\AdminBotHandler;
+use App\Bot\Application\DeepLink\StartPayload;
+use App\Bot\Application\DeepLink\StartPayloadRouter;
+use App\Reseller\UI\ClaimBotHandler;
 use App\Bot\Application\ServiceAction\ServiceActionContext;
 use App\Bot\Application\ServiceAction\ServiceActionResolver;
 use App\Bot\Infrastructure\TelegramApiClient;
@@ -111,6 +114,8 @@ class TelegramUpdateHandler
         private readonly WalletPayment $walletPayment,
         private readonly ResellerBotHandler $resellerBotHandler,
         private readonly ResellerCheckout $resellerCheckout,
+        private readonly StartPayloadRouter $startPayloadRouter,
+        private readonly ClaimBotHandler $claimBotHandler,
     ) {
     }
 
@@ -171,6 +176,13 @@ class TelegramUpdateHandler
         if ('/start' === $text) {
             $this->handleStart($account, $chatId, $isAdmin);
 
+            return;
+        }
+
+        // "/start <payload>" from a deep link (claim_ now, ref_ later; StartPayloadRouter), read exactly as sent. Taken
+        // only by a handler of its prefix that is switched on; anything else goes on below as it always did.
+        $rawText = (string) ($message['text'] ?? '');
+        if (StartPayload::isStartCommand($rawText) && $this->startPayloadRouter->routeBot($account, $chatId, StartPayload::fromStartCommand($rawText))) {
             return;
         }
 
@@ -336,6 +348,12 @@ class TelegramUpdateHandler
 
         if ($this->resellerBotHandler->supports($data)) {
             $this->resellerBotHandler->handle($account, $chatId, $callbackId, $data);
+
+            return;
+        }
+
+        if ($this->claimBotHandler->supports($data)) {
+            $this->claimBotHandler->handle($account, $chatId, $callbackId, $data);
 
             return;
         }
@@ -2487,7 +2505,8 @@ class TelegramUpdateHandler
         $this->telegramApiClient->sendMessage(
             $chatId,
             $message,
-            $this->keyboardFactory->trackOrderDetailMenu((int) ($order->getId() ?? 0), $order->getTargetService()?->getId(), $canResume)
+            // The service button only for its owner (a reseller's renewal of a service his customer claimed: no way in).
+            $this->keyboardFactory->trackOrderDetailMenu((int) ($order->getId() ?? 0), $order->getTargetService()?->getUser()->getId() === $account->getUser()->getId() ? $order->getTargetService()?->getId() : null, $canResume)
         );
     }
 

@@ -67,6 +67,9 @@ final class Version20261027090000 extends AbstractMigration
         $this->abortIf($services > 0, sprintf('Irreversible: %d service(s) were sold by a reseller; dropping that would lose who sold them. Nothing was changed.', $services));
         $plans = (int) $this->connection->fetchOne('SELECT COUNT(*) FROM plan WHERE reseller_floor_amount IS NOT NULL');
         $this->abortIf($plans > 0, sprintf('Irreversible: %d plan(s) have a reseller floor price; dropping it would lose the admin\'s setting. Nothing was changed.', $plans));
+        // Claim links (S2) point at reseller: rolling this one back first would fail half-way on their foreign key.
+        $claims = false !== $this->connection->fetchOne("SELECT 1 FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'service_claim'");
+        $this->abortIf($claims, 'Roll back Version20261030090000 (claim links) first. Nothing was changed.');
 
         $this->addSql('ALTER TABLE `order` DROP FOREIGN KEY FK_F529939891E6A19D');
         $this->addSql('ALTER TABLE vpn_service DROP FOREIGN KEY FK_EF0F523425E4B3DC');

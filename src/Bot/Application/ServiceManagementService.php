@@ -26,6 +26,7 @@ use App\Provisioning\Application\ServiceConfigDeliveryRefresher;
 use App\Provisioning\Application\TrafficAddonSettingsProvider;
 use App\Provisioning\Application\CustomerAccessGuard;
 use App\Provisioning\Application\CustomerServiceFinder;
+use App\Reseller\Application\ServiceOwnership;
 use App\Provisioning\Application\FinalConfigLinkProvider;
 use App\Provisioning\Application\ServiceAdminOutcome;
 use App\Provisioning\Application\ServiceAdministration;
@@ -77,6 +78,7 @@ class ServiceManagementService
         private readonly DiscountApplication $discountApplication,
         private readonly PaymentStarter $paymentStarter,
         private readonly WalletPayment $walletPayment,
+        private readonly ServiceOwnership $serviceOwnership,
     ) {
     }
 
@@ -1484,6 +1486,8 @@ class ServiceManagementService
                 VpnServiceStatus::DELETED !== $service->getStatus() && $this->salesSettingsProvider->addTrafficEnabled(),
                 // A deleted service has no page.
                 VpnServiceStatus::DELETED !== $service->getStatus() ? $this->subscriptionPageUrl->forTelegram($service) : null,
+                // Claim links: the owner who got it by a link may give it new connection links (D4).
+                $this->serviceOwnership->canResetLinks($service->getUser(), $service),
             )
         );
 

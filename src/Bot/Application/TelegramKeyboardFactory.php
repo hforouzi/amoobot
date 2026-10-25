@@ -539,7 +539,7 @@ class TelegramKeyboardFactory
     /**
      * @return array<string, array<array<array<string, string>>>>
      */
-    public function userServiceDetail(int $serviceId, bool $canRenew = true, bool $canAddTraffic = true, ?string $subscriptionPageUrl = null): array
+    public function userServiceDetail(int $serviceId, bool $canRenew = true, bool $canAddTraffic = true, ?string $subscriptionPageUrl = null, bool $canResetLinks = false): array
     {
         $rows = [];
         if (null !== $subscriptionPageUrl) {
@@ -570,6 +570,9 @@ class TelegramKeyboardFactory
         }
         foreach ($this->inlineKeyboardRows($actionButtons, 2) as $row) {
             $rows[] = $row;
+        }
+        if ($canResetLinks) {
+            $rows[] = [['text' => $this->button('button.claim.reset_links'), 'callback_data' => 'cl_rst:'.$serviceId]];
         }
 
         $rows[] = [[

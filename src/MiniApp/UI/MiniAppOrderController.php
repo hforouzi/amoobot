@@ -126,7 +126,8 @@ final class MiniAppOrderController extends AbstractController
             'summary' => self::summary($order),
             'payment' => $payment,
             'paymentState' => null !== $payment ? $this->progress->state($payment) : null,
-            'service' => $service instanceof VpnService && VpnServiceStatus::DELETED !== $service->getStatus() ? $service : null,
+            // Only his own: a reseller's renewal of a service his customer claimed links to nothing of the customer's.
+            'service' => $service instanceof VpnService && VpnServiceStatus::DELETED !== $service->getStatus() && $service->getUser()->getId() === $user->customer()->getId() ? $service : null,
             'payable' => $payable,
         ]);
     }
