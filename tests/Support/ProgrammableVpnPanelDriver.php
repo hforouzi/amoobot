@@ -10,6 +10,9 @@ use App\Provisioning\Domain\Dto\CreatedVpnService;
 use App\Provisioning\Domain\Dto\CreateVpnServiceRequest;
 use App\Provisioning\Domain\Dto\RenewVpnServiceRequest;
 use App\Provisioning\Domain\Dto\VpnUsage;
+use App\Provisioning\Domain\ClientOwnerDriverInterface;
+use App\Provisioning\Domain\CredentialRotationDriverInterface;
+use App\Provisioning\Domain\Dto\RotatedCredentials;
 use App\Provisioning\Domain\ExistingClientAwareDriverInterface;
 use App\Provisioning\Domain\VpnPanelDriverInterface;
 
@@ -29,8 +32,11 @@ use App\Provisioning\Domain\VpnPanelDriverInterface;
  * - $usage / $usageFails: what getUsage() reports (the panel's current state of a client)
  * - $subscriptionBase / $linkHost: what the created service's subscription URL (base + "/" + sub id, like the real
  *   drivers; null = no subscription base) and config link point to
+ * - TEST_PANEL_RENEW_DELAY_MS env var: sleeps inside renewService (a renewal in settlement, for claim-link races)
+ * - claim links: $ownerUpdates records updateClientOwner() calls, $ownerUpdateFailures makes the next n of them throw;
+ *   $rotations counts rotateCredentials(), $rotationFails makes it throw, $canRotate answers canRotateCredentials()
  */
-final class ProgrammableVpnPanelDriver implements VpnPanelDriverInterface, ExistingClientAwareDriverInterface
+final class ProgrammableVpnPanelDriver implements VpnPanelDriverInterface, ExistingClientAwareDriverInterface, ClientOwnerDriverInterface, CredentialRotationDriverInterface
 {
     public const TYPE = 'test';
 
@@ -48,6 +54,12 @@ final class ProgrammableVpnPanelDriver implements VpnPanelDriverInterface, Exist
     public ?string $stateFile = null;
     public ?string $subscriptionBase = 'https://panel.test/sub';
     public string $linkHost = 'edge.panel.test';
+    /** @var list<array{remoteId: string, telegramId: int, comment: string}> */
+    public array $ownerUpdates = [];
+    public int $ownerUpdateFailures = 0;
+    public int $rotations = 0;
+    public bool $rotationFails = false;
+    public bool $canRotate = true;
 
     public function failNext(int $times = 1, ?string $message = null): void
     {
@@ -74,6 +86,46 @@ final class ProgrammableVpnPanelDriver implements VpnPanelDriverInterface, Exist
         $this->stateFile = null;
         $this->subscriptionBase = 'https://panel.test/sub';
         $this->linkHost = 'edge.panel.test';
+        $this->ownerUpdates = [];
+        $this->ownerUpdateFailures = 0;
+        $this->rotations = 0;
+        $this->rotationFails = false;
+        $this->canRotate = true;
+    }
+
+    public function updateClientOwner(string $remoteId, int $telegramId, string $comment, ?VpnPanel $panel = null): void
+    {
+        if ($this->ownerUpdateFailures > 0) {
+            --$this->ownerUpdateFailures;
+            throw new \RuntimeException('Simulated panel outage during updateClientOwner');
+        }
+        $this->ownerUpdates[] = ['remoteId' => $remoteId, 'telegramId' => $telegramId, 'comment' => $comment];
+    }
+
+    public function canRotateCredentials(string $remoteId, ?VpnPanel $panel = null): bool
+    {
+        return $this->canRotate && str_starts_with($remoteId, 'test_');
+    }
+
+    public function rotateCredentials(string $remoteId, ?VpnPanel $panel = null): RotatedCredentials
+    {
+        if ($this->rotationFails) {
+            throw new \RuntimeException('Simulated panel outage during rotateCredentials');
+        }
+        ++$this->rotations;
+        $this->loadState();
+        $old = substr($remoteId, 5);
+        $uuid = bin2hex(random_bytes(6));
+        $subId = bin2hex(random_bytes(6));
+        foreach ($this->clients as $email => $client) {
+            if ($client['uuid'] === $old) {
+                $this->clients[$email] = ['uuid' => $uuid, 'email' => $client['email'], 'subId' => $subId];
+            }
+        }
+        $this->saveState();
+        $link = 'vless://'.$uuid.'@'.$this->linkHost.':443?type=tcp&security=none#test';
+
+        return new RotatedCredentials('test_'.$uuid, $uuid, $subId, null !== $this->subscriptionBase ? $this->subscriptionBase.'/'.$subId : null, [$link]);
     }
 
     public function supports(?VpnPanel $panel): bool
@@ -137,6 +189,10 @@ final class ProgrammableVpnPanelDriver implements VpnPanelDriverInterface, Exist
     public function renewService(string $remoteId, RenewVpnServiceRequest $request, ?VpnPanel $panel = null): void
     {
         ++$this->renewCalls;
+        $delay = (int) ($_SERVER['TEST_PANEL_RENEW_DELAY_MS'] ?? getenv('TEST_PANEL_RENEW_DELAY_MS') ?: 0);
+        if ($delay > 0) {
+            usleep($delay * 1000);
+        }
         $this->maybeFail('renewService');
     }
 

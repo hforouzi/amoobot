@@ -41,6 +41,10 @@ final class AdminCrudPermissions
         'admin_reseller_enable' => AdminPermission::RESELLERS_MANAGE,
         'admin_reseller_disable' => AdminPermission::RESELLERS_MANAGE,
         'admin_reseller_order_refund' => AdminPermission::RESELLERS_MANAGE,
+        // Claim-link writes (the pages themselves need SERVICES_VIEW): an admin-made link, revoke, return to reseller.
+        'admin_claims_create' => AdminPermission::SERVICES_MANAGE,
+        'admin_claim_revoke' => AdminPermission::SERVICES_MANAGE,
+        'admin_claims_return' => AdminPermission::SERVICES_MANAGE,
     ];
 
     /** Dashboard, login/logout, locale switch: any admin (access_control ^/admin). */
@@ -75,6 +79,8 @@ final class AdminCrudPermissions
             Crud\UserCrudController::class => $p(AdminPermission::CUSTOMERS_VIEW, AdminPermission::CUSTOMERS_MANAGE),
             \App\Admin\UI\WalletAdminController::class => $p(AdminPermission::WALLETS_VIEW, AdminPermission::WALLETS_MANAGE),
             \App\Admin\UI\ResellerAdminController::class => $p(AdminPermission::RESELLERS_VIEW, AdminPermission::RESELLERS_MANAGE),
+            // Claim links and ownership history of services.
+            \App\Admin\UI\ClaimAdminController::class => $p(AdminPermission::SERVICES_VIEW, AdminPermission::SERVICES_MANAGE),
             Crud\TelegramAccountCrudController::class => $p(AdminPermission::CUSTOMERS_VIEW, AdminPermission::CUSTOMERS_MANAGE),
             Crud\VpnServiceCrudController::class => $p(AdminPermission::SERVICES_VIEW, AdminPermission::SERVICES_MANAGE, AdminPermission::SERVICES_DELETE),
             // "New subscription page link" of a service.

@@ -6,6 +6,7 @@ namespace App\MiniApp\UI;
 
 use App\MiniApp\Admin\AdminRouteAccess;
 use App\Security\AdminAccessPolicy;
+use App\Bot\Application\DeepLink\StartPayloadRouter;
 use App\Bot\Application\TelegramUserResolver;
 use App\MiniApp\Auth\InitDataRejected;
 use App\MiniApp\Auth\InitDataValidator;
@@ -29,6 +30,10 @@ use Symfony\Component\Security\Http\Attribute\IsGranted;
  * Mini App login: Telegram.WebApp.initData in, a server-side session out (MiniAppSessionManager, delivered by
  * SessionTokenTransport). Rate limited per client address (every attempt) and per Telegram user (after the HMAC
  * check, so nobody can lock a user out with forged data). Failures are logged with the reason and the address only.
+ *
+ * A start parameter (startapp=..., inside the signed initData) goes through the shared deep-link router
+ * (StartPayloadRouter, as /start <payload> in the bot): when a handler takes it, the answer names the section the app
+ * opens first ("start"). Without one, or when the handler is off, the answer is exactly as before.
  */
 final class MiniAppAuthController extends AbstractController
 {
@@ -44,6 +49,7 @@ final class MiniAppAuthController extends AbstractController
         private readonly RateLimiterFactory $userLimiter,
         private readonly AdminAccessPolicy $accessPolicy,
         private readonly AdminRouteAccess $adminAccess,
+        private readonly StartPayloadRouter $startPayloadRouter,
     ) {
     }
 
@@ -78,7 +84,9 @@ final class MiniAppAuthController extends AbstractController
         $account = $this->userResolver->resolveFromTelegramUser($data->user);
         // An admin's session lasts only as long as admin rights may (AdminRouteAccess re-checks it on admin routes).
         $ttl = [] !== $this->accessPolicy->permissions($this->accessPolicy->botActor($account->getTelegramId())) ? $this->adminAccess->sessionTtl() : null;
-        $response = $this->transport->deliver($this->sessions->issue($account->getTelegramId(), $request->headers->get('User-Agent'), $ttl), []);
+        $session = $this->sessions->issue($account->getTelegramId(), $request->headers->get('User-Agent'), $ttl);
+        $start = $this->startPayloadRouter->routeMiniApp($account, $data->startParam);
+        $response = $this->transport->deliver($session, null === $start ? [] : ['start' => $start]);
         $response->headers->set('Cache-Control', 'no-store, private');
 
         return $response;

@@ -18,6 +18,7 @@ admin:
   payments_provisioning_failed: Provisioning failed
   wallets: "Wallets"
   resellers: "Resellers"
+  claims: "Claim links"
   dashboard: Dashboard
   menu:
     sales: Sales
@@ -544,6 +545,7 @@ panel_inbounds:
 action:
   rotate_page_link_confirm: "The current subscription page link of this service will stop working; the customer gets the new one from the bot. Continue?"
   rotate_page_link: "New subscription page link"
+  claims_history: "Claim links and owners"
   confirm_payment: "Approve"
   retry_provisioning: "Retry provisioning"
   reject_payment: "Reject"
@@ -948,6 +950,7 @@ flash:
   settings.reseller_saved: "Reseller settings saved."
   settings.reseller_floor: "The floor must be a percent between 0 and 100, with at most two decimals."
   settings.reseller_rounding: "The rounding must be a whole number of Toman between 1 and 1,000,000."
+  settings.reseller_claim_ttl: "The claim link lifetime must be a whole number of hours between 1 and 720."
   bulk_price.invalid: "The form values are not valid."
   bulk_price.positive: "The value must be a positive number."
   bulk_price.confirm: "Tick the final confirmation to apply."
@@ -1146,14 +1149,100 @@ reseller_settings:
   sections:
     switches: Resellers
     pricing: Wholesale pricing
+    claims: Claim links
   fields:
     enabled: Enable resellers
+    claims_enabled: Enable claim links
+    claim_ttl_hours: A new link works for (hours)
     floor_percent: Floor (percent of the base price)
     rounding: Round wholesale prices up to (Toman)
   help:
     enabled: "With it off, no reseller menu shows and no wholesale purchase can start; profiles and rules are kept."
     floor_percent: "No reseller pays less than this share of a plan's base price, whatever the discount (plus a plan's own reseller floor price). Default 50."
     rounding: "Wholesale prices are rounded up to a multiple of this, before the floor is checked. Default 1000."
+    claims_enabled: "A reseller (or an admin) can hand one service over to a Telegram user with a single-use link that expires. Needs resellers on too. With it off, no link can be made or used, open links stop working, and /start behaves as before."
+    claim_ttl_hours: "1 to 720 hours (30 days). Default 168 (7 days). Changing it does not change links already made."
+
+claim_admin:
+  title: Claim links
+  subtitle: "Single-use links that move one service into the Telegram account that opens them. Only a hash of each link is stored: a link is shown once, to whoever made it."
+  service_title: "Service #%id%: claim links and owners"
+  feature_off: "Claim links are switched off (Settings, Resellers tab): no link can be made or used. The history below stays."
+  all: All
+  empty: No claim links yet.
+  revoke: Revoke
+  made_by_admin: "Admin #%id%"
+  links_title: Claim links of this service
+  history_title: Ownership history
+  history_empty: "The owner never changed."
+  status:
+    open: Open
+    claimed: Claimed
+    revoked: Revoked
+    expired: Expired
+  revoke_reason:
+    reseller: by the reseller
+    admin: by an admin
+    replaced: replaced by a new link
+    reseller_disabled: reseller disabled
+    returned: service returned to the reseller
+  panel_sync:
+    pending: Panel update pending
+    synced: Panel updated
+    skipped: Panel not updated (not supported)
+    failed: Panel update failed
+  fields:
+    service: Service
+    made_by: Made by
+    from: From
+    to: To
+    status: Status
+    created: Created
+    expires: Expires
+    claimed_by: Claimed by
+    panel: Panel
+    owner: Owner now
+    sold_by: Sold by reseller
+    when: When
+    how: How
+    reason: Reason
+  how:
+    claim: "Claim link #%id%"
+    admin: "Admin #%id%"
+    customer: Customer
+    system: System
+  created:
+    title: "New claim link. Copy it now: it is not shown again."
+    no_link: "The bot's username is unknown; the customer sends the bot exactly:"
+    app: "In the app:"
+    help: "Single use, until %until%. Anyone who opens it first takes the service, so send it privately. It replaced any open link of this service."
+  create:
+    title: Make a claim link
+    help: "For a support case: hands this service from its current owner to whoever opens the link. Audited."
+    submit: Make claim link
+  problem:
+    claims_disabled: "Claim links are switched off."
+    deleted: "The service is deleted."
+    trial: "Trial services cannot be handed over."
+    order_in_settlement: "An order of this service is being paid or provisioned; try again when it is finished."
+    not_sold_by_reseller: "Not sold by this reseller."
+    not_a_reseller_order: "Not a reseller order."
+    not_owned_by_reseller: "The reseller no longer owns it."
+  return:
+    title: Return to reseller
+    help: "The wrong person claimed this service: it goes back to the reseller who sold it, with a new subscription page address. The panel credentials stay; reset them afterwards if needed. Both sides get a bot message. Audited."
+    reason: Reason (required)
+    submit: Return to reseller
+  flash:
+    revoked: "The link was revoked."
+    not_open: "The link was not open any more; nothing changed."
+    returned: "The service is back with the reseller."
+  error:
+    feature_off: "Claim links are switched off in Settings (Resellers tab)."
+    not_claimable: "No claim link can be made for this service now."
+    reason: "Give a reason of 3 to 255 characters."
+    busy: "An order of this service is being paid or provisioned; try again when it is finished."
+    not_returnable: "This service cannot be returned to a reseller (not sold by one, already with him, deleted or never claimed)."
 
 reseller_admin:
   title: Resellers

@@ -11,6 +11,7 @@ Automation handles recurring lifecycle work for services and orders.
 - Suspend expired services when enabled.
 - Suspend traffic-exhausted services when enabled.
 - Expire incomplete orders.
+- Claim links (`--only=claims`, every 15 minutes, no toggle): expire links past their time and retry pending panel owner updates ([resellers](resellers.md#claim-links)).
 
 ## Settings
 
@@ -29,6 +30,8 @@ php bin/console app:orders:expire-incomplete
 php bin/console app:service:sync-usage
 php bin/console app:service:check-expiry
 php bin/console app:service:send-notifications
+php bin/console app:claims:expire --dry-run
+php bin/console app:claims:expire
 ```
 
 Use dry-run first on production data.

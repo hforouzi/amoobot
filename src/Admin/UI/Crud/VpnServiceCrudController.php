@@ -107,14 +107,21 @@ class VpnServiceCrudController extends AbstractCrudController
             ->askConfirmation('action.rotate_page_link_confirm')
             ->setCssClass('btn btn-warning');
 
+        // Claim links and the owner history (ClaimAdminController, SERVICES_VIEW; its writes need SERVICES_MANAGE).
+        $claims = Action::new('claims', 'action.claims_history', 'fa fa-gift')
+            ->linkToRoute('admin_claims_service', fn (VpnService $service): array => ['id' => $service->getId()])
+            ->setCssClass('btn btn-secondary');
+
         return $actions
             ->add(Action::INDEX, $regenerateConfig)
             ->add(Action::DETAIL, $regenerateConfig)
             ->add(Action::DETAIL, $rotatePageLink)
+            ->add(Action::DETAIL, $claims)
             // Its route lives in VpnPanelInboundActionsController (PANELS_MANAGE).
             ->setPermission('regenerateConfig', AdminPermission::PANELS_MANAGE->value)
             // SubscriptionPageLinkController (SERVICES_MANAGE).
-            ->setPermission('rotatePageLink', AdminPermission::SERVICES_MANAGE->value);
+            ->setPermission('rotatePageLink', AdminPermission::SERVICES_MANAGE->value)
+            ->setPermission('claims', AdminPermission::SERVICES_VIEW->value);
     }
 
     /** By customer: the Customers page links each customer's services here. */

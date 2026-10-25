@@ -22,8 +22,10 @@ use Doctrine\ORM\EntityManagerInterface;
  * web form sends it; a refused change saves nothing and names the problem (an admin-domain message key).
  *
  * Disabling takes the reseller row lock first (as ResellerCheckout does), so a purchase in flight either completed
- * before it or sees the profile disabled; it then ends the reseller's Mini App sessions. Services already sold keep
- * running: they are paid for.
+ * before it or sees the profile disabled; in the same transaction it revokes his open claim links (a claim racing it
+ * either committed before or finds its link revoked: both lock the claim row); it then ends the reseller's Mini App
+ * sessions. Services already sold keep running: they are paid for; services his customers claimed are not touched.
+ * Re-enabling does not restore revoked links.
  */
 final class ResellerAdministration
 {
@@ -32,6 +34,7 @@ final class ResellerAdministration
         private readonly AdminAuditLogger $auditLogger,
         private readonly MiniAppSessionManager $sessions,
         private readonly ResellerPricing $pricing,
+        private readonly ClaimLinks $claimLinks,
     ) {
     }
 
@@ -162,25 +165,27 @@ final class ResellerAdministration
 
     public function enable(Reseller $reseller, AdminActor $admin): void
     {
-        if ($this->changeStatus($reseller, ResellerStatus::ACTIVE)) {
+        if (null !== $this->changeStatus($reseller, ResellerStatus::ACTIVE, $admin)) {
             $this->auditLogger->record('reseller.enable', 'Reseller', $reseller->getId(), ['customer_id' => $reseller->getUser()->getId()], $admin);
         }
     }
 
     /**
      * Stops the reseller at once: no purchase can start or finish its order after this (ResellerCheckout re-checks
-     * under the same lock), and his Mini App sessions end. Existing services keep running.
+     * under the same lock), his open claim links are revoked in the same transaction, and his Mini App sessions end.
+     * Existing services keep running.
      *
      * @return int the Mini App sessions ended
      */
     public function disable(Reseller $reseller, AdminActor $admin): int
     {
-        if (!$this->changeStatus($reseller, ResellerStatus::DISABLED)) {
+        $links = $this->changeStatus($reseller, ResellerStatus::DISABLED, $admin);
+        if (null === $links) {
             return 0;
         }
         $telegramId = $reseller->getUser()->getTelegramAccount()?->getTelegramId();
         $sessions = null === $telegramId ? 0 : $this->sessions->revokeAllFor($telegramId);
-        $this->auditLogger->record('reseller.disable', 'Reseller', $reseller->getId(), ['customer_id' => $reseller->getUser()->getId(), 'sessions_revoked' => $sessions], $admin);
+        $this->auditLogger->record('reseller.disable', 'Reseller', $reseller->getId(), ['customer_id' => $reseller->getUser()->getId(), 'sessions_revoked' => $sessions, 'claim_links_revoked' => $links], $admin);
 
         return $sessions;
     }
@@ -203,8 +208,11 @@ final class ResellerAdministration
         return rtrim(rtrim(sprintf('%d.%02d', intdiv($bp, 100), $bp % 100), '0'), '.');
     }
 
-    /** Under the reseller row lock; false when it already had that status. */
-    private function changeStatus(Reseller $reseller, string $status): bool
+    /**
+     * Under the reseller row lock; null when it already had that status, else the claim links revoked with it (a
+     * disable revokes his open links in the same transaction: claim rows only, after the reseller row).
+     */
+    private function changeStatus(Reseller $reseller, string $status, AdminActor $admin): ?int
     {
         $connection = $this->entityManager->getConnection();
         $connection->beginTransaction();
@@ -214,13 +222,14 @@ final class ResellerAdministration
             if ($reseller->getStatus() === $status) {
                 $connection->commit();
 
-                return false;
+                return null;
             }
             $reseller->setStatus($status);
             $this->entityManager->flush();
+            $links = ResellerStatus::DISABLED === $status ? $this->claimLinks->revokeAllOf($reseller, $admin->adminUserId) : 0;
             $connection->commit();
 
-            return true;
+            return $links;
         } catch (\Throwable $e) {
             $connection->rollBack();
 

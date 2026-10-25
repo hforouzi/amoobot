@@ -1,6 +1,6 @@
 # Resellers
 
-A reseller is a customer account that buys services at a **wholesale price from its own wallet** and hands them to its own customers. Phase S1 of [the design](../design/reseller-and-claim.md): reseller profiles, wholesale pricing, purchases from the wallet in the bot, the admin pages and the report. Claim links (handing a service to the end customer's Telegram account) and the reseller Mini App come later.
+A reseller is a customer account that buys services at a **wholesale price from its own wallet** and hands them to its own customers. Phases S1 and S2 of [the design](../design/reseller-and-claim.md): reseller profiles, wholesale pricing, purchases from the wallet in the bot, the admin pages and the report (S1), and **claim links** that hand one service to the end customer's Telegram account (S2, [below](#claim-links)). The reseller Mini App comes later.
 
 Resellers are **off by default**. While they are off nothing changes for anybody: no reseller menu, no wholesale purchase.
 
@@ -49,7 +49,7 @@ An active reseller gets a **🧑‍💼 Reseller** button in the main menu (only
 - **Credit:** the wallet's credit limit (Customers → Wallets), 0 by default; set it per reseller if he may buy on credit.
 - **Daily spend cap** (optional, per reseller): today's open and paid reseller orders may not exceed it. "Today" is the day in the application timezone, which is **UTC** in production (`App\Kernel::TIMEZONE`, the zone every stored date uses): the cap starts again at 00:00 UTC (03:30 in Tehran).
 - **Frozen wallet:** no purchase.
-- **Disabled reseller:** no purchase from that moment (a purchase in flight either finished before or is refused), his Mini App sessions end, the menu disappears. Services already sold keep running.
+- **Disabled reseller:** no purchase from that moment (a purchase in flight either finished before or is refused), his open claim links are revoked, his Mini App sessions end, the menu disappears. Services already sold keep running.
 
 ## Refunds
 
@@ -63,12 +63,55 @@ Customers → Resellers → **Reseller report**: per reseller, the orders whose 
 
 - **RESELLERS_VIEW** (super admin, admin, support): the list, profiles, the report.
 - **RESELLERS_MANAGE** (super admin, admin): create, edit, plan rules, enable / disable. Refunds also need WALLETS_MANAGE.
-- Every change is in the audit log: `reseller.create`, `reseller.update` (before / after), `reseller.plan_price`, `reseller.enable`, `reseller.disable` (with the Mini App sessions ended), `reseller.order_refund`, and `settings.update` for the settings tab.
+- Every change is in the audit log: `reseller.create`, `reseller.update` (before / after), `reseller.plan_price`, `reseller.enable`, `reseller.disable` (with the Mini App sessions ended and the claim links revoked), `reseller.order_refund`, and `settings.update` for the settings tab.
+- Claim links: SERVICES_VIEW to look, SERVICES_MANAGE to make, revoke or return (see [Claim links](#claim-links)).
 
 ## Monitoring
 
 `php bin/console app:wallet:reconcile` also checks reseller orders: one paid any other way than from the wallet (`reseller_order_not_wallet_paid`), a held debit / order amount / wholesale snapshot that disagree (`reseller_debit_snapshot_mismatch`), a wholesale snapshot below min(floor, retail) (`reseller_order_below_floor`), a service whose "sold by" differs from its order (`reseller_service_attribution_mismatch`), a reseller order that is not on the reseller's own account (`reseller_order_wrong_customer`), a reseller order without its confirmation nonce (`reseller_order_without_nonce`), and refunds without their reseller order (`refund_without_order`), above what was paid (`refund_exceeds_paid`) or for a service that runs again (`refund_on_live_service`).
 
+## Claim links
+
+A claim link hands **one** service to whoever opens it in Telegram and taps **Add to my account**. It is **single use**, **expires** (7 days by default) and can be **revoked**. The end customer then sees the service in "My services" (bot and Mini App) like one he bought. No money moves.
+
+Claim links are **off by default** and need resellers on too: Settings → Resellers → **Enable claim links**, and **A new link works for (hours)** (1 to 720, default 168; changing it does not change links already made). With them off, no link can be made or used, open links stop working, `/start` and the Mini App behave exactly as before, and nothing changes for any customer.
+
+### For the reseller (bot)
+
+- **Services I sold → a service → Make claim link.** Only for a service he sold and still owns (not a trial, not deleted, not while one of its orders is being paid or provisioned). The bot shows the link **once**: `https://t.me/<bot>?start=claim_…` (and `?startapp=claim_…` when the Mini App is on; that needs the bot's Main Mini App set in BotFather), plus its QR. Making a new one revokes the open one of that service. At most 30 links per hour.
+- **Claim links:** his links, open first (service, until / claimed on / revoked / expired), with **Revoke** for each open one. The list never shows the link again, nor who claimed it.
+- After the claim he is told "used on <date>" and still sees the service in "Services I sold" with plan, status, expiry, traffic and **claimed on**. He can still **renew** and **add traffic** at wholesale (decision D5): he is told it is done, **without** the subscription link or configs, which go to the customer. He never sees the customer's Telegram data, other services, orders or wallet, cannot make a new link for it, and has no subscription page or config access to it any more.
+- Disabling a reseller **revokes his open links** at once (re-enabling does not bring them back). Services already claimed are not affected.
+
+### For the customer
+
+- Opening the link (bot `/start claim_…` or the Mini App) shows a preview: service, plan, traffic left, expiry and the reseller's display name (if set). The required channels are checked first, as for a purchase. Nothing changes until he taps **Add to my account**; link-preview bots and prefetches never claim.
+- Every unusable link (wrong, truncated, expired, revoked, used, owner changed, service deleted) gets the **same** answer, so the link cannot be probed. The person who claimed it gets "already in your account" if he opens it again.
+- On the claim the service's **subscription page address changes** (the reseller's `/s/…` link stops working) but the **panel credentials stay** (UUID, subId, config links), so the apps the reseller installed keep working (decision D4). The customer can then use **♻️ Reset my connection links** in the service view: new UUID and subId on the panel, new links through the regeneration path; every installed app must import them again (the reseller's copies stop working). Modern 3x-ui panels with VLESS / VMess only.
+- After a claim the panel client is updated (best effort) to `tgId` = the customer's Telegram id and comment `amoobot order #N, claimed` (modern 3x-ui only; legacy panels are skipped). A failure never undoes the claim: `app:claims:expire` retries it with a growing delay (5 minutes up to 6 hours) and gives up after 12 attempts (shown on the admin page).
+
+### Security
+
+- The token is 32 random bytes (256 bit, 43 characters). Only its SHA-256 is stored; the token is never logged, audited or stored, and the bot message log masks it (`claim_[redacted]`). After the preview, buttons and the Mini App carry a short-lived **ticket** bound to the claim and the Telegram user, never the token.
+- Payloads are parsed exactly as received (no trimming; anything with extra characters, spaces or a newline is not a link).
+- Rate limits: 10 previews / claims per 10 minutes per Telegram user (invalid ones included), 30 per minute per address on the Mini App claim routes, 30 new links per hour per reseller. The fifth invalid link of one Telegram user within an hour is reported to the admins with LOGS_VIEW (no automatic ban).
+- The claim is one transaction locking the claim row, then the service row; it never touches a wallet, order or payment row, so it cannot deadlock with settlement. It is refused while an order of the service is being paid or provisioned ("try again in a minute").
+
+### Admin
+
+Customers → **Claim links** (SERVICES_VIEW): every link by status; a service's links and **ownership history** (also from the service's detail page, "Claim links and owners"). With SERVICES_MANAGE:
+
+- **Make claim link** for any live service (support case: e.g. moving a customer's service to his new Telegram account). Shown once on the answer page. Audited `claim.create_admin` (never the token).
+- **Revoke** an open link. Audited `claim.revoke_admin`.
+- **Return to reseller** (reason required): the wrong person claimed it. The service goes back to the reseller who sold it with a new subscription page address; the panel credentials stay (reset them afterwards if needed); both sides get a bot message. Audited `claim.revert`, plus an ownership event.
+
+### Monitoring
+
+- `app:claims:expire` (scheduled as `app:automation:run --only=claims`, every 15 minutes) marks links past their expiry as expired and retries pending panel updates. Safe to run by hand; `--dry-run` only counts.
+- `app:wallet:reconcile` also checks the claim invariants (no money involved, listed with the payments): `claim_open_owner_changed`, `claim_open_service_mismatch`, `claim_open_reseller_disabled`, `claim_without_ownership_event`, `claim_owner_mismatch`, `ownership_event_owner_mismatch`.
+
 ## Upgrading
 
-Run the migrations (`Version20261027090000`: new tables and nullable columns only; `Version20261029090000`: `order.reseller_nonce`, a nullable column and a unique key per reseller). Nothing existing is changed. Roll back newest first, and only while no reseller data exists (no order carries a confirmation nonce for the second, no reseller data for the first); otherwise `down()` refuses and changes nothing.
+Run the migrations (`Version20261027090000`: new tables and nullable columns only; `Version20261029090000`: `order.reseller_nonce`, a nullable column and a unique key per reseller; `Version20261030090000`: the `service_claim` and `service_ownership_event` tables). Nothing existing is changed. Roll back newest first, and only while no data of that migration exists (no claim link or ownership event for the third, no order carrying a confirmation nonce for the second, no reseller data for the first); otherwise `down()` refuses and changes nothing.
+
+After deploying S2, `deploy.sh` installs the new `claims` timer; `bin/post-deploy-check.sh` checks it with the other jobs and runs `app:wallet:reconcile`, which now includes the claim checks.

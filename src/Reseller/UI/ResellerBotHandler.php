@@ -15,7 +15,12 @@ use App\Entity\TelegramAccount;
 use App\Payment\Application\Settlement\SettlementOutcome;
 use App\Payment\Application\Settlement\SettlementResult;
 use App\Provisioning\Application\TrafficAddonSettingsProvider;
+use App\Bot\Application\QrCodeSender;
+use App\Reseller\Application\ClaimLinks;
 use App\Reseller\Application\ResellerCheckout;
+use App\Reseller\Application\ResellerSettings;
+use App\Reseller\Domain\ClaimException;
+use App\Reseller\Domain\ClaimStatus;
 use App\Reseller\Domain\ResellerConfirmation;
 use App\Reseller\Domain\ResellerException;
 use App\Reseller\Domain\WholesaleQuote;
@@ -32,7 +37,12 @@ use Psr\Log\LoggerInterface;
  *
  * Callbacks: reseller, rs_new, rs_plan:{planId} (confirm), rs_buy:{planId}:{amount}:{nonce}, rs_sold:{page},
  * rs_svc:{serviceId}, rs_renew:{id} (confirm), rs_renew_ok:{id}:{amount}:{nonce}, rs_tr:{id} (choose GB),
- * rs_tr_gb:{id}:{gb} (confirm), rs_tr_ok:{id}:{gb}:{amount}:{nonce}.
+ * rs_tr_gb:{id}:{gb} (confirm), rs_tr_ok:{id}:{gb}:{amount}:{nonce}; claim links (S2, with reseller.claims_enabled):
+ * rs_link:{serviceId} (make one: shown once, with its QR), rs_links:{page} (his links), rs_rv:{claimId} (revoke).
+ *
+ * After a claim (decision D5) a sold service still shows here with its plan, status, expiry, traffic and "claimed on",
+ * and can be renewed / given traffic at wholesale; never who claimed it, its links or anything else of the customer,
+ * and no new claim link.
  *
  * Every price is quoted on the server (ResellerCheckout / ResellerPricing). The confirm step shows it and puts the
  * amount and a one-time nonce (ResellerConfirmations) into the pay button. The purchase checks both under the reseller
@@ -43,7 +53,7 @@ use Psr\Log\LoggerInterface;
 final class ResellerBotHandler
 {
     public const SOLD_PER_PAGE = 8;
-    private const PREFIXES = ['rs_plan:', 'rs_buy:', 'rs_cg:', 'rs_cd:', 'rs_buyc:', 'rs_sold:', 'rs_svc:', 'rs_renew:', 'rs_renew_ok:', 'rs_tr:', 'rs_tr_gb:', 'rs_tr_ok:'];
+    private const PREFIXES = ['rs_plan:', 'rs_buy:', 'rs_cg:', 'rs_cd:', 'rs_buyc:', 'rs_sold:', 'rs_svc:', 'rs_renew:', 'rs_renew_ok:', 'rs_tr:', 'rs_tr_gb:', 'rs_tr_ok:', 'rs_link:', 'rs_links:', 'rs_rv:'];
     private const TRAFFIC_CHOICES = [10, 20, 50, 100];
     /** Suggested buttons for a customizable plan (only those inside the plan's range are shown, with its min and max). */
     private const PLAN_TRAFFIC_CHOICES = [10, 20, 30, 50, 100, 200];
@@ -51,7 +61,7 @@ final class ResellerBotHandler
     public const PROMPT_TRAFFIC = 'traffic';
     public const PROMPT_DAYS = 'days';
     /** The number of parts each customizable-plan callback must have (anything else is ignored). */
-    private const EXACT_PARTS = ['rs_cg' => 3, 'rs_cd' => 4, 'rs_buyc' => 6];
+    private const EXACT_PARTS = ['rs_cg' => 3, 'rs_cd' => 4, 'rs_buyc' => 6, 'rs_link' => 2, 'rs_links' => 2, 'rs_rv' => 2];
 
     public function __construct(
         private readonly TelegramApiClient $telegram,
@@ -65,6 +75,9 @@ final class ResellerBotHandler
         private readonly IncompleteOrderSettingsProvider $incompleteOrders,
         private readonly WalletSettings $walletSettings,
         private readonly ResellerPromptStore $prompts,
+        private readonly ClaimLinks $claimLinks,
+        private readonly ResellerSettings $settings,
+        private readonly QrCodeSender $qrCodeSender,
     ) {
     }
 
@@ -124,6 +137,9 @@ final class ResellerBotHandler
             'rs_tr_ok' => $this->settle($account, $reseller, $chatId, $callbackId, $confirmed(3)->nonce,
                 fn (): SettlementResult => $this->checkout->addTraffic($account->getUser(), $first, $second, $confirmed(3)),
                 fn (string $notice) => $this->confirmTraffic($account, $chatId, $callbackId, $first, $second, $notice)),
+            'rs_link' => $this->makeClaimLink($account, $chatId, $callbackId, $first),
+            'rs_links' => $this->showClaimLinks($reseller, $chatId, $callbackId, max(1, $first)),
+            'rs_rv' => $this->revokeClaimLink($account, $reseller, $chatId, $callbackId, $first),
             default => $this->ack($callbackId),
         };
     }
@@ -155,12 +171,16 @@ final class ResellerBotHandler
         if (null !== $remaining) {
             $lines[] = $this->texts->message('reseller.menu_daily', ['reseller' => ['remaining' => number_format($remaining)]]);
         }
-        $this->telegram->sendMessage($chatId, implode("\n\n", $lines), ['inline_keyboard' => [
+        $rows = [
             [['text' => $this->texts->button('button.reseller.new_service'), 'callback_data' => 'rs_new']],
             [['text' => $this->texts->button('button.reseller.sold_services'), 'callback_data' => 'rs_sold:1']],
-            [['text' => $this->texts->button('button.main.wallet'), 'callback_data' => 'wallet']],
-            [['text' => $this->texts->button('button.common.back_to_main_menu'), 'callback_data' => 'main_menu']],
-        ]]);
+        ];
+        if ($this->settings->claimsEnabled()) {
+            $rows[] = [['text' => $this->texts->button('button.reseller.claim_links'), 'callback_data' => 'rs_links:1']];
+        }
+        $rows[] = [['text' => $this->texts->button('button.main.wallet'), 'callback_data' => 'wallet']];
+        $rows[] = [['text' => $this->texts->button('button.common.back_to_main_menu'), 'callback_data' => 'main_menu']];
+        $this->telegram->sendMessage($chatId, implode("\n\n", $lines), ['inline_keyboard' => $rows]);
     }
 
     /**
@@ -447,16 +467,30 @@ final class ResellerBotHandler
             return;
         }
         $this->ack($callbackId);
-        $this->telegram->sendMessage($chatId, $this->texts->message('reseller.service', ['service' => [
+        $text = $this->texts->message('reseller.service', ['service' => [
             'id' => (int) $service->getId(),
             'username' => (string) $service->getUsername(),
             'status' => $this->texts->message('reseller.status.'.$service->getStatus()),
             'expiresAt' => $service->getExpiresAt()?->format('Y-m-d') ?? '∞',
             'traffic' => sprintf('%s / %s GB', self::gb($service->getTrafficUsedBytes()), null === $service->getTrafficLimitBytes() ? '∞' : self::gb($service->getTrafficLimitBytes())),
-        ]]), ['inline_keyboard' => [
-            [['text' => $this->texts->button('button.reseller.renew'), 'callback_data' => 'rs_renew:'.$serviceId], ['text' => $this->texts->button('button.reseller.add_traffic'), 'callback_data' => 'rs_tr:'.$serviceId]],
-            [['text' => $this->texts->button('button.reseller.back'), 'callback_data' => 'rs_sold:1']],
         ]]);
+        $rows = [[['text' => $this->texts->button('button.reseller.renew'), 'callback_data' => 'rs_renew:'.$serviceId], ['text' => $this->texts->button('button.reseller.add_traffic'), 'callback_data' => 'rs_tr:'.$serviceId]]];
+        $reseller = $this->checkout->resellerFor($account->getUser());
+        if ($reseller instanceof Reseller && $this->settings->claimsEnabled()) {
+            // Claimed: the date only, never by whom (D5). Still his: the link he may make, and the one still open.
+            $claimedAt = $service->getUser()->getId() !== $account->getUser()->getId() ? $this->claimLinks->claimedAwayAt($reseller, $service) : null;
+            $open = $this->claimLinks->openLinkOf($service);
+            if (null !== $claimedAt) {
+                $text .= "\n".$this->texts->message('reseller.claimed_on', ['claim' => ['claimedAt' => $claimedAt->format('Y-m-d H:i')]]);
+            } elseif (null !== $open && $open->getReseller()?->getId() === $reseller->getId()) {
+                $text .= "\n".$this->texts->message('reseller.claim_open', ['claim' => ['expiresAt' => $open->getExpiresAt()->format('Y-m-d H:i')]]);
+            }
+            if (null === $this->claimLinks->resellerProblem($account->getUser(), $service)) {
+                $rows[] = [['text' => $this->texts->button(null === $open ? 'button.reseller.make_claim_link' : 'button.reseller.new_claim_link'), 'callback_data' => 'rs_link:'.$serviceId]];
+            }
+        }
+        $rows[] = [['text' => $this->texts->button('button.reseller.back'), 'callback_data' => 'rs_sold:1']];
+        $this->telegram->sendMessage($chatId, $text, ['inline_keyboard' => $rows]);
     }
 
     private function confirmRenew(TelegramAccount $account, string $chatId, string $callbackId, int $serviceId, ?string $notice = null): void
@@ -551,6 +585,91 @@ final class ResellerBotHandler
             'amount' => number_format((int) ($result->payment?->getPayableAmount() ?? 0)),
             'balance' => number_format($this->wallets->find($account->getUser())?->getBalance() ?? 0),
         ]]), ['inline_keyboard' => [[['text' => $this->texts->button('button.reseller.back'), 'callback_data' => 'reseller']]]]);
+    }
+
+    /**
+     * A new claim link for a service he sold and still owns, shown once: the t.me link (or, when the bot's username is
+     * unknown, the /start text), the Mini App link when the app is on, and a QR of the link. The open link it replaces
+     * (if any) stops working.
+     */
+    private function makeClaimLink(TelegramAccount $account, string $chatId, string $callbackId, int $serviceId): void
+    {
+        try {
+            $link = $this->claimLinks->createForReseller($account->getUser(), $serviceId);
+        } catch (ClaimException $e) {
+            $this->popup($chatId, $callbackId, $this->texts->message(match ($e->error) {
+                ClaimException::RATE_LIMITED => 'reseller.claim_error.rate_limited',
+                ClaimException::FEATURE_OFF, ClaimException::RESELLER_UNAVAILABLE => 'reseller.unavailable',
+                default => 'reseller.claim_error.not_claimable',
+            }));
+
+            return;
+        }
+        $this->ack($callbackId);
+        $variables = ['service' => ['id' => $serviceId], 'claim' => [
+            'link' => $link->botLink ?? ('/start '.$link->payload()),
+            'expiresAt' => $link->claim->getExpiresAt()->format('Y-m-d H:i'),
+        ]];
+        $lines = [$this->texts->message(null === $link->botLink ? 'reseller.claim_created_no_link' : 'reseller.claim_created', $variables)];
+        if (null !== $link->appLink) {
+            $lines[] = $this->texts->message('reseller.claim_created_app', ['claim' => ['appLink' => $link->appLink]]);
+        }
+        if ($link->replacedOpenLink) {
+            $lines[] = $this->texts->message('reseller.claim_replaced');
+        }
+        $this->telegram->sendMessage($chatId, implode("\n\n", $lines), ['inline_keyboard' => [
+            [['text' => $this->texts->button('button.reseller.claim_links'), 'callback_data' => 'rs_links:1']],
+            [['text' => $this->texts->button('button.reseller.back'), 'callback_data' => 'rs_svc:'.$serviceId]],
+        ]]);
+        if (null !== $link->botLink) {
+            $this->qrCodeSender->send($chatId, $link->botLink, $this->texts->message('reseller.claim_qr_caption', ['service' => ['id' => $serviceId]]), 'claim-link');
+        }
+    }
+
+    /** His links, open first: service, status and date; a revoke button for each open one. Never who claimed. */
+    private function showClaimLinks(Reseller $reseller, string $chatId, string $callbackId, int $page): void
+    {
+        if (!$this->settings->claimsEnabled()) {
+            $this->popup($chatId, $callbackId, $this->texts->message('reseller.unavailable'));
+
+            return;
+        }
+        $result = $this->claimLinks->linksOf($reseller, $page);
+        if ([] === $result['items']) {
+            $this->popup($chatId, $callbackId, $this->texts->message('reseller.claims_empty'));
+
+            return;
+        }
+        $this->ack($callbackId);
+        $lines = [$this->texts->message('reseller.claims_title', ['page' => $page])];
+        $rows = [];
+        foreach ($result['items'] as $claim) {
+            $date = match ($claim->getStatus()) {
+                ClaimStatus::OPEN => $claim->getExpiresAt(),
+                ClaimStatus::CLAIMED => $claim->getClaimedAt(),
+                ClaimStatus::REVOKED => $claim->getRevokedAt(),
+                default => $claim->getExpiredAt() ?? $claim->getExpiresAt(),
+            };
+            $lines[] = $this->texts->message('reseller.claim_line.'.$claim->getStatus(), ['claim' => [
+                'serviceId' => (int) $claim->getService()->getId(),
+                'date' => $date?->format('Y-m-d H:i') ?? '-',
+            ]]);
+            if ($claim->isOpen()) {
+                $rows[] = [['text' => $this->texts->message('reseller.claim_revoke_button', ['claim' => ['serviceId' => (int) $claim->getService()->getId()]]), 'callback_data' => 'rs_rv:'.$claim->getId()]];
+            }
+        }
+        if ($result['hasNext']) {
+            $rows[] = [['text' => $this->texts->button('button.reseller.next_page'), 'callback_data' => 'rs_links:'.($page + 1)]];
+        }
+        $rows[] = [['text' => $this->texts->button('button.reseller.back'), 'callback_data' => 'reseller']];
+        $this->telegram->sendMessage($chatId, implode("\n", $lines), ['inline_keyboard' => $rows]);
+    }
+
+    private function revokeClaimLink(TelegramAccount $account, Reseller $reseller, string $chatId, string $callbackId, int $claimId): void
+    {
+        $revoked = $this->claimLinks->revokeByReseller($account->getUser(), $claimId);
+        $this->telegram->answerCallbackQuery($callbackId, $this->texts->message($revoked ? 'reseller.claim_revoked' : 'reseller.claim_not_open'), true);
+        $this->showClaimLinks($reseller, $chatId, '', 1);
     }
 
     /**

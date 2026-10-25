@@ -12,6 +12,9 @@ use App\Provisioning\Domain\Dto\CreatedVpnService;
 use App\Provisioning\Domain\Dto\CreateVpnServiceRequest;
 use App\Provisioning\Domain\Dto\RenewVpnServiceRequest;
 use App\Provisioning\Domain\Dto\VpnUsage;
+use App\Provisioning\Domain\ClientOwnerDriverInterface;
+use App\Provisioning\Domain\CredentialRotationDriverInterface;
+use App\Provisioning\Domain\Dto\RotatedCredentials;
 use App\Provisioning\Domain\ExistingClientAwareDriverInterface;
 use App\Provisioning\Domain\ServiceActivationDriverInterface;
 use App\Provisioning\Domain\TrafficLimitDriverInterface;
@@ -36,7 +39,7 @@ use Symfony\Component\Uid\Uuid;
  * - create is idempotent: the UUID is sent explicitly (derived from the order), and after a failed or lost add the
  *   client is looked up and adopted when it carries that UUID.
  */
-final class Sanaei3xuiModernDriver implements VpnPanelDriverInterface, ExistingClientAwareDriverInterface, TrafficLimitDriverInterface, ServiceActivationDriverInterface, BatchUsageDriverInterface
+final class Sanaei3xuiModernDriver implements VpnPanelDriverInterface, ExistingClientAwareDriverInterface, TrafficLimitDriverInterface, ServiceActivationDriverInterface, BatchUsageDriverInterface, ClientOwnerDriverInterface, CredentialRotationDriverInterface
 {
     public const BYTES_PER_GB = 1073741824;
     private const MS_PER_DAY = 86400000;
@@ -182,6 +185,46 @@ final class Sanaei3xuiModernDriver implements VpnPanelDriverInterface, ExistingC
     public function activateService(string $remoteId, ?VpnPanel $panel = null): void
     {
         $this->updateAndVerify($this->requirePanel($panel), $this->ref($remoteId), ['enable' => true]);
+    }
+
+    /** tgId and comment only (claim links); credentials, limits, expiry and status are kept (updateAndVerify). */
+    public function updateClientOwner(string $remoteId, int $telegramId, string $comment, ?VpnPanel $panel = null): void
+    {
+        $this->updateAndVerify($this->requirePanel($panel), $this->ref($remoteId), ['tgId' => max(0, $telegramId), 'comment' => $comment]);
+    }
+
+    public function canRotateCredentials(string $remoteId, ?VpnPanel $panel = null): bool
+    {
+        return $this->supports($panel) && null !== $this->remoteIdParser->parse($remoteId);
+    }
+
+    /**
+     * A new UUID and subId for the client, everything else kept (the row is replaced with the full client, as every
+     * update). Only for clients that authenticate by UUID (VLESS / VMess): a client with a password (Trojan,
+     * Shadowsocks) is refused, nothing changed. The answer is read back from the panel before it is trusted.
+     */
+    public function rotateCredentials(string $remoteId, ?VpnPanel $panel = null): RotatedCredentials
+    {
+        $panel = $this->requirePanel($panel);
+        $ref = $this->ref($remoteId);
+        $current = $this->api->getClient($panel, $ref->email);
+        if (null === $current) {
+            throw new \RuntimeException(sprintf('Client "%s" does not exist on the panel.', $ref->email));
+        }
+        if ('' !== (string) ($current['password'] ?? '') || '' === (string) ($current['id'] ?? '')) {
+            throw new \RuntimeException(sprintf('Client "%s" does not authenticate by UUID; its credentials are not rotated here.', $ref->email));
+        }
+        $uuid = Uuid::v4()->toRfc4122();
+        $subId = bin2hex(random_bytes(8));
+        $this->updateAndVerify($panel, $ref, ['id' => $uuid, 'subId' => $subId]);
+
+        return new RotatedCredentials(
+            $this->remoteIdParser->format($ref->panelId ?? $panel->getId(), $ref->localInboundId, $ref->inboundId, $uuid, $ref->email, $subId),
+            $uuid,
+            $subId,
+            SubscriptionUrl::build($panel, $subId),
+            $this->fetchLinks($panel, $ref->email, $subId),
+        );
     }
 
     public function deleteService(string $remoteId, ?VpnPanel $panel = null): void

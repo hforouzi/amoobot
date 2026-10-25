@@ -68,6 +68,8 @@ final class SettingsAdministration
         'reseller_enabled' => ResellerSettings::ENABLED,
         'reseller_floor_percent' => ResellerSettings::FLOOR_BP,
         'reseller_rounding' => ResellerSettings::ROUNDING,
+        'reseller_claims_enabled' => ResellerSettings::CLAIMS_ENABLED,
+        'reseller_claim_ttl_hours' => ResellerSettings::CLAIM_TTL_HOURS,
     ];
 
     public function __construct(
@@ -283,6 +285,8 @@ final class SettingsAdministration
             'reseller_enabled' => $this->resellerSettings->enabled(),
             'reseller_floor_percent' => ResellerAdministration::bpToPercent($this->resellerSettings->floorBp()),
             'reseller_rounding' => $this->resellerSettings->rounding(),
+            'reseller_claims_enabled' => $this->resellerSettings->settingClaimsOn(),
+            'reseller_claim_ttl_hours' => $this->resellerSettings->claimTtlHours(),
         ];
     }
 
@@ -294,10 +298,12 @@ final class SettingsAdministration
     public function resellerProblem(array $form): ?array
     {
         $rounding = self::text($form, 'reseller_rounding', '');
+        $ttl = self::text($form, 'reseller_claim_ttl_hours', (string) ResellerSettings::DEFAULT_CLAIM_TTL_HOURS);
 
         return match (true) {
             null === ResellerAdministration::percentToBp(self::text($form, 'reseller_floor_percent', ''), 10000) => ['field' => 'reseller_floor_percent', 'message' => 'flash.settings.reseller_floor'],
             1 !== preg_match('/^\d{1,7}$/D', $rounding) || (int) $rounding < 1 || (int) $rounding > ResellerSettings::MAX_ROUNDING => ['field' => 'reseller_rounding', 'message' => 'flash.settings.reseller_rounding'],
+            1 !== preg_match('/^\d{1,4}$/D', $ttl) || (int) $ttl < 1 || (int) $ttl > ResellerSettings::MAX_CLAIM_TTL_HOURS => ['field' => 'reseller_claim_ttl_hours', 'message' => 'flash.settings.reseller_claim_ttl'],
             default => null,
         };
     }
@@ -317,6 +323,8 @@ final class SettingsAdministration
         $this->set(ResellerSettings::ENABLED, self::checked($form, 'reseller_enabled'), 'boolean');
         $this->set(ResellerSettings::FLOOR_BP, (string) ResellerAdministration::percentToBp(self::text($form, 'reseller_floor_percent', ''), 10000), 'number');
         $this->set(ResellerSettings::ROUNDING, (string) (int) self::text($form, 'reseller_rounding', ''), 'number');
+        $this->set(ResellerSettings::CLAIMS_ENABLED, self::checked($form, 'reseller_claims_enabled'), 'boolean');
+        $this->set(ResellerSettings::CLAIM_TTL_HOURS, (string) (int) self::text($form, 'reseller_claim_ttl_hours', (string) ResellerSettings::DEFAULT_CLAIM_TTL_HOURS), 'number');
         $this->entityManager->flush();
 
         return null;

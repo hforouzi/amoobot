@@ -26,6 +26,11 @@ use Psr\Log\LoggerInterface;
  *
  * Called by PaymentSettlementService only after its transaction has committed. Delivery problems
  * are logged and swallowed: a message that cannot be sent must never undo a settled payment.
+ *
+ * A renewal or extra traffic paid by someone who no longer owns the service (a reseller for a service his customer
+ * claimed with a link, docs/design/reseller-and-claim.md D5): the payer is told it is done, with the new expiry and
+ * traffic but WITHOUT the subscription link or config links; the owner gets the usual message with them. The owner is
+ * read from the database at that moment, not from the (possibly stale) entity.
  */
 class PaymentCustomerNotifier
 {
@@ -51,8 +56,17 @@ class PaymentCustomerNotifier
             return;
         }
 
-        // A new service: "Open subscription page" under the last message.
         $orderType = $payment->getOrder()->getType();
+        if ((OrderType::RENEWAL === $orderType || OrderType::ADD_TRAFFIC === $orderType) && $vpnService instanceof VpnService && null !== $vpnService->getId()) {
+            $ownerId = $this->entityManager->getConnection()->fetchOne('SELECT user_id FROM vpn_service WHERE id = ?', [$vpnService->getId()]);
+            if (false !== $ownerId && (int) $ownerId !== $payment->getOrder()->getUser()->getId()) {
+                $this->confirmedForPreviousOwner($payment, $vpnService, (int) $ownerId);
+
+                return;
+            }
+        }
+
+        // A new service: "Open subscription page" under the last message.
         $lastMessageKeyboard = OrderType::RENEWAL !== $orderType && OrderType::ADD_TRAFFIC !== $orderType ? $this->subscriptionPageButton->keyboardFor($vpnService) : null;
         $this->deliver($payment, 'confirmed', function () use ($payment, $vpnService): array {
             $orderType = $payment->getOrder()->getType();
@@ -67,6 +81,38 @@ class PaymentCustomerNotifier
 
             return $this->buildNewServiceConfirmedMessages($vpnService);
         }, $lastMessageKeyboard);
+    }
+
+    /**
+     * The payer no longer owns the service: no links to him; the owner gets the usual message (with his links).
+     */
+    private function confirmedForPreviousOwner(Payment $payment, VpnService $vpnService, int $ownerId): void
+    {
+        $key = OrderType::RENEWAL === $payment->getOrder()->getType() ? 'service.renewed_for_customer' : 'service.add_traffic_done_for_customer';
+        $this->deliver($payment, 'confirmed_for_customer', fn (): array => [$this->botTextResolver->message($key, ['service' => [
+            'id' => (int) $vpnService->getId(),
+            'expiresAt' => $vpnService->getExpiresAt()?->format('Y-m-d') ?? '∞',
+            'trafficGb' => null === $vpnService->getTrafficLimitGb() ? '∞' : (string) $vpnService->getTrafficLimitGb(),
+        ]])]);
+
+        $owner = $this->entityManager->getRepository(TelegramAccount::class)->findOneBy(['user' => $ownerId]);
+        if (!$owner instanceof TelegramAccount) {
+            return;
+        }
+        try {
+            $messages = OrderType::RENEWAL === $payment->getOrder()->getType()
+                ? $this->buildRenewalConfirmedMessages($vpnService)
+                : $this->buildAddTrafficConfirmedMessages($vpnService, (int) ((is_array($payment->getOrder()->getMetadata()) ? $payment->getOrder()->getMetadata() : [])['trafficGb'] ?? 0));
+            foreach ($messages as $message) {
+                if (str_contains($message, '<code>')) {
+                    $this->telegramApiClient->sendHtmlMessage($owner->getTelegramId(), $message);
+                } else {
+                    $this->telegramApiClient->sendMessage($owner->getTelegramId(), $message);
+                }
+            }
+        } catch (\Throwable $e) {
+            $this->logger->error('Owner notification of a paid renewal failed.', ['payment_id' => $payment->getId(), 'error' => $e->getMessage()]);
+        }
     }
 
     /** A confirmed wallet top-up: the amount credited (what was received, see TopUpCredit) and the balance now. */

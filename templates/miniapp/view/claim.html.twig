@@ -1,0 +1,22 @@
+{% extends 'miniapp/view/_base.html.twig' %}
+{% trans_default_domain 'miniapp' %}
+{# A claim link's preview (MiniAppClaimController): what would be handed over, nothing of the current owner but the
+   reseller's display name. "Add to my account" POSTs the ticket (never the token); the answer opens the service. #}
+{% block section %}services{% endblock %}
+{% block title %}{{ 'claim.title'|trans }}{% endblock %}
+{% block attributes %} data-claim="{{ preview.claimId }}" data-main-button-text="{{ 'claim.accept'|trans }}" data-main-button-action="claim"{% endblock %}
+{% block content %}
+    <section class="card">
+        <h2>🎁 {{ 'claim.heading'|trans }}</h2>
+        <dl class="price-lines">
+            <dt>{{ 'claim.service'|trans }}</dt><dd><bdi>#{{ preview.serviceId }}</bdi> · {{ preview.planTitle }}</dd>
+            {% set left = preview.trafficLeftBytes %}
+            <dt>{{ 'claim.traffic_left'|trans }}</dt><dd><bdi>{{ left is null ? '∞' : ((left / 1073741824)|number_format(2)) ~ ' GB' }}</bdi></dd>
+            <dt>{{ 'claim.expires'|trans }}</dt><dd><bdi>{{ preview.serviceExpiresAt ? preview.serviceExpiresAt|date('Y-m-d') : '∞' }}</bdi></dd>
+            {% if preview.fromName %}<dt>{{ 'claim.from'|trans }}</dt><dd>{{ preview.fromName }}</dd>{% endif %}
+        </dl>
+        <p class="muted">{{ 'claim.hint'|trans({'%until%': preview.linkExpiresAt|date('Y-m-d H:i')}) }}</p>
+        <button type="button" class="btn" data-main-action="claim" data-claim-accept data-action="{{ path('miniapp_claim_accept', {id: preview.claimId}) }}" data-body="{{ {ticket: preview.ticket}|json_encode }}">✅ {{ 'claim.accept'|trans }}</button>
+        <button type="button" class="btn secondary small" style="margin-top:10px" data-close-app>{{ 'claim.cancel'|trans }}</button>
+    </section>
+{% endblock %}

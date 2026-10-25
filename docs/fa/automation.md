@@ -47,6 +47,7 @@ Toggleهای پنل ادمین (`automation.*`) احترام می‌گذارد. 
 | `expiry` (بررسی انقضا) | `app:automation:run --only=expiry` | هر ۱۵ دقیقه، بعد از sync | `:05 :20 :35 :50` | روشن |
 | `suspend` (تعلیق خودکار) | `app:automation:run --only=suspend` | هر ۱۵ دقیقه، بعد از expiry | `:08 :23 :38 :53` | **خاموش** (اختیاری) |
 | `notifications` (اعلان انقضا و ترافیک) | `app:automation:run --only=notifications` | هر ۳۰ دقیقه | `:10 :40` | روشن |
+| `claims` (منقضی کردن لینک‌های واگذاری، تلاش دوباره برای به‌روزرسانی پنل) | `app:automation:run --only=claims` | هر ۱۵ دقیقه | `:03 :18 :33 :48` | بدون Toggle (فقط مرتب‌سازی؛ وقتی لینکی نیست کاری نمی‌کند) |
 
 - ترتیب sync ← expiry ← suspend عمدی است: انقضا و تعلیق روی داده‌ی تازه‌ی مصرف تصمیم می‌گیرند.
 - اعلان‌ها تکراری ارسال نمی‌شوند (کلید یکتای `service_id + type + key` در `service_notification_log`)، پس اجرای مکرر بی‌خطر است.
@@ -57,6 +58,7 @@ Toggleهای پنل ادمین (`automation.*`) احترام می‌گذارد. 
 | دستور | دلیل |
 |---|---|
 | `app:payments:repair-stuck` | تعمیر پرداخت‌ها تصمیم انسانی می‌خواهد (`--apply` وضعیت پرداخت را تغییر می‌دهد) |
+| `app:claims:expire` | همان کار `--only=claims`؛ فقط برای اجرای دستی |
 | `app:service:sync-usage`، `app:service:check-expiry`، `app:service:send-notifications`، `app:orders:expire-incomplete`، `app:broadcast:run` | همان کارهای `automation:run` هستند ولی Toggleهای پنل را نادیده می‌گیرند. فقط برای اجرای دستی |
 | `app:broadcast:send` / `prepare` / `retry-failed` | برای یک broadcast مشخص (آرگومان لازم دارند). ارسال زمان‌بندی‌شده با `--only=broadcasts` انجام می‌شود |
 | `app:payment:check-nowpayments` | برای یک پرداخت مشخص. IPN درگاه وضعیت را خودکار به‌روز می‌کند |

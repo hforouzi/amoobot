@@ -117,6 +117,11 @@ services:
         arguments:
             $appSecret: '%env(APP_SECRET)%'
 
+    # Claim-link tickets (the confirm step carries a ticket bound to the claim and the Telegram user, never the token).
+    App\Reseller\Application\ClaimTickets:
+        arguments:
+            $appSecret: '%env(APP_SECRET)%'
+
     # How the session token travels (the one seam to switch to a cookie): see BearerTokenTransport.
     App\MiniApp\Session\SessionTokenTransport:
         alias: App\MiniApp\Session\BearerTokenTransport

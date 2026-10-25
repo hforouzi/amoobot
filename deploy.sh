@@ -91,6 +91,7 @@ SCHEDULED_JOBS=(
   "expiry|lifecycle|*:5/15|600|900|app:automation:run --only=expiry"
   "suspend|lifecycle|*:8/15|600|900|app:automation:run --only=suspend"
   "notifications|lifecycle|*:10/30|900|1800|app:automation:run --only=notifications"
+  "claims|claims|*:3/15|300|900|app:automation:run --only=claims"
 )
 JOBS_LOG_DIR="/var/log/amoobot"
 JOBS_STATE_DIR="${STATE_DIR}/jobs"
@@ -1532,8 +1533,9 @@ for entry in "${SCHEDULED_JOBS[@]}"; do
   case "$JOB_COMMAND" in
     'app:automation:run --only=broadcasts'|'app:automation:run --only=orders'|\
     'app:automation:run --only=sync'|'app:automation:run --only=expiry'|\
-    'app:automation:run --only=suspend'|'app:automation:run --only=notifications') ;;
-    *) die "SCHEDULED_JOBS: only the six reviewed automation tasks may be scheduled." ;;
+    'app:automation:run --only=suspend'|'app:automation:run --only=notifications'|\
+    'app:automation:run --only=claims') ;;
+    *) die "SCHEDULED_JOBS: only the seven reviewed automation tasks may be scheduled." ;;
   esac
   job_names+="$JOB_NAME "
 done

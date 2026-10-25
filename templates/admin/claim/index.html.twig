@@ -1,0 +1,64 @@
+{# ClaimAdminController::index: every claim link, newest first, by status; (SERVICES_MANAGE) revoke an open one. #}
+{% extends '@EasyAdmin/page/content.html.twig' %}
+{% trans_default_domain 'admin' %}
+{% set canManage = is_granted('PERM_SERVICES_MANAGE') %}
+
+{% block content_title %}{{ 'claim_admin.title'|trans }}{% endblock %}
+
+{% block main %}
+    <div class="admin-custom-page admin-claims-page">
+        {% if not enabled %}<p class="alert alert-warning" data-claims-off>{{ 'claim_admin.feature_off'|trans }}</p>{% endif %}
+        <p class="admin-page-subtitle">{{ 'claim_admin.subtitle'|trans }}</p>
+        <nav class="admin-actions" data-status-filter>
+            <a class="btn {{ status == '' ? 'btn-primary' : 'btn-secondary' }}" href="{{ path('admin_claims') }}">{{ 'claim_admin.all'|trans }}</a>
+            {% for s in statuses %}
+                <a class="btn {{ status == s ? 'btn-primary' : 'btn-secondary' }}" href="{{ path('admin_claims', {status: s}) }}">{{ ('claim_admin.status.' ~ s)|trans }}</a>
+            {% endfor %}
+        </nav>
+        {% if claims is empty %}
+            <p class="text-muted" data-no-claims>{{ 'claim_admin.empty'|trans }}</p>
+        {% else %}
+            <table class="table datagrid">
+                <thead><tr>
+                    <th>#</th>
+                    <th>{{ 'claim_admin.fields.service'|trans }}</th>
+                    <th>{{ 'claim_admin.fields.made_by'|trans }}</th>
+                    <th>{{ 'claim_admin.fields.from'|trans }}</th>
+                    <th>{{ 'claim_admin.fields.status'|trans }}</th>
+                    <th>{{ 'claim_admin.fields.created'|trans }}</th>
+                    <th>{{ 'claim_admin.fields.expires'|trans }}</th>
+                    <th>{{ 'claim_admin.fields.claimed_by'|trans }}</th>
+                    <th>{{ 'claim_admin.fields.panel'|trans }}</th>
+                    <th></th>
+                </tr></thead>
+                <tbody>
+                {% for claim in claims %}
+                    <tr data-claim-id="{{ claim.id }}" data-status="{{ claim.status }}">
+                        <td>{{ claim.id }}</td>
+                        <td><a href="{{ path('admin_claims_service', {id: claim.service.id}) }}">#{{ claim.service.id }}</a></td>
+                        <td>{% if claim.reseller %}<a href="{{ path('admin_reseller', {id: claim.reseller.id}) }}">{{ claim.reseller }}</a>{% else %}{{ 'claim_admin.made_by_admin'|trans({'%id%': claim.createdByAdminId ?? '-'}) }}{% endif %}</td>
+                        <td>{{ claim.fromUser.name ?? ('#' ~ claim.fromUser.id) }}</td>
+                        <td>{{ ('claim_admin.status.' ~ claim.status)|trans }}{% if claim.revokeReason %} <span class="text-muted">({{ ('claim_admin.revoke_reason.' ~ claim.revokeReason)|trans }})</span>{% endif %}</td>
+                        <td>{{ claim.createdAt|date('Y-m-d H:i') }}</td>
+                        <td>{{ claim.expiresAt|date('Y-m-d H:i') }}</td>
+                        <td>{% if claim.claimedByUser %}{{ claim.claimedByUser.name ?? ('#' ~ claim.claimedByUser.id) }} <bdi class="text-muted">{{ claim.claimedByTelegramId }}</bdi> · {{ claim.claimedAt|date('Y-m-d H:i') }}{% else %}—{% endif %}</td>
+                        <td>{% if claim.panelSyncStatus %}<span data-panel-sync="{{ claim.panelSyncStatus }}" title="{{ claim.panelSyncError }}">{{ ('claim_admin.panel_sync.' ~ claim.panelSyncStatus)|trans }}</span>{% else %}—{% endif %}</td>
+                        <td>
+                            {% if canManage and claim.open %}
+                                <form method="post" action="{{ path('admin_claim_revoke', {id: claim.id}) }}" data-revoke-form>
+                                    <input type="hidden" name="_token" value="{{ csrf_token(csrf) }}">
+                                    <button type="submit" class="btn btn-sm btn-secondary">{{ 'claim_admin.revoke'|trans }}</button>
+                                </form>
+                            {% endif %}
+                        </td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            <nav class="admin-actions">
+                {% if page > 1 %}<a class="btn btn-secondary" href="{{ path('admin_claims', {page: page - 1, status: status}) }}">{{ 'wallet_admin.previous'|trans }}</a>{% endif %}
+                {% if hasNext %}<a class="btn btn-secondary" href="{{ path('admin_claims', {page: page + 1, status: status}) }}">{{ 'wallet_admin.next'|trans }}</a>{% endif %}
+            </nav>
+        {% endif %}
+    </div>
+{% endblock %}
