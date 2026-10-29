@@ -125,6 +125,21 @@ final class ResellerMiniAppCustomersTest extends IntegrationTestCase
         yield 'tab' => [['name' => "Al\ti"], 'name'];
         yield 'control character' => [['name' => "Al\x07i"], 'name'];
         yield 'bidi override' => [['name' => "Ali\u{202E}gpj"], 'name'];
+        // L5: every character of Unicode categories Cc, Cf, Zl and Zp (except the ZWNJ / ZWJ, and line breaks in a note).
+        yield 'Cf zero-width space' => [['name' => "Al\u{200B}i"], 'name'];
+        yield 'Cf soft hyphen' => [['name' => "Al\u{00AD}i"], 'name'];
+        yield 'Cf word joiner' => [['name' => "Al\u{2060}i"], 'name'];
+        yield 'Cf left-to-right mark' => [['name' => "Ali\u{200E}"], 'name'];
+        yield 'Cf Arabic letter mark' => [['name' => "علی\u{061C}"], 'name'];
+        yield 'Cf byte order mark' => [['name' => "\u{FEFF}Ali"], 'name'];
+        yield 'Cf tag character' => [['name' => "Ali\u{E0041}"], 'name'];
+        yield 'Cc escape' => [['name' => "Ali\u{001B}[31m"], 'name'];
+        yield 'Cc C1 control' => [['name' => "Ali\u{0085}x"], 'name'];
+        yield 'Zl line separator' => [['name' => "Ali\u{2028}x"], 'name'];
+        yield 'Zp paragraph separator in a note' => [['name' => 'Ali', 'note' => "a\u{2029}b"], 'note'];
+        yield 'Cc tab in a note' => [['name' => 'Ali', 'note' => "a\tb"], 'note'];
+        yield 'Cf zero-width space in a note' => [['name' => 'Ali', 'note' => "a\u{200B}b"], 'note'];
+        yield 'Cc in a phone' => [['name' => 'Ali', 'phone' => "0912\u{0000}1234567"], 'phone'];
         yield 'too long' => [['name' => str_repeat('a', 65)], 'name'];
         yield 'not a string' => [['name' => ['Ali']], 'name'];
         yield 'number' => [['name' => 12], 'name'];
@@ -156,6 +171,30 @@ final class ResellerMiniAppCustomersTest extends IntegrationTestCase
         $this->appPostJson('/app/api/reseller/customers', $session, ['name' => "می\u{200C}خواهم", 'phone' => '۰۹۱۲۱۲۳۴۵۶۷'], self::newKey());
         self::assertSame(200, $this->httpStatus());
         self::assertSame(["می\u{200C}خواهم", '۰۹۱۲۱۲۳۴۵۶۷'], array_values($this->em->getConnection()->fetchAssociative('SELECT name, phone FROM reseller_customer') ?: []));
+    }
+
+    /** L5: an invisible or control character gets its own, clear error; nothing is stripped and saved instead. */
+    public function testAnInvisibleCharacterIsRefusedWithAClearErrorNotStripped(): void
+    {
+        $session = $this->authenticate(self::CUSTOMER);
+        $answer = $this->appPostJson('/app/api/reseller/customers', $session, ['name' => "Al\u{200B}i"], self::newKey());
+
+        self::assertSame(422, $this->httpStatus());
+        $message = self::getContainer()->get('translator')->trans('reseller.customer.error.control', [], 'miniapp', 'fa');
+        self::assertNotSame('reseller.customer.error.control', $message, 'translated');
+        self::assertSame([$message], $answer['errors']['name'] ?? null);
+        self::assertSame(0, $this->sqlInt('SELECT COUNT(*) FROM reseller_customer'));
+    }
+
+    /** L5: the two allowed joiners and a note's line breaks are kept exactly as typed. */
+    public function testJoinersAndANotesLineBreaksAreKept(): void
+    {
+        $session = $this->authenticate(self::CUSTOMER);
+        $name = "می\u{200C}خواهم 👨\u{200D}👩\u{200D}👧";
+        $this->appPostJson('/app/api/reseller/customers', $session, ['name' => $name, 'note' => "line 1\r\nline 2\nline 3"], self::newKey());
+
+        self::assertSame(200, $this->httpStatus());
+        self::assertSame([$name, "line 1\r\nline 2\nline 3"], array_values($this->em->getConnection()->fetchAssociative('SELECT name, note FROM reseller_customer') ?: []));
     }
 
     public function testOutputIsEscaped(): void

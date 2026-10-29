@@ -34,8 +34,16 @@ class ResellerCustomers
     /** Labels per reseller: a soft cap against filling the table from one account. */
     public const MAX_PER_RESELLER = 5000;
 
-    /** Control characters (except the ones a note may have), bidi controls, BOM, private use, surrogates, unassigned. */
-    private const FORBIDDEN = '/[\x{0000}-\x{0008}\x{000B}\x{000C}\x{000E}-\x{001F}\x{007F}-\x{009F}\x{061C}\x{200E}\x{200F}\x{202A}-\x{202E}\x{2066}-\x{2069}\x{FEFF}\p{Co}\p{Cs}\p{Cn}]/u';
+    /**
+     * Invisible and control characters: Unicode categories Cc (control), Cf (format: bidi marks and overrides, zero-width
+     * space, BOM, ...), Zl and Zp (line / paragraph separator). Two exceptions, both visible in what they do: the
+     * zero-width non-joiner (U+200C, needed to write Persian correctly) and the zero-width joiner (U+200D, emoji
+     * sequences). A note may also have line breaks (CONTROL_IN_NOTE).
+     */
+    private const CONTROL = '/(?![\x{200C}\x{200D}])[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u';
+    private const CONTROL_IN_NOTE = '/(?![\x{200C}\x{200D}\n\r])[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u';
+    /** Private use, surrogates, unassigned. */
+    private const FORBIDDEN = '/[\p{Co}\p{Cs}\p{Cn}]/u';
     private const PHONE = '/^\+?[0-9\x{06F0}-\x{06F9}\x{0660}-\x{0669}]{4,15}$/uD';
 
     public function __construct(
@@ -271,7 +279,7 @@ class ResellerCustomers
      *
      * @return array{string, string|null, string|null}
      *
-     * @throws ResellerCustomerInvalid errors by field (codes: required, too_long, spaces, characters, format)
+     * @throws ResellerCustomerInvalid errors by field (codes: required, too_long, spaces, control, characters, format)
      */
     private function validated(array $input): array
     {
@@ -294,7 +302,8 @@ class ResellerCustomers
 
     /**
      * One text field exactly as sent: null when absent or empty; otherwise a string of at most $max characters, valid
-     * UTF-8, nothing forbidden (line breaks only where $multiline), and no space or line break at either end.
+     * UTF-8, no invisible or control character ("control"; line breaks only where $multiline), nothing else forbidden,
+     * and no space or line break at either end. Nothing is trimmed or removed: a value that does not match is refused.
      *
      * @param array<string, mixed>        $input
      * @param array<string, list<string>> $errors
@@ -315,7 +324,12 @@ class ResellerCustomers
 
             return null;
         }
-        if (0 !== preg_match(self::FORBIDDEN, $value) || (!$multiline && 0 !== preg_match('/[\r\n\t]/', $value))) {
+        if (0 !== preg_match($multiline ? self::CONTROL_IN_NOTE : self::CONTROL, $value)) {
+            $errors[$field] = ['control'];
+
+            return null;
+        }
+        if (0 !== preg_match(self::FORBIDDEN, $value)) {
             $errors[$field] = ['characters'];
 
             return null;

@@ -907,6 +907,7 @@ reseller.customer.error.form: "لطفاً فیلدها را بررسی کنید.
 reseller.customer.error.required: "الزامی است."
 reseller.customer.error.too_long: "بیش از حد طولانی است."
 reseller.customer.error.spaces: "فاصله یا خط خالی ابتدا یا انتها را بردارید."
+reseller.customer.error.control: "یک نویسهٔ نامرئی یا کنترلی دارد (مثلاً نشانهٔ جهت، فاصلهٔ صفرعرض یا تب). لطفاً آن را بدون این نویسه دوباره بنویسید."
 reseller.customer.error.characters: "نویسه‌های غیرمجاز دارد."
 reseller.customer.error.format: "فقط رقم، با + اختیاری در ابتدا (۴ تا ۱۵ رقم)."
 reseller.customer.error.limit_reached: "به بیشترین تعداد برچسب مشتری رسیده‌اید."
