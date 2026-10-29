@@ -6,6 +6,7 @@ namespace App\Admin\UI\Crud;
 
 use App\Admin\Security\AdminCrudPermissions;
 use App\Admin\UI\Field\JsonField;
+use App\Admin\UI\VpnPanelInboundActionsController;
 use App\Entity\VpnInbound;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Action;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Actions;
@@ -18,8 +19,13 @@ use EasyCorp\Bundle\EasyAdminBundle\Field\DateTimeField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\IdField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\IntegerField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\TextField;
+use Symfony\Component\Security\Csrf\CsrfTokenManagerInterface;
 class VpnInboundCrudController extends AbstractCrudController
 {
+    public function __construct(private readonly CsrfTokenManagerInterface $csrfTokenManager)
+    {
+    }
+
     public static function getEntityFqcn(): string
     {
         return VpnInbound::class;
@@ -47,8 +53,13 @@ class VpnInboundCrudController extends AbstractCrudController
             ->setCssClass('btn btn-warning')
             ->displayIf(fn (VpnInbound $inbound): bool => 'sanaei_3xui' === $inbound->getPanel()->getType());
 
+        // A POST form with a per-inbound CSRF token: it calls the panel once per service.
         $regenerateServiceConfigs = Action::new('regenerateServiceConfigs', 'action.regenerate_service_configs')
-            ->linkToRoute('admin_vpn_inbound_regenerate_service_configs', fn (VpnInbound $inbound): array => ['id' => $inbound->getId()])
+            ->linkToUrl(fn (VpnInbound $inbound): string => $this->generateUrl('admin_vpn_inbound_regenerate_service_configs', [
+                'id' => $inbound->getId(),
+                '_token' => $this->csrfTokenManager->getToken(VpnPanelInboundActionsController::REGENERATE_INBOUND_CSRF_PREFIX.$inbound->getId())->getValue(),
+            ]))
+            ->renderAsForm()
             ->setCssClass('btn btn-info')
             ->displayIf(fn (VpnInbound $inbound): bool => 'sanaei_3xui' === $inbound->getPanel()->getType());
 

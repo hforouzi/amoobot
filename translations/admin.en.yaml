@@ -965,6 +965,7 @@ flash:
   inbound.metadata_synced: "Access metadata synced."
   inbound.configs_partially_updated: "Configs of %updated% service(s) updated, %failed% failed (external proxies: %proxies%)."
   inbound.configs_updated: "Configs of %count% service(s) updated."
+  inbound.regenerate_use_cli: "This inbound has %count% services; the button handles at most %max% (one panel call each). Run on the server: %command% (try it first without --apply: a dry run)."
   service.no_uuid: "The service has no UUID or subscription ID; it cannot be regenerated."
   service.regenerate_failed: "Regenerating the config failed: %error%"
   service.refreshed_from_panel: "Config of service #%id% refreshed from the panel: %count% link(s) (before: %previous%)."

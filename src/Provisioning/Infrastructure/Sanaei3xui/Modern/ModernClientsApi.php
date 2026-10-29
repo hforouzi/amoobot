@@ -220,19 +220,21 @@ class ModernClientsApi
      * accepts are returned; the others are counted in "rejected". The subscription id never appears in a log or error
      * (it is a credential: it opens the subscription).
      *
+     * @param bool $recordHealth false: a failure is not counted towards the panel's "degraded" state (bulk refreshes)
+     *
      * @return array{links: list<string>, rejected: int}
      */
-    public function links(VpnPanel $panel, string $email): array
+    public function links(VpnPanel $panel, string $email, bool $recordHealth = true): array
     {
-        return ShareLinkPolicy::filter($this->http->get($panel, 'panel/api/clients/links/'.rawurlencode($email), [], self::LINKS_MAX_BYTES)->obj);
+        return ShareLinkPolicy::filter($this->http->get($panel, 'panel/api/clients/links/'.rawurlencode($email), [], self::LINKS_MAX_BYTES, null, $recordHealth)->obj);
     }
 
     /**
      * @return array{links: list<string>, rejected: int}
      */
-    public function subLinks(VpnPanel $panel, string $subId): array
+    public function subLinks(VpnPanel $panel, string $subId, bool $recordHealth = true): array
     {
-        return ShareLinkPolicy::filter($this->http->get($panel, 'panel/api/clients/subLinks/'.rawurlencode($subId), [], self::LINKS_MAX_BYTES, 'panel/api/clients/subLinks/{subId}')->obj);
+        return ShareLinkPolicy::filter($this->http->get($panel, 'panel/api/clients/subLinks/'.rawurlencode($subId), [], self::LINKS_MAX_BYTES, 'panel/api/clients/subLinks/{subId}', $recordHealth)->obj);
     }
 
     /**

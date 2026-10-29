@@ -72,19 +72,23 @@ final class PanelLinkSnapshot
         return '' === $fromRemoteId ? null : $fromRemoteId;
     }
 
-    public function refresh(VpnService $service, string $source, bool $apply = true): PanelLinkRefresh
+    /**
+     * @param bool $recordPanelHealth false for bulk runs: a failing panel call is not counted towards the panel's
+     *                                "degraded" state (which stops its sales)
+     */
+    public function refresh(VpnService $service, string $source, bool $apply = true, bool $recordPanelHealth = true): PanelLinkRefresh
     {
-        $result = $this->readAndStore($service, $source, $apply);
+        $result = $this->readAndStore($service, $source, $apply, $recordPanelHealth);
         if (PanelLinkRefresh::CHANGED_MEANWHILE !== $result->outcome) {
             return $result;
         }
         // Once more, for the credentials the service has now.
-        $again = $this->readAndStore($service, $source, $apply);
+        $again = $this->readAndStore($service, $source, $apply, $recordPanelHealth);
 
         return $again->withChangedMeanwhile();
     }
 
-    private function readAndStore(VpnService $service, string $source, bool $apply): PanelLinkRefresh
+    private function readAndStore(VpnService $service, string $source, bool $apply, bool $recordPanelHealth): PanelLinkRefresh
     {
         $before = self::links($service->getConfigLinks() ?? []);
         $driver = $this->driverFor($service);
@@ -98,7 +102,7 @@ final class PanelLinkSnapshot
         $subId = self::effectiveSubId($service);
 
         try {
-            $answer = $driver->panelLinks($remoteId, $subId, $service->getPanel());
+            $answer = $driver->panelLinks($remoteId, $subId, $service->getPanel(), $recordPanelHealth);
         } catch (\RuntimeException $e) {
             $error = ServiceErrorText::redact($service, $e->getMessage());
             $this->logger->warning('panel_links_snapshot_failed', $context + ['error' => $error]);

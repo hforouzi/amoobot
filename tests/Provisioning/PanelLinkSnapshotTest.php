@@ -178,12 +178,49 @@ final class PanelLinkSnapshotTest extends IntegrationTestCase
         self::assertStringContainsString('2 لینک (قبلاً 1)', (string) $client->getResponse()->getContent(), 'the count change is shown');
         self::assertCount(2, $this->storedLinks());
 
-        // The inbound-wide action: same snapshot, nothing from the inbound.
+        // The inbound-wide action (a POST form with a CSRF token): same snapshot, nothing from the inbound.
         $this->setStoredLinks([self::OLD_LINK]);
-        $client->request('GET', '/admin/vpn-inbound/'.$this->inbound->getId().'/regenerate-service-configs');
+        $this->pressInboundButton($client);
         self::assertSame(302, $client->getResponse()->getStatusCode());
         self::assertCount(2, $this->storedLinks());
         self::assertStringNotContainsString('origin.example.com', implode("\n", $this->storedLinks()));
+    }
+
+    public function testTheInboundButtonNeedsAPostWithItsCsrfToken(): void
+    {
+        $this->fake->addHostGroup('cdn', [1], ['cdn1.example.com', 'cdn2.example.com']);
+        $client = $this->admin();
+        $url = '/admin/vpn-inbound/'.$this->inbound->getId().'/regenerate-service-configs';
+
+        $client->request('GET', $url);
+        self::assertSame(405, $client->getResponse()->getStatusCode(), 'a link (GET) no longer triggers panel calls');
+        $client->request('POST', $url, ['_token' => 'forged']);
+        self::assertSame(302, $client->getResponse()->getStatusCode());
+        $client->request('POST', $url);
+        self::assertSame([], $this->fake->requests, 'no panel call without a valid token');
+        self::assertSame([self::OLD_LINK], $this->storedLinks());
+    }
+
+    public function testTheInboundButtonRefusesMoreThanTenServicesAndNamesTheCommand(): void
+    {
+        $user = $this->createUser('8803');
+        for ($i = 0; $i < 10; ++$i) {
+            $this->createActiveService($user, $this->inbound);
+        }
+        $this->em->flush();
+        $client = $this->admin();
+
+        $this->pressInboundButton($client);
+
+        self::assertSame(302, $client->getResponse()->getStatusCode());
+        while ($client->getResponse()->isRedirect()) {
+            $client->followRedirect();
+        }
+        $page = html_entity_decode((string) $client->getResponse()->getContent());
+        self::assertStringContainsString('php bin/console app:inbound:regenerate-service-configs '.$this->inbound->getId().' --apply', $page);
+        self::assertStringContainsString('11', $page, 'the number of services is named');
+        self::assertSame([], $this->fake->requests, 'no panel call');
+        self::assertSame([self::OLD_LINK], $this->storedLinks());
     }
 
     public function testALegacyPanelServiceKeepsItsOwnPath(): void
@@ -223,6 +260,18 @@ final class PanelLinkSnapshotTest extends IntegrationTestCase
     {
         $this->em->getConnection()->update('vpn_service', ['config_links' => json_encode($links), 'config_text' => implode("\n", $links)], ['id' => $this->service->getId()]);
         $this->em->clear();
+    }
+
+    /** Submits the "regenerate service configs" form of the inbound, as the inbound list renders it. */
+    private function pressInboundButton(KernelBrowser $client): void
+    {
+        $crawler = $client->request('GET', '/admin/vpn-panel/'.$this->panel->getId().'/inbounds');
+        if ($client->getResponse()->isRedirect()) {
+            $crawler = $client->followRedirect();
+        }
+        $form = $crawler->filter('form[action*="/vpn-inbound/'.$this->inbound->getId().'/regenerate-service-configs"]');
+        self::assertCount(1, $form, 'the inbound list renders the button as a POST form');
+        $client->submit($form->form());
     }
 
     private function admin(): KernelBrowser

@@ -60,10 +60,12 @@ class ModernPanelHttpClient
      * @param array<string, scalar> $query
      * @param int|null              $maxBodyBytes the largest answer accepted (UNEXPECTED_RESPONSE beyond it, not retried)
      * @param string|null           $label        the path as logs and error messages show it (default: the path)
+     * @param bool                  $recordHealth false: a failure is not counted on the panel (bulk link refreshes:
+     *                                            one bad run must not mark the panel degraded and stop its sales)
      */
-    public function get(VpnPanel $panel, string $path, array $query = [], ?int $maxBodyBytes = null, ?string $label = null): PanelResponse
+    public function get(VpnPanel $panel, string $path, array $query = [], ?int $maxBodyBytes = null, ?string $label = null, bool $recordHealth = true): PanelResponse
     {
-        return $this->request($panel, 'GET', $path, $query, null, $maxBodyBytes, $label);
+        return $this->request($panel, 'GET', $path, $query, null, $maxBodyBytes, $label, $recordHealth);
     }
 
     /**
@@ -79,7 +81,7 @@ class ModernPanelHttpClient
      * @param array<string, scalar> $query
      * @param array<mixed>|null     $json
      */
-    private function request(VpnPanel $panel, string $method, string $path, array $query, ?array $json, ?int $maxBodyBytes = null, ?string $label = null): PanelResponse
+    private function request(VpnPanel $panel, string $method, string $path, array $query, ?array $json, ?int $maxBodyBytes = null, ?string $label = null, bool $recordHealth = true): PanelResponse
     {
         $token = $this->token($panel);
         $endpoint = PanelEndpoint::fromPanel($panel);
@@ -114,7 +116,9 @@ class ModernPanelHttpClient
 
                     continue;
                 }
-                $this->recordFailure($panel, $e);
+                if ($recordHealth) {
+                    $this->recordFailure($panel, $e);
+                }
 
                 throw $e;
             }

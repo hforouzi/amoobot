@@ -22,6 +22,7 @@ use App\Provisioning\Infrastructure\VpnPanelDriverRegistry;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\RedirectResponse;
+use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\Routing\Attribute\Route;
 
 #[Route('/admin')]
@@ -29,6 +30,13 @@ final class VpnPanelInboundActionsController extends AbstractController
 {
     use TranslatedFlashes;
 
+    /** CSRF token id prefix of the inbound-wide "regenerate service configs" form (VpnInboundCrudController). */
+    public const REGENERATE_INBOUND_CSRF_PREFIX = 'regenerate_inbound_configs_';
+    /**
+     * At most this many services per click: each modern service is one panel call (up to ~20 s with retries), and they
+     * must not all run inside one web request. Larger inbounds use app:inbound:regenerate-service-configs.
+     */
+    public const WEB_REGENERATE_MAX_SERVICES = 10;
 
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
@@ -129,9 +137,30 @@ final class VpnPanelInboundActionsController extends AbstractController
         return $this->redirectToInbounds($inbound);
     }
 
-    #[Route('/vpn-inbound/{id}/regenerate-service-configs', name: 'admin_vpn_inbound_regenerate_service_configs', methods: ['GET'])]
-    public function regenerateInboundServiceConfigs(VpnInbound $inbound): RedirectResponse
+    #[Route('/vpn-inbound/{id}/regenerate-service-configs', name: 'admin_vpn_inbound_regenerate_service_configs', methods: ['POST'])]
+    public function regenerateInboundServiceConfigs(VpnInbound $inbound, Request $request): RedirectResponse
     {
+        $token = $request->request->get('_token') ?? $request->query->get('_token');
+        if (!is_string($token) || !$this->isCsrfTokenValid(self::REGENERATE_INBOUND_CSRF_PREFIX.$inbound->getId(), $token)) {
+            $this->flash('danger', 'flash.csrf_expired');
+
+            return $this->redirectToInbounds($inbound);
+        }
+        $count = (int) $this->entityManager->createQueryBuilder()
+            ->select('COUNT(s.id)')->from(VpnService::class, 's')
+            ->where('s.inbound = :inbound')->andWhere('s.status <> :deleted')
+            ->setParameter('inbound', $inbound)->setParameter('deleted', VpnServiceStatus::DELETED)
+            ->getQuery()->getSingleScalarResult();
+        if ($count > self::WEB_REGENERATE_MAX_SERVICES) {
+            $this->flash('warning', 'flash.inbound.regenerate_use_cli', [
+                '%count%' => $count,
+                '%max%' => self::WEB_REGENERATE_MAX_SERVICES,
+                '%command%' => sprintf('php bin/console app:inbound:regenerate-service-configs %d --apply', $inbound->getId() ?? 0),
+            ]);
+
+            return $this->redirectToInbounds($inbound);
+        }
+
         $config = is_array($inbound->getConfig()) ? $inbound->getConfig() : [];
         $externalProxyList = $config['externalProxyList'] ?? [];
         $externalProxyCount = is_array($externalProxyList) ? count($externalProxyList) : 0;

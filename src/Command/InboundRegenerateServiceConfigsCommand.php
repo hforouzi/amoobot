@@ -5,8 +5,6 @@ declare(strict_types=1);
 namespace App\Command;
 
 use App\Entity\VpnInbound;
-use App\Entity\VpnService;
-use App\Provisioning\Application\ServiceErrorText;
 use App\Provisioning\Application\ServiceLinkChange;
 use App\Provisioning\Application\ServiceLinkRegenerator;
 use Doctrine\ORM\EntityManagerInterface;
@@ -21,7 +19,7 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 #[AsCommand(name: 'app:inbound:regenerate-service-configs', description: 'Re-read or regenerate the config links of every service of a VpnInbound (dry run unless --apply)')]
 final class InboundRegenerateServiceConfigsCommand extends Command
 {
-    use LinkChangeOutput;
+    use RegeneratesLinksInBatches;
 
     public const DEFAULT_BATCH_SIZE = 50;
 
@@ -40,6 +38,7 @@ final class InboundRegenerateServiceConfigsCommand extends Command
             ->addOption('dry-run', null, InputOption::VALUE_NONE, 'Show old vs new links without writing anything (the default)')
             ->addOption('after-id', null, InputOption::VALUE_REQUIRED, 'Resume: only services with an id greater than this', '0')
             ->addOption('batch-size', null, InputOption::VALUE_REQUIRED, 'Services read per batch (each service is written on its own)', (string) self::DEFAULT_BATCH_SIZE)
+            ->addOption('pause', null, InputOption::VALUE_REQUIRED, 'Seconds to wait between batches (spares the panel)', self::DEFAULT_PAUSE_SECONDS)
             ->setHelp(<<<'HELP'
                 For every service of the inbound (deleted ones skipped), in order of id:
 
@@ -52,8 +51,11 @@ final class InboundRegenerateServiceConfigsCommand extends Command
                 count and the links that would be added (+) or removed (-), and writes nothing. Pass <info>--apply</info>
                 to store. Each service is written on its own (row locked, credentials re-checked; links read for
                 credentials a reset changed meanwhile are never written). Services are read in batches
-                (<info>--batch-size</info>); after each batch the last processed id is printed: resume an interrupted
-                run with <info>--after-id=<id></info>.
+                (<info>--batch-size</info>) with a pause between them (<info>--pause</info>, seconds); after each batch the
+                last processed id is printed: resume an interrupted run with <info>--after-id=<id></info>.
+
+                The run stops after 5 services in a row failed (the panel is probably down). A bulk run never marks the
+                panel "degraded": its failed calls are not counted towards that.
                 HELP);
     }
 
@@ -80,53 +82,12 @@ final class InboundRegenerateServiceConfigsCommand extends Command
         }
         $io->section(sprintf('Inbound #%d (%s), %s', $inboundId, (string) ($inbound->getProtocol() ?? '-'), $apply ? 'APPLY (writes)' : 'dry run (nothing is written)'));
 
-        $counts = ['total' => 0, ServiceLinkChange::UPDATED => 0, ServiceLinkChange::UNCHANGED => 0, ServiceLinkChange::KEPT => 0, ServiceLinkChange::SKIPPED => 0, ServiceLinkChange::FAILED => 0, ServiceLinkChange::CHANGED => 0];
-        $lastId = $afterId;
-        while (true) {
-            /** @var list<int> $ids */
-            $ids = array_map('intval', $this->entityManager->createQueryBuilder()
-                ->select('s.id')->from(VpnService::class, 's')
-                ->where('IDENTITY(s.inbound) = :inbound')->andWhere('s.id > :after')
-                ->setParameter('inbound', $inboundId)->setParameter('after', $lastId)
-                ->orderBy('s.id', 'ASC')->setMaxResults($batchSize)
-                ->getQuery()->getSingleColumnResult());
-            if ([] === $ids) {
-                break;
-            }
-            foreach ($ids as $serviceId) {
-                // Loaded one by one: each service is written (and committed) on its own, before the next is read.
-                $service = $this->entityManager->find(VpnService::class, $serviceId);
-                if (!$service instanceof VpnService) {
-                    $lastId = $serviceId;
-                    continue;
-                }
-                try {
-                    $change = $this->linkRegenerator->run($service, 'console_inbound_regenerate_configs', $apply);
-                    if ($apply) {
-                        $this->entityManager->flush();
-                    }
-                } catch (\Throwable $e) {
-                    $change = new ServiceLinkChange(ServiceLinkChange::FAILED, '-', [], [], false, ServiceErrorText::redact($service, $e->getMessage()));
-                }
-                ++$counts['total'];
-                ++$counts[$change->outcome];
-                $this->printChange($io, $serviceId, $change, $apply);
-                $lastId = $serviceId;
-            }
-            $this->entityManager->clear();
-            $io->writeln(sprintf('  -- batch done, last processed id %d (resume with --after-id=%d)', $lastId, $lastId));
+        $run = $this->regenerateInBatches($io, [$inboundId], 'console_inbound_regenerate_configs', $apply, $afterId, $batchSize, self::pauseMs($input->getOption('pause')));
+        $counts = $run['counts'];
+        $this->printSummary($io, $counts, $apply);
+        if ($run['stopped']) {
+            return Command::FAILURE;
         }
-
-        $io->section('Summary');
-        $io->listing([
-            sprintf('services: %d', $counts['total']),
-            sprintf('%s: %d', $apply ? 'updated' : 'would update', $counts[ServiceLinkChange::UPDATED]),
-            sprintf('unchanged: %d', $counts[ServiceLinkChange::UNCHANGED]),
-            sprintf('kept (panel gave no links): %d', $counts[ServiceLinkChange::KEPT]),
-            sprintf('skipped: %d', $counts[ServiceLinkChange::SKIPPED]),
-            sprintf('failed (stored links kept): %d', $counts[ServiceLinkChange::FAILED]),
-            sprintf('credentials changed meanwhile (nothing written): %d', $counts[ServiceLinkChange::CHANGED]),
-        ]);
         if ($apply) {
             $io->success('Done.');
         } else {

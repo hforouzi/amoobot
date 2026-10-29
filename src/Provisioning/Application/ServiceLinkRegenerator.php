@@ -25,7 +25,11 @@ final class ServiceLinkRegenerator
     ) {
     }
 
-    public function run(VpnService $service, string $source, bool $apply): ServiceLinkChange
+    /**
+     * @param bool $bulk one service of a bulk run: a failing panel call does not count towards the panel's "degraded"
+     *                   state, so a bad run never stops the panel's sales
+     */
+    public function run(VpnService $service, string $source, bool $apply, bool $bulk = false): ServiceLinkChange
     {
         $before = ServiceConfigRegenerator::normalizedLinks($service->getConfigLinks() ?? []);
         if (VpnServiceStatus::DELETED === $service->getStatus()) {
@@ -33,7 +37,7 @@ final class ServiceLinkRegenerator
         }
 
         if (null !== $this->panelLinkSnapshot->driverFor($service)) {
-            $refresh = $this->panelLinkSnapshot->refresh($service, $source, $apply);
+            $refresh = $this->panelLinkSnapshot->refresh($service, $source, $apply, !$bulk);
 
             $changed = $refresh->changedMeanwhile;
 

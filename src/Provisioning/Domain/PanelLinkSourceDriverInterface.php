@@ -18,7 +18,9 @@ interface PanelLinkSourceDriverInterface
     /**
      * The client's links now: the subscription's (by subId) or, without one, the client's (by email).
      *
+     * @param bool $recordHealth false: a failure is not counted towards the panel's "degraded" state (bulk refreshes)
+     *
      * @throws \RuntimeException the panel could not be asked or refused (the message names no secret)
      */
-    public function panelLinks(string $remoteId, ?string $subId, ?VpnPanel $panel = null): PanelLinks;
+    public function panelLinks(string $remoteId, ?string $subId, ?VpnPanel $panel = null, bool $recordHealth = true): PanelLinks;
 }
