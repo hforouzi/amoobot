@@ -967,7 +967,7 @@ flash:
   inbound.configs_updated: "Configs of %count% service(s) updated."
   service.no_uuid: "The service has no UUID or subscription ID; it cannot be regenerated."
   service.regenerate_failed: "Regenerating the config failed: %error%"
-  service.refreshed_from_panel: "Config of service #%id% refreshed from the panel: %count% link(s)."
+  service.refreshed_from_panel: "Config of service #%id% refreshed from the panel: %count% link(s) (before: %previous%)."
   service.regenerated: "Config of service #%id% regenerated: %count% link(s)."
   payment.confirmed: "Payment approved. %detail%"
   payment.already_processed: "This payment was already processed. %detail%"

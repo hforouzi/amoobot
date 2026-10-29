@@ -14,6 +14,21 @@ final class VpnServiceConfigRefreshService
     ) {
     }
 
+    /**
+     * What refreshSanaeiLegacy() would store, read from the panel without changing the service (dry runs).
+     */
+    public function previewSanaeiLegacy(VpnService $service): VpnServiceConfigRefreshResult
+    {
+        if (!$this->isSanaeiLegacyService($service)) {
+            return VpnServiceConfigRefreshResult::skipped();
+        }
+        try {
+            return $this->sanaei3xuiDriver->refreshLegacyServiceConfig($service);
+        } catch (\Throwable $e) {
+            return VpnServiceConfigRefreshResult::failed($e->getMessage());
+        }
+    }
+
     public function refreshSanaeiLegacy(VpnService $service, string $sourceFlow): VpnServiceConfigRefreshResult
     {
         if (!$this->isSanaeiLegacyService($service)) {

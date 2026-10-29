@@ -17,8 +17,10 @@ use App\Provisioning\Domain\ClientOwnerDriverInterface;
 use App\Provisioning\Domain\ClientOwnerNotApplicable;
 use App\Provisioning\Domain\ClientUuid;
 use App\Provisioning\Domain\CredentialRotationDriverInterface;
+use App\Provisioning\Domain\Dto\PanelLinks;
 use App\Provisioning\Domain\Dto\RotatedCredentials;
 use App\Provisioning\Domain\ExistingClientAwareDriverInterface;
+use App\Provisioning\Domain\PanelLinkSourceDriverInterface;
 use App\Provisioning\Domain\ServiceActivationDriverInterface;
 use App\Provisioning\Domain\TrafficLimitDriverInterface;
 use App\Provisioning\Domain\VpnPanelDriverInterface;
@@ -42,7 +44,7 @@ use Symfony\Component\Uid\Uuid;
  * - create is idempotent: the UUID is sent explicitly (derived from the order), and after a failed or lost add the
  *   client is looked up and adopted when it carries that UUID.
  */
-final class Sanaei3xuiModernDriver implements VpnPanelDriverInterface, ExistingClientAwareDriverInterface, TrafficLimitDriverInterface, ServiceActivationDriverInterface, BatchUsageDriverInterface, ClientOwnerDriverInterface, CredentialRotationDriverInterface
+final class Sanaei3xuiModernDriver implements VpnPanelDriverInterface, ExistingClientAwareDriverInterface, TrafficLimitDriverInterface, ServiceActivationDriverInterface, BatchUsageDriverInterface, ClientOwnerDriverInterface, CredentialRotationDriverInterface, PanelLinkSourceDriverInterface
 {
     public const BYTES_PER_GB = 1073741824;
     private const MS_PER_DAY = 86400000;
@@ -330,24 +332,38 @@ final class Sanaei3xuiModernDriver implements VpnPanelDriverInterface, ExistingC
     }
 
     /**
-     * Share links (links/{email}) and the subscription's links (subLinks/{subId}) of a client.
+     * The client's links as its subscription renders them: subLinks/{subId} (Hosts applied, in the subscription's
+     * order), or links/{email} for a client without a subId. Never both: the two can differ (random SNI or CIDR picks),
+     * and their union would hand out duplicates (docs/design/multi-inbound-plans.md, 9.1). Empty when the panel cannot
+     * answer: at creation and rotation the links are a convenience, the subscription URL works without them.
      *
      * @return list<string>
      */
     public function fetchLinks(VpnPanel $panel, string $email, ?string $subId): array
     {
-        $links = [];
         try {
-            $links = $this->api->links($panel, $email);
-            if (null !== $subId && '' !== $subId) {
-                $links = array_values(array_unique([...$links, ...$this->api->subLinks($panel, $subId)]));
-            }
+            return $this->linksOf($panel, $email, $subId)->links;
         } catch (PanelApiException $e) {
-            // Links are a convenience: the bot can build them itself (VpnAccessLinkGenerator) when the panel cannot.
             $this->logger->warning('sanaei_modern_links_unavailable', ['panel_id' => $panel->getId(), 'failure' => $e->failure->value]);
+
+            return [];
+        }
+    }
+
+    public function panelLinks(string $remoteId, ?string $subId, ?VpnPanel $panel = null): PanelLinks
+    {
+        return $this->linksOf($this->requirePanel($panel), $this->ref($remoteId)->email, $subId);
+    }
+
+    private function linksOf(VpnPanel $panel, string $email, ?string $subId): PanelLinks
+    {
+        $subId = null === $subId || '' === trim($subId) ? null : trim($subId);
+        $answer = null === $subId ? $this->api->links($panel, $email) : $this->api->subLinks($panel, $subId);
+        if ($answer['rejected'] > 0) {
+            $this->logger->warning('sanaei_modern_links_rejected', ['panel_id' => $panel->getId(), 'rejected' => $answer['rejected']]);
         }
 
-        return $links;
+        return new PanelLinks($answer['links'], $answer['rejected'], null === $subId ? 'links' : 'subLinks', null === $subId ? null : SubscriptionUrl::build($panel, $subId));
     }
 
     /**

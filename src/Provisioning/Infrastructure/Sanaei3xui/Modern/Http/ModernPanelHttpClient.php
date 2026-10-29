@@ -24,7 +24,9 @@ use Symfony\Contracts\HttpClient\HttpClientInterface;
  *   MAX_ATTEMPTS and within RETRY_BUDGET_MS; a POST is sent exactly once (a retry could apply it twice);
  * - HTTPS certificates are verified; a self-signed panel is trusted only through its pinned public key;
  * - plain http:// only to loopback or private addresses (the bearer token would otherwise travel in clear text);
- * - the per-panel proxy setting (PANEL_PROXY_*) is honoured.
+ * - the per-panel proxy setting (PANEL_PROXY_*) is honoured;
+ * - a GET may cap the answer's size (maxBodyBytes: the transfer is aborted beyond it) and name itself with a label for
+ *   logs and errors, so a path that carries a credential (a subscription id) is never written out.
  * Each finished call is recorded on the panel (consecutive failures -> degraded); the caller flushes.
  */
 class ModernPanelHttpClient
@@ -53,10 +55,12 @@ class ModernPanelHttpClient
 
     /**
      * @param array<string, scalar> $query
+     * @param int|null              $maxBodyBytes the largest answer accepted (UNEXPECTED_RESPONSE beyond it, not retried)
+     * @param string|null           $label        the path as logs and error messages show it (default: the path)
      */
-    public function get(VpnPanel $panel, string $path, array $query = []): PanelResponse
+    public function get(VpnPanel $panel, string $path, array $query = [], ?int $maxBodyBytes = null, ?string $label = null): PanelResponse
     {
-        return $this->request($panel, 'GET', $path, $query, null);
+        return $this->request($panel, 'GET', $path, $query, null, $maxBodyBytes, $label);
     }
 
     /**
@@ -72,18 +76,26 @@ class ModernPanelHttpClient
      * @param array<string, scalar> $query
      * @param array<mixed>|null     $json
      */
-    private function request(VpnPanel $panel, string $method, string $path, array $query, ?array $json): PanelResponse
+    private function request(VpnPanel $panel, string $method, string $path, array $query, ?array $json, ?int $maxBodyBytes = null, ?string $label = null): PanelResponse
     {
         $token = $this->token($panel);
         $endpoint = PanelEndpoint::fromPanel($panel);
         $endpoint->assertTransportAllowed();
         $url = $endpoint->url($path, $query);
         $options = $this->options($panel, $endpoint, $token, $json);
+        $path = $label ?? $path;
+        if (null !== $maxBodyBytes) {
+            $options['on_progress'] = static function (int $downloaded, int $size) use ($maxBodyBytes): void {
+                if ($downloaded > $maxBodyBytes || $size > $maxBodyBytes) {
+                    throw new AnswerTooLarge();
+                }
+            };
+        }
 
         $firstStartedAt = microtime(true);
         for ($attempt = 1; ; ++$attempt) {
             try {
-                $response = $this->attempt($panel, $method, $path, $url, $options, $token);
+                $response = $this->attempt($panel, $method, $path, $url, $options, $token, $maxBodyBytes);
                 $panel->recordCallSuccess();
 
                 return $response;
@@ -108,7 +120,7 @@ class ModernPanelHttpClient
     /**
      * @param array<string, mixed> $options
      */
-    private function attempt(VpnPanel $panel, string $method, string $path, string $url, #[\SensitiveParameter] array $options, #[\SensitiveParameter] string $token): PanelResponse
+    private function attempt(VpnPanel $panel, string $method, string $path, string $url, #[\SensitiveParameter] array $options, #[\SensitiveParameter] string $token, ?int $maxBodyBytes = null): PanelResponse
     {
         $startedAt = microtime(true);
         try {
@@ -116,14 +128,29 @@ class ModernPanelHttpClient
             $status = $response->getStatusCode();
             $headers = $response->getHeaders(false);
             $body = $response->getContent(false);
+            if (null !== $maxBodyBytes && strlen($body) > $maxBodyBytes) {
+                throw new AnswerTooLarge();
+            }
+        } catch (AnswerTooLarge) {
+            $this->logFailure($panel, $method, $path, PanelFailure::UNEXPECTED_RESPONSE, null, $startedAt);
+
+            throw new PanelApiException(PanelFailure::UNEXPECTED_RESPONSE, sprintf('%s %s: the answer is larger than %d bytes.', $method, $path, (int) $maxBodyBytes));
         } catch (HttpClientException $e) {
+            if ($e->getPrevious() instanceof AnswerTooLarge) {
+                $this->logFailure($panel, $method, $path, PanelFailure::UNEXPECTED_RESPONSE, null, $startedAt);
+
+                throw new PanelApiException(PanelFailure::UNEXPECTED_RESPONSE, sprintf('%s %s: the answer is larger than %d bytes.', $method, $path, (int) $maxBodyBytes));
+            }
             $failure = self::classifyTransportError($e->getMessage());
             $this->logFailure($panel, $method, $path, $failure, null, $startedAt);
             if (PanelFailure::TLS_CERTIFICATE === $failure && null !== $panel->getTlsPinSha256()) {
                 throw new PanelApiException($failure, sprintf('%s %s: the panel certificate does not match the pinned public key (was the certificate replaced?).', $method, $path));
             }
 
-            throw new PanelApiException($failure, sprintf('%s %s: %s', $method, $path, SecretRedactor::redact($e->getMessage(), [$token], 300)));
+            // Transport messages may quote the request URL (base path, subscription id): only the label is shown.
+            $message = str_replace([$url, rawurldecode($url)], '<panel>/'.$path, $e->getMessage());
+
+            throw new PanelApiException($failure, sprintf('%s %s: %s', $method, $path, SecretRedactor::redact($message, [$token], 300)));
         }
 
         $latencyMs = self::elapsedMs($startedAt);

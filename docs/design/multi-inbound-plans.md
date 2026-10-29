@@ -1,6 +1,6 @@
 # Plans with several inbounds of one panel — design
 
-Status: **design for review**, nothing implemented. Persian summary: [docs/fa/design/multi-inbound-plans.md](../fa/design/multi-inbound-plans.md).
+Status: **design for review**; only phase **H0** (section 9.7) is implemented, see "H0 as built". Persian summary: [docs/fa/design/multi-inbound-plans.md](../fa/design/multi-inbound-plans.md).
 
 **Updated 2026-10-29: 3x-ui Hosts.** New section 9 covers Hosts. Lines changed elsewhere are marked **[Hosts]**. Where they
 disagree, section 9 overrides the phase plan (7.4) and adds to the open questions (8).
@@ -554,11 +554,55 @@ and if possible one host with 2 addresses):
 
 | Phase | Scope | Tests | Rollback | Off by default |
 |---|---|---|---|---|
-| **H0** (first; fixes existing single-inbound services) | Modern 3x-ui: regenerate / reset-links / both regenerate commands re-read the snapshot from the panel (`fetchLinks`) instead of `VpnAccessLinkGenerator`; `fetchLinks` = `subLinks` only (fallback `links/{email}` without subId); never store an empty list over a non-empty one; `app:service:verify-links` (9.6); capability probe `hosts=yes/no/forbidden` | Fake3xui `subLinks` with hosts fixture: regenerate stores panel links only; generator not called for modern; empty answer keeps old; reset-links stores new-UUID panel links; verifier parsing (vless/vmess/trojan/ss, VLESS route mask, CIDR/SNI-pool tolerance); real panel: 9.6 steps 1–7 | Revert PR (no schema) | Nothing to switch: a bug fix. The commands print "source=panel" |
+| **H0** (first; fixes existing single-inbound services) — **built**, see below | Modern 3x-ui: regenerate / reset-links / both regenerate commands re-read the snapshot from the panel (`fetchLinks`) instead of `VpnAccessLinkGenerator`; `fetchLinks` = `subLinks` only (fallback `links/{email}` without subId); never store an empty list over a non-empty one; `app:service:verify-links` (9.6); capability probe `hosts=yes/no/forbidden` | Fake3xui `subLinks` with hosts fixture: regenerate stores panel links only; generator not called for modern; empty answer keeps old; reset-links stores new-UUID panel links; verifier parsing (vless/vmess/trojan/ss, VLESS route mask, CIDR/SNI-pool tolerance); real panel: 9.6 steps 1–7 | Revert PR (no schema) | Nothing to switch: a bug fix. The commands print "source=panel" |
 | **H1** | Admin read-only links preview (9.4) + Hosts cache + warnings; panel page shows Hosts capability | Preview count per 9.2 against fixtures (disabled, excluded, CIDR, no hosts, bindings); API 404/403 → "unknown" not "0"; real panel: preview count = verifier count for the test plan | Revert | Preview only; no customer effect |
 | **H2** | Scheduled snapshot refresh (TTL 6 h, batches), triggers after attach/renew/resume, admin "Refresh links" per service / inbound / panel, doctor counters, display cap 30 with "N more" | Job batches and pause; failure keeps snapshot; alert once on empty; display cap text; real panel: 9.6 step 3 | Disable the schedule entry; revert | `provisioning.links_refresh_enabled` default **off** (manual buttons work regardless) |
 | M1–M3 | As 7.4; M2 uses `subLinks` (no generator loop) | As 7.2 | As 7.4 | `plans.multi_inbound_enabled` off |
 | **H4** (optional) | Per-plan host allow-list via `clientHostRuleIds` | Binding written at create/attach; deleted row → verifier warns | Clear bindings (empty list) | `plans.host_selection_enabled` off |
+
+#### H0 as built
+
+Branch `fix/hosts-h0-sublinks`. No migration and no switch. Admin guide: [vpn-panels.md, "Config links and 3x-ui
+Hosts"](../en/vpn-panels.md#config-links-and-3x-ui-hosts).
+
+- **Panel calls.** `ModernClientsApi::subLinks()` / `links()`:
+  - the existing client: Bearer token, TLS verification, 3 s connect / 10 s total, no redirects;
+  - the answer is capped at 1 MiB (not retried) and at most 500 links of 8 KiB;
+  - only `vless`, `vmess`, `trojan`, `ss`, `hysteria2`/`hy2`, `tuic` and `wireguard` items without spaces or control
+    characters are kept; the others are counted and logged by scheme only;
+  - the subId never appears in a log or an error, and transport errors no longer quote the request URL.
+- **`fetchLinks()`** (creation and credential rotation) = `subLinks` only; `links/{email}` only without a subId.
+- **`PanelLinkSnapshot`** (one place for the rules of 9.1/9.3):
+  - an answer with links replaces the snapshot; a shorter one too, logged as `panel_links_snapshot_shrank` and
+    reported;
+  - an empty answer or a failure keeps the snapshot and reports an admin-only error.
+- **Users of the snapshot:**
+  - `ServiceConfigRegenerator`, and so the web and Mini App "Regenerate config" buttons and the claim "reset my
+    links". Their locking, rate limit and recheck are unchanged; the admin message shows "(before: N)";
+  - `app:service:regenerate-config`;
+  - `app:inbound:regenerate-service-configs`.
+- **Also routed through it.** Two more paths did the same Hosts-blind rebuild: the web "regenerate configs of the
+  inbound" action and `app:panel:sync-inbounds --regenerate-configs`.
+- **Commands.** Both regenerate commands are **dry runs unless `--apply`**: old vs new count, + / - links without
+  credentials. The bulk one runs in batches, resumes with `--after-id`, and goes on past failures.
+- **Hosts probe.** `hosts/list` gives `hosts=yes/no/forbidden/unknown`. It is printed by `app:panel:doctor` and
+  `app:service:verify-links` and **not stored** on the panel; it is never a switch.
+- **`app:service:verify-links <serviceId> [--json]`** as in 9.6:
+  - U2 and U6 are automatic checks;
+  - U1 and U3–U5 are manual steps in the admin guide;
+  - link order is not compared.
+- **Not changed in H0** (these still build Hosts-blind links; to fix in H2):
+  - at creation, when the panel gives no links, `VpnProvisioningService` stores links built from the inbound;
+  - at display, a modern service with **no** stored links gets links built from the inbound
+    (`FinalConfigLinkProvider`);
+  - a reset whose new links cannot be read leaves the snapshot empty, so the display fallback above applies.
+
+  `vpn-panels.md` has a read-only SQL count of the services this affects.
+- **Not tested against a real panel:**
+  - the 9.6 production steps;
+  - U1–U6;
+  - the 1 MiB cap with curl (tested with the mock transport);
+  - VMess/Trojan/SS link parsing in the verifier against real panel output.
 
 ### 9.8 Open questions and risks (Hosts)
 

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Provisioning\Infrastructure\Sanaei3xui\Modern;
 
 use App\Entity\VpnPanel;
+use App\Provisioning\Domain\ShareLinkPolicy;
 use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http\ModernPanelHttpClient;
 use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http\PanelApiException;
 use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http\PanelFailure;
@@ -210,22 +211,72 @@ class ModernClientsApi
         return $obj;
     }
 
+    /** The largest link list accepted from the panel (ShareLinkPolicy caps the count, this the bytes). */
+    public const LINKS_MAX_BYTES = 1048576;
+
     /**
-     * Share links of one client (GET links/{email}) or of a subscription (GET subLinks/{subId}).
+     * Share links of one client (GET links/{email}) or of a subscription (GET subLinks/{subId}: the same links, in the
+     * same order, as the subscription the customer's app fetches, with Hosts applied). Only items ShareLinkPolicy
+     * accepts are returned; the others are counted in "rejected". The subscription id never appears in a log or error
+     * (it is a credential: it opens the subscription).
      *
-     * @return list<string>
+     * @return array{links: list<string>, rejected: int}
      */
     public function links(VpnPanel $panel, string $email): array
     {
-        return self::extractLinks($this->http->get($panel, 'panel/api/clients/links/'.rawurlencode($email))->obj);
+        return ShareLinkPolicy::filter($this->http->get($panel, 'panel/api/clients/links/'.rawurlencode($email), [], self::LINKS_MAX_BYTES)->obj);
     }
 
     /**
-     * @return list<string>
+     * @return array{links: list<string>, rejected: int}
      */
     public function subLinks(VpnPanel $panel, string $subId): array
     {
-        return self::extractLinks($this->http->get($panel, 'panel/api/clients/subLinks/'.rawurlencode($subId))->obj);
+        return ShareLinkPolicy::filter($this->http->get($panel, 'panel/api/clients/subLinks/'.rawurlencode($subId), [], self::LINKS_MAX_BYTES, 'panel/api/clients/subLinks/{subId}')->obj);
+    }
+
+    /**
+     * GET panel/api/hosts/list: whether the panel has the Hosts API (3x-ui v3.11+), reported by app:panel:doctor and
+     * app:service:verify-links only, never a switch for link handling. Decided from the answer, never a version string:
+     * success with a list = "yes", the bare 404 page = "no", 401/403 = "forbidden" (the token's scope does not cover it).
+     *
+     * @return array{state: 'yes'|'no'|'forbidden'|'unknown', count: int, detail: ?string}
+     */
+    public function hostsCapability(VpnPanel $panel): array
+    {
+        try {
+            $obj = $this->http->get($panel, 'panel/api/hosts/list', [], self::LINKS_MAX_BYTES)->obj;
+        } catch (PanelApiException $e) {
+            return match ($e->failure) {
+                PanelFailure::WRONG_URL => ['state' => 'no', 'count' => 0, 'detail' => null],
+                PanelFailure::AUTH_REJECTED => ['state' => 'forbidden', 'count' => 0, 'detail' => null],
+                default => ['state' => 'unknown', 'count' => 0, 'detail' => $e->failure->value],
+            };
+        }
+        if (null !== $obj && (!is_array($obj) || !array_is_list($obj))) {
+            return ['state' => 'unknown', 'count' => 0, 'detail' => PanelFailure::UNEXPECTED_RESPONSE->value];
+        }
+
+        return ['state' => 'yes', 'count' => count($obj ?? []), 'detail' => null];
+    }
+
+    /**
+     * GET panel/api/hosts/byInbound/{id}: the host groups attached to one inbound (each with inboundIds, hosts[] = its
+     * addresses, isDisabled, excludeFromSubTypes, ...). Read only by app:service:verify-links.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function hostsByInbound(VpnPanel $panel, int $inboundId): array
+    {
+        $obj = $this->http->get($panel, 'panel/api/hosts/byInbound/'.$inboundId, [], self::LINKS_MAX_BYTES)->obj;
+        if (null === $obj) {
+            return [];
+        }
+        if (!is_array($obj) || !array_is_list($obj)) {
+            throw new PanelApiException(PanelFailure::UNEXPECTED_RESPONSE, 'GET panel/api/hosts/byInbound: obj is not a list.');
+        }
+
+        return array_values(array_filter($obj, 'is_array'));
     }
 
     /**
@@ -424,26 +475,5 @@ class ModernClientsApi
         }
 
         return 404 === $e->httpStatus || 1 === preg_match('/not\s*found|no\s+such|does\s*n[o\']t\s*exist|not\s*exist/i', (string) $e->panelMessage);
-    }
-
-    /**
-     * @return list<string>
-     */
-    private static function extractLinks(mixed $obj): array
-    {
-        if (is_string($obj)) {
-            $obj = preg_split('/\R/', $obj) ?: [];
-        }
-        if (!is_array($obj)) {
-            return [];
-        }
-        $links = [];
-        array_walk_recursive($obj, static function (mixed $value) use (&$links): void {
-            if (is_string($value) && 1 === preg_match('#^[a-z][a-z0-9+.-]*://\S+$#i', trim($value))) {
-                $links[] = trim($value);
-            }
-        });
-
-        return array_values(array_unique($links));
     }
 }

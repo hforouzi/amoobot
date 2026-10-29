@@ -5,8 +5,9 @@ declare(strict_types=1);
 namespace App\Provisioning\Application;
 
 /**
- * The result of ServiceConfigRegenerator::regenerate(): what happened, how many links the service now has, and the
- * error text on failure (it can come from a panel; callers outside the web panel mask it).
+ * The result of ServiceConfigRegenerator::regenerate(): what happened, how many links the service now has (and had
+ * before, so a shorter list is reported), and the error text on failure (it can come from a panel; callers outside the
+ * web panel mask it).
  */
 final readonly class ServiceConfigRegeneration
 {
@@ -20,6 +21,7 @@ final readonly class ServiceConfigRegeneration
         public string $outcome,
         public int $linkCount = 0,
         public ?string $error = null,
+        public ?int $previousLinkCount = null,
     ) {
     }
 

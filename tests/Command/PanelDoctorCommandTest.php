@@ -51,6 +51,25 @@ final class PanelDoctorCommandTest extends IntegrationTestCase
         self::assertSame(SanaeiIntegrationMode::MODERN, $this->em->find(VpnPanel::class, $this->panel->getId())?->getDetectedIntegrationMode(), 'the probe is stored');
     }
 
+    public function testTheHostsApiIsReportedFromTheAnswer(): void
+    {
+        $this->panel->setIntegrationMode(\App\Provisioning\Domain\SanaeiIntegrationMode::MODERN);
+        $this->em->flush();
+        $this->fake->addHostGroup('cdn', [1, 2], ['cdn.example.com']);
+        [, $out] = $this->doctor([]);
+        self::assertStringContainsString('INFO  hosts=yes (1 host group(s)', $out);
+
+        $this->fake->hostsApi = false;
+        [, $out] = $this->doctor([]);
+        self::assertStringContainsString('INFO  hosts=no', $out);
+
+        $this->fake->hostsApi = true;
+        $this->fake->script('GET', 'panel/api/hosts/list', Fake3xuiPanel::envelope(false, null, 'forbidden', 403));
+        [$code, $out] = $this->doctor([]);
+        self::assertStringContainsString('WARN  hosts=forbidden', $out);
+        self::assertSame(Command::SUCCESS, $code, 'reported, not a failure');
+    }
+
     public function testTheSubscriptionUrlCheck(): void
     {
         [$code, $out] = $this->doctor([]);
