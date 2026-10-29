@@ -38,17 +38,18 @@ final class ShareLinkPolicy
         foreach ($obj as $item) {
             // Surrounding whitespace only: trim() would also strip NUL and other control bytes, which make an item unusable.
             $link = is_string($item) ? trim($item, " \t\r\n") : null;
-            if ('' === $link) {
+            // A repeated item is dropped before the cap: duplicates must not push distinct links out of it.
+            if ('' === $link || (null !== $link && isset($links[$link]))) {
                 continue;
             }
             if (null === $link || !self::isAcceptable($link) || count($links) >= self::MAX_LINKS) {
                 ++$rejected;
                 continue;
             }
-            $links[] = $link;
+            $links[$link] = true;
         }
 
-        return ['links' => array_values(array_unique($links)), 'rejected' => $rejected];
+        return ['links' => array_map('strval', array_keys($links)), 'rejected' => $rejected];
     }
 
     public static function isAcceptable(string $link): bool
