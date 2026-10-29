@@ -153,6 +153,30 @@ final class RegenerateLinksCommandsTest extends IntegrationTestCase
         self::assertStringContainsString('services: 2', $resumed);
     }
 
+    public function testADryRunUsesTheSubIdRecoveredFromTheRemoteIdLikeApply(): void
+    {
+        $service = $this->services[0];
+        $this->em->getConnection()->update('vpn_service', ['sub_id' => null], ['id' => $service->getId()]);
+        $before = $this->row('vpn_service', (int) $service->getId());
+
+        [$code, $out] = $this->runCommand('app:service:regenerate-config', ['serviceId' => (string) $service->getId()]);
+
+        self::assertSame(Command::SUCCESS, $code, $out);
+        self::assertStringContainsString('subId recovered from remoteId (used for this dry run, not stored)', $out);
+        self::assertContains('GET panel/api/clients/subLinks/'.$this->subId(1), $this->fake->requestLines(), 'the same endpoint as --apply');
+        self::assertNotContains('GET panel/api/clients/links/tg_cmd_1', $this->fake->requestLines());
+        self::assertSame($before, $this->row('vpn_service', (int) $service->getId()), 'nothing written');
+        $this->assertNoSecret($out, 1);
+
+        $this->fake->requests = [];
+        [$code, $out] = $this->runCommand('app:service:regenerate-config', ['serviceId' => (string) $service->getId(), '--apply' => true]);
+
+        self::assertSame(Command::SUCCESS, $code, $out);
+        self::assertContains('GET panel/api/clients/subLinks/'.$this->subId(1), $this->fake->requestLines());
+        self::assertSame($this->subId(1), $this->row('vpn_service', (int) $service->getId())['sub_id'], '--apply stores the recovered subId');
+        self::assertCount(2, $this->links($service));
+    }
+
     public function testALegacyPanelServiceIsPreviewedThroughTheLegacyDriverWithoutWriting(): void
     {
         $this->panel->setIntegrationMode(SanaeiIntegrationMode::LEGACY);

@@ -186,6 +186,40 @@ final class VerifyLinksCommandTest extends IntegrationTestCase
         self::assertStringContainsString('legacy: Hosts not applicable', $out);
     }
 
+    public function testAnUnexpectedErrorIsCannotCheckNeverADifference(): void
+    {
+        $this->storeThePanelsLinks();
+        $this->fake->script('GET', 'panel/api/clients/links/'.self::EMAIL, static function (): never {
+            throw new \LogicException('unexpected answer for '.self::SUB_ID.' at https://panel.example.test:2053/secret/x');
+        });
+
+        [$code, $out] = $this->verify();
+
+        self::assertSame(2, $code, $out);
+        self::assertStringContainsString('CANNOT CHECK (could not run: LogicException', $out);
+        $this->assertNoSecret($out);
+    }
+
+    public function testAStoredSubIdThatIsNotThePanelsIsADifference(): void
+    {
+        $this->storeThePanelsLinks();
+        $this->em->getConnection()->update('vpn_service', ['sub_id' => 'othersub00000000'], ['id' => $this->service->getId()]);
+
+        [$code, $out] = $this->verify();
+
+        self::assertSame(1, $code, $out);
+        self::assertStringContainsString('DIFF  stored subId = panel subId', $out);
+        self::assertStringContainsString('differs from the panel\'s', $out);
+        self::assertStringNotContainsString('othersub00000000', $out);
+        $this->assertNoSecret($out);
+
+        $this->em->getConnection()->update('vpn_service', ['sub_id' => null], ['id' => $this->service->getId()]);
+        [$code, $out] = $this->verify();
+        self::assertSame(1, $code, $out);
+        self::assertStringContainsString('no subId is stored (the remote id\'s is used)', $out);
+        $this->assertNoSecret($out);
+    }
+
     public function testJsonOutput(): void
     {
         $this->storeThePanelsLinks();
@@ -197,7 +231,7 @@ final class VerifyLinksCommandTest extends IntegrationTestCase
         self::assertSame(0, $code);
         self::assertSame('PASS', $report['result']);
         self::assertSame(0, $report['exitCode']);
-        self::assertCount(7, $report['checks']);
+        self::assertCount(8, $report['checks']);
         self::assertCount(4, $report['manual']);
     }
 

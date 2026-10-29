@@ -280,7 +280,7 @@ final class SuperAdminGatingTest extends IntegrationTestCase
             ['GET', '/admin/vpn-inbound/'.$inboundId.'/test-create-client', []],
             ['GET', '/admin/vpn-inbound/'.$inboundId.'/resync', []],
             ['GET', '/admin/vpn-inbound/'.$inboundId.'/sync-access-metadata', []],
-            ['GET', '/admin/vpn-inbound/'.$inboundId.'/regenerate-service-configs', []],
+            ['POST', '/admin/vpn-inbound/'.$inboundId.'/regenerate-service-configs', []],
             ['GET', '/admin/vpn-service/'.$this->serviceId.'/regenerate-config', []],
             ['GET', '/admin/settings/renewal-pricing', []],
             ['POST', '/admin/settings/renewal-pricing', []],

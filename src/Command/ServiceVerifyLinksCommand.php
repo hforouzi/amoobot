@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Command;
 
 use App\Entity\VpnService;
+use App\Provisioning\Application\ServiceErrorText;
 use App\Provisioning\Infrastructure\Sanaei3xui\Modern\ServiceLinkVerifier;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\Console\Attribute\AsCommand;
@@ -44,19 +45,29 @@ final class ServiceVerifyLinksCommand extends Command
                   security, sni, type, host, path, remark; random SNI/CIDR picks and remark templates tolerated);
                 - subLinks against what the panel's Hosts predict (one link per enabled, raw-format host address);
                 - every address public, every link carrying this client's credential (VLESS route bytes masked);
+                - the stored subId is the panel's (the bot reads subLinks with the stored one);
                 - U2: subLinks has no info node; U6: links/{email} gives the same set as subLinks.
 
                 Exit code: <info>0</info> PASS, <info>1</info> differences (listed), <info>2</info> could not check (legacy
-                panel, panel unreachable or refusing, no client). Links are shown without UUID or password.
+                panel, panel unreachable or refusing, no client, or any unexpected error). Links are shown without UUID
+                or password, the subId never.
                 HELP);
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $service = $this->entityManager->find(VpnService::class, (int) $input->getArgument('serviceId'));
-        $report = $service instanceof VpnService
-            ? $this->verifier->verify($service)
-            : ['exitCode' => 2, 'result' => 'CANNOT CHECK', 'reason' => 'service not found', 'checks' => []];
+        if (!$service instanceof VpnService) {
+            $report = ['exitCode' => 2, 'result' => 'CANNOT CHECK', 'reason' => 'service not found', 'checks' => []];
+        } else {
+            try {
+                $report = $this->verifier->verify($service);
+            } catch (\Throwable $e) {
+                // Anything unexpected (an odd panel answer, a bug) means "could not run": never exit 1, which reads as DIFF.
+                $reason = sprintf('could not run: %s: %s', (new \ReflectionClass($e))->getShortName(), ServiceErrorText::redact($service, $e->getMessage(), 200));
+                $report = ['exitCode' => 2, 'result' => 'CANNOT CHECK', 'reason' => $reason, 'checks' => []];
+            }
+        }
 
         if ((bool) $input->getOption('json')) {
             $output->writeln((string) json_encode($report + ['manual' => self::MANUAL], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));

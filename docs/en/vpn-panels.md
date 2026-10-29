@@ -49,14 +49,27 @@ php bin/console app:service:regenerate-config <serviceId> --apply      # stores 
 php bin/console app:inbound:regenerate-service-configs <inboundId>
 php bin/console app:inbound:regenerate-service-configs <inboundId> --apply --batch-size=50
 php bin/console app:inbound:regenerate-service-configs <inboundId> --apply --after-id=<last processed id>   # resume
+
+# After syncing a panel's inbounds: every service of the panel, same rules (a dry run unless --apply).
+php bin/console app:panel:sync-inbounds <panelId> --regenerate-configs
+php bin/console app:panel:sync-inbounds <panelId> --regenerate-configs --apply
 ```
 
 - **Both commands are dry runs unless you pass `--apply`.** `--apply` together with `--dry-run` is refused.
 - Links are printed as `scheme address:port #remark`, never with the UUID or password.
 - After each batch the bulk command prints `last processed id N`; if it stops, run it again with `--after-id=N`.
 - A service whose panel call fails is skipped with `FAILED, stored links kept`. The run goes on and the command exits with 1.
+- **After 5 failed services in a row the run stops** (the panel is probably down) and prints the `--after-id` to resume
+  with. Batches are separated by a pause, `--pause` seconds (default 0.2).
+- A bulk run **never marks the panel "degraded"** (which would stop its sales): its failed calls are not counted.
+- Each service is written on its own, with its row locked. If a "reset my links" changed the service's credentials
+  while its links were being read, the links read are thrown away (`credentials changed meanwhile`) and the panel is
+  read again for the new credentials. Old links are never written over new credentials.
 - The admin "Regenerate config" button (web panel and Mini App) does the same as `--apply` for one service. Its
   message shows the new and the previous count, for example "2 link(s) (before: 3)".
+- The web action "Regenerate service configs" of an **inbound** handles at most **10 services** (one panel call each,
+  inside one web request). For a larger inbound it shows the command to run instead:
+  `php bin/console app:inbound:regenerate-service-configs <inboundId> --apply` (run it without `--apply` first).
 
 ### Verify links (read-only)
 
@@ -68,6 +81,7 @@ It reads the database and the panel (GET requests only) and changes nothing. It 
 
 | Check | Meaning of DIFF |
 |---|---|
+| stored subId = panel subId | The subId the bot reads links with is not the panel's, or is missing from the database (then `regenerate-config <id> --apply` stores it). Neither value is printed. |
 | stored snapshot = panel subLinks | The service still has old links. Run `app:service:regenerate-config <id> --apply`. |
 | panel subLinks = Hosts prediction | A host that should give a link does not, or its security / SNI / path differs. Skipped when the panel has no Hosts API or the client is bound to specific host rules. |
 | every address is public | A link points at `127.0.0.1` or a private address (set the panel's Sub/Web domain, or add a host). |
@@ -76,7 +90,7 @@ It reads the database and the panel (GET requests only) and changes nothing. It 
 | U6: links/{email} = subLinks | The panel's two link endpoints disagree. The bot stores subLinks only. |
 
 Exit code `0` = PASS, `1` = differences (listed), `2` = could not check (legacy panel, panel unreachable or refusing,
-client missing).
+client missing, or any unexpected error).
 
 **Manual checks** (things the command cannot see), on a test service:
 
@@ -112,7 +126,8 @@ covered by this fix yet). Count them, read-only:
 SELECT COUNT(*) AS modern_services_without_link_snapshot
 FROM vpn_service s JOIN vpn_panel p ON p.id = s.panel_id
 WHERE p.type = 'sanaei_3xui'
-  AND (p.sanaei_integration_mode = 'modern' OR (p.sanaei_integration_mode = 'auto' AND p.sanaei_detected_mode = 'modern'))
+  AND (p.sanaei_integration_mode = 'modern'
+       OR (p.sanaei_integration_mode NOT IN ('legacy', 'modern') AND p.sanaei_detected_mode = 'modern'))
   AND s.status <> 'deleted'
   AND (s.config_links IS NULL OR TRIM(s.config_links) IN ('', '[]', 'null'));
 ```

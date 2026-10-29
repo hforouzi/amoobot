@@ -64,7 +64,7 @@ Toggleهای پنل ادمین (`automation.*`) احترام می‌گذارد. 
 | `app:broadcast:send` / `prepare` / `retry-failed` | برای یک broadcast مشخص (آرگومان لازم دارند). ارسال زمان‌بندی‌شده با `--only=broadcasts` انجام می‌شود |
 | `app:payment:check-nowpayments` | برای یک پرداخت مشخص. IPN درگاه وضعیت را خودکار به‌روز می‌کند |
 | `app:telegram:poll` | فقط برای حالت long polling (توسعه). Production از webhook استفاده می‌کند |
-| `app:panel:sync-inbounds`، `app:inbound:regenerate-service-configs` | تغییر دسته‌جمعی پیکربندی‌ها، فقط دستی (`regenerate-service-configs` بدون `--apply` فقط اجرای آزمایشی است) |
+| `app:panel:sync-inbounds`، `app:inbound:regenerate-service-configs` | تغییر دسته‌جمعی پیکربندی‌ها، فقط دستی (`regenerate-service-configs` و `sync-inbounds --regenerate-configs` بدون `--apply` فقط اجرای آزمایشی‌اند) |
 | سلامت پنل‌ها | دستور جداگانه‌ای ندارد. خطای اتصال به پنل باعث شکست کار `sync` و ارسال هشدار می‌شود |
 
 ### محدودیت مهم: `automation.batch_limit`

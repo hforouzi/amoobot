@@ -11,7 +11,8 @@ use App\Provisioning\Domain\VpnServiceStatus;
  * The console regeneration of one service's links (app:service:regenerate-config, app:inbound:regenerate-service-
  * configs), as a dry run ($apply=false: the panel is read, nothing is changed) or applied (the caller flushes):
  *
- * - modern 3x-ui: the panel's own links (PanelLinkSnapshot); a failure or an empty answer keeps the stored links;
+ * - modern 3x-ui: the panel's own links (PanelLinkSnapshot, which writes and commits them itself, under the row lock
+ *   and only if the credentials did not change meanwhile); a failure or an empty answer keeps the stored links;
  * - legacy 3x-ui: the legacy driver's refresh, unchanged (VpnServiceConfigRefreshService);
  * - other drivers: links built from the inbound (VpnAccessLinkGenerator), as before.
  */
@@ -24,7 +25,11 @@ final class ServiceLinkRegenerator
     ) {
     }
 
-    public function run(VpnService $service, string $source, bool $apply): ServiceLinkChange
+    /**
+     * @param bool $bulk one service of a bulk run: a failing panel call does not count towards the panel's "degraded"
+     *                   state, so a bad run never stops the panel's sales
+     */
+    public function run(VpnService $service, string $source, bool $apply, bool $bulk = false): ServiceLinkChange
     {
         $before = ServiceConfigRegenerator::normalizedLinks($service->getConfigLinks() ?? []);
         if (VpnServiceStatus::DELETED === $service->getStatus()) {
@@ -32,13 +37,16 @@ final class ServiceLinkRegenerator
         }
 
         if (null !== $this->panelLinkSnapshot->driverFor($service)) {
-            $refresh = $this->panelLinkSnapshot->refresh($service, $source, $apply);
+            $refresh = $this->panelLinkSnapshot->refresh($service, $source, $apply, !$bulk);
+
+            $changed = $refresh->changedMeanwhile;
 
             return match ($refresh->outcome) {
-                PanelLinkRefresh::UPDATED, PanelLinkRefresh::UNCHANGED => new ServiceLinkChange(PanelLinkRefresh::UPDATED === $refresh->outcome ? ServiceLinkChange::UPDATED : ServiceLinkChange::UNCHANGED, 'panel', $before, $refresh->after, $apply),
-                PanelLinkRefresh::KEPT_EMPTY_ANSWER, PanelLinkRefresh::EMPTY => new ServiceLinkChange(ServiceLinkChange::KEPT, 'panel', $before, $before, false, $refresh->error),
+                PanelLinkRefresh::UPDATED, PanelLinkRefresh::UNCHANGED => new ServiceLinkChange(PanelLinkRefresh::UPDATED === $refresh->outcome ? ServiceLinkChange::UPDATED : ServiceLinkChange::UNCHANGED, 'panel', $refresh->before, $refresh->after, $apply, null, $changed),
+                PanelLinkRefresh::KEPT_EMPTY_ANSWER, PanelLinkRefresh::EMPTY => new ServiceLinkChange(ServiceLinkChange::KEPT, 'panel', $refresh->before, $refresh->before, false, $refresh->error, $changed),
                 PanelLinkRefresh::NO_IDENTITY => new ServiceLinkChange(ServiceLinkChange::SKIPPED, 'panel', $before, $before, false, 'no client identity'),
-                default => new ServiceLinkChange(ServiceLinkChange::FAILED, 'panel', $before, $before, false, $refresh->error),
+                PanelLinkRefresh::CHANGED_MEANWHILE => new ServiceLinkChange(ServiceLinkChange::CHANGED, 'panel', $before, $before, false, $refresh->error, true),
+                default => new ServiceLinkChange(ServiceLinkChange::FAILED, 'panel', $refresh->before, $refresh->before, false, $refresh->error, $changed),
             };
         }
 
@@ -53,7 +61,7 @@ final class ServiceLinkRegenerator
         if ($isLegacy) {
             $result = $apply ? $this->configRefreshService->refreshSanaeiLegacy($service, $source) : $this->configRefreshService->previewSanaeiLegacy($service);
             if (!$result->succeeded) {
-                return new ServiceLinkChange(ServiceLinkChange::FAILED, 'legacy', $before, $before, false, (string) ($result->failureReason ?? 'unknown'));
+                return new ServiceLinkChange(ServiceLinkChange::FAILED, 'legacy', $before, $before, false, ServiceErrorText::redact($service, (string) ($result->failureReason ?? 'unknown')));
             }
 
             return new ServiceLinkChange($result->configLinks === $before ? ServiceLinkChange::UNCHANGED : ServiceLinkChange::UPDATED, 'legacy', $before, $result->configLinks, $apply);
@@ -62,7 +70,7 @@ final class ServiceLinkRegenerator
         try {
             $links = $this->vpnAccessLinkGenerator->generate($service);
         } catch (\Throwable $e) {
-            return new ServiceLinkChange(ServiceLinkChange::FAILED, 'generated', $before, $before, false, $e->getMessage());
+            return new ServiceLinkChange(ServiceLinkChange::FAILED, 'generated', $before, $before, false, ServiceErrorText::redact($service, $e->getMessage()));
         }
         $after = ServiceConfigRegenerator::normalizedLinks($links['configLinks']);
         if ($apply) {

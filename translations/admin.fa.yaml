@@ -965,6 +965,7 @@ flash:
   inbound.metadata_synced: "همگام‌سازی متادیتای دسترسی انجام شد."
   inbound.configs_partially_updated: "کانفیگ %updated% سرویس بروزرسانی شد. %failed% سرویس با خطا. (externalProxy: %proxies%)"
   inbound.configs_updated: "کانفیگ %count% سرویس بروزرسانی شد."
+  inbound.regenerate_use_cli: "این اینباند %count% سرویس دارد و این دکمه حداکثر %max% سرویس را انجام می‌دهد (برای هر سرویس یک درخواست به پنل). روی سرور اجرا کنید: %command% (اول بدون --apply اجرا کنید تا فقط آزمایشی باشد)."
   service.no_uuid: "سرویس uuid یا subId ندارد. بازسازی امکان‌پذیر نیست."
   service.regenerate_failed: "بازسازی کانفیگ ناموفق: %error%"
   service.refreshed_from_panel: "کانفیگ سرویس #%id% از پنل بروزرسانی شد. %count% لینک (قبلاً %previous%)."

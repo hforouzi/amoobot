@@ -35,7 +35,7 @@ php bin/console app:panel:detect-version
 php bin/console app:panel:test-login
 php bin/console app:panel:list-inbounds
 php bin/console app:panel:test-client-links
-php bin/console app:panel:sync-inbounds
+php bin/console app:panel:sync-inbounds <panelId> [--regenerate-configs [--apply]]   # --regenerate-configs بدون --apply فقط اجرای آزمایشی است (دسته‌ای، --after-id، --pause؛ بعد از ۵ خطای پشت‌سرهم متوقف می‌شود)
 php bin/console app:panel:sync-inbound-metadata
 php bin/console app:panel:debug-transport
 ```
@@ -54,7 +54,10 @@ php bin/console app:automation:run
 php bin/console app:service:sync-usage
 php bin/console app:service:check-expiry
 php bin/console app:service:send-notifications
-php bin/console app:service:regenerate-config
+# بدون --apply فقط اجرای آزمایشی‌اند: لینک‌های قبلی و جدید، بدون ذخیره. راهنما: vpn-panels.md، «لینک‌های کانفیگ و Hostهای 3x-ui».
+php bin/console app:service:regenerate-config <serviceId> [--apply]
+php bin/console app:inbound:regenerate-service-configs <inboundId> [--apply] [--batch-size=50] [--pause=0.2] [--after-id=N]
+php bin/console app:service:verify-links <serviceId> [--json]   # فقط خواندنی؛ خروجی ۰ = PASS، ۱ = DIFF، ۲ = بررسی ممکن نشد
 php bin/console app:service:debug-links
 ```
 

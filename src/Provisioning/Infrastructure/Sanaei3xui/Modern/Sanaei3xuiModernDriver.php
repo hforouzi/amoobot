@@ -350,17 +350,18 @@ final class Sanaei3xuiModernDriver implements VpnPanelDriverInterface, ExistingC
         }
     }
 
-    public function panelLinks(string $remoteId, ?string $subId, ?VpnPanel $panel = null): PanelLinks
+    public function panelLinks(string $remoteId, ?string $subId, ?VpnPanel $panel = null, bool $recordHealth = true): PanelLinks
     {
-        return $this->linksOf($this->requirePanel($panel), $this->ref($remoteId)->email, $subId);
+        return $this->linksOf($this->requirePanel($panel), $this->ref($remoteId)->email, $subId, $recordHealth);
     }
 
-    private function linksOf(VpnPanel $panel, string $email, ?string $subId): PanelLinks
+    private function linksOf(VpnPanel $panel, string $email, ?string $subId, bool $recordHealth = true): PanelLinks
     {
         $subId = null === $subId || '' === trim($subId) ? null : trim($subId);
-        $answer = null === $subId ? $this->api->links($panel, $email) : $this->api->subLinks($panel, $subId);
+        $answer = null === $subId ? $this->api->links($panel, $email, $recordHealth) : $this->api->subLinks($panel, $subId, $recordHealth);
         if ($answer['rejected'] > 0) {
-            $this->logger->warning('sanaei_modern_links_rejected', ['panel_id' => $panel->getId(), 'rejected' => $answer['rejected']]);
+            // Counted per scheme only (e.g. {"socks": 1, "not_a_string": 2}): never the item, it may carry a credential.
+            $this->logger->warning('sanaei_modern_links_rejected', ['panel_id' => $panel->getId(), 'rejected' => $answer['rejected'], 'schemes' => $answer['rejectedSchemes']]);
         }
 
         return new PanelLinks($answer['links'], $answer['rejected'], null === $subId ? 'links' : 'subLinks', null === $subId ? null : SubscriptionUrl::build($panel, $subId));

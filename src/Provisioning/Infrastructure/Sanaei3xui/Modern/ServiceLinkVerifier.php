@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Provisioning\Infrastructure\Sanaei3xui\Modern;
 
 use App\Entity\VpnService;
+use App\Provisioning\Application\PanelLinkSnapshot;
+use App\Provisioning\Application\ServiceErrorText;
 use App\Provisioning\Domain\PublicUrlPolicy;
 use App\Provisioning\Domain\ShareLinkTuple;
 use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http\PanelApiException;
@@ -74,7 +76,7 @@ final class ServiceLinkVerifier
                 }
             }
         } catch (PanelApiException $e) {
-            return self::cannot('the panel could not be read: '.$e->getMessage());
+            return self::cannot('the panel could not be read: '.ServiceErrorText::redact($service, $e->getMessage()));
         }
 
         $panelLinks = self::tuples($sub['links']);
@@ -84,6 +86,7 @@ final class ServiceLinkVerifier
         $checks = [];
         $checks[] = ['name' => 'panel', 'status' => self::INFO, 'detail' => sprintf('hosts=%s; client on inbound(s) %s; %d link(s) in subLinks; per-client host binding: %s; link order is not compared',
             $hosts['state'], [] === $inboundIds ? '-' : implode(', ', $inboundIds), count($sub['links']), [] === $bindings ? 'none' : implode(', ', $bindings)), 'differences' => []];
+        $checks[] = self::storedSubId($service, $subId);
         $checks[] = $this->storedVsPanel($service, $panelLinks, $tolerance);
         $checks[] = $this->prediction($hosts['state'], $groups, $options, $inboundIds, $bindings, $panelLinks);
         $checks[] = self::publicAddresses($panelLinks);
@@ -94,6 +97,29 @@ final class ServiceLinkVerifier
         $diff = [] !== array_filter($checks, static fn (array $c): bool => self::DIFF === $c['status']);
 
         return ['exitCode' => $diff ? 1 : 0, 'result' => $diff ? 'DIFF' : 'PASS', 'reason' => null, 'checks' => $checks];
+    }
+
+    /**
+     * The subId the bot reads subLinks with (the stored one, else the remote id's) is the panel's: otherwise the bot
+     * refreshes a subscription that is not this client's, or none. Neither value is shown (a subId opens the
+     * subscription).
+     *
+     * @return array{name: string, status: string, detail: string, differences: list<string>}
+     */
+    private static function storedSubId(VpnService $service, string $panelSubId): array
+    {
+        $stored = trim((string) $service->getSubId());
+        $used = PanelLinkSnapshot::effectiveSubId($service);
+        $differences = [];
+        if ($used !== $panelSubId) {
+            $differences[] = '' === $stored && null === $used
+                ? 'no subId is stored and the remote id has none: the bot reads links/{email} instead of subLinks'
+                : 'the subId the bot uses differs from the panel\'s: its links are not this client\'s subscription (re-sync the service)';
+        } elseif ('' === $stored) {
+            $differences[] = 'no subId is stored (the remote id\'s is used): app:service:regenerate-config <id> --apply stores it';
+        }
+
+        return ['name' => 'stored subId = panel subId', 'status' => [] === $differences ? self::PASS : self::DIFF, 'detail' => 'compared, not shown', 'differences' => $differences];
     }
 
     /**

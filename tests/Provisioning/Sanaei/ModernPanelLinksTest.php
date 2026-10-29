@@ -122,6 +122,11 @@ final class ModernPanelLinksTest extends TestCase
         self::assertSame(9, $links->rejected);
         self::assertSame('subLinks', $links->source);
         self::assertStringContainsString('sanaei_modern_links_rejected', $this->logger->all);
+        // Counted per scheme, never an item (they may carry a UUID).
+        self::assertStringContainsString('"schemes":{"http":1,"javascript":1,"not_a_string":2,"socks":1,"vless":4}', $this->logger->all);
+        self::assertStringNotContainsString('abc@host', $this->logger->all);
+        self::assertStringNotContainsString('evil.example.com', $this->logger->all);
+        self::assertStringNotContainsString(self::UUID, $this->logger->all);
     }
 
     public function testAnswerThatIsNotAListGivesNoLinks(): void
