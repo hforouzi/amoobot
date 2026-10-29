@@ -6,6 +6,7 @@ namespace App\Command;
 
 use App\Entity\VpnInbound;
 use App\Entity\VpnService;
+use App\Provisioning\Application\ServiceErrorText;
 use App\Provisioning\Application\ServiceLinkChange;
 use App\Provisioning\Application\ServiceLinkRegenerator;
 use Doctrine\ORM\EntityManagerInterface;
@@ -95,7 +96,7 @@ final class InboundRegenerateServiceConfigsCommand extends Command
                 try {
                     $change = $this->linkRegenerator->run($service, 'console_inbound_regenerate_configs', $apply);
                 } catch (\Throwable $e) {
-                    $change = new ServiceLinkChange(ServiceLinkChange::FAILED, '-', [], [], false, $e->getMessage());
+                    $change = new ServiceLinkChange(ServiceLinkChange::FAILED, '-', [], [], false, ServiceErrorText::redact($service, $e->getMessage()));
                 }
                 ++$counts['total'];
                 ++$counts[$change->outcome];

@@ -86,6 +86,7 @@ class ModernPanelHttpClient
         $endpoint->assertTransportAllowed();
         $url = $endpoint->url($path, $query);
         $options = $this->options($panel, $endpoint, $token, $json);
+        $secrets = self::secretsOf($endpoint, $path, $label, $token);
         $path = $label ?? $path;
         if (null !== $maxBodyBytes) {
             $options['on_progress'] = static function (int $downloaded, int $size) use ($maxBodyBytes): void {
@@ -98,7 +99,7 @@ class ModernPanelHttpClient
         $firstStartedAt = microtime(true);
         for ($attempt = 1; ; ++$attempt) {
             try {
-                $response = $this->attempt($panel, $method, $path, $url, $options, $token, $maxBodyBytes);
+                $response = $this->attempt($panel, $method, $path, $url, $options, $secrets, $maxBodyBytes);
                 $panel->recordCallSuccess();
 
                 return $response;
@@ -122,8 +123,9 @@ class ModernPanelHttpClient
 
     /**
      * @param array<string, mixed> $options
+     * @param list<string>         $secrets what no message may contain (token, base path, the path's hidden segments)
      */
-    private function attempt(VpnPanel $panel, string $method, string $path, string $url, #[\SensitiveParameter] array $options, #[\SensitiveParameter] string $token, ?int $maxBodyBytes = null): PanelResponse
+    private function attempt(VpnPanel $panel, string $method, string $path, string $url, #[\SensitiveParameter] array $options, #[\SensitiveParameter] array $secrets, ?int $maxBodyBytes = null): PanelResponse
     {
         $startedAt = microtime(true);
         try {
@@ -148,15 +150,14 @@ class ModernPanelHttpClient
                 throw new PanelApiException($failure, sprintf('%s %s: the panel certificate does not match the pinned public key (was the certificate replaced?).', $method, $path));
             }
 
-            // Transport messages may quote the request URL (base path, subscription id): only the label is shown.
-            $message = str_replace([$url, rawurldecode($url)], '<panel>/'.$path, $e->getMessage());
-
-            throw new PanelApiException($failure, sprintf('%s %s: %s', $method, $path, SecretRedactor::redact($message, [$token], 300)));
+            // Transport messages quote the URL, as the transport normalised it (default port dropped, ...): every URL is
+            // replaced by the label, then the base path and the hidden path segments are removed wherever they remain.
+            throw new PanelApiException($failure, sprintf('%s %s: %s', $method, $path, self::clean($e->getMessage(), $secrets, $path, 300)));
         }
 
         $latencyMs = self::elapsedMs($startedAt);
         try {
-            $result = $this->parse($method, $path, $status, $headers, $body, $latencyMs, $token);
+            $result = $this->parse($method, $path, $status, $headers, $body, $latencyMs, $secrets);
         } catch (PanelApiException $e) {
             $this->logFailure($panel, $method, $path, $e->failure, $status, $startedAt);
 
@@ -190,8 +191,9 @@ class ModernPanelHttpClient
 
     /**
      * @param array<string, list<string>> $headers
+     * @param list<string>                $secrets
      */
-    private function parse(string $method, string $path, int $status, #[\SensitiveParameter] array $headers, #[\SensitiveParameter] string $body, int $latencyMs, #[\SensitiveParameter] string $token): PanelResponse
+    private function parse(string $method, string $path, int $status, #[\SensitiveParameter] array $headers, #[\SensitiveParameter] string $body, int $latencyMs, #[\SensitiveParameter] array $secrets): PanelResponse
     {
         $what = $method.' '.$path;
         if (401 === $status || 403 === $status) {
@@ -201,7 +203,7 @@ class ModernPanelHttpClient
             // A JSON envelope with 404 is the API answering "no such record"; the bare 404 page means no API here.
             $decoded = json_decode(ltrim($body), true);
             if (is_array($decoded) && is_bool($decoded['success'] ?? null)) {
-                $msg = is_scalar($decoded['msg'] ?? null) ? SecretRedactor::redact((string) $decoded['msg'], [$token], 300) : null;
+                $msg = is_scalar($decoded['msg'] ?? null) ? self::clean((string) $decoded['msg'], $secrets, $path, 300) : null;
 
                 throw new PanelApiException(PanelFailure::PANEL_REJECTED, sprintf('%s: HTTP 404: %s', $what, '' !== (string) $msg ? $msg : 'not found'), $status, $msg);
             }
@@ -209,7 +211,7 @@ class ModernPanelHttpClient
             throw new PanelApiException(PanelFailure::WRONG_URL, sprintf('%s: HTTP 404, no API at this URL (check the URL and the web base path).', $what), $status);
         }
         if ($status >= 300 && $status < 400) {
-            $location = SecretRedactor::redact((string) ($headers['location'][0] ?? ''), [$token], 200);
+            $location = self::clean((string) ($headers['location'][0] ?? ''), $secrets, $path, 200);
 
             throw new PanelApiException(PanelFailure::HTTP_ERROR, sprintf('%s: HTTP %d redirect to "%s" (redirects are not followed; use the final URL).', $what, $status, $location), $status);
         }
@@ -230,7 +232,7 @@ class ModernPanelHttpClient
         if (!is_array($decoded) || !is_bool($decoded['success'] ?? null)) {
             throw new PanelApiException(PanelFailure::UNEXPECTED_RESPONSE, sprintf('%s: the answer is not the {success, msg, obj} envelope.', $what), $status);
         }
-        $msg = is_scalar($decoded['msg'] ?? null) ? SecretRedactor::redact((string) $decoded['msg'], [$token], 300) : null;
+        $msg = is_scalar($decoded['msg'] ?? null) ? self::clean((string) $decoded['msg'], $secrets, $path, 300) : null;
         if (false === $decoded['success']) {
             throw new PanelApiException(PanelFailure::PANEL_REJECTED, sprintf('%s: the panel refused: %s', $what, '' !== (string) $msg ? $msg : '(no message)'), $status, $msg);
         }
@@ -292,6 +294,56 @@ class ModernPanelHttpClient
         if ($panel->recordCallFailure(new \DateTimeImmutable())) {
             $this->logger->warning('sanaei_panel_degraded', ['panel_id' => $panel->getId(), 'failures' => $panel->getConsecutiveFailures(), 'failure' => $e->failure->value]);
         }
+    }
+
+    /**
+     * What no message may contain (the token first): the token, the panel's base path (it hides the panel) and every path segment the
+     * label replaces (a subscription id opens the customer's subscription).
+     *
+     * @return list<string>
+     */
+    private static function secretsOf(PanelEndpoint $endpoint, string $path, ?string $label, #[\SensitiveParameter] string $token): array
+    {
+        $secrets = [$token];
+        $basePath = trim($endpoint->basePath, '/');
+        if ('' !== $basePath) {
+            $secrets[] = $basePath;
+            array_push($secrets, ...explode('/', $basePath));
+        }
+        if (null !== $label) {
+            $shown = explode('/', trim($label, '/'));
+            foreach (explode('/', trim($path, '/')) as $segment) {
+                if ('' !== $segment && !in_array($segment, $shown, true)) {
+                    $secrets[] = $segment;
+                    $secrets[] = rawurldecode($segment);
+                }
+            }
+        }
+        $words = array_values(array_unique(array_filter(array_slice($secrets, 1), static fn (string $s): bool => '' !== $s)));
+        // Longest first: "a/b" before "a".
+        usort($words, static fn (string $a, string $b): int => strlen($b) <=> strlen($a));
+
+        return [$token, ...$words];
+    }
+
+    /**
+     * A text that may quote the request (a transport error, the panel's msg, a Location header) as it may be shown:
+     * every URL becomes "<panel>/<label>", each secret is removed wherever it stands as a whole word (also encoded),
+     * then the usual token patterns are masked.
+     *
+     * @param list<string> $secrets
+     */
+    private static function clean(string $text, #[\SensitiveParameter] array $secrets, string $label, int $maxLength): string
+    {
+        $text = (string) preg_replace('#\b[a-z][a-z0-9+.-]*://[^\s"\'<>]*#i', '<panel>/'.$label, $text);
+        foreach ($secrets as $secret) {
+            foreach (array_unique([$secret, rawurlencode($secret)]) as $form) {
+                $text = (string) preg_replace('/(?<![A-Za-z0-9_.~-])'.preg_quote($form, '/').'(?![A-Za-z0-9_.~-])/', SecretRedactor::MASK, $text);
+            }
+        }
+
+        // The token also where it is not a whole word; the base path and segments only as words (they can be short).
+        return SecretRedactor::redact($text, array_slice($secrets, 0, 1), $maxLength);
     }
 
     private function token(VpnPanel $panel): string

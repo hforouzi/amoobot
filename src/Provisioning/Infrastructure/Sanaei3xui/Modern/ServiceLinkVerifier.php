@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Provisioning\Infrastructure\Sanaei3xui\Modern;
 
 use App\Entity\VpnService;
+use App\Provisioning\Application\ServiceErrorText;
 use App\Provisioning\Domain\PublicUrlPolicy;
 use App\Provisioning\Domain\ShareLinkTuple;
 use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http\PanelApiException;
@@ -74,7 +75,7 @@ final class ServiceLinkVerifier
                 }
             }
         } catch (PanelApiException $e) {
-            return self::cannot('the panel could not be read: '.$e->getMessage());
+            return self::cannot('the panel could not be read: '.ServiceErrorText::redact($service, $e->getMessage()));
         }
 
         $panelLinks = self::tuples($sub['links']);

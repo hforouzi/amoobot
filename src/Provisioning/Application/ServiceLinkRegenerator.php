@@ -53,7 +53,7 @@ final class ServiceLinkRegenerator
         if ($isLegacy) {
             $result = $apply ? $this->configRefreshService->refreshSanaeiLegacy($service, $source) : $this->configRefreshService->previewSanaeiLegacy($service);
             if (!$result->succeeded) {
-                return new ServiceLinkChange(ServiceLinkChange::FAILED, 'legacy', $before, $before, false, (string) ($result->failureReason ?? 'unknown'));
+                return new ServiceLinkChange(ServiceLinkChange::FAILED, 'legacy', $before, $before, false, ServiceErrorText::redact($service, (string) ($result->failureReason ?? 'unknown')));
             }
 
             return new ServiceLinkChange($result->configLinks === $before ? ServiceLinkChange::UNCHANGED : ServiceLinkChange::UPDATED, 'legacy', $before, $result->configLinks, $apply);
@@ -62,7 +62,7 @@ final class ServiceLinkRegenerator
         try {
             $links = $this->vpnAccessLinkGenerator->generate($service);
         } catch (\Throwable $e) {
-            return new ServiceLinkChange(ServiceLinkChange::FAILED, 'generated', $before, $before, false, $e->getMessage());
+            return new ServiceLinkChange(ServiceLinkChange::FAILED, 'generated', $before, $before, false, ServiceErrorText::redact($service, $e->getMessage()));
         }
         $after = ServiceConfigRegenerator::normalizedLinks($links['configLinks']);
         if ($apply) {

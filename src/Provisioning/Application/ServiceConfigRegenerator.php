@@ -74,7 +74,7 @@ final class ServiceConfigRegenerator
 
             return new ServiceConfigRegeneration(ServiceConfigRegeneration::REGENERATED, count($configLinks), null, $previous);
         } catch (\Throwable $e) {
-            return new ServiceConfigRegeneration(ServiceConfigRegeneration::FAILED, error: $e->getMessage());
+            return new ServiceConfigRegeneration(ServiceConfigRegeneration::FAILED, error: ServiceErrorText::redact($service, $e->getMessage()));
         }
     }
 
@@ -83,7 +83,7 @@ final class ServiceConfigRegenerator
         try {
             $refresh = $this->panelLinkSnapshot->refresh($service, $source);
         } catch (\Throwable $e) {
-            return new ServiceConfigRegeneration(ServiceConfigRegeneration::FAILED, $previous, $e->getMessage(), $previous);
+            return new ServiceConfigRegeneration(ServiceConfigRegeneration::FAILED, $previous, ServiceErrorText::redact($service, $e->getMessage()), $previous);
         }
         if (PanelLinkRefresh::NO_IDENTITY === $refresh->outcome) {
             return new ServiceConfigRegeneration(ServiceConfigRegeneration::NO_IDENTITY, $previous, null, $previous);

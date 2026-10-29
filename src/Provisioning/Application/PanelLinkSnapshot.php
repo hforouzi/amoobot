@@ -57,9 +57,10 @@ final class PanelLinkSnapshot
         try {
             $answer = $driver->panelLinks($remoteId, $service->getSubId(), $service->getPanel());
         } catch (\RuntimeException $e) {
-            $this->logger->warning('panel_links_snapshot_failed', $context + ['error' => $e->getMessage()]);
+            $error = ServiceErrorText::redact($service, $e->getMessage());
+            $this->logger->warning('panel_links_snapshot_failed', $context + ['error' => $error]);
 
-            return new PanelLinkRefresh(PanelLinkRefresh::FAILED, $before, [], 0, $e->getMessage());
+            return new PanelLinkRefresh(PanelLinkRefresh::FAILED, $before, [], 0, $error);
         }
         $after = $answer->links;
 
