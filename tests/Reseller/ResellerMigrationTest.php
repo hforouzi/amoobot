@@ -12,7 +12,8 @@ use Symfony\Component\Process\Process;
 
 /**
  * Migrations Version20261027090000 (resellers, S1) and Version20261029090000 (order.reseller_nonce): additive, so they
- * go down (newest first, after the claim links of S2, Version20261030090000) and up again on a database without
+ * go down (newest first, after the customer labels of S3, Version20261031090000, and the claim links of S2,
+ * Version20261030090000) and up again on a database without
  * reseller data. With any (a profile, a plan floor price, an order with a confirmation nonce) down() refuses and changes
  * nothing; S1's down() also refuses while the nonce or the claim-links migration is still applied (it would drop half
  * of that unique key / fail on their foreign key).
@@ -23,6 +24,7 @@ final class ResellerMigrationTest extends IntegrationTestCase
     private const S1 = 'DoctrineMigrations\\Version20261027090000';
     private const NONCE = 'DoctrineMigrations\\Version20261029090000';
     private const CLAIMS = 'DoctrineMigrations\\Version20261030090000';
+    private const LABELS = 'DoctrineMigrations\\Version20261031090000';
 
     public function testDownIsRefusedWhileResellerDataExistsAndNothingChanges(): void
     {
@@ -65,7 +67,7 @@ final class ResellerMigrationTest extends IntegrationTestCase
     public function testWithoutResellerDataBothGoDownAndUpAgain(): void
     {
         try {
-            foreach ([self::CLAIMS, self::NONCE, self::S1] as $version) {
+            foreach ([self::LABELS, self::CLAIMS, self::NONCE, self::S1] as $version) {
                 $down = $this->migrate($version, 'down');
                 self::assertSame(0, $down->getExitCode(), $version.': '.$down->getOutput().$down->getErrorOutput());
             }
@@ -74,7 +76,7 @@ final class ResellerMigrationTest extends IntegrationTestCase
             self::assertFalse($this->columnExists('order', 'reseller_nonce'));
             self::assertFalse($this->tableExists('service_claim'));
 
-            foreach ([self::S1, self::NONCE, self::CLAIMS] as $version) {
+            foreach ([self::S1, self::NONCE, self::CLAIMS, self::LABELS] as $version) {
                 $up = $this->migrate($version, 'up');
                 self::assertSame(0, $up->getExitCode(), $version.': '.$up->getOutput().$up->getErrorOutput());
             }
@@ -92,6 +94,7 @@ final class ResellerMigrationTest extends IntegrationTestCase
         self::assertTrue($this->columnExists('vpn_service', 'sold_by_reseller_id'));
         self::assertTrue($this->indexExists('order', 'uniq_order_reseller_nonce'));
         self::assertTrue($this->tableExists('service_claim'));
+        self::assertTrue($this->tableExists('reseller_customer'));
         self::assertNotFalse($this->em->getConnection()->fetchOne("SELECT 1 FROM information_schema.REFERENTIAL_CONSTRAINTS WHERE CONSTRAINT_SCHEMA = DATABASE() AND CONSTRAINT_NAME = 'FK_F529939891E6A19D'"), 'order -> reseller key');
     }
 
@@ -131,7 +134,7 @@ final class ResellerMigrationTest extends IntegrationTestCase
             $connection->executeStatement('DELETE FROM reseller');
         }
         $connection->executeStatement('SET FOREIGN_KEY_CHECKS = 1');
-        foreach ([[self::S1, !$this->tableExists('reseller')], [self::NONCE, !$this->columnExists('order', 'reseller_nonce')], [self::CLAIMS, !$this->tableExists('service_claim')]] as [$version, $missing]) {
+        foreach ([[self::S1, !$this->tableExists('reseller')], [self::NONCE, !$this->columnExists('order', 'reseller_nonce')], [self::CLAIMS, !$this->tableExists('service_claim')], [self::LABELS, !$this->tableExists('reseller_customer')]] as [$version, $missing]) {
             if ($missing) {
                 $connection->executeStatement('DELETE FROM doctrine_migration_versions WHERE version = ?', [$version]);
                 $up = $this->migrate($version, 'up');

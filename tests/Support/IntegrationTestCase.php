@@ -40,6 +40,9 @@ abstract class IntegrationTestCase extends KernelTestCase
         'discount_usage',
         'discount_code',
         'service_notification_log',
+        // A reseller's customer labels (S3) point at reseller and vpn_service.
+        'reseller_customer_service',
+        'reseller_customer',
         // Claim links (S2) point at vpn_service and user.
         'service_ownership_event',
         'service_claim',
