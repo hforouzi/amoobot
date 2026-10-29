@@ -2,6 +2,9 @@
 
 Status: **design for review**, nothing implemented. Persian summary: [docs/fa/design/multi-inbound-plans.md](../fa/design/multi-inbound-plans.md).
 
+**Updated 2026-10-29: 3x-ui Hosts.** New section 9 covers Hosts. Lines changed elsewhere are marked **[Hosts]**. Where they
+disagree, section 9 overrides the phase plan (7.4) and adds to the open questions (8).
+
 **Requirement.** An admin attaches several inbounds of the **same panel** to a plan. A customer who buys it gets **one
 client** attached to all of them. Multi-panel plans are out of scope. Existing plans and services keep exactly one
 inbound and behave exactly as today.
@@ -18,7 +21,7 @@ Items marked **DECISION NEEDED** are decided here with a recommendation; the own
 | Modern API (`ModernClientsApi`) | Client-centric: `clients/add {client, inboundIds: [...]}`, `clients/{email}/attach {inboundIds}`, and `get/update/del/resetTraffic/traffic/links/{email}`, `subLinks/{subId}`, `clients/list` (with traffic) — all by **email** | One client row spans its inbounds; every operation after creation is by email |
 | Modern driver (`Sanaei3xuiModernDriver`) | `createService` sends `inboundIds: [one]`, GETs the client, `attach`es the inbound if `inboundIds` lacks it, adopts by UUID after a lost answer; renew / traffic / suspend / activate / reset / delete / usage all by email | Multi-inbound needs changes only at **create / adopt / attach**; the rest already covers all inbounds |
 | Legacy driver (`Sanaei3xuiDriver`) | Inbound endpoints: the client lives in one inbound's `settings.clients`; usage per inbound | No shared client across inbounds: **not supported** |
-| Links | Modern create stores the panel's links (`links/{email}` + `subLinks/{subId}`); `VpnAccessLinkGenerator` builds links from **one** inbound (fallback, and "regenerate config" for non-legacy services) | Generator must loop over all inbounds, or prefer the panel's links |
+| Links | Modern create stores the panel's links (`links/{email}` + `subLinks/{subId}`); `VpnAccessLinkGenerator` builds links from **one** inbound (fallback, and "regenerate config" for non-legacy services) | Generator must loop over all inbounds, or prefer the panel's links. **[Hosts]** The generator knows nothing about Hosts. Decision (9.1): the panel's `subLinks` is the source of truth; see 9.1 and the phase-0 bug in 9.7 |
 | Usage sync | `getUsages()` reads `clients/list` traffic per email | Already one figure per client |
 | Bot / Mini App / `/s/{token}` | Show `configLinks`, `subscriptionUrl`, QR; the bot's service detail shows the primary inbound's host/country/protocol | Show every server; links already a list |
 | Trials | `TrialPlan.inbound` (one); `TrialAccountService` copies it into a hidden plan | Unchanged in this design (Q5) |
@@ -142,7 +145,7 @@ whole provisioning, would block a paid customer over one secondary inbound.
 | Renew, add traffic, suspend, resume (`updateAndVerify` by email) | Unchanged: one record |
 | Reset usage, usage sync | Unchanged: by email |
 | Delete | Unchanged: `del/{email}` (verify it clears every inbound); rows set `detached` |
-| Regenerate links | Modern: re-read `links/{email}` + `subLinks`; `VpnAccessLinkGenerator` fallback loops over primary + attached rows (VLESS/VMess from the UUID; Trojan/SS need the password from the client GET) |
+| Regenerate links | Modern: re-read `links/{email}` + `subLinks`; `VpnAccessLinkGenerator` fallback loops over primary + attached rows (VLESS/VMess from the UUID; Trojan/SS need the password from the client GET). **[Hosts]** Replaced by 9.1: modern = `subLinks` only; no generator fallback for an inbound that has Hosts |
 | Panel doctor / health | Lists services with `failed`/`pending` attachments |
 
 ## 4. Changing inbounds after sales
@@ -168,6 +171,7 @@ whole provisioning, would block a paid customer over one secondary inbound.
 
 - **Links / QR.** `configLinks` holds every attached inbound's link (from the panel); the bot and Mini App show them as
   today (a list), each with its own QR. The subscription URL (one) is the recommended way and covers all inbounds.
+  **[Hosts]** One link per (inbound × usable host); count cap and refresh rules in 9.2 and 9.3.
 - **Subscription page `/s/{token}`.** Unchanged: it shows the stored subscription URL, its QR and the configs list.
 - **Bot service detail / Mini App service view.** "Servers: <remark/host, protocol> × N" instead of one host line,
   read from primary + attached rows.
@@ -249,6 +253,8 @@ whole provisioning, would block a paid customer over one secondary inbound.
 
 ### 7.4 Phases (each a small PR, safe with the switch off)
 
+**[Hosts]** Superseded by 9.7, which puts phases H0 to H2 before M1. The M-phases below are unchanged in content.
+
 | Phase | Content | Safe because |
 |---|---|---|
 | M1 | Tables + migration, `Plan::getInbounds()`, the switch, plan form field (web) with validation, plan list column, panel inbound "used by" | Switch off: field hidden, provisioning unchanged |
@@ -268,4 +274,333 @@ whole provisioning, would block a paid customer over one secondary inbound.
    verified on your panel version? *Recommended: yes.*
 5. **Trials.** Keep trial plans single-inbound for now? *Recommended: yes; revisit after M2 is live.*
 6. **Panel version.** Which 3x-ui version(s) run in production? The checklist (7.3) must pass on each before the switch
-   is turned on. *Recommended: run it on a staging panel of the same version.*
+   is turned on. *Recommended: run it on a staging panel of the same version.* **[Hosts]** Answered: v3.11.0. The
+   Hosts questions are in 9.8.
+
+## 9. Hosts (new, 2026-10-29)
+
+Production runs 3x-ui **v3.11.0**: 27 hosts, 11 enabled. Sources are labelled throughout:
+
+- **[code]** read in the MHSanaei/3x-ui source at tag `v3.11.0`, mainly `internal/sub/host_sub.go`, `host_order.go`,
+  `links.go`, `service.go`, `internal/web/controller/host.go`, `client.go`, `api.go`, `internal/database/model/model.go`
+  (`Host`, `Client.ClientHostRuleIds`), `internal/web/service/host.go`;
+- **[doc]** the official API reference `docs/content/docs/en/reference/api/hosts.mdx` and
+  `operations/multi-node.mdx`;
+- **[ours]** this repository;
+- **[unverified]** an assumption. Each one is listed in 9.6 step 9 and must be checked on the real panel.
+
+### 9.0 What the panel does with Hosts [code]
+
+- **Storage.** A host group (`groupId`) is stored as one `hosts` row **per inbound × address**. The "Address"
+  multi-value field (`HostGroup.hosts[]`, each item may carry `:port`) produces one row per address
+  (`buildHostRows`). Each row has:
+  - its own `id`, `sortOrder`, `isDisabled`, `excludeFromSubTypes`;
+  - overrides: `security` (`same|tls|none|reality`), `sni`/`snis[]`, `hostHeader`, `path`, `alpn`, `fingerprint`, …
+- **Links per host.** For each inbound, every row that is enabled and not excluded for the format renders **one link**
+  (`subscriptionHostVariants`, `hostEndpoints`). The row is turned into an `externalProxy` entry that *replaces* the
+  inbound's own `externalProxy` (`injectExternalProxy`). So **hosts supersede legacy externalProxy** when at least one
+  row applies. With none, the panel falls back to the legacy path "byte-identical".
+- **Not one fixed link per host.** One host can render a link that varies between requests:
+  - **CIDR address:** an address in CIDR form renders `randomCount` (1–100) random IPs from the range, each its own
+    link, with remark suffixes " - 1", " - 2", ….
+  - **SNI pool:** with more than one SNI, each request picks one at random (`randomSni`), or one per group when
+    `sniSharedRandom` is set.
+  - **Remark:** the host remark is a template expanded per client (`renderHostRemark`, vars such as `{{HOST}}`).
+  - **VLESS route:** `vlessRoute` rewrites bytes 6–7 of the **UUID inside the link** (`applyVlessRoute`). The UUID in
+    the link then differs from the client's UUID.
+- **Fields stored but not used by the v3.11.0 subscription renderers.** `isHidden`, `shuffleHost` and `nodeGuids` are
+  not referenced anywhere in `internal/sub` [code].
+- **Per-client binding.** `Client.clientHostRuleIds` (host **row** ids) restricts a client to those rows, one link each:
+  - `nil` keeps the stored binding;
+  - an empty list clears it;
+  - a binding to a deleted row "fails closed" on that inbound (`host_tombstones`): **no link** at all on that inbound.
+- **Sub formats** are exactly `raw`, `json` and `clash`. `excludeFromSubTypes` holds these strings.
+- **Ordering.** `subHostSortMode`, default `inbound-first`:
+  - `inbound-first`: links follow inbound order, then each inbound's hosts by `sort_order, id`;
+  - `hosts-first`: host groups by `sortOrder, remark, groupId`, then inbound `subSortIndex`, inbound id, host id.
+- **Address of a host-less inbound** (`resolveInboundAddress`), first that is set: node address / listen /
+  `shareAddr` (by `shareAddrStrategy`), then the panel's Sub domain, then its Web domain, then **the Host header of the
+  request**.
+- **The API is the subscription.**
+  - `GET panel/api/clients/subLinks/{subId}` runs the same `getSubs` as the public `/sub/{subId}` (raw format). It
+    includes per-client bindings and per-client external links. It never adds the "info node" dummy link
+    (`subscriptionBody` is false for the API).
+  - `GET panel/api/clients/links/{email}` applies hosts too, **per inbound** (`LinksForClient`).
+- **Who can call it.** Hosts endpoints are under `panel/api/hosts`, Bearer token, `admin` scope. The `monitor` and
+  `node-sync` scope allow-lists contain neither `/hosts/*` nor `/clients/subLinks` or `/clients/links`.
+
+**What the bot does today [ours]**:
+
+- **Create (modern).** Stores `links/{email}` ∪ `subLinks/{subId}` (`Sanaei3xuiModernDriver::fetchLinks`), so new
+  services get Hosts-correct links.
+- **Display** (`FinalConfigLinkProvider`). For `sanaei_3xui` with stored links, shows the stored links only: a
+  **snapshot from creation time**. It is never refreshed when hosts change.
+- **"Regenerate config"** (`ServiceConfigRegenerator`), the claim "reset my links" (which calls it),
+  `app:service:regenerate-config` and `app:inbound:regenerate-service-configs`. On a **modern** service these call
+  `VpnAccessLinkGenerator`, which builds from the inbound + legacy `externalProxyList` and ignores Hosts:
+  - the regenerator **adds** those links to the panel's ones (dedupe is exact text without the fragment);
+  - the two commands **replace** the stored links with them.
+
+  Result: links to an inbound address or legacy proxy the panel no longer advertises, a missing host list, and a VLESS
+  route lost. This is the **phase-0 bug**.
+- **Legacy (`Sanaei3xuiConfigGenerator`).** Reads only `externalProxy`; Hosts are out of reach of the legacy API.
+
+### 9.1 Source of truth for customer links — DECISION (H1)
+
+**Decision: (b), fetched through the authenticated API, with a stored last-known-good snapshot.**
+
+- **What is stored.** `vpn_service.configLinks` / `configText` = the parsed lines of
+  `GET panel/api/clients/subLinks/{subId}`. Fall back to `links/{email}` only when the service has no subId.
+- **Who reads it.** The bot's config button, the `/s/{token}` list, the per-link QR codes and copy all read the
+  snapshot (as today). The subscription URL and its QR stay the panel's public URL (unchanged).
+- **Never fetched from the bot:** the public `/sub/{subId}` URL. Its side effects and variations, all verified [code]:
+  HWID enforcement, recording the fetch, format chosen from the User-Agent, base64 body, the info-node dummy link.
+  The API gives the same `getSubs` output over the connection and token the bot already trusts (`panel.base_url`), so
+  there is **no new outbound URL and no SSRF surface**.
+- **Our generator.** `VpnAccessLinkGenerator` / `Sanaei3xuiConfigGenerator` are no longer used for modern 3x-ui
+  services. They are kept unchanged for legacy panels and non-3x-ui drivers.
+
+**Why**
+
+| | (a) generate ourselves | (b) panel output | (c) hybrid: panel, else generate |
+|---|---|---|---|
+| Correct today | Must reimplement everything in 9.0: CIDR, SNI pools, remark templates, VLESS route, bindings, tombstones, sort modes, ECH/pinning/mux/finalmask, node addresses | Yes by construction: same code as the customer's subscription | Same as (b) until the panel fails |
+| Future panel versions | Breaks silently on every new host field (v3.11 already has 30+) | Follows automatically | Fallback output silently diverges |
+| Panel down | Works (inbound data cached) | Last snapshot keeps being shown; refresh retried | Shows **wrong** links when the panel is down: the worst moment to mislead |
+| Security | No panel call | Same authenticated client as provisioning; no new egress; no subId URL fetched | Same as (b) |
+| Rotation / claim (S2, D4) | Must rebuild from the new UUID (today's bug) | Rotation already reads `subLinks` back after `clients/update` | — |
+
+Rejected:
+
+- **(a)**: correctness and maintenance; the screenshots alone show more host behaviour than the bot could track.
+- **Fetching the public sub URL**: side effects, format negotiation, base64. It also needs a second URL allow-list,
+  because the sub domain may sit behind a CDN.
+- **(c) with generation as fallback**: when the panel cannot be reached, a stale but correct snapshot is better than a
+  fresh but wrong set.
+
+**Rule kept from (c):** if no snapshot exists *and* the panel is unreachable at creation, the order still succeeds (as
+today) and the customer gets the subscription URL only. The snapshot is filled by the refresh job (9.3). The generator
+is used only for an inbound the Hosts API reports with **zero hosts** *and* only when the panel is unreachable
+(byte-identical legacy path [code]). With the Hosts API unknown (permission or old panel), no generator fallback runs.
+
+**Performance.** One GET per service per refresh, no fetch on page view. Existing HTTP client limits: 3 s connect, at most 10 s per request, GET retries only for transient failures. The
+`/s/{token}` page never waits on the panel.
+
+**Exposing the panel's own address.** A host-less inbound with no listen/shareAddr and no Sub/Web domain gets the
+**Host header of our API request**: the panel's base URL host, often `127.0.0.1` or a private name [code]. Today
+`CustomerAccessGuard` withholds such links and alerts the admins once [ours]. That stays the last line of defence. The
+admin preview (9.4) warns before sale. We never rewrite a link's address: that would be (a) again.
+
+**Token rotation and claim (S2, D4).**
+
+- `public_token` rotation does not touch panel links: unchanged.
+- "Reset my links" (`rotateCredentials`) already reads the new links from `subLinks` after the update [ours]. The
+  follow-up `ServiceConfigRegenerator` call must stop merging generated links (phase H0). Otherwise the old UUID is
+  gone, but host-less links of the new UUID are added.
+- **VLESS route:** a link's UUID may differ from `clientUuid` in bytes 6–7. Any code that matches links to a client by
+  UUID must compare with those bytes masked (9.6).
+
+### 9.2 Link-generation rules (needed for the preview and the verifier only)
+
+Under (b) the bot never emits these links. The rules below are what the admin preview (9.4) predicts and what the
+verifier (9.6) checks. If the panel disagrees, the panel wins and the verifier reports the difference.
+
+- **Included hosts.** For each attached inbound, take the rows with `isDisabled=false` and `raw` not in
+  `excludeFromSubTypes`. If the client has `clientHostRuleIds`, keep only those rows of this inbound. If the binding
+  points only at deleted rows of this inbound, the inbound gives **0** links.
+- **Count per row:** 1, or `max(randomCount,1)` when the address is a CIDR.
+- **Inbound with no usable row:** 1 link on the legacy path. That is one link per legacy `externalProxy` entry if any,
+  else one for the inbound address (9.0).
+- **Not counted:** inbounds with `excludeFromSub` (no link); the client's own "external links" are counted separately.
+- **Ordering:** as `subHostSortMode` (9.0). The preview reads the setting; it does not guess.
+- **Remark:** the host remark template expanded per client; legacy rows use the panel's remark composition. The
+  preview shows the raw template.
+- **Override per field.** Applied over the inbound's stream; empty or false means "inbound value"
+  (`hostToExternalProxyMap`, `applyEndpointHostPath`):
+  - address, port;
+  - security (`same` = the inbound's);
+  - SNI (`overrideSniFromAddress` → the address; `keepSniBlank` → none);
+  - fingerprint, ALPN, cipher suites, pinned cert SHA-256, verify-by-name, allowInsecure, ECH;
+  - Host header and path: **only on transports that already carry them** (ws, httpupgrade, xhttp);
+  - mux, sockopt, finalmask (json/clash only);
+  - VLESS route (UUID bytes 6–7);
+  - mihomo fields (clash only).
+- **Protocols:**
+  - VLESS: UUID, plus `flow` from the client;
+  - VMess: `vmess://` + base64 JSON, so the verifier decodes it;
+  - Trojan: password;
+  - Shadowsocks: `ss://` SIP002 userinfo.
+
+  Host overrides apply to all four the same way, through the externalProxy path. Whether a REALITY inbound with a TLS
+  host override renders as the panel UI suggests is **[unverified]**.
+- **Cap.** Telegram messages and QR codes scale with N.
+  - **Soft cap 20 links per service:** preview warning.
+  - **Display cap 30:** the bot and `/s/{token}` show the first 30 in panel order, then "N more are in your
+    subscription link". The full set stays stored.
+  - **No hard refusal:** the panel is the authority, and a refusal would block sales over a CDN list.
+
+### 9.3 Data model, cache, invalidation
+
+- **No hosts table.** Hosts are read live for the admin preview and the verifier only; customer links come from the
+  snapshot.
+- **Existing columns only:**
+  - `configLinks`, `configText`: the snapshot;
+  - `lastAccessInfoSyncedAt`: the time of the last successful refresh.
+
+  No migration for Hosts.
+- **Per-plan host selection.** **Default: all usable hosts of each attached inbound** (the panel decides; zero bot
+  configuration). An optional per-plan allow-list is possible through `clientHostRuleIds` at create/attach time [code],
+  but it is **not built now** (H4, optional):
+  - row ids are per inbound × address;
+  - a deleted row fails the inbound closed for bound clients;
+  - an admin editing hosts in the panel would silently cut paid customers off.
+- **Hosts cache (preview only).** Per panel, in the app cache:
+  - TTL 10 min;
+  - a "Refresh" button in admin clears it;
+  - when the API fails, the preview shows "Hosts unknown" with the reason. It never shows "0 hosts".
+- **Snapshot refresh** (H2), a scheduled job (`app:services:refresh-links`):
+  - which services: live 3x-ui modern services whose snapshot is older than **6 h**, in batches with a pause;
+  - additional triggers: on regenerate, on reset-links, after attach, after renew/resume;
+  - an admin action "Refresh links for services on inbound X / whole panel" for after editing hosts;
+  - **failure:** the old snapshot is kept; the last error is logged and counted in panel doctor;
+  - **empty answer** while the client exists: the snapshot is kept, admins alerted once (an empty list is never
+    stored over a non-empty one).
+- **Hosts API unavailable:**
+  - 404 without JSON envelope → "panel without Hosts API";
+  - 401/403 → "token lacks permission (needs admin scope)";
+  - customer links are unaffected (they use `clients/subLinks`); only the preview and verifier lose host detail.
+
+### 9.4 Admin UX
+
+- **Plan page, read-only "Links preview"** for the plan's inbounds (primary + additional). One row per inbound:
+  remark, protocol, port, usable hosts (address:port, security, SNI, remark template), disabled or excluded-from-raw
+  hosts in grey with the reason, and the predicted link count (9.2). Total at the bottom.
+- **Warnings:**
+  - an inbound with 0 usable hosts *and* a non-public resolved address (link will be withheld);
+  - only disabled hosts;
+  - a host excluded from `raw` (the format the bot consumes);
+  - a CIDR or SNI-pool host ("links vary per refresh");
+  - total above 20 (soft cap) or 30 (display cap);
+  - Hosts API unavailable or not permitted (reason shown);
+  - per-client bindings found on existing services (`clientHostRuleIds` non-empty; read from `clients/list`).
+- **Feature detection, never versions.** Extend `SanaeiCapabilityProbe` with `GET panel/api/hosts/list`:
+  - `success:true` + list → `hosts=yes`;
+  - 404 without the envelope → `hosts=no`;
+  - 401/403 → `hosts=forbidden`.
+
+  Stored on the panel next to the API mode; shown on the panel page and by `app:panel:doctor`.
+- **Service page:** "Links (from panel, refreshed <time>)", a "Refresh from panel" button, and the verifier's last
+  result.
+
+### 9.5 Interaction with multi-inbound plans
+
+- **Link count** = Σ over the service's attached inbounds of (usable host rows × CIDR count, or 1 when none), plus
+  the client's external links, minus the inbounds that a binding fails closed. The panel computes it; the preview
+  predicts it.
+- **Partial attach (D2).** `subLinks` lists only the inbounds actually attached, so a `failed` inbound simply has no
+  links. After a successful retry, the attach step triggers a snapshot refresh.
+- **Existing services.** No data migration. H0 makes "regenerate" Hosts-correct. H2 refreshes every live modern
+  service once (batched), then by TTL. Legacy-mode services keep the legacy path.
+- **Admin changes host attachments in the panel later.** Customers' subscription URLs follow at once (served by the
+  panel). Stored links follow at the next refresh (≤ 6 h), or at once with "Refresh links" on the inbound or panel.
+  "Apply to existing services" (section 4) is about inbounds, not hosts: hosts need no per-service action unless H4
+  bindings are used.
+
+### 9.6 Verification procedure (read-only command, first implementation PR)
+
+`app:service:verify-links <serviceId> [--json]`: no writes, no panel writes.
+
+1. Load the service and its panel. Refuse a non-modern panel ("legacy: Hosts not applicable").
+2. Fetch `clients/get/{email}` (UUID, subId, `clientHostRuleIds`), `clients/subLinks/{subId}`, `clients/links/{email}`
+   and, if `hosts=yes`, `hosts/byInbound/{id}` for each of the client's `inboundIds`, plus `inbounds/options`.
+3. Parse every link to a tuple:
+   - scheme, address, port, security, sni, type, host, path;
+   - UUID/password: VLESS UUID with bytes 6–7 masked; VMess decoded from base64;
+   - remark, decoded.
+4. Compare the **stored snapshot vs `subLinks`**. Pass = the same multiset of tuples, ignoring `sni` for SNI-pool
+   hosts, the address for CIDR hosts, and remarks with a template var.
+5. Compare **`subLinks` vs the 9.2 prediction:** per inbound, the count and the set of (address, port, security, sni,
+   host, path). Every difference is reported with its field.
+6. Report:
+   - **public-address check:** any link whose address fails `PublicUrlPolicy` (e.g. `127.0.0.1`);
+   - **UUID check:** each link's credential matches the client, modulo VLESS route;
+   - **duplicates** between `links/{email}` and `subLinks`.
+7. Exit code: 0 = PASS (steps 4–6 clean), 1 = DIFF (differences listed), 2 = cannot check (panel unreachable, not
+   permitted, no subId).
+
+**Steps for the owner on production** (a test service on a plan whose inbound has ≥ 2 enabled hosts, one disabled host,
+and if possible one host with 2 addresses):
+
+1. `php bin/console app:panel:doctor <panelId>`: expect `hosts=yes` (the line H0 adds).
+2. `php bin/console app:service:verify-links <serviceId>`: expect PASS, or DIFF on step 4 only (an old snapshot, which
+   is the bug H0/H2 fix).
+3. In the panel, disable one enabled host. Run again: expect DIFF "snapshot has a link the panel no longer gives".
+   Then use "Refresh links" on the service and run again: expect PASS. Re-enable the host.
+4. Add a second address to a host. Refresh, verify: expect +1 link per address.
+5. Mark a host "Exclude from formats: raw". Refresh, verify: expect the link gone. Revert.
+6. Compare with what a phone sees: `curl -s '<subscription URL>' | base64 -d` (run by the owner, not the bot). Expect
+   the same links as `subLinks`, plus at most one `socks://127.0.0.1` info line if the info node is on.
+7. Pass = steps 2–6 behave as stated. Any other DIFF is a 9.2 rule to correct before H3.
+8. Toggle `shuffleHost` on a multi-address host, refresh twice: record whether count or order change (9.0 says no).
+9. **[unverified] list:**
+   - U1: `shuffleHost`, `isHidden` and `nodeGuids` have no effect on raw links in v3.11.0;
+   - U2: the API `subLinks` never contains the info-node line;
+   - U3: with a REALITY inbound, a host `security=tls` override renders as the UI suggests;
+   - U4: the panel's Sub/Web domain is set in production, so no host-less inbound resolves to the request host;
+   - U5: our bot token has `admin` scope;
+   - U6: `links/{email}` and `subLinks` give the same set for a single-inbound client.
+
+### 9.7 Phase plan (replaces the order of 7.4)
+
+| Phase | Scope | Tests | Rollback | Off by default |
+|---|---|---|---|---|
+| **H0** (first; fixes existing single-inbound services) | Modern 3x-ui: regenerate / reset-links / both regenerate commands re-read the snapshot from the panel (`fetchLinks`) instead of `VpnAccessLinkGenerator`; `fetchLinks` = `subLinks` only (fallback `links/{email}` without subId); never store an empty list over a non-empty one; `app:service:verify-links` (9.6); capability probe `hosts=yes/no/forbidden` | Fake3xui `subLinks` with hosts fixture: regenerate stores panel links only; generator not called for modern; empty answer keeps old; reset-links stores new-UUID panel links; verifier parsing (vless/vmess/trojan/ss, VLESS route mask, CIDR/SNI-pool tolerance); real panel: 9.6 steps 1–7 | Revert PR (no schema) | Nothing to switch: a bug fix. The commands print "source=panel" |
+| **H1** | Admin read-only links preview (9.4) + Hosts cache + warnings; panel page shows Hosts capability | Preview count per 9.2 against fixtures (disabled, excluded, CIDR, no hosts, bindings); API 404/403 → "unknown" not "0"; real panel: preview count = verifier count for the test plan | Revert | Preview only; no customer effect |
+| **H2** | Scheduled snapshot refresh (TTL 6 h, batches), triggers after attach/renew/resume, admin "Refresh links" per service / inbound / panel, doctor counters, display cap 30 with "N more" | Job batches and pause; failure keeps snapshot; alert once on empty; display cap text; real panel: 9.6 step 3 | Disable the schedule entry; revert | `provisioning.links_refresh_enabled` default **off** (manual buttons work regardless) |
+| M1–M3 | As 7.4; M2 uses `subLinks` (no generator loop) | As 7.2 | As 7.4 | `plans.multi_inbound_enabled` off |
+| **H4** (optional) | Per-plan host allow-list via `clientHostRuleIds` | Binding written at create/attach; deleted row → verifier warns | Clear bindings (empty list) | `plans.host_selection_enabled` off |
+
+### 9.8 Open questions and risks (Hosts)
+
+Open questions, each with the recommended default:
+
+1. **H1 — source of truth.** Panel `subLinks` as the stored snapshot; no generated fallback for host-bearing inbounds?
+   *Recommended: yes.*
+2. **Multi-value Address.** One link per address, or one chosen?
+   - Verified [code]: one link per address. Each address is its own row, all rendered; "Shuffle host" is not used by
+     the v3.11.0 renderers.
+   - To test (9.6 steps 4 and 8): count and order on the real panel.
+   - *Recommended: accept the panel's output (one per address); count it in the cap.*
+3. **Nodes.**
+   - Verified [code]: an inbound on a node is advertised with the node's address (`resolveInboundAddress`); host
+     `nodeGuids` is stored but unused by the v3.11.0 renderers. Our model already pins a plan to one panel, and
+     inbounds carry `nodeId` (`inbounds/options`).
+   - The subscription URL is the **master** panel's (`subLinks` and `/sub` are served by the panel the client lives
+     on).
+   - *Recommended: no node-specific logic; show the node id per inbound in the preview; re-check `nodeGuids` when the
+     panel is upgraded.*
+4. **Exclude from formats.**
+   - Formats: `raw`, `json`, `clash` [code]. The bot stores `subLinks` = **raw**; customers' apps may fetch json or
+     clash through the subscription URL.
+   - Links excluded from raw never reach our snapshot; links excluded only from json/clash still appear in the bot.
+   - *Recommended: consume raw only; the preview flags hosts whose exclusions differ between formats ("apps using
+     json/clash will see a different list").*
+5. **Cap.** Soft 20 (warning), display 30 ("N more in your subscription link")? *Recommended: yes.*
+6. **Refresh.** TTL 6 h, plus manual refresh, plus triggers? *Recommended: yes; the scheduled job is off until H2 has run
+   on production once by hand.*
+7. **Per-plan host selection (H4).** Build it? *Recommended: not now; default "all usable hosts".*
+8. **Info node.** If the owner enables the subscription info node, apps see a `socks://127.0.0.1` line. *Recommended:
+   leave it to the owner; the bot never stores it (API, U2).*
+
+Risks:
+
+- **A stale snapshot** after host edits (≤ TTL). Mitigation: the subscription URL is always live; "Refresh links"
+  buttons.
+- **Random per refresh** (CIDR, SNI pools): QR codes change between refreshes. Mitigation: refresh only on TTL or
+  triggers, not per view; preview warning.
+- **Request-host leak** for host-less inbounds without Sub/Web domain: withheld by `CustomerAccessGuard` plus a preview
+  warning (U4).
+- **Per-client bindings set by hand in the panel** can make an inbound give zero links: the verifier reports it.
+- **A panel upgrade changes the rendering:** none for customers under (b). The 9.2 prediction may drift, and the
+  verifier flags it.
+- **Token scope** narrower than admin breaks provisioning and links alike: the probe reports `forbidden`.
