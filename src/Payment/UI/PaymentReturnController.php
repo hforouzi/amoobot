@@ -4,9 +4,7 @@ declare(strict_types=1);
 
 namespace App\Payment\UI;
 
-use App\Entity\Order;
 use App\Entity\Payment;
-use App\Entity\VpnService;
 use App\Payment\Application\Settlement\PaymentSettlementService;
 use App\Payment\Application\Settlement\VerifiedPayment;
 use App\Payment\Domain\PaymentDisplayState;
@@ -14,7 +12,7 @@ use App\Payment\Domain\PaymentGatewayType;
 use App\Payment\Domain\PaymentReturnUrl;
 use App\Payment\Infrastructure\PaymentGatewayRegistry;
 use App\Provisioning\Application\CustomerAccessGuard;
-use App\Shop\Domain\OrderType;
+use App\Shop\Application\OrderServiceAccess;
 use Doctrine\ORM\EntityManagerInterface;
 use Psr\Log\LoggerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
@@ -32,6 +30,10 @@ use Symfony\Component\Routing\Attribute\Route;
  * The page never confirms anything by itself: it asks the provider (verifyPayment), hands a paid
  * result to PaymentSettlementService and then only displays the resulting payment state. While the
  * payment is still pending the page shows a "waiting for confirmation" state that refreshes itself.
+ *
+ * The service's access (subscription link, config links, the redirect to them) is shown only while the service still
+ * belongs to the order's customer (OrderServiceAccess). After it changed owner (a claim link, "Return to reseller")
+ * the page only says the payment went through: the payer never sees, or is redirected to, someone else's links.
  */
 final class PaymentReturnController extends AbstractController
 {
@@ -43,6 +45,7 @@ final class PaymentReturnController extends AbstractController
         private readonly PaymentSettlementService $paymentSettlementService,
         private readonly LoggerInterface $logger,
         private readonly CustomerAccessGuard $accessGuard,
+        private readonly OrderServiceAccess $orderServices,
     ) {
     }
 
@@ -61,7 +64,10 @@ final class PaymentReturnController extends AbstractController
 
         $order = $payment->getOrder();
         $state = $this->displayState($payment);
-        $service = 'paid' === $state ? $this->findServiceForOrder($order) : null;
+        $orderService = 'paid' === $state ? $this->orderServices->serviceOf($order) : null;
+        // Someone else's service now: no links, no redirect, not even its name.
+        $ownedElsewhere = null !== $orderService && !$this->orderServices->ownedByOrderCustomer($order, $orderService);
+        $service = $ownedElsewhere ? null : $orderService;
         // Only what a client can reach (never the panel's 127.0.0.1 / private address).
         $subscriptionUrl = null !== $service ? (string) $this->accessGuard->subscriptionUrl($service) : '';
         $configText = null !== $service ? implode("\n", $this->accessGuard->configLinks($service, array_values(array_filter(array_map('trim', explode("\n", (string) $service->getConfigText())), static fn (string $line): bool => '' !== $line)))) : '';
@@ -77,6 +83,7 @@ final class PaymentReturnController extends AbstractController
             'subscriptionUrl' => '' !== $subscriptionUrl ? $subscriptionUrl : null,
             'configText' => '' !== $configText ? $configText : null,
             'accessWithheld' => $accessWithheld,
+            'ownedElsewhere' => $ownedElsewhere,
             'redirectEnabled' => 'paid' === $state && '' !== $subscriptionUrl,
             'refreshSeconds' => 'pending' === $state ? self::REFRESH_SECONDS : null,
             'statusText' => $statusText ?? $payment->getCryptoPaymentStatus(),
@@ -170,17 +177,6 @@ final class PaymentReturnController extends AbstractController
         $payment = $this->entityManager->getRepository(Payment::class)->findOneBy(['returnToken' => $token]);
 
         return $payment instanceof Payment ? $payment : null;
-    }
-
-    private function findServiceForOrder(Order $order): ?VpnService
-    {
-        if (in_array($order->getType(), [OrderType::RENEWAL, OrderType::ADD_TRAFFIC], true)) {
-            return $order->getTargetService();
-        }
-
-        $service = $this->entityManager->getRepository(VpnService::class)->findOneBy(['order' => $order]);
-
-        return $service instanceof VpnService ? $service : null;
     }
 
     private function notFound(): Response

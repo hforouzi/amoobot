@@ -1191,6 +1191,7 @@ claim_admin:
     synced: Panel updated
     skipped: Panel not updated (not supported)
     failed: Panel update failed
+    not_applicable: "Panel not updated (this client cannot take an owner: password-based or no UUID)"
   fields:
     service: Service
     made_by: Made by
@@ -1241,7 +1242,7 @@ claim_admin:
     feature_off: "Claim links are switched off in Settings (Resellers tab)."
     not_claimable: "No claim link can be made for this service now."
     reason: "Give a reason of 3 to 255 characters."
-    busy: "An order of this service is being paid or provisioned; try again when it is finished."
+    busy: "An order of this service is being paid or provisioned, or another change of it is running; try again in a minute."
     not_returnable: "This service cannot be returned to a reseller (not sold by one, already with him, deleted or never claimed)."
 
 reseller_admin:

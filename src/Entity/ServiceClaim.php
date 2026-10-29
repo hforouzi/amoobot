@@ -33,6 +33,8 @@ class ServiceClaim
     public const SYNC_SYNCED = 'synced';
     public const SYNC_SKIPPED = 'skipped';
     public const SYNC_FAILED = 'failed';
+    /** The panel client cannot take an owner this way (password-based, an id that is not a UUID): final, not retried. */
+    public const SYNC_NOT_APPLICABLE = 'not_applicable';
 
     public const REVOKED_BY_RESELLER = 'reseller';
     public const REVOKED_BY_ADMIN = 'admin';
@@ -349,6 +351,17 @@ class ServiceClaim
     public function panelSyncSkipped(string $why): self
     {
         $this->panelSyncStatus = self::SYNC_SKIPPED;
+        $this->panelSyncNextAt = null;
+        $this->panelSyncError = mb_substr($why, 0, 255);
+
+        return $this;
+    }
+
+    /** Final after one attempt: this client cannot take an owner by a row update, so it is never retried. */
+    public function panelSyncNotApplicable(string $why): self
+    {
+        ++$this->panelSyncAttempts;
+        $this->panelSyncStatus = self::SYNC_NOT_APPLICABLE;
         $this->panelSyncNextAt = null;
         $this->panelSyncError = mb_substr($why, 0, 255);
 

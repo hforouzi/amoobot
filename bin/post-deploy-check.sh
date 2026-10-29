@@ -222,7 +222,7 @@ check_webhook_info() {
 # 6a. Wallet ledger: app:wallet:reconcile (read only, as the web user; it also checks the claim-link ownership
 #     invariants). An INFO line only, never a FAIL: a mismatch needs a person (an admin adjustment, a payment decision,
 #     an ownership fix), not a redeploy, and the command never changes anything. The claims timer (app:automation:run
-#     --only=claims) is checked with the other scheduled jobs (7.).
+#     --only=claims, lock group lifecycle) is checked with the other scheduled jobs (7.).
 check_wallet_reconcile() {
   local rc
   if ! is_root && [[ "$(id -un)" != "$WEB_USER" ]]; then info wallet-reconcile "not run: needs root (runs bin/console as ${WEB_USER})"; return; fi

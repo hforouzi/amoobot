@@ -12,10 +12,10 @@ use App\Entity\VpnService;
 use App\Provisioning\Domain\VpnServiceStatus;
 use App\Reseller\Domain\ClaimException;
 use App\Reseller\Domain\ClaimPreview;
+use App\Reseller\Domain\ClaimStatus;
 use App\Reseller\Domain\ClaimToken;
 use App\Reseller\Domain\ServiceClaimed;
-use App\Shared\Infrastructure\TransactionRollback;
-use Doctrine\DBAL\Exception\DeadlockException;
+use Doctrine\DBAL\LockMode;
 use Doctrine\ORM\EntityManagerInterface;
 use Psr\Clock\ClockInterface;
 use Psr\EventDispatcher\EventDispatcherInterface;
@@ -32,19 +32,23 @@ use Symfony\Component\RateLimiter\RateLimiterFactory;
  * never claims (link-preview bots and prefetches cannot), the confirm button does, and it carries the ticket, never the
  * token. Every "not usable" case answers the same ClaimException::UNAVAILABLE (no oracle); the real reason is logged.
  *
- * claim(): one transaction. Lock order: the service_claim row (FOR UPDATE, by the id the ticket names), then the
- * vpn_service row. No wallet, order or payment row is locked or written, so it cannot deadlock with settlement (order
- * -> payment -> user -> wallet). Checked under the locks: the link is open and not expired, the service is still owned
- * by the link's owner (fromUser) and not deleted, no order of the service is in settlement (ServiceOrdersInFlight), the
- * claimer is not that owner, and a reseller's link still belongs to an active reseller with claims on. Written: the
+ * claim(): one transaction (ClaimTransactions: READ COMMITTED, bounded retry of a deadlock or lock wait timeout, then
+ * BUSY). Lock order: the service_claim row (by its id, the one the ticket names), then the order / payment rows of the
+ * service under a shared lock (ServiceOrdersInFlight::existsLocked: it sees every settlement step committed before and
+ * keeps them from moving on until the claim commits), then the vpn_service row. That order has no cycle with
+ * settlement (order -> payment -> user -> wallet -> service). Checked under the locks: the link is open and not
+ * expired, the service is still owned by the link's owner (fromUser) and not deleted, no order of the service is in
+ * settlement, the claimer is not that owner, and a reseller's link still belongs to an active reseller. Written: the
  * service's owner, a new subscription page token (the old /s/... link stops working; the panel UUID, subId and config
  * links are kept, decision D4), the claim (claimed, by whom, when; open_service_id cleared) and one ownership event.
- * After the commit, best effort: ServiceClaimed is dispatched, the panel client is told the new owner (ClaimPanelSync;
- * retried by app:claims:expire), and the new and previous owner get a bot message.
+ * After the commit, best effort and never turning the claim into an error: ServiceClaimed is dispatched, the panel
+ * client is told the new owner (ClaimPanelSync; retried by app:claims:expire), and the new and previous owner get a bot
+ * message.
  *
  * A second delivery of the same confirmation (double tap, Telegram redelivery, a second process) finds the claim
- * already claimed by this same user and answers "done" again without writing anything. Two claimers at once are
- * serialized by the claim row lock: the second sees it claimed and gets the generic answer.
+ * already claimed by this same user, while the service is still his, and answers "done" again without writing
+ * anything (after an admin's "Return to reseller" the old link is just unusable). Two claimers at once are serialized
+ * by the claim row lock: the second sees it claimed and gets the generic answer.
  *
  * Rate limits (claim_attempt_user): previews and claims per Telegram user, invalid tokens included; the fifth invalid
  * token of one user within an hour is reported to the admins (claim_invalid_user, ClaimNotifier).
@@ -53,7 +57,6 @@ class ClaimService
 {
     public const OUTCOME_CLAIMED = 'claimed';
     public const OUTCOME_ALREADY_YOURS = 'already_yours';
-    private const DEADLOCK_ATTEMPTS = 3;
 
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
@@ -62,7 +65,7 @@ class ClaimService
         private readonly ServiceOrdersInFlight $ordersInFlight,
         private readonly ClaimPanelSync $panelSync,
         private readonly ClaimNotifier $notifier,
-        private readonly TransactionRollback $transactionRollback,
+        private readonly ClaimTransactions $transactions,
         private readonly EventDispatcherInterface $events,
         private readonly ClockInterface $clock,
         private readonly LoggerInterface $logger,
@@ -109,8 +112,9 @@ class ClaimService
         if (null !== $claim->getReseller()) {
             $this->entityManager->refresh($claim->getReseller());
         }
-        if (!$claim->isOpen() && $claim->getClaimedByUser()?->getId() === $viewer->getId()) {
+        if (!$claim->isOpen() && $claim->getClaimedByUser()?->getId() === $viewer->getId() && $claim->getService()->getUser()->getId() === $viewer->getId()) {
             // He opened his own used link again (or Telegram delivered /start twice after he confirmed): no oracle, it is his.
+            // Not after it moved on (an admin returned it to the reseller): then it is just a link that cannot be used.
             throw new ClaimException(ClaimException::ALREADY_YOURS);
         }
         $problem = $this->linkProblem($claim, $this->clock->now());
@@ -169,17 +173,18 @@ class ClaimService
             $this->invalid($telegramUserId, $claimId, 'bad_ticket');
         }
 
-        for ($attempt = 1; ; ++$attempt) {
-            try {
-                [$outcome, $claim, $service, $claimer] = $this->claimOnce($claimId, (int) $claimer->getId(), $telegramUserId);
-                break;
-            } catch (DeadlockException $e) {
-                $this->logger->warning('claim_deadlock_victim', ['claim_id' => $claimId, 'attempt' => $attempt]);
-                if ($attempt >= self::DEADLOCK_ATTEMPTS) {
-                    throw new ClaimException(ClaimException::BUSY, 'deadlock');
-                }
-                usleep(random_int(20_000, 60_000) * $attempt);
+        try {
+            [$outcome, $claim, $service, $claimer] = $this->transactions->run('claim', fn (): array => $this->claimOnce($claimId, (int) $claimer->getId(), $telegramUserId));
+        } catch (ClaimException $e) {
+            if (ClaimException::UNAVAILABLE === $e->error && 'expired' === $e->reason) {
+                // Past its time but not swept yet: close it now (its own small transaction), so lists are honest.
+                $this->expireNow($claimId);
             }
+            if (ClaimException::UNAVAILABLE === $e->error) {
+                $this->logger->info('claim_refused', ['claim_id' => $claimId, 'telegram_id' => $telegramUserId, 'reason' => $e->reason]);
+            }
+
+            throw $e;
         }
 
         if (self::OUTCOME_CLAIMED === $outcome) {
@@ -191,91 +196,84 @@ class ClaimService
     }
 
     /**
+     * The claim itself, inside ClaimTransactions (see the class comment for the lock order).
+     *
      * @return array{string, ServiceClaim, VpnService, User}
      *
-     * @throws ClaimException|DeadlockException nothing was written
+     * @throws ClaimException nothing was written
      */
     private function claimOnce(int $claimId, int $claimerId, string $telegramUserId): array
     {
-        $connection = $this->entityManager->getConnection();
-        $this->entityManager->flush();
-        $level = $connection->getTransactionNestingLevel();
-        $connection->beginTransaction();
-        try {
-            // 1. The claim row, 2. the service row: the one lock order of every claim-link write.
-            $connection->executeQuery('SELECT id FROM service_claim WHERE id = ? FOR UPDATE', [$claimId]);
-            $claim = $this->entityManager->find(ServiceClaim::class, $claimId) ?? throw new ClaimException(ClaimException::UNAVAILABLE, 'gone');
-            $this->entityManager->refresh($claim);
-            // By id: a retried attempt may run on a fresh entity manager.
-            $claimer = $this->entityManager->find(User::class, $claimerId) ?? throw new ClaimException(ClaimException::UNAVAILABLE, 'claimer gone');
-            $now = $this->clock->now();
+        // 1. The claim row, by its id (a locking refresh: the row as committed now, not as this request first saw it).
+        $claim = $this->entityManager->find(ServiceClaim::class, $claimId) ?? throw new ClaimException(ClaimException::UNAVAILABLE, 'gone');
+        $this->entityManager->refresh($claim, LockMode::PESSIMISTIC_WRITE);
+        // By id: a retried attempt may run on a fresh entity manager.
+        $claimer = $this->entityManager->find(User::class, $claimerId) ?? throw new ClaimException(ClaimException::UNAVAILABLE, 'claimer gone');
+        $now = $this->clock->now();
+        $serviceId = (int) $claim->getService()->getId();
 
-            if (!$claim->isOpen() && $claim->getClaimedByUser()?->getId() === $claimer->getId()) {
-                // A second delivery of this user's own confirmation: already done, nothing to write.
-                $connection->commit();
-
+        if (!$claim->isOpen() && $claim->getClaimedByUser()?->getId() === $claimer->getId()) {
+            // A second delivery of this user's own confirmation: done already, nothing to write, while it is still his.
+            $owner = $this->entityManager->getConnection()->fetchOne('SELECT user_id FROM vpn_service WHERE id = ?', [$serviceId]);
+            if (false !== $owner && (int) $owner === $claimer->getId()) {
                 return [self::OUTCOME_ALREADY_YOURS, $claim, $claim->getService(), $claimer];
             }
-            if ($claim->isOpen() && $claim->isExpiredAt($now)) {
-                // Past its time but not swept yet: close it now, so lists are honest.
-                $claim->markExpired($now);
-                $this->entityManager->flush();
-                $connection->commit();
 
-                throw new ClaimException(ClaimException::UNAVAILABLE, 'expired');
-            }
-            if (null !== $claim->getReseller()) {
-                $this->entityManager->refresh($claim->getReseller());
-            }
-            // The link itself here; the service (owner, status) only after its lock, below.
-            $problem = $this->linkProblem($claim, $now, false);
-            if (null !== $problem) {
-                throw new ClaimException(ClaimException::UNAVAILABLE, $problem);
-            }
+            throw new ClaimException(ClaimException::UNAVAILABLE, 'no_longer_his');
+        }
+        if (null !== $claim->getReseller()) {
+            $this->entityManager->refresh($claim->getReseller());
+        }
+        // The link itself here; the service (owner, status) only after its lock, below.
+        $problem = $this->linkProblem($claim, $now, false);
+        if (null !== $problem) {
+            throw new ClaimException(ClaimException::UNAVAILABLE, $problem);
+        }
 
-            $serviceId = (int) $claim->getService()->getId();
-            $connection->executeQuery('SELECT id FROM vpn_service WHERE id = ? FOR UPDATE', [$serviceId]);
-            $service = $this->entityManager->find(VpnService::class, $serviceId) ?? throw new ClaimException(ClaimException::UNAVAILABLE, 'service gone');
-            $this->entityManager->refresh($service);
-            $from = $claim->getFromUser();
-            if ($service->getUser()->getId() !== $from->getId()) {
-                throw new ClaimException(ClaimException::UNAVAILABLE, 'owner_changed');
-            }
-            if (VpnServiceStatus::DELETED === $service->getStatus()) {
-                throw new ClaimException(ClaimException::UNAVAILABLE, 'service_deleted');
-            }
-            if ($claimer->getId() === $from->getId()) {
-                throw new ClaimException(ClaimException::OWN_SERVICE);
-            }
-            if ($this->ordersInFlight->exists($serviceId)) {
-                throw new ClaimException(ClaimException::BUSY, 'order_in_settlement');
-            }
+        // 2. The service's orders and payments, under a shared lock (before the service row: no cycle with settlement).
+        if ($this->ordersInFlight->existsLocked($serviceId)) {
+            throw new ClaimException(ClaimException::BUSY, 'order_in_settlement');
+        }
 
-            $service->setUser($claimer)->rotatePublicToken()->setUpdatedAt($now);
-            $claim->markClaimed($claimer, $telegramUserId, $now);
-            $this->entityManager->persist(ServiceOwnershipEvent::claimed($claim, $from, $claimer, $now));
-            $this->entityManager->flush();
-            $connection->commit();
+        // 3. The service row.
+        $service = $this->entityManager->find(VpnService::class, $serviceId) ?? throw new ClaimException(ClaimException::UNAVAILABLE, 'service gone');
+        $this->entityManager->refresh($service, LockMode::PESSIMISTIC_WRITE);
+        $from = $claim->getFromUser();
+        if ($service->getUser()->getId() !== $from->getId()) {
+            throw new ClaimException(ClaimException::UNAVAILABLE, 'owner_changed');
+        }
+        if (VpnServiceStatus::DELETED === $service->getStatus()) {
+            throw new ClaimException(ClaimException::UNAVAILABLE, 'service_deleted');
+        }
+        if ($claimer->getId() === $from->getId()) {
+            throw new ClaimException(ClaimException::OWN_SERVICE);
+        }
 
-            return [self::OUTCOME_CLAIMED, $claim, $service, $claimer];
+        $service->setUser($claimer)->rotatePublicToken()->setUpdatedAt($now);
+        $claim->markClaimed($claimer, $telegramUserId, $now);
+        $this->entityManager->persist(ServiceOwnershipEvent::claimed($claim, $from, $claimer, $now));
+
+        return [self::OUTCOME_CLAIMED, $claim, $service, $claimer];
+    }
+
+    /** An open link found past its expiry at claim time: expired now, by its id (the sweep may get there first). */
+    private function expireNow(int $claimId): void
+    {
+        try {
+            $this->entityManager->getConnection()->executeStatement(
+                'UPDATE service_claim SET status = ?, open_service_id = NULL, expired_at = ? WHERE id = ? AND status = ?',
+                [ClaimStatus::EXPIRED, $this->clock->now()->format('Y-m-d H:i:s'), $claimId, ClaimStatus::OPEN],
+            );
         } catch (\Throwable $e) {
-            if ($connection->getTransactionNestingLevel() > $level) {
-                if (!$this->transactionRollback->rollBack($level) || !$this->entityManager->isOpen()) {
-                    $this->transactionRollback->resetEntityManager();
-                } else {
-                    // The unit of work may hold the half-made change: start clean.
-                    $this->entityManager->clear();
-                }
-            }
-            if ($e instanceof ClaimException && ClaimException::UNAVAILABLE === $e->error) {
-                $this->logger->info('claim_refused', ['claim_id' => $claimId, 'telegram_id' => $telegramUserId, 'reason' => $e->reason]);
-            }
-
-            throw $e;
+            // Only tidying up: the sweep (app:claims:expire) closes it otherwise.
+            $this->logger->warning('claim_expire_now_failed', ['claim_id' => $claimId, 'error' => $e->getMessage()]);
         }
     }
 
-    /** Best effort after the commit: never undoes the claim. */
+    /**
+     * Best effort after the commit: never undoes the claim, and a failure here (listener, panel, Telegram, even the
+     * failure handling itself) never reaches the claimer as an error: the claim is done.
+     */
     private function afterCommit(ServiceClaim $claim, VpnService $service, User $claimer, string $telegramUserId): void
     {
         try {
@@ -283,8 +281,18 @@ class ClaimService
         } catch (\Throwable $e) {
             $this->logger->error('ServiceClaimed listener failed.', ['claim_id' => $claim->getId(), 'error' => $e->getMessage()]);
         }
-        $this->panelSync->sync($claim);
-        $this->notifier->claimed($claim, $service, $claimer, $telegramUserId);
+        try {
+            $this->panelSync->sync($claim);
+        } catch (\Throwable $e) {
+            // ClaimPanelSync never throws on a panel failure; this is its own bookkeeping failing. The claim stays
+            // pending, so app:claims:expire tries again.
+            $this->logger->error('claim_panel_sync_crashed', ['claim_id' => $claim->getId(), 'error' => $e->getMessage()]);
+        }
+        try {
+            $this->notifier->claimed($claim, $service, $claimer, $telegramUserId);
+        } catch (\Throwable $e) {
+            $this->logger->error('claim_notification_crashed', ['claim_id' => $claim->getId(), 'error' => $e->getMessage()]);
+        }
     }
 
     /**

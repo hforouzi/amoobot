@@ -8,7 +8,7 @@ use App\Entity\Payment;
 use App\Entity\User;
 use App\Entity\VpnService;
 use App\Payment\Domain\PaymentDisplayState;
-use App\Shop\Domain\OrderType;
+use App\Shop\Application\OrderServiceAccess;
 use Doctrine\ORM\EntityManagerInterface;
 
 /**
@@ -17,8 +17,10 @@ use Doctrine\ORM\EntityManagerInterface;
  */
 final class PaymentProgress
 {
-    public function __construct(private readonly EntityManagerInterface $entityManager)
-    {
+    public function __construct(
+        private readonly EntityManagerInterface $entityManager,
+        private readonly OrderServiceAccess $orderServices,
+    ) {
     }
 
     public function ownedPayment(User $user, int $paymentId): ?Payment
@@ -33,18 +35,17 @@ final class PaymentProgress
         return PaymentDisplayState::forCustomer($payment);
     }
 
-    /** The service the paid order created or changed, once the payment is paid. */
+    /**
+     * The service the paid order created or changed, once the payment is paid, and only while it still belongs to the
+     * order's customer (a service handed over with a claim link is not his to open any more: OrderServiceAccess).
+     */
     public function service(Payment $payment): ?VpnService
     {
         if (PaymentDisplayState::PAID !== $this->state($payment)) {
             return null;
         }
-        $order = $payment->getOrder();
-        if (in_array($order->getType(), [OrderType::RENEWAL, OrderType::ADD_TRAFFIC], true)) {
-            return $order->getTargetService();
-        }
 
-        return $this->entityManager->getRepository(VpnService::class)->findOneBy(['order' => $order], ['id' => 'DESC']);
+        return $this->orderServices->ownedServiceOf($payment->getOrder());
     }
 
     /**

@@ -84,6 +84,8 @@ HSTS_STATE_FILE="${STATE_DIR}/hsts-enabled"
 #   name | lock group | OnCalendar | timeout (s) | interval (s) | console command
 # Jobs in the same lock group never run concurrently. Only app:automation:run tasks: they honour the admin toggles.
 # Never add app:payments:repair-stuck or other destructive commands here.
+# claims is in the lifecycle group: its panel owner updates replace the whole client row, as sync/expiry/suspend do, so
+# they never overlap; :13/:28/:43/:58 keeps clear of sync's start (a busy group is waited for 120 s, then skipped once).
 SCHEDULED_JOBS=(
   "broadcasts|broadcasts|*:0/2|600|120|app:automation:run --only=broadcasts"
   "orders|orders|*:0/10|300|600|app:automation:run --only=orders"
@@ -91,7 +93,7 @@ SCHEDULED_JOBS=(
   "expiry|lifecycle|*:5/15|600|900|app:automation:run --only=expiry"
   "suspend|lifecycle|*:8/15|600|900|app:automation:run --only=suspend"
   "notifications|lifecycle|*:10/30|900|1800|app:automation:run --only=notifications"
-  "claims|claims|*:3/15|300|900|app:automation:run --only=claims"
+  "claims|lifecycle|*:13/15|300|900|app:automation:run --only=claims"
 )
 JOBS_LOG_DIR="/var/log/amoobot"
 JOBS_STATE_DIR="${STATE_DIR}/jobs"

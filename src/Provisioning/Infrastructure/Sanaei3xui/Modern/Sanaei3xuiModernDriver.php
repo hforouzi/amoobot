@@ -12,7 +12,10 @@ use App\Provisioning\Domain\Dto\CreatedVpnService;
 use App\Provisioning\Domain\Dto\CreateVpnServiceRequest;
 use App\Provisioning\Domain\Dto\RenewVpnServiceRequest;
 use App\Provisioning\Domain\Dto\VpnUsage;
+use App\Provisioning\Domain\ClientOwnerComment;
 use App\Provisioning\Domain\ClientOwnerDriverInterface;
+use App\Provisioning\Domain\ClientOwnerNotApplicable;
+use App\Provisioning\Domain\ClientUuid;
 use App\Provisioning\Domain\CredentialRotationDriverInterface;
 use App\Provisioning\Domain\Dto\RotatedCredentials;
 use App\Provisioning\Domain\ExistingClientAwareDriverInterface;
@@ -187,10 +190,27 @@ final class Sanaei3xuiModernDriver implements VpnPanelDriverInterface, ExistingC
         $this->updateAndVerify($this->requirePanel($panel), $this->ref($remoteId), ['enable' => true]);
     }
 
-    /** tgId and comment only (claim links); credentials, limits, expiry and status are kept (updateAndVerify). */
+    /**
+     * tgId and comment only (claim links); credentials, limits, expiry and status are kept (updateAndVerify). The
+     * comment keeps what an admin wrote there (ClientOwnerComment). A password-based client (Trojan, Shadowsocks) or
+     * one whose id is not a UUID is refused before anything is sent (ClientOwnerNotApplicable: retrying cannot help).
+     */
     public function updateClientOwner(string $remoteId, int $telegramId, string $comment, ?VpnPanel $panel = null): void
     {
-        $this->updateAndVerify($this->requirePanel($panel), $this->ref($remoteId), ['tgId' => max(0, $telegramId), 'comment' => $comment]);
+        $panel = $this->requirePanel($panel);
+        $ref = $this->ref($remoteId);
+        $current = $this->api->getClient($panel, $ref->email);
+        if (null === $current) {
+            throw new \RuntimeException(sprintf('Client "%s" does not exist on the panel.', $ref->email));
+        }
+        $id = (string) ($current['id'] ?? '');
+        if ('' === $id && '' !== (string) ($current['password'] ?? '')) {
+            throw new ClientOwnerNotApplicable(sprintf('Client "%s" authenticates by password; its row is not replaced.', $ref->email));
+        }
+        if (!ClientUuid::isUuid($id)) {
+            throw new ClientOwnerNotApplicable(sprintf('The panel reports an id for client "%s" that is not a UUID; its row is not replaced.', $ref->email));
+        }
+        $this->updateAndVerify($panel, $ref, ['tgId' => max(0, $telegramId), 'comment' => ClientOwnerComment::compose(isset($current['comment']) ? (string) $current['comment'] : null, $comment)]);
     }
 
     public function canRotateCredentials(string $remoteId, ?VpnPanel $panel = null): bool
@@ -199,31 +219,50 @@ final class Sanaei3xuiModernDriver implements VpnPanelDriverInterface, ExistingC
     }
 
     /**
-     * A new UUID and subId for the client, everything else kept (the row is replaced with the full client, as every
+     * The given UUID and subId for the client, everything else kept (the row is replaced with the full client, as every
      * update). Only for clients that authenticate by UUID (VLESS / VMess): a client with a password (Trojan,
-     * Shadowsocks) is refused, nothing changed. The answer is read back from the panel before it is trusted.
+     * Shadowsocks) is refused, nothing changed. The answer is read back from the panel before it is trusted; links that
+     * cannot be fetched are left empty (the bot builds them, ServiceConfigRegenerator).
      */
-    public function rotateCredentials(string $remoteId, ?VpnPanel $panel = null): RotatedCredentials
+    public function rotateCredentials(string $remoteId, string $newUuid, string $newSubId, ?VpnPanel $panel = null): RotatedCredentials
+    {
+        $panel = $this->requirePanel($panel);
+        $ref = $this->ref($remoteId);
+        if (!ClientUuid::isUuid($newUuid) || 1 !== preg_match('/^[A-Za-z0-9_-]{1,64}$/D', $newSubId)) {
+            throw new \InvalidArgumentException('New credentials must be a UUID and a plain subscription id.');
+        }
+        $current = $this->api->getClient($panel, $ref->email);
+        if (null === $current) {
+            throw new \RuntimeException(sprintf('Client "%s" does not exist on the panel.', $ref->email));
+        }
+        if ('' !== (string) ($current['password'] ?? '') || !ClientUuid::isUuid((string) ($current['id'] ?? ''))) {
+            throw new \RuntimeException(sprintf('Client "%s" does not authenticate by UUID; its credentials are not rotated here.', $ref->email));
+        }
+        $this->updateAndVerify($panel, $ref, ['id' => $newUuid, 'subId' => $newSubId]);
+
+        return $this->credentials($panel, $ref, $newUuid, $newSubId);
+    }
+
+    public function currentCredentials(string $remoteId, ?VpnPanel $panel = null): ?RotatedCredentials
     {
         $panel = $this->requirePanel($panel);
         $ref = $this->ref($remoteId);
         $current = $this->api->getClient($panel, $ref->email);
         if (null === $current) {
-            throw new \RuntimeException(sprintf('Client "%s" does not exist on the panel.', $ref->email));
+            return null;
         }
-        if ('' !== (string) ($current['password'] ?? '') || '' === (string) ($current['id'] ?? '')) {
-            throw new \RuntimeException(sprintf('Client "%s" does not authenticate by UUID; its credentials are not rotated here.', $ref->email));
-        }
-        $uuid = Uuid::v4()->toRfc4122();
-        $subId = bin2hex(random_bytes(8));
-        $this->updateAndVerify($panel, $ref, ['id' => $uuid, 'subId' => $subId]);
 
+        return $this->credentials($panel, $ref, (string) ($current['id'] ?? ''), (string) ($current['subId'] ?? ''));
+    }
+
+    private function credentials(VpnPanel $panel, Sanaei3xuiRemoteClientRef $ref, string $uuid, string $subId): RotatedCredentials
+    {
         return new RotatedCredentials(
-            $this->remoteIdParser->format($ref->panelId ?? $panel->getId(), $ref->localInboundId, $ref->inboundId, $uuid, $ref->email, $subId),
+            $this->remoteIdParser->format($ref->panelId ?? $panel->getId(), $ref->localInboundId, $ref->inboundId, $uuid, $ref->email, '' === $subId ? null : $subId),
             $uuid,
             $subId,
-            SubscriptionUrl::build($panel, $subId),
-            $this->fetchLinks($panel, $ref->email, $subId),
+            '' === $subId ? null : SubscriptionUrl::build($panel, $subId),
+            $this->fetchLinks($panel, $ref->email, '' === $subId ? null : $subId),
         );
     }
 
@@ -324,9 +363,17 @@ final class Sanaei3xuiModernDriver implements VpnPanelDriverInterface, ExistingC
             throw new \RuntimeException(sprintf('Client "%s" does not exist on the panel.', $ref->email));
         }
         $body = ModernClientsApi::mergeForUpdate($current, $changes);
-        if ('' === (string) ($body['id'] ?? '')) {
-            // Without the UUID a row replacement could give the client new credentials: refuse.
-            throw new PanelApiException(PanelFailure::UNEXPECTED_RESPONSE, sprintf('The panel did not return the UUID of client "%s"; refusing to replace the row.', $ref->email));
+        if (!ClientUuid::isUuid((string) ($body['id'] ?? ''))) {
+            // Without the UUID (or with the panel's row id where the UUID belongs) a row replacement would give the
+            // client other credentials: refuse, nothing is sent.
+            throw new PanelApiException(PanelFailure::UNEXPECTED_RESPONSE, sprintf('The panel did not return a UUID for client "%s"; refusing to replace the row.', $ref->email));
+        }
+        if (!array_key_exists('id', $changes) && '' !== $ref->clientId && ClientUuid::isUuid($ref->clientId) && 0 !== strcasecmp($ref->clientId, (string) $body['id'])) {
+            // The caller's copy is older than the panel (e.g. the owner just reset the links): the panel's UUID is the
+            // one written back (merged from the row read just now), never the caller's. Logged: a write that read the
+            // row before such a change and writes after it would put the old one back (ServiceOwnership checks after a
+            // reset and puts its credentials back).
+            $this->logger->warning('sanaei_modern_client_uuid_differs', ['panel_id' => $panel->getId(), 'remote_inbound_id' => $ref->inboundId]);
         }
         $this->api->updateClient($panel, $ref->email, $body);
 

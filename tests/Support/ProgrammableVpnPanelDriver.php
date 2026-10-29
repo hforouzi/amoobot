@@ -11,6 +11,7 @@ use App\Provisioning\Domain\Dto\CreateVpnServiceRequest;
 use App\Provisioning\Domain\Dto\RenewVpnServiceRequest;
 use App\Provisioning\Domain\Dto\VpnUsage;
 use App\Provisioning\Domain\ClientOwnerDriverInterface;
+use App\Provisioning\Domain\ClientOwnerNotApplicable;
 use App\Provisioning\Domain\CredentialRotationDriverInterface;
 use App\Provisioning\Domain\Dto\RotatedCredentials;
 use App\Provisioning\Domain\ExistingClientAwareDriverInterface;
@@ -33,8 +34,12 @@ use App\Provisioning\Domain\VpnPanelDriverInterface;
  * - $subscriptionBase / $linkHost: what the created service's subscription URL (base + "/" + sub id, like the real
  *   drivers; null = no subscription base) and config link point to
  * - TEST_PANEL_RENEW_DELAY_MS env var: sleeps inside renewService (a renewal in settlement, for claim-link races)
- * - claim links: $ownerUpdates records updateClientOwner() calls, $ownerUpdateFailures makes the next n of them throw;
- *   $rotations counts rotateCredentials(), $rotationFails makes it throw, $canRotate answers canRotateCredentials()
+ * - claim links: $ownerUpdates records updateClientOwner() calls, $ownerUpdateFailures makes the next n of them throw,
+ *   $ownerNotApplicable makes them refuse (ClientOwnerNotApplicable); $rotations counts rotateCredentials() (also kept
+ *   per client in the state file: rotationsOnPanel()), $rotationFails makes it throw before anything changed,
+ *   $rotationFailsAfterApply after the client got the new credentials (a lost answer), $currentCredentialsFails makes
+ *   currentCredentials() throw, $canRotate answers canRotateCredentials(); TEST_PANEL_ROTATE_DELAY_MS sleeps inside
+ *   rotateCredentials() (a reset racing a claim or a return). A client is found by its current UUID or any it had.
  */
 final class ProgrammableVpnPanelDriver implements VpnPanelDriverInterface, ExistingClientAwareDriverInterface, ClientOwnerDriverInterface, CredentialRotationDriverInterface
 {
@@ -49,7 +54,7 @@ final class ProgrammableVpnPanelDriver implements VpnPanelDriverInterface, Exist
     public ?VpnUsage $usage = null;
     public bool $usageFails = false;
     public bool $lookupFails = false;
-    /** @var array<string, array{uuid: string, email: string, subId: string}> */
+    /** @var array<string, array{uuid: string, email: string, subId: string, past?: list<string>, rotations?: int}> */
     public array $clients = [];
     public ?string $stateFile = null;
     public ?string $subscriptionBase = 'https://panel.test/sub';
@@ -59,6 +64,11 @@ final class ProgrammableVpnPanelDriver implements VpnPanelDriverInterface, Exist
     public int $ownerUpdateFailures = 0;
     public int $rotations = 0;
     public bool $rotationFails = false;
+    public bool $rotationFailsAfterApply = false;
+    public bool $currentCredentialsFails = false;
+    public bool $ownerNotApplicable = false;
+    /** The next rotation is applied and then undone at once, as a concurrent full-row write would (old UUID back). */
+    public bool $revertNextRotationOnce = false;
     public bool $canRotate = true;
 
     public function failNext(int $times = 1, ?string $message = null): void
@@ -90,7 +100,35 @@ final class ProgrammableVpnPanelDriver implements VpnPanelDriverInterface, Exist
         $this->ownerUpdateFailures = 0;
         $this->rotations = 0;
         $this->rotationFails = false;
+        $this->rotationFailsAfterApply = false;
+        $this->currentCredentialsFails = false;
+        $this->ownerNotApplicable = false;
+        $this->revertNextRotationOnce = false;
         $this->canRotate = true;
+    }
+
+    /** Writes the clients held now to the state file (a test that sets $stateFile after creating them). */
+    public function saveStateNow(): void
+    {
+        $this->saveState();
+    }
+
+    /** How often the client of this remote id was rotated, across processes (state file). */
+    public function rotationsOnPanel(string $remoteId): int
+    {
+        $this->loadState();
+        $email = $this->emailOf($remoteId);
+
+        return null === $email ? 0 : (int) ($this->clients[$email]['rotations'] ?? 0);
+    }
+
+    /** The client's UUID on the "panel" now (state file). */
+    public function uuidOnPanel(string $remoteId): ?string
+    {
+        $this->loadState();
+        $email = $this->emailOf($remoteId);
+
+        return null === $email ? null : $this->clients[$email]['uuid'];
     }
 
     public function updateClientOwner(string $remoteId, int $telegramId, string $comment, ?VpnPanel $panel = null): void
@@ -98,6 +136,9 @@ final class ProgrammableVpnPanelDriver implements VpnPanelDriverInterface, Exist
         if ($this->ownerUpdateFailures > 0) {
             --$this->ownerUpdateFailures;
             throw new \RuntimeException('Simulated panel outage during updateClientOwner');
+        }
+        if ($this->ownerNotApplicable) {
+            throw new ClientOwnerNotApplicable('Simulated password-based client');
         }
         $this->ownerUpdates[] = ['remoteId' => $remoteId, 'telegramId' => $telegramId, 'comment' => $comment];
     }
@@ -107,25 +148,68 @@ final class ProgrammableVpnPanelDriver implements VpnPanelDriverInterface, Exist
         return $this->canRotate && str_starts_with($remoteId, 'test_');
     }
 
-    public function rotateCredentials(string $remoteId, ?VpnPanel $panel = null): RotatedCredentials
+    public function rotateCredentials(string $remoteId, string $newUuid, string $newSubId, ?VpnPanel $panel = null): RotatedCredentials
     {
         if ($this->rotationFails) {
             throw new \RuntimeException('Simulated panel outage during rotateCredentials');
         }
         ++$this->rotations;
+        $delay = (int) (getenv('TEST_PANEL_ROTATE_DELAY_MS') ?: 0);
+        if ($delay > 0) {
+            usleep($delay * 1000);
+        }
         $this->loadState();
-        $old = substr($remoteId, 5);
-        $uuid = bin2hex(random_bytes(6));
-        $subId = bin2hex(random_bytes(6));
-        foreach ($this->clients as $email => $client) {
-            if ($client['uuid'] === $old) {
-                $this->clients[$email] = ['uuid' => $uuid, 'email' => $client['email'], 'subId' => $subId];
+        $email = $this->emailOf($remoteId);
+        if (null !== $email) {
+            $client = $this->clients[$email];
+            $past = $client['past'] ?? [];
+            $past[] = $client['uuid'];
+            $this->clients[$email] = ['uuid' => $newUuid, 'email' => $client['email'], 'subId' => $newSubId, 'past' => array_values(array_unique($past)), 'rotations' => (int) ($client['rotations'] ?? 0) + 1];
+            $this->saveState();
+            if ($this->revertNextRotationOnce) {
+                $this->revertNextRotationOnce = false;
+                $this->clients[$email]['uuid'] = $client['uuid'];
+                $this->clients[$email]['subId'] = $client['subId'];
+                $this->clients[$email]['past'][] = $newUuid;
+                $this->saveState();
             }
         }
-        $this->saveState();
+        if ($this->rotationFailsAfterApply) {
+            throw new \RuntimeException('Simulated timeout after the panel applied the new credentials');
+        }
+
+        return $this->credentials($newUuid, $newSubId);
+    }
+
+    public function currentCredentials(string $remoteId, ?VpnPanel $panel = null): ?RotatedCredentials
+    {
+        if ($this->currentCredentialsFails) {
+            throw new \RuntimeException('Simulated panel outage during currentCredentials');
+        }
+        $this->loadState();
+        $email = $this->emailOf($remoteId);
+
+        return null === $email ? null : $this->credentials($this->clients[$email]['uuid'], $this->clients[$email]['subId']);
+    }
+
+    private function credentials(string $uuid, string $subId): RotatedCredentials
+    {
         $link = 'vless://'.$uuid.'@'.$this->linkHost.':443?type=tcp&security=none#test';
 
         return new RotatedCredentials('test_'.$uuid, $uuid, $subId, null !== $this->subscriptionBase ? $this->subscriptionBase.'/'.$subId : null, [$link]);
+    }
+
+    /** The client of a "test_<uuid>" remote id: by its current UUID or one it had before a rotation. */
+    private function emailOf(string $remoteId): ?string
+    {
+        $uuid = substr($remoteId, 5);
+        foreach ($this->clients as $email => $client) {
+            if ($client['uuid'] === $uuid || in_array($uuid, $client['past'] ?? [], true)) {
+                return (string) $email;
+            }
+        }
+
+        return null;
     }
 
     public function supports(?VpnPanel $panel): bool

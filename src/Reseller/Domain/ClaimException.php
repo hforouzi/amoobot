@@ -34,6 +34,8 @@ final class ClaimException extends \RuntimeException
     public const NOT_RETURNABLE = 'not_returnable';
     public const RESET_UNSUPPORTED = 'reset_unsupported';
     public const RESET_FAILED = 'reset_failed';
+    /** The panel may have changed and the database could not be brought in line: an admin was alerted. */
+    public const RESET_UNCONFIRMED = 'reset_unconfirmed';
 
     public function __construct(
         public readonly string $error,

@@ -54,3 +54,8 @@ framework:
             policy: fixed_window
             limit: 5
             interval: '1 hour'
+        # "Reset my connection links" per service (ServiceOwnership): each one makes every installed app import new links.
+        claim_reset_links:
+            policy: sliding_window
+            limit: 3
+            interval: '1 day'

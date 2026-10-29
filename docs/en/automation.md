@@ -11,7 +11,7 @@ Automation handles recurring lifecycle work for services and orders.
 - Suspend expired services when enabled.
 - Suspend traffic-exhausted services when enabled.
 - Expire incomplete orders.
-- Claim links (`--only=claims`, every 15 minutes, no toggle): expire links past their time and retry pending panel owner updates ([resellers](resellers.md#claim-links)).
+- Claim links (`--only=claims`, every 15 minutes at :13/:28/:43/:58, no toggle): expire links past their time and retry pending panel owner updates ([resellers](resellers.md#claim-links)). It runs in the `lifecycle` lock group with sync, expiry, suspend and notifications: its panel owner updates replace the whole client row, like theirs, so two of them must never overlap.
 
 ## Settings
 

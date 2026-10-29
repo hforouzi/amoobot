@@ -66,6 +66,18 @@ class ClaimNotifier
     }
 
     /**
+     * A reset of connection links whose outcome on the panel could not be confirmed, or that the panel did not keep:
+     * the admins with LOGS_VIEW are told (service id and what is wrong; nothing of the customer), to check the client.
+     */
+    public function resetNeedsAttention(int $serviceId, string $what): void
+    {
+        $this->logger->error('claim_reset_links_needs_attention', ['service_id' => $serviceId, 'what' => $what]);
+        foreach ($this->accessPolicy->telegramRecipients(AdminPermission::LOGS_VIEW) as $chatId) {
+            $this->send($chatId, $this->texts->message('claim.admin_reset_attention', ['service' => ['id' => $serviceId], 'claim' => ['what' => $what]]));
+        }
+    }
+
+    /**
      * The claimer's buttons: the (new) subscription page and the service in "My services".
      *
      * @return array{inline_keyboard: list<list<array<string, string>>>}

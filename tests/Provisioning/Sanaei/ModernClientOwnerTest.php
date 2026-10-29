@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Provisioning\Sanaei;
 
 use App\Entity\VpnPanel;
+use App\Provisioning\Domain\ClientOwnerNotApplicable;
 use App\Provisioning\Domain\Dto\CreateVpnServiceRequest;
 use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Sanaei3xuiModernDriver;
 use App\Provisioning\Infrastructure\Sanaei3xui\Sanaei3xuiRemoteIdParser;
@@ -13,9 +14,12 @@ use App\Tests\Support\Fake3xui\Fake3xuiWiring;
 use PHPUnit\Framework\TestCase;
 
 /**
- * The two claim-link capabilities of the modern driver against the stateful fake 3x-ui (update replaces the whole
- * row): updateClientOwner() changes tgId and comment only; rotateCredentials() gives the client a new UUID and subId and
- * keeps everything else, and refuses a client that authenticates by password. Both read back what they wrote.
+ * The claim-link capabilities of the modern driver against the stateful fake 3x-ui (update replaces the whole row):
+ * updateClientOwner() changes tgId and the comment marker only, keeps an admin's comment, and refuses (nothing sent) a
+ * password-based client or one whose id is not a UUID; rotateCredentials() gives the client exactly the new UUID and
+ * subId it is given and keeps everything else, and refuses a client that authenticates by password;
+ * currentCredentials() reads the client by its email, so a stale UUID in the remote id does not matter. No row is ever
+ * written back with an id that is not a UUID.
  */
 final class ModernClientOwnerTest extends TestCase
 {
@@ -23,6 +27,7 @@ final class ModernClientOwnerTest extends TestCase
 
     private const UUID = '7f3c9a10-5b2e-4c8d-9e1f-0a1b2c3d4e5f';
     private const EMAIL = 'tg_123456_order_42';
+    private const NEW_UUID = '0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d';
 
     private VpnPanel $panel;
     private Sanaei3xuiModernDriver $driver;
@@ -63,10 +68,11 @@ final class ModernClientOwnerTest extends TestCase
         $before = $this->fake->clients[self::EMAIL];
         self::assertTrue($this->driver->canRotateCredentials($this->remoteId(), $this->panel));
 
-        $rotated = $this->driver->rotateCredentials($this->remoteId(), $this->panel);
+        $rotated = $this->driver->rotateCredentials($this->remoteId(), self::NEW_UUID, 'newsub0123456789', $this->panel);
 
         $after = $this->fake->clients[self::EMAIL];
-        self::assertNotSame(self::UUID, $after['id']);
+        self::assertSame(self::NEW_UUID, $after['id']);
+        self::assertSame('newsub0123456789', $after['subId']);
         self::assertSame($rotated->clientUuid, $after['id']);
         self::assertSame($rotated->subId, $after['subId']);
         self::assertNotSame($before['subId'], $after['subId']);
@@ -87,12 +93,82 @@ final class ModernClientOwnerTest extends TestCase
         $before = $this->fake->clients[self::EMAIL];
 
         try {
-            $this->driver->rotateCredentials($this->remoteId(), $this->panel);
+            $this->driver->rotateCredentials($this->remoteId(), self::NEW_UUID, 'newsub0123456789', $this->panel);
             self::fail('rotated a password client');
         } catch (\RuntimeException) {
         }
         self::assertSame($before['id'], $this->fake->clients[self::EMAIL]['id']);
         self::assertSame($before['subId'], $this->fake->clients[self::EMAIL]['subId']);
+    }
+
+    public function testCurrentCredentialsFindTheClientByEmailAfterARotation(): void
+    {
+        $stale = $this->remoteId();
+        $this->driver->rotateCredentials($stale, self::NEW_UUID, 'newsub0123456789', $this->panel);
+
+        // The remote id still names the old UUID (a database write that failed after the panel changed).
+        $now = $this->driver->currentCredentials($stale, $this->panel);
+        self::assertNotNull($now);
+        self::assertSame(self::NEW_UUID, $now->clientUuid);
+        self::assertSame('newsub0123456789', $now->subId);
+
+        unset($this->fake->clients[self::EMAIL]);
+        self::assertNull($this->driver->currentCredentials($stale, $this->panel));
+    }
+
+    public function testTheOwnerUpdateKeepsAnAdminCommentAndDoesNotRepeatItsMarker(): void
+    {
+        $this->fake->clients[self::EMAIL]['comment'] = 'VIP, pays in cash';
+
+        $this->driver->updateClientOwner($this->remoteId(), 987654, 'amoobot order #42, claimed', $this->panel);
+        self::assertSame('VIP, pays in cash | amoobot order #42, claimed', $this->fake->clients[self::EMAIL]['comment']);
+
+        // Returned to the reseller, then claimed again: still one marker after the admin's text.
+        $this->driver->updateClientOwner($this->remoteId(), 111, 'amoobot order #42', $this->panel);
+        self::assertSame('VIP, pays in cash | amoobot order #42', $this->fake->clients[self::EMAIL]['comment']);
+        $this->driver->updateClientOwner($this->remoteId(), 222, 'amoobot order #42, claimed', $this->panel);
+        self::assertSame('VIP, pays in cash | amoobot order #42, claimed', $this->fake->clients[self::EMAIL]['comment']);
+    }
+
+    public function testTheOwnerUpdateRefusesAPasswordClientWithoutSendingAnything(): void
+    {
+        $this->fake->clients[self::EMAIL]['id'] = '';
+        $this->fake->clients[self::EMAIL]['password'] = 'trojan-secret';
+        $this->fake->requests = [];
+
+        try {
+            $this->driver->updateClientOwner($this->remoteId(), 987654, 'amoobot order #42, claimed', $this->panel);
+            self::fail('updated a password client');
+        } catch (ClientOwnerNotApplicable) {
+        }
+        self::assertSame([], $this->updates());
+    }
+
+    public function testARowWhoseIdIsNotAUuidIsNeverWrittenBack(): void
+    {
+        // A panel answer with the database row id where the UUID belongs (and no "uuid" field).
+        $this->fake->clients[self::EMAIL]['id'] = 17;
+        $this->fake->requests = [];
+
+        try {
+            $this->driver->updateClientOwner($this->remoteId(), 987654, 'amoobot order #42, claimed', $this->panel);
+            self::fail('owner update with a numeric id');
+        } catch (ClientOwnerNotApplicable) {
+        }
+        // Every other writer refuses it too (here: suspend), instead of turning the row id into the credential.
+        try {
+            $this->driver->suspendService($this->remoteId(), $this->panel);
+            self::fail('suspend with a numeric id');
+        } catch (\RuntimeException) {
+        }
+        self::assertSame([], $this->updates());
+        self::assertSame(17, $this->fake->clients[self::EMAIL]['id']);
+    }
+
+    /** @return list<string> */
+    private function updates(): array
+    {
+        return array_values(array_filter($this->fake->requestLines(), static fn (string $l): bool => str_contains($l, 'clients/update/')));
     }
 
     private function remoteId(): string

@@ -30,14 +30,16 @@ use Psr\Log\LoggerInterface;
  * never the token. Every unusable link gets the same answer.
  *
  * Callbacks: cl_ok:{claimId}:{ticket} (claim), cl_no (cancel), cl_rst:{serviceId} (reset my connection links: the
- * warning), cl_rst_ok:{serviceId} (do it).
+ * warning), cl_rst_ok:{serviceId}:{nonce} (do it; the nonce names the credentials the warning was shown for, so a
+ * second delivery of the same tap rotates nothing: ServiceOwnership::resetNonce). A cl_rst_ok without a nonce (a button
+ * from before) shows the warning again.
  */
 final class ClaimBotHandler implements StartPayloadHandler
 {
     private const PATTERNS = [
         'cl_ok' => '/^cl_ok:([1-9]\d{0,9}):([0-9a-z]{7}[A-Za-z0-9_-]{16})$/D',
         'cl_rst' => '/^cl_rst:([1-9]\d{0,9})$/D',
-        'cl_rst_ok' => '/^cl_rst_ok:([1-9]\d{0,9})$/D',
+        'cl_rst_ok' => '/^cl_rst_ok:([1-9]\d{0,9})(?::([0-9a-f]{12}))?$/D',
     ];
 
     public function __construct(
@@ -118,7 +120,7 @@ final class ClaimBotHandler implements StartPayloadHandler
         match ($kind) {
             'cl_ok' => $this->claim($account, $chatId, $callbackId, (int) $m[1], $m[2]),
             'cl_rst' => $this->confirmReset($account, $chatId, $callbackId, (int) $m[1]),
-            default => $this->reset($account, $chatId, $callbackId, (int) $m[1]),
+            default => isset($m[2]) ? $this->reset($account, $chatId, $callbackId, (int) $m[1], $m[2]) : $this->confirmReset($account, $chatId, $callbackId, (int) $m[1]),
         };
     }
 
@@ -158,21 +160,31 @@ final class ClaimBotHandler implements StartPayloadHandler
         }
         $this->telegram->answerCallbackQuery($callbackId);
         $this->telegram->sendMessage($chatId, $this->texts->message('claim.reset_warning', ['service' => ['id' => $serviceId]]), ['inline_keyboard' => [
-            [['text' => $this->texts->button('button.claim.reset_confirm'), 'callback_data' => 'cl_rst_ok:'.$serviceId]],
+            [['text' => $this->texts->button('button.claim.reset_confirm'), 'callback_data' => 'cl_rst_ok:'.$serviceId.':'.$this->ownership->resetNonce($service)]],
             [['text' => $this->texts->button('button.common.back'), 'callback_data' => 'service_view:'.$serviceId]],
         ]]);
     }
 
-    private function reset(TelegramAccount $account, string $chatId, string $callbackId, int $serviceId): void
+    /** The answer says what really happened: done, done already (a second tap), nothing changed, or unconfirmed. */
+    private function reset(TelegramAccount $account, string $chatId, string $callbackId, int $serviceId, string $nonce): void
     {
         try {
-            $this->ownership->resetConnectionLinks($account->getUser(), $serviceId);
+            [$outcome] = $this->ownership->resetConnectionLinks($account->getUser(), $serviceId, $nonce);
         } catch (ClaimException $e) {
-            $this->telegram->answerCallbackQuery($callbackId, $this->texts->message(ClaimException::RESET_FAILED === $e->error || ClaimException::BUSY === $e->error ? 'claim.reset_failed' : 'claim.reset_unavailable'), true);
+            $this->telegram->answerCallbackQuery($callbackId, $this->texts->message(match ($e->error) {
+                ClaimException::RESET_FAILED, ClaimException::BUSY => 'claim.reset_failed',
+                ClaimException::RATE_LIMITED => 'claim.reset_rate_limited',
+                ClaimException::RESET_UNCONFIRMED => 'claim.reset_unconfirmed',
+                default => 'claim.reset_unavailable',
+            }), true);
+            if (ClaimException::RESET_UNCONFIRMED === $e->error) {
+                // Also in the chat: it is more than a passing popup.
+                $this->telegram->sendMessage($chatId, $this->texts->message('claim.reset_unconfirmed'));
+            }
 
             return;
         }
-        $this->telegram->sendMessage($chatId, $this->texts->message('claim.reset_done', ['service' => ['id' => $serviceId]]));
+        $this->telegram->sendMessage($chatId, $this->texts->message(ServiceOwnership::RESET_ALREADY_DONE === $outcome ? 'claim.reset_already_done' : 'claim.reset_done', ['service' => ['id' => $serviceId]]));
         // The service view with its new links (answers the callback).
         $this->serviceManagement->showUserServiceDetail($account, $serviceId, $chatId, $callbackId);
     }

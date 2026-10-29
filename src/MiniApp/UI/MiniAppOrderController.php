@@ -16,6 +16,7 @@ use App\Provisioning\Domain\VpnServiceStatus;
 use App\Shop\Application\Checkout\OrderLifecycle;
 use App\Shop\Application\Checkout\PaymentStarter;
 use App\Shop\Application\Checkout\ReceiptSubmission;
+use App\Shop\Application\OrderServiceAccess;
 use App\Shop\Domain\OrderStatus;
 use App\Shop\Domain\OrderType;
 use App\Wallet\Application\WalletPayment;
@@ -49,6 +50,7 @@ final class MiniAppOrderController extends AbstractController
         private readonly OrderLifecycle $orderLifecycle,
         private readonly WalletPayment $walletPayment,
         private readonly WalletService $wallets,
+        private readonly OrderServiceAccess $orderServices,
     ) {
     }
 
@@ -115,9 +117,8 @@ final class MiniAppOrderController extends AbstractController
     {
         $order = $this->orderLifecycle->ownedOrder($user->customer(), $id) ?? throw new NotFoundHttpException();
         $payment = $this->orderLifecycle->latestPayment($order);
-        $service = in_array($order->getType(), [OrderType::RENEWAL, OrderType::ADD_TRAFFIC], true)
-            ? $order->getTargetService()
-            : $this->entityManager->getRepository(VpnService::class)->findOneBy(['order' => $order], ['id' => 'DESC']);
+        // Only while it is still his: a renewal of a service he handed over links to nothing of the new owner's.
+        $service = $this->orderServices->ownedServiceOf($order);
         $payable = OrderStatus::WAITING_PAYMENT === $order->getStatus() && $this->orderLifecycle->canEditForPayment($order)
             && (null === $payment || PaymentStatus::PENDING !== $payment->getStatus() || null === $payment->getGateway());
 
@@ -126,8 +127,7 @@ final class MiniAppOrderController extends AbstractController
             'summary' => self::summary($order),
             'payment' => $payment,
             'paymentState' => null !== $payment ? $this->progress->state($payment) : null,
-            // Only his own: a reseller's renewal of a service his customer claimed links to nothing of the customer's.
-            'service' => $service instanceof VpnService && VpnServiceStatus::DELETED !== $service->getStatus() && $service->getUser()->getId() === $user->customer()->getId() ? $service : null,
+            'service' => $service instanceof VpnService && VpnServiceStatus::DELETED !== $service->getStatus() ? $service : null,
             'payable' => $payable,
         ]);
     }

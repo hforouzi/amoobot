@@ -18,10 +18,10 @@ use App\Reseller\Domain\ClaimToken;
 use App\Reseller\Domain\CreatedClaimLink;
 use App\Security\AdminActor;
 use App\Security\AdminAuditLogger;
-use App\Shared\Infrastructure\TransactionRollback;
 use App\Shop\Domain\OrderType;
-use Doctrine\DBAL\Exception\DeadlockException;
+use Doctrine\DBAL\ArrayParameterType;
 use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
+use Doctrine\DBAL\LockMode;
 use Doctrine\ORM\EntityManagerInterface;
 use Psr\Clock\ClockInterface;
 use Psr\Log\LoggerInterface;
@@ -33,12 +33,13 @@ use Symfony\Component\RateLimiter\RateLimiterFactory;
  * service he sold and still owns, an admin (SERVICES_MANAGE) for any live service; both can revoke. Shared by the bot,
  * the admin pages and (S3) the reseller Mini App: no logic in the callers.
  *
- * Creating a link: one transaction that takes the service's open link (if any, by open_service_id) and then the service
- * row FOR UPDATE, the same order as a claim (claim row, then service), re-checks that the service may be handed over,
- * revokes the open link (replaced) and inserts the new one with a fresh 256-bit token whose hash only is stored. The
- * unique open_service_id makes two open links for one service impossible even when two creations race; the loser is
- * retried (deadlock or duplicate key) and then replaces the winner's link. The token is returned once (CreatedClaimLink)
- * and never stored, logged or audited.
+ * Creating a link: one transaction (ClaimTransactions) that finds the service's open link by a plain read, locks it by
+ * its id, then locks the service row - the lock order of every claim-link write (claim rows by primary key, then the
+ * service) - re-checks that the service may be handed over, revokes the open link (replaced) and inserts the new one
+ * with a fresh 256-bit token whose hash only is stored. The unique open_service_id makes two open links for one
+ * service impossible even when two creations race; the loser is run again (duplicate key here; a deadlock or lock
+ * wait timeout in ClaimTransactions) and then replaces the winner's link. The token is returned once
+ * (CreatedClaimLink) and never stored, logged or audited.
  *
  * A link cannot be made for: a deleted service, a trial, a service whose order is being paid / provisioned
  * (ServiceOrdersInFlight); for a reseller also not for a service he did not sell or no longer owns (claimed already).
@@ -46,14 +47,13 @@ use Symfony\Component\RateLimiter\RateLimiterFactory;
 class ClaimLinks
 {
     public const PER_PAGE = 8;
-    private const ATTEMPTS = 3;
 
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
         private readonly ResellerSettings $settings,
         private readonly ResellerCheckout $checkout,
         private readonly ServiceOrdersInFlight $ordersInFlight,
-        private readonly TransactionRollback $transactionRollback,
+        private readonly ClaimTransactions $transactions,
         private readonly AdminAuditLogger $auditLogger,
         private readonly BotIdentity $botIdentity,
         private readonly MiniAppLinks $miniAppLinks,
@@ -106,9 +106,8 @@ class ClaimLinks
 
         $resellerId = (int) $reseller->getId();
         $link = $this->create($service, function (VpnService $locked, string $tokenHash) use ($resellerId): ServiceClaim {
-            // Read again by id: after a retried attempt the entity manager may be a new one.
+            // Read again by id: after a retried attempt the entity manager may be a new one. Locked (shared) first, below.
             $reseller = $this->entityManager->find(Reseller::class, $resellerId) ?? throw new ClaimException(ClaimException::RESELLER_UNAVAILABLE);
-            $this->entityManager->refresh($reseller);
             if (!$this->settings->claimsEnabled() || !$reseller->isActive()) {
                 throw new ClaimException(ClaimException::RESELLER_UNAVAILABLE);
             }
@@ -117,7 +116,12 @@ class ClaimLinks
             }
 
             return (new ServiceClaim($locked, $reseller->getUser(), $tokenHash, $this->clock->now(), $this->expiresAt()))->byReseller($reseller);
-        }, $reseller->getUser()->getId(), null);
+        }, $reseller->getUser()->getId(), null, function () use ($resellerId): void {
+            // The reseller row first, shared: a disable (reseller row, then his claim rows) either finished before and is
+            // seen here, or waits until this link is made and then revokes it. Order: reseller, claim rows, service.
+            $reseller = $this->entityManager->find(Reseller::class, $resellerId) ?? throw new ClaimException(ClaimException::RESELLER_UNAVAILABLE);
+            $this->entityManager->refresh($reseller, LockMode::PESSIMISTIC_READ);
+        });
         $this->logger->info('claim_link_created', ['claim_id' => $link->claim->getId(), 'service_id' => $serviceId, 'reseller_id' => $reseller->getId(), 'replaced' => $link->replacedOpenLink]);
 
         return $link;
@@ -183,15 +187,24 @@ class ClaimLinks
 
     /**
      * Revokes every open link of this reseller, inside the caller's transaction (ResellerAdministration::disable, after
-     * the reseller row lock). Claim rows only, never a service row: no lock cycle with a claim (claim, then service).
+     * the reseller row lock). Claim rows only, found by a plain read and then changed by their primary key in ascending
+     * order (never through a secondary index, see ClaimTransactions), and never a service row: no lock cycle with a
+     * claim (claim row, then service). A link a claim took meanwhile is no longer open and is left alone.
      *
      * @return int the links revoked
      */
     public function revokeAllOf(Reseller $reseller, ?int $adminUserId): int
     {
-        return (int) $this->entityManager->getConnection()->executeStatement(
-            'UPDATE service_claim SET status = ?, open_service_id = NULL, revoked_at = ?, revoke_reason = ?, revoked_by_admin_id = ? WHERE reseller_id = ? AND status = ?',
-            [ClaimStatus::REVOKED, $this->clock->now()->format('Y-m-d H:i:s'), ServiceClaim::REVOKED_RESELLER_DISABLED, $adminUserId, $reseller->getId(), ClaimStatus::OPEN],
+        $connection = $this->entityManager->getConnection();
+        $ids = array_map('intval', $connection->fetchFirstColumn('SELECT id FROM service_claim WHERE reseller_id = ? AND status = ? ORDER BY id', [$reseller->getId(), ClaimStatus::OPEN]));
+        if ([] === $ids) {
+            return 0;
+        }
+
+        return (int) $connection->executeStatement(
+            'UPDATE service_claim SET status = ?, open_service_id = NULL, revoked_at = ?, revoke_reason = ?, revoked_by_admin_id = ? WHERE id IN (?) AND status = ? ORDER BY id',
+            [ClaimStatus::REVOKED, $this->clock->now()->format('Y-m-d H:i:s'), ServiceClaim::REVOKED_RESELLER_DISABLED, $adminUserId, $ids, ClaimStatus::OPEN],
+            [4 => ArrayParameterType::INTEGER],
         );
     }
 
@@ -261,97 +274,85 @@ class ClaimLinks
     /**
      * @param \Closure(VpnService, string): ServiceClaim $build checks again under the locks and builds the new claim with
      *                                                    this token hash
+     * @param (\Closure(): void)|null                     $before runs first in the transaction (a lock taken before the
+     *                                                    claim rows)
      *
      * @throws ClaimException
      */
-    private function create(VpnService $service, \Closure $build, ?int $byUserId, ?int $byAdminId): CreatedClaimLink
+    private function create(VpnService $service, \Closure $build, ?int $byUserId, ?int $byAdminId, ?\Closure $before = null): CreatedClaimLink
     {
         $serviceId = (int) $service->getId();
         for ($attempt = 1; ; ++$attempt) {
             $token = ClaimToken::generate();
-            $connection = $this->entityManager->getConnection();
-            $this->entityManager->flush();
-            $level = $connection->getTransactionNestingLevel();
-            $connection->beginTransaction();
-            $claim = null;
             try {
-                // Lock order as for a claim: the claim row (here: the service's open link, if any), then the service.
-                $openId = $connection->fetchOne('SELECT id FROM service_claim WHERE open_service_id = ? FOR UPDATE', [$serviceId]);
-                $connection->executeQuery('SELECT id FROM vpn_service WHERE id = ? FOR UPDATE', [$serviceId]);
-                $locked = $this->entityManager->find(VpnService::class, $serviceId) ?? throw new ClaimException(ClaimException::NOT_CLAIMABLE, 'service gone');
-                $this->entityManager->refresh($locked);
-                $claim = $build($locked, ClaimToken::hash($token));
-                $replaced = false;
-                if (false !== $openId) {
-                    $old = $this->entityManager->find(ServiceClaim::class, (int) $openId);
-                    if ($old instanceof ServiceClaim) {
-                        $this->entityManager->refresh($old);
-                        if ($old->isOpen()) {
-                            $old->markRevoked(ServiceClaim::REVOKED_REPLACED, $byUserId, $byAdminId, $this->clock->now());
-                            // Before the insert: Doctrine inserts before it updates, and the new row takes open_service_id.
-                            $this->entityManager->flush();
-                            $replaced = true;
-                        }
+                [$claim, $replaced] = $this->transactions->run('create_link', function () use ($serviceId, $build, $token, $byUserId, $byAdminId, $before): array {
+                    if (null !== $before) {
+                        $before();
                     }
-                }
-                $this->entityManager->persist($claim);
-                $this->entityManager->flush();
-                $connection->commit();
+                    // 1. The service's open link: found by a plain read, locked by its id, checked again.
+                    $openId = $this->entityManager->getConnection()->fetchOne('SELECT id FROM service_claim WHERE open_service_id = ?', [$serviceId]);
+                    $old = false === $openId ? null : $this->entityManager->find(ServiceClaim::class, (int) $openId);
+                    if ($old instanceof ServiceClaim) {
+                        $this->entityManager->refresh($old, LockMode::PESSIMISTIC_WRITE);
+                    }
+                    // 2. The service.
+                    $locked = $this->entityManager->find(VpnService::class, $serviceId) ?? throw new ClaimException(ClaimException::NOT_CLAIMABLE, 'service gone');
+                    $this->entityManager->refresh($locked, LockMode::PESSIMISTIC_WRITE);
+                    $claim = $build($locked, ClaimToken::hash($token));
+                    $replaced = false;
+                    if ($old instanceof ServiceClaim && $old->isOpen() && $old->getService()->getId() === $serviceId) {
+                        $old->markRevoked(ServiceClaim::REVOKED_REPLACED, $byUserId, $byAdminId, $this->clock->now());
+                        // Before the insert: Doctrine inserts before it updates, and the new row takes open_service_id.
+                        $this->entityManager->flush();
+                        $replaced = true;
+                    }
+                    // A link made after the plain read above makes this insert fail on the unique open_service_id: run again.
+                    $this->entityManager->persist($claim);
+                    $this->entityManager->flush();
+
+                    return [$claim, $replaced];
+                });
 
                 return new CreatedClaimLink($claim, $token, $this->botLink($token), $this->appLink($token), $replaced);
-            } catch (\Throwable $e) {
-                if (!$this->transactionRollback->rollBack($level) || !$this->entityManager->isOpen()) {
-                    $this->transactionRollback->resetEntityManager();
-                } elseif ($claim instanceof ServiceClaim && $this->entityManager->contains($claim)) {
-                    $this->entityManager->detach($claim);
-                }
+            } catch (UniqueConstraintViolationException $e) {
                 // Two creations for one service at once: the loser runs again and then replaces the winner's link.
-                if (($e instanceof DeadlockException || $e instanceof UniqueConstraintViolationException) && $attempt < self::ATTEMPTS && 0 === $level) {
-                    usleep(random_int(10_000, 40_000) * $attempt);
-                    continue;
+                if ($attempt >= ClaimTransactions::ATTEMPTS || 0 !== $this->entityManager->getConnection()->getTransactionNestingLevel()) {
+                    throw new ClaimException(ClaimException::BUSY, 'create_link: '.$e::class);
                 }
-
-                throw $e;
+                usleep(random_int(10_000, 40_000) * $attempt);
             }
         }
     }
 
     /**
      * @param \Closure(ServiceClaim): bool $allowed
+     *
+     * @throws ClaimException service_busy (the row stayed locked: a claim of it is running)
      */
     private function revoke(int $claimId, \Closure $allowed, string $reason, ?int $byUserId, ?int $byAdminId): bool
     {
         if ($claimId <= 0) {
             return false;
         }
-        $connection = $this->entityManager->getConnection();
-        $this->entityManager->flush();
-        $connection->beginTransaction();
-        try {
-            $connection->executeQuery('SELECT id FROM service_claim WHERE id = ? FOR UPDATE', [$claimId]);
+        $revoked = $this->transactions->run('revoke_link', function () use ($claimId, $allowed, $reason, $byUserId, $byAdminId): bool {
+            // The claim row by its id, as committed now.
             $claim = $this->entityManager->find(ServiceClaim::class, $claimId);
             if (!$claim instanceof ServiceClaim) {
-                $connection->commit();
-
                 return false;
             }
-            $this->entityManager->refresh($claim);
+            $this->entityManager->refresh($claim, LockMode::PESSIMISTIC_WRITE);
             if (!$claim->isOpen() || !$allowed($claim)) {
-                $connection->commit();
-
                 return false;
             }
             $claim->markRevoked($reason, $byUserId, $byAdminId, $this->clock->now());
-            $this->entityManager->flush();
-            $connection->commit();
-        } catch (\Throwable $e) {
-            $connection->rollBack();
 
-            throw $e;
+            return true;
+        });
+        if ($revoked) {
+            $this->logger->info('claim_link_revoked', ['claim_id' => $claimId, 'reason' => $reason]);
         }
-        $this->logger->info('claim_link_revoked', ['claim_id' => $claimId, 'reason' => $reason]);
 
-        return true;
+        return $revoked;
     }
 
     private function expiresAt(): \DateTimeImmutable
