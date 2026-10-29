@@ -18,7 +18,12 @@ use Psr\Log\LoggerInterface;
  * lock - the order / payment rows of the service (ServiceOrdersInFlight::existsLocked), then the vpn_service row. A
  * claim row is never locked through a secondary index (open_service_id, service_id, status): InnoDB takes the index
  * entry before the row, while a claim updating that row takes the row before the index entry, and the two deadlock.
- * Rows are found by a plain read first and then locked by id and checked again.
+ * Rows are found by a plain read first and then locked by id and checked again. Making a reseller's link takes his
+ * user row and the reseller row (shared) before all of that (the reseller lock order, ResellerCheckout's class
+ * comment). A claim and "return to reseller" lock no reseller row and no user row up front: they meet user rows only
+ * through foreign key checks after the service row, and a user row up front would sit before the order / payment rows
+ * that settlement locks before the user (a cycle with settlement). A collision of one of them with a reseller purchase
+ * is a deadlock victim on one side and retried there (here, and in ResellerCheckout).
  *
  * READ COMMITTED (only for a transaction started here, never inside a caller's): every plain read after a lock sees
  * what was committed before that lock, so "lock, then check again" is honest. Under REPEATABLE READ the check would
