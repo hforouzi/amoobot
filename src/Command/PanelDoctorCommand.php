@@ -124,6 +124,9 @@ final class PanelDoctorCommand extends Command
             $output->writeln('      detail: '.$this->safe($report->message));
         } else {
             $output->writeln(sprintf('PASS  connection (%s API)', $report->detectedMode->value ?? '?'));
+            if ($panel->isModern()) {
+                $this->printHosts($output, $panel);
+            }
         }
 
         // A warning, not a failure: the connection works, but customers would get no usable subscription link.
@@ -139,6 +142,21 @@ final class PanelDoctorCommand extends Command
                 '%section%' => $this->translator->trans('panel_connection.form.advanced', [], 'admin', $locale),
             ], 'admin', $locale)));
         }
+    }
+
+    /**
+     * Whether the panel has the Hosts API (docs/design/multi-inbound-plans.md 9.4), from GET hosts/list alone: reported,
+     * never a switch (customer links come from clients/subLinks either way).
+     */
+    private function printHosts(OutputInterface $output, VpnPanel $panel): void
+    {
+        $hosts = $this->clientsApi->hostsCapability($panel);
+        $output->writeln(match ($hosts['state']) {
+            'yes' => sprintf('INFO  hosts=yes (%d host group(s); customer links follow them through clients/subLinks)', $hosts['count']),
+            'no' => 'INFO  hosts=no (this panel has no Hosts API; customer links still come from clients/subLinks)',
+            'forbidden' => 'WARN  hosts=forbidden (the API token may not read /panel/api/hosts: give it the admin scope)',
+            default => sprintf('WARN  hosts=unknown (%s)', $this->safe((string) $hosts['detail'])),
+        });
     }
 
     private function selfTest(OutputInterface $output, VpnPanel $panel, mixed $inboundOption): bool
