@@ -57,14 +57,16 @@ final class ServiceVerifyLinksCommand extends Command
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $service = $this->entityManager->find(VpnService::class, (int) $input->getArgument('serviceId'));
-        try {
-            $report = $service instanceof VpnService
-                ? $this->verifier->verify($service)
-                : ['exitCode' => 2, 'result' => 'CANNOT CHECK', 'reason' => 'service not found', 'checks' => []];
-        } catch (\Throwable $e) {
-            // Anything unexpected (an odd panel answer, a bug) means "could not run": never exit 1, which reads as DIFF.
-            $reason = sprintf('could not run: %s: %s', (new \ReflectionClass($e))->getShortName(), $service instanceof VpnService ? ServiceErrorText::redact($service, $e->getMessage(), 200) : '');
-            $report = ['exitCode' => 2, 'result' => 'CANNOT CHECK', 'reason' => $reason, 'checks' => []];
+        if (!$service instanceof VpnService) {
+            $report = ['exitCode' => 2, 'result' => 'CANNOT CHECK', 'reason' => 'service not found', 'checks' => []];
+        } else {
+            try {
+                $report = $this->verifier->verify($service);
+            } catch (\Throwable $e) {
+                // Anything unexpected (an odd panel answer, a bug) means "could not run": never exit 1, which reads as DIFF.
+                $reason = sprintf('could not run: %s: %s', (new \ReflectionClass($e))->getShortName(), ServiceErrorText::redact($service, $e->getMessage(), 200));
+                $report = ['exitCode' => 2, 'result' => 'CANNOT CHECK', 'reason' => $reason, 'checks' => []];
+            }
         }
 
         if ((bool) $input->getOption('json')) {

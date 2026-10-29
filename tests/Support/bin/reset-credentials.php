@@ -13,7 +13,7 @@ use App\Provisioning\Infrastructure\Sanaei3xui\Sanaei3xuiRemoteIdParser;
 
 [$container, $entityManager] = require __DIR__.'/boot-test-kernel.php';
 
-[$serviceId, $newUuid, $newSubId, $holdMs, $locked] = array_slice($argv, 1) + array_fill(0, 5, '');
+[$serviceId, $newUuid, $newSubId, $holdMs, $locked] = array_slice($argv ?? [], 1) + array_fill(0, 5, '');
 $connection = $entityManager->getConnection();
 $connection->executeStatement('SET TRANSACTION ISOLATION LEVEL READ COMMITTED');
 $connection->beginTransaction();

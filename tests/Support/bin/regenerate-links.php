@@ -24,7 +24,7 @@ use Symfony\Component\Console\Output\BufferedOutput;
 
 [$container, $entityManager] = require __DIR__.'/boot-test-kernel.php';
 
-[$mode, $serviceId, $inboundId, $newUuid, $newSubId, $ready, $go, $probe] = array_slice($argv, 1) + array_fill(0, 8, '');
+[$mode, $serviceId, $inboundId, $newUuid, $newSubId, $ready, $go, $probe] = array_slice($argv ?? [], 1) + array_fill(0, 8, '');
 $service = $entityManager->find(VpnService::class, (int) $serviceId) ?? throw new RuntimeException('no such service');
 $oldUuid = (string) $service->getClientUuid();
 $oldSubId = (string) $service->getSubId();
@@ -32,7 +32,7 @@ $link = static fn (string $uuid, string $host): string => sprintf('vless://%s@%s
 
 $fake = new Fake3xuiPanel();
 $own = $entityManager->getConnection();
-$fake->script('GET', 'panel/api/clients/subLinks/'.$oldSubId, static function () use ($ready, $go, $probe, $own, $entityManager, $serviceId, $oldUuid, $link) {
+$fake->script('GET', 'panel/api/clients/subLinks/'.$oldSubId, static function () use ($ready, $go, $probe, $own, $serviceId, $oldUuid, $link) {
     touch($ready);
     // Another connection tries the row without waiting: it gets it unless this process holds it.
     $other = DriverManager::getConnection($own->getParams());
