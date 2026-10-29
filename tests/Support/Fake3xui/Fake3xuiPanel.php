@@ -646,8 +646,9 @@ final class Fake3xuiPanel
             if (!in_array((int) $row['inboundId'], $groups[$key]['inboundIds'], true)) {
                 $groups[$key]['inboundIds'][] = (int) $row['inboundId'];
             }
-            if (!in_array($row['address'], $groups[$key]['hosts'], true)) {
-                $groups[$key]['hosts'][] = $row['address'];
+            $entry = (int) ($row['port'] ?? 0) !== $groups[$key]['port'] ? $row['address'].':'.$row['port'] : $row['address'];
+            if (!in_array($entry, $groups[$key]['hosts'], true)) {
+                $groups[$key]['hosts'][] = $entry;
             }
         }
         if (null !== $inboundId) {
@@ -666,10 +667,12 @@ final class Fake3xuiPanel
      */
     public function addHostGroup(string $groupId, array $inboundIds, array $addresses, array $fields = []): void
     {
-        foreach ($addresses as $address) {
+        foreach ($addresses as $entry) {
+            // "addr:port" sets the row's port, like 3x-ui's parseHostAndPort.
+            [$address, $port] = 1 === preg_match('/^([^:\/]+):(\d+)$/', $entry, $m) ? [$m[1], (int) $m[2]] : [$entry, (int) ($fields['port'] ?? 0)];
             foreach ($inboundIds as $inboundId) {
-                $this->hosts[] = $fields + ['id' => count($this->hosts) + 1, 'groupId' => $groupId, 'inboundId' => $inboundId, 'address' => $address,
-                    'remark' => $groupId, 'port' => 0, 'security' => 'same', 'sni' => '', 'isDisabled' => false, 'excludeFromSubTypes' => [], 'sortOrder' => 0];
+                $this->hosts[] = ['address' => $address, 'port' => $port] + $fields + ['id' => count($this->hosts) + 1, 'groupId' => $groupId, 'inboundId' => $inboundId,
+                    'remark' => $groupId, 'security' => 'same', 'sni' => '', 'isDisabled' => false, 'excludeFromSubTypes' => [], 'sortOrder' => 0];
             }
         }
     }
