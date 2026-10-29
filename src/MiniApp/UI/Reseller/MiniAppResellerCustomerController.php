@@ -150,6 +150,9 @@ final class MiniAppResellerCustomerController extends AbstractController
     {
         $reseller = $this->access->require($user);
         $locale = MiniAppLocale::fromRequest($request);
+        if (!$this->limiter->create($user->telegramUserId())->consume()->isAccepted()) {
+            return $this->failure('rate_limited', Response::HTTP_TOO_MANY_REQUESTS, $locale);
+        }
         if (!$this->customers->delete($reseller, $id)) {
             return $this->failure('not_found', Response::HTTP_NOT_FOUND, $locale);
         }

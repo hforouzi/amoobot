@@ -121,6 +121,9 @@ final class MiniAppResellerController extends AbstractController
     public function quote(Request $request, #[CurrentUser] MiniAppUser $user): JsonResponse
     {
         $locale = MiniAppLocale::fromRequest($request);
+        if (!$this->purchases->throttle($user)) {
+            return self::answer(['error' => 'rate_limited', 'message' => $this->purchases->refusalMessage('rate_limited', $locale)], Response::HTTP_TOO_MANY_REQUESTS);
+        }
         try {
             $body = ResellerInput::body($request);
             $quote = $this->purchases->quote($user, ResellerPurchases::KIND_NEW, ResellerInput::id($body, 'planId'), ResellerInput::optionalNumber($body, 'trafficGb'), ResellerInput::optionalNumber($body, 'durationDays'));

@@ -41,7 +41,8 @@ use Symfony\Contracts\Translation\TranslatorInterface;
  * A double submit is one order, twice over: the Idempotency-Key runs the call once (CheckoutIdempotency::claimOnce:
  * a repeat gets the first answer, a parallel duplicate idempotency_in_progress), and the confirmation's nonce is stored
  * on the order under the reseller lock (a second delivery with another key finds the first order: already_processed,
- * answered with where that order stands). Rate limited per Telegram user (miniapp_reseller).
+ * answered with where that order stands). Rate limited per Telegram user (miniapp_reseller, throttle()): the 428
+ * confirmation step and the purchase both count.
  */
 class ResellerPurchases
 {
@@ -75,12 +76,13 @@ class ResellerPurchases
     public function purchase(MiniAppUser $user, string $kind, int $target, int $trafficGb, int $days, ?string $idempotencyKey, ?string $confirmToken, string $locale): array
     {
         $reseller = $this->access->require($user);
+        // Both steps count: the 428 with a fresh confirmation, and the purchase itself.
+        if (!$this->throttle($user)) {
+            return $this->error('rate_limited', Response::HTTP_TOO_MANY_REQUESTS, $locale);
+        }
         $confirmation = self::parseToken($confirmToken);
         if (null === $confirmation) {
             return $this->confirmStep($user, $kind, $target, $trafficGb, $days, null, $locale);
-        }
-        if (!$this->limiter->create($user->telegramUserId())->consume()->isAccepted()) {
-            return $this->error('rate_limited', Response::HTTP_TOO_MANY_REQUESTS, $locale);
         }
 
         try {
@@ -115,6 +117,15 @@ class ResellerPurchases
         }
 
         return [Response::HTTP_OK, $answer];
+    }
+
+    /**
+     * One unit of the reseller section's budget (miniapp_reseller, per Telegram user), taken by every write, every
+     * purchase step and every quote call; false when it is used up (answer 429 rate_limited, change nothing).
+     */
+    public function throttle(MiniAppUser $user): bool
+    {
+        return $this->limiter->create($user->telegramUserId())->consume()->isAccepted();
     }
 
     /**

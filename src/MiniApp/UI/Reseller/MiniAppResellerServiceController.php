@@ -192,6 +192,9 @@ final class MiniAppResellerServiceController extends AbstractController
     {
         $reseller = $this->access->require($user);
         $locale = MiniAppLocale::fromRequest($request);
+        if (!$this->purchases->throttle($user)) {
+            return self::answer(['error' => 'rate_limited', 'message' => $this->purchases->refusalMessage('rate_limited', $locale)], Response::HTTP_TOO_MANY_REQUESTS);
+        }
         try {
             $body = ResellerInput::body($request);
             $customerId = null === ($body['customerId'] ?? null) || '' === $body['customerId'] ? null : ResellerInput::id($body, 'customerId');
@@ -212,6 +215,9 @@ final class MiniAppResellerServiceController extends AbstractController
     private function quoteAnswer(Request $request, MiniAppUser $user, string $kind, int $id, bool $asksTraffic): JsonResponse
     {
         $locale = MiniAppLocale::fromRequest($request);
+        if (!$this->purchases->throttle($user)) {
+            return self::answer(['error' => 'rate_limited', 'message' => $this->purchases->refusalMessage('rate_limited', $locale)], Response::HTTP_TOO_MANY_REQUESTS);
+        }
         try {
             $trafficGb = $asksTraffic ? ResellerInput::optionalNumber(ResellerInput::body($request), 'trafficGb') : 0;
             $quote = $this->purchases->quote($user, $kind, $id, $trafficGb, 0);
