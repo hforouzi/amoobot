@@ -317,8 +317,9 @@ class ResellerCheckout
     public function quoteAddTraffic(User $user, int $serviceId, int $trafficGb): array
     {
         $reseller = $this->resellerFor($user) ?? throw new ResellerException('reseller_unavailable');
-        $this->assertAddTrafficOpen($trafficGb);
+        // His service first: anybody else's (or none) is service_not_sold_by_you (not found), even while add-traffic is closed.
         $service = $this->soldService($reseller, $serviceId);
+        $this->assertAddTrafficOpen($trafficGb);
         $quote = $this->pricing->quoteAddTraffic($reseller, $service, $trafficGb);
 
         return [$reseller, $service, $quote, $this->confirmations->issue($reseller, ResellerConfirmations::KIND_TRAFFIC, $serviceId, $trafficGb, 0, $quote->wholesaleAmount)];
@@ -336,8 +337,8 @@ class ResellerCheckout
         self::refuseDiscountCode($discountCode);
 
         return $this->purchase($user, ResellerConfirmations::KIND_TRAFFIC, $serviceId, $trafficGb, 0, $confirmation, function (Reseller $reseller) use ($serviceId, $trafficGb): array {
-            $this->assertAddTrafficOpen($trafficGb);
             $service = $this->soldService($reseller, $serviceId);
+            $this->assertAddTrafficOpen($trafficGb);
             $quote = $this->pricing->quoteAddTraffic($reseller, $service, $trafficGb);
             $plan = $service->getOrder()?->getPlan() ?? throw new ResellerException('price_unavailable');
 

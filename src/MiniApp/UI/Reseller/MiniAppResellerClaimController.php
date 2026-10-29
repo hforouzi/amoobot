@@ -12,7 +12,9 @@ use App\MiniApp\Security\MiniAppUser;
 use App\MiniApp\UI\MiniAppFragments;
 use App\MiniApp\UI\MiniAppLocale;
 use App\Reseller\Application\ClaimLinks;
+use App\Reseller\Application\ResellerCheckout;
 use App\Reseller\Domain\ClaimException;
+use App\Reseller\Domain\ResellerException;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -43,6 +45,7 @@ final class MiniAppResellerClaimController extends AbstractController
         private readonly MiniAppFragments $fragments,
         private readonly MiniAppResellerAccess $access,
         private readonly ClaimLinks $claimLinks,
+        private readonly ResellerCheckout $checkout,
         private readonly TranslatorInterface $translator,
         #[Autowire(service: 'limiter.miniapp_reseller')]
         private readonly RateLimiterFactory $limiter,
@@ -72,6 +75,13 @@ final class MiniAppResellerClaimController extends AbstractController
         $locale = MiniAppLocale::fromRequest($request);
         if (!$this->limiter->create($user->telegramUserId())->consume()->isAccepted()) {
             return self::answer(['error' => 'rate_limited', 'message' => $this->translator->trans('checkout.message.rate_limited', [], 'miniapp', $locale)], Response::HTTP_TOO_MANY_REQUESTS);
+        }
+        // Not a live service he sold (anybody else's, or none): not found, like every other reseller id. Only his own
+        // services can then be "not claimable" (claimed already, expired, ...).
+        try {
+            $this->checkout->findSoldService($user->customer(), $id);
+        } catch (ResellerException) {
+            return self::answer(['error' => 'not_found', 'message' => $this->translator->trans('reseller.error.not_found', [], 'miniapp', $locale)], Response::HTTP_NOT_FOUND);
         }
         try {
             $link = $this->claimLinks->createForReseller($user->customer(), $id);

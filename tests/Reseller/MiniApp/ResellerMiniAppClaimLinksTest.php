@@ -72,7 +72,7 @@ final class ResellerMiniAppClaimLinksTest extends IntegrationTestCase
         $this->appPostJson('/app/api/reseller/links/'.$theirs->claim->getId().'/revoke', $session);
         self::assertSame(ClaimStatus::OPEN, $this->claimStatus((int) $theirs->claim->getId()));
         $this->appPostJson('/app/api/reseller/services/'.$this->othersService->getId().'/claim-link', $session);
-        self::assertSame(409, $this->httpStatus());
+        self::assertSame(404, $this->httpStatus(), 'not his: not found (L3)');
         self::assertSame(1, $this->sqlInt('SELECT COUNT(*) FROM service_claim'));
     }
 

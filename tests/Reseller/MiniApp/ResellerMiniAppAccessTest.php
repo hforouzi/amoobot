@@ -111,6 +111,35 @@ final class ResellerMiniAppAccessTest extends IntegrationTestCase
         self::assertSame(0, $this->sqlInt('SELECT COUNT(*) FROM service_claim'));
     }
 
+    /**
+     * L3: a claim link for another reseller's service or a missing one, and add-traffic of such a service while
+     * add-traffic is closed, answer 404 (not "not claimable" / "sales closed", which would tell the id exists); his own
+     * service gets the real reason.
+     */
+    public function testForeignAndMissingIdsAre404EvenWhereTheActionIsRefused(): void
+    {
+        $session = $this->authenticate(self::CUSTOMER);
+        foreach ([(string) $this->othersService->getId(), '999999'] as $id) {
+            $answer = $this->appPostJson('/app/api/reseller/services/'.$id.'/claim-link', $session);
+            self::assertSame(404, $this->httpStatus(), 'claim link '.$id.': '.json_encode($answer));
+            self::assertSame('not_found', $answer['error'] ?? null);
+        }
+        self::assertSame(0, $this->sqlInt('SELECT COUNT(*) FROM service_claim'));
+
+        $this->setting('traffic_addon.enabled', 'false');
+        foreach ([(string) $this->othersService->getId(), '999999'] as $id) {
+            foreach (['/add-traffic/quote', '/add-traffic'] as $action) {
+                $answer = $this->appPostJson('/app/api/reseller/services/'.$id.$action, $session, ['trafficGb' => '10'], self::newKey());
+                self::assertSame(404, $this->httpStatus(), $id.$action.': '.json_encode($answer));
+            }
+            $this->appGet('/app/view/reseller/services/'.$id.'/add-traffic', $session);
+            self::assertSame(404, $this->httpStatus());
+        }
+        $answer = $this->appPostJson('/app/api/reseller/services/'.$this->sold->getId().'/add-traffic/quote', $session, ['trafficGb' => '10']);
+        self::assertSame(409, $this->httpStatus(), 'his own service: the real reason');
+        self::assertSame('sales_closed', $answer['error'] ?? null);
+    }
+
     public function testWithoutTheCsrfTokenNothingIsBought(): void
     {
         $session = $this->authenticate(self::CUSTOMER);
