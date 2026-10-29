@@ -35,6 +35,15 @@ final class Fake3xuiPanel
     public array $clients = [];
     /** @var array<string, array{up: int, down: int, lastOnline: int}> email => traffic */
     public array $traffic = [];
+    /**
+     * Host rows as 3x-ui stores them (one per host group x inbound x address): id, groupId, inboundId, remark, address,
+     * port (0 = the inbound's), security, sni, isDisabled, excludeFromSubTypes, sortOrder. Each usable row renders one link.
+     *
+     * @var list<array<string, mixed>>
+     */
+    public array $hosts = [];
+    /** false = a panel without the Hosts API (hosts/* answer the bare 404 page). */
+    public bool $hostsApi = true;
 
     /** @var list<array{method: string, path: string, query: array<string, string>, headers: array<string, list<string>>, body: mixed}> */
     public array $requests = [];
@@ -246,6 +255,19 @@ final class Fake3xuiPanel
             }
 
             return self::envelope(true, $links);
+        }
+        if (str_starts_with($api, 'hosts/')) {
+            if (!$this->hostsApi) {
+                return new MockResponse('404 page not found', ['http_code' => 404, 'response_headers' => ['content-type' => 'text/plain']]);
+            }
+            if ('GET' === $method && 'hosts/list' === $api) {
+                return self::envelope(true, $this->hostGroups(null));
+            }
+            if ('GET' === $method && 1 === preg_match('#^hosts/byInbound/(\d+)$#', $api, $m)) {
+                $groups = $this->hostGroups((int) $m[1]);
+
+                return self::envelope(true, [] === $groups ? null : $groups);
+            }
         }
         if ('GET' === $method && 1 === preg_match('#^inbounds/get/(\d+)$#', $api, $m)) {
             return isset($this->inbounds[(int) $m[1]]) ? self::envelope(true, $this->inbounds[(int) $m[1]]) : self::envelope(false, null, 'inbound not found');
@@ -572,12 +594,84 @@ final class Fake3xuiPanel
         $links = [];
         foreach ($client['inboundIds'] as $id) {
             $inbound = $this->inbounds[$id] ?? null;
-            if (null !== $inbound) {
+            if (null === $inbound) {
+                continue;
+            }
+            $hosts = $this->usableHosts((int) $id);
+            if ([] === $hosts) {
                 $links[] = sprintf('%s://%s@panel.example.test:%d?type=tcp#%s', $inbound['protocol'], $client['id'], $inbound['port'], rawurlencode($client['email']));
+                continue;
+            }
+            foreach ($hosts as $host) {
+                $query = ['type' => 'tcp', 'security' => 'same' === ($host['security'] ?? 'same') ? 'reality' : $host['security']];
+                if ('' !== (string) ($host['sni'] ?? '')) {
+                    $query['sni'] = $host['sni'];
+                }
+                $links[] = sprintf('%s://%s@%s:%d?%s#%s', $inbound['protocol'], $client['id'], $host['address'], (int) ($host['port'] ?? 0) ?: $inbound['port'], http_build_query($query), rawurlencode($host['remark'].'-'.$client['email']));
             }
         }
 
         return $links;
+    }
+
+    /**
+     * The rows of an inbound that render a raw link (enabled, not excluded from "raw"), in the panel's order.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function usableHosts(int $inboundId): array
+    {
+        $rows = array_values(array_filter($this->hosts, static fn (array $h): bool => (int) $h['inboundId'] === $inboundId
+            && !($h['isDisabled'] ?? false) && !in_array('raw', (array) ($h['excludeFromSubTypes'] ?? []), true)));
+        usort($rows, static fn (array $a, array $b): int => [(int) ($a['sortOrder'] ?? 0), (int) $a['id']] <=> [(int) ($b['sortOrder'] ?? 0), (int) $b['id']]);
+
+        return $rows;
+    }
+
+    /**
+     * Host groups as hosts/list and hosts/byInbound answer them (entity.HostGroup): rows folded by groupId.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function hostGroups(?int $inboundId): array
+    {
+        $groups = [];
+        foreach ($this->hosts as $row) {
+            $key = (string) $row['groupId'];
+            $groups[$key] ??= [
+                'groupId' => $key, 'inboundIds' => [], 'hosts' => [], 'remark' => $row['remark'], 'port' => (int) ($row['port'] ?? 0),
+                'security' => $row['security'] ?? 'same', 'sni' => $row['sni'] ?? '', 'isDisabled' => (bool) ($row['isDisabled'] ?? false),
+                'excludeFromSubTypes' => (array) ($row['excludeFromSubTypes'] ?? []), 'sortOrder' => (int) ($row['sortOrder'] ?? 0),
+            ];
+            if (!in_array((int) $row['inboundId'], $groups[$key]['inboundIds'], true)) {
+                $groups[$key]['inboundIds'][] = (int) $row['inboundId'];
+            }
+            if (!in_array($row['address'], $groups[$key]['hosts'], true)) {
+                $groups[$key]['hosts'][] = $row['address'];
+            }
+        }
+        if (null !== $inboundId) {
+            $groups = array_filter($groups, static fn (array $g): bool => in_array($inboundId, $g['inboundIds'], true));
+        }
+
+        return array_values($groups);
+    }
+
+    /**
+     * Adds a host group: one row per inbound x address, like 3x-ui's buildHostRows.
+     *
+     * @param list<int>            $inboundIds
+     * @param list<string>         $addresses
+     * @param array<string, mixed> $fields     remark, port, security, sni, isDisabled, excludeFromSubTypes, sortOrder
+     */
+    public function addHostGroup(string $groupId, array $inboundIds, array $addresses, array $fields = []): void
+    {
+        foreach ($addresses as $address) {
+            foreach ($inboundIds as $inboundId) {
+                $this->hosts[] = $fields + ['id' => count($this->hosts) + 1, 'groupId' => $groupId, 'inboundId' => $inboundId, 'address' => $address,
+                    'remark' => $groupId, 'port' => 0, 'security' => 'same', 'sni' => '', 'isDisabled' => false, 'excludeFromSubTypes' => [], 'sortOrder' => 0];
+            }
+        }
     }
 
     private static function uuid(): string

@@ -68,7 +68,7 @@ final class ModernDriverTest extends TestCase
         self::assertSame(['vless://'.self::UUID.'@panel.example.test:443?type=tcp#'.self::EMAIL], $created->configLinks);
         self::assertSame([
             'POST panel/api/clients/add', 'GET panel/api/clients/get/'.self::EMAIL,
-            'GET panel/api/clients/links/'.self::EMAIL, 'GET panel/api/clients/subLinks/'.$row['subId'],
+            'GET panel/api/clients/subLinks/'.$row['subId'],
         ], $this->fake->requestLines());
         self::assertSame(['client', 'inboundIds'], array_keys((array) $this->fake->requests[0]['body']));
     }
