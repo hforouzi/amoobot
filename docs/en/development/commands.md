@@ -35,7 +35,7 @@ php bin/console app:panel:detect-version
 php bin/console app:panel:test-login
 php bin/console app:panel:list-inbounds
 php bin/console app:panel:test-client-links
-php bin/console app:panel:sync-inbounds
+php bin/console app:panel:sync-inbounds <panelId> [--regenerate-configs [--apply]]   # --regenerate-configs is a dry run unless --apply (batches, --after-id, --pause; stops after 5 failures in a row)
 php bin/console app:panel:sync-inbound-metadata
 php bin/console app:panel:debug-transport
 ```
@@ -54,7 +54,10 @@ php bin/console app:automation:run
 php bin/console app:service:sync-usage
 php bin/console app:service:check-expiry
 php bin/console app:service:send-notifications
-php bin/console app:service:regenerate-config
+# Dry runs unless --apply: old vs new links, nothing written. See vpn-panels.md, "Config links and 3x-ui Hosts".
+php bin/console app:service:regenerate-config <serviceId> [--apply]
+php bin/console app:inbound:regenerate-service-configs <inboundId> [--apply] [--batch-size=50] [--pause=0.2] [--after-id=N]
+php bin/console app:service:verify-links <serviceId> [--json]   # read-only; exit 0 PASS, 1 DIFF, 2 could not check
 php bin/console app:service:debug-links
 ```
 

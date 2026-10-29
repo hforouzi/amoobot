@@ -52,13 +52,21 @@ php bin/console app:service:regenerate-config <serviceId> --apply      # ذخی�
 php bin/console app:inbound:regenerate-service-configs <inboundId>
 php bin/console app:inbound:regenerate-service-configs <inboundId> --apply --batch-size=50
 php bin/console app:inbound:regenerate-service-configs <inboundId> --apply --after-id=<آخرین شناسهٔ پردازش‌شده>   # ادامه
+
+# بعد از همگام‌سازی اینباندهای یک پنل: همهٔ سرویس‌های پنل، با همین قواعد (بدون --apply فقط آزمایشی).
+php bin/console app:panel:sync-inbounds <panelId> --regenerate-configs
+php bin/console app:panel:sync-inbounds <panelId> --regenerate-configs --apply
 ```
 
 - **هر دو دستور بدون `--apply` فقط اجرای آزمایشی‌اند.** `--apply` همراه با `--dry-run` پذیرفته نمی‌شود.
 - لینک‌ها به شکل `scheme address:port #remark` چاپ می‌شوند، هرگز همراه با UUID یا رمز.
 - دستور دسته‌ای بعد از هر دسته `last processed id N` را چاپ می‌کند. اگر متوقف شد، آن را با `--after-id=N` دوباره اجرا کنید.
 - سرویسی که درخواستش به پنل خطا بدهد با پیام `FAILED, stored links kept` رد می‌شود، اجرا ادامه پیدا می‌کند و کد خروج ۱ است.
+- **بعد از ۵ سرویس ناموفق پشت‌سرهم، اجرا متوقف می‌شود** (احتمالاً پنل در دسترس نیست) و مقدار `--after-id` برای ادامه را چاپ می‌کند. بین دسته‌ها مکث می‌شود: `--pause` به ثانیه (پیش‌فرض ۰٫۲).
+- اجرای دسته‌ای **هرگز پنل را «degraded» نمی‌کند** (که فروش روی آن را متوقف می‌کرد): خطاهای آن شمرده نمی‌شوند.
+- هر سرویس جداگانه و با قفل روی ردیف خودش نوشته می‌شود. اگر «ریست لینک‌ها» در همان فاصله‌ای که لینک‌ها خوانده می‌شد مشخصات سرویس را عوض کرده باشد، لینک‌های خوانده‌شده دور ریخته می‌شوند (`credentials changed meanwhile`) و لینک‌های مشخصات جدید دوباره از پنل خوانده می‌شوند. لینک قدیمی هرگز روی مشخصات جدید نوشته نمی‌شود.
 - دکمهٔ «بازسازی کانفیگ» در پنل وب و مینی‌اپ برای یک سرویس همان کار `--apply` را می‌کند و پیامش تعداد جدید و قبلی را نشان می‌دهد.
+- اکشن وب «بازسازی کانفیگ سرویس‌ها» برای یک **اینباند** حداکثر **۱۰ سرویس** را انجام می‌دهد (برای هر سرویس یک درخواست به پنل، داخل یک درخواست وب). برای اینباند بزرگ‌تر، دستوری را که باید اجرا شود نشان می‌دهد: `php bin/console app:inbound:regenerate-service-configs <inboundId> --apply` (اول بدون `--apply`).
 
 ### بررسی لینک‌ها (فقط‌خواندنی)
 
@@ -70,6 +78,7 @@ php bin/console app:service:verify-links <serviceId>          # با --json گز
 
 | بررسی | معنای DIFF |
 |---|---|
+| stored subId = panel subId | subId که ربات با آن لینک‌ها را می‌خواند با subId پنل یکی نیست، یا در پایگاه داده ذخیره نشده (در این حالت `regenerate-config <id> --apply` آن را ذخیره می‌کند). هیچ‌کدام از دو مقدار چاپ نمی‌شود. |
 | stored snapshot = panel subLinks | سرویس هنوز لینک‌های قدیمی دارد. `app:service:regenerate-config <id> --apply` را اجرا کنید. |
 | panel subLinks = Hosts prediction | Hostی که باید لینک بدهد لینکی نداده، یا security / SNI / path آن فرق دارد. اگر پنل API مربوط به Hostها را نداشته باشد یا کلاینت به Hostهای مشخصی وصل شده باشد، این بررسی انجام نمی‌شود. |
 | every address is public | لینکی به `127.0.0.1` یا آدرس خصوصی اشاره می‌کند (Sub/Web domain پنل را تنظیم کنید یا Host اضافه کنید). |
@@ -77,7 +86,7 @@ php bin/console app:service:verify-links <serviceId>          # با --json گز
 | U2 | در subLinks موردی بود که ربات کنار می‌گذارد (مثلاً خط اطلاعات `socks://127.0.0.1`). |
 | U6 | دو endpoint لینک پنل نتیجهٔ یکسان نمی‌دهند. ربات فقط subLinks را ذخیره می‌کند. |
 
-کد خروج: `0` یعنی PASS، `1` یعنی تفاوت (فهرست می‌شود)، `2` یعنی بررسی ممکن نبود (پنل legacy، پنل در دسترس نبود یا رد کرد، یا کلاینت وجود نداشت).
+کد خروج: `0` یعنی PASS، `1` یعنی تفاوت (فهرست می‌شود)، `2` یعنی بررسی ممکن نبود (پنل legacy، پنل در دسترس نبود یا رد کرد، کلاینت وجود نداشت، یا هر خطای پیش‌بینی‌نشده).
 
 **بررسی‌های دستی** (چیزهایی که دستور نمی‌بیند)، روی یک سرویس آزمایشی:
 
@@ -107,7 +116,8 @@ php bin/console app:service:verify-links <serviceId>          # با --json گز
 SELECT COUNT(*) AS modern_services_without_link_snapshot
 FROM vpn_service s JOIN vpn_panel p ON p.id = s.panel_id
 WHERE p.type = 'sanaei_3xui'
-  AND (p.sanaei_integration_mode = 'modern' OR (p.sanaei_integration_mode = 'auto' AND p.sanaei_detected_mode = 'modern'))
+  AND (p.sanaei_integration_mode = 'modern'
+       OR (p.sanaei_integration_mode NOT IN ('legacy', 'modern') AND p.sanaei_detected_mode = 'modern'))
   AND s.status <> 'deleted'
   AND (s.config_links IS NULL OR TRIM(s.config_links) IN ('', '[]', 'null'));
 ```

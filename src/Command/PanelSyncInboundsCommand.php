@@ -138,7 +138,7 @@ final class PanelSyncInboundsCommand extends Command
                 return Command::FAILURE;
             }
         } else {
-            $io->note('اینباندها بروزرسانی شدند. اگر External Proxy تغییر کرده، کانفیگ سرویسها را بازسازی کنید: app:inbound:regenerate-service-configs {inboundId}');
+            $io->note('اینباندها بروزرسانی شدند. اگر External Proxy یا Hostها تغییر کرده، لینک‌های سرویس‌ها را دوباره بخوانید: اول بدون --apply (اجرای آزمایشی) app:inbound:regenerate-service-configs {inboundId} و بعد همان دستور با --apply.');
         }
 
         return Command::SUCCESS;

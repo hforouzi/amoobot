@@ -591,6 +591,20 @@ Hosts"](../en/vpn-panels.md#config-links-and-3x-ui-hosts).
   - U2 and U6 are automatic checks;
   - U1 and U3–U5 are manual steps in the admin guide;
   - link order is not compared.
+- **After the independent review:**
+  - the 1 MiB cap holds for compressed answers: `Accept-Encoding: identity`, and the body is counted after decoding
+    while it arrives;
+  - error texts lose the subId, base path and URLs themselves (not by matching the request URL);
+  - `PanelLinkSnapshot` writes each service on its own. The panel is read with no lock held. Then the row is locked
+    by primary key, and the links are written only if the client UUID, subId and remote id are still the ones they
+    were read for. Otherwise ("changed meanwhile", e.g. a link reset) they are discarded and read once more;
+  - bulk runs (both commands, `sync-inbounds --regenerate-configs`, now also a dry run unless `--apply`):
+    - pause between batches;
+    - stop after 5 failures in a row;
+    - never count towards the panel's "degraded" state;
+  - the web inbound action is a POST with a CSRF token, for at most 10 services;
+  - duplicates are dropped before the 500-link cap; rejected items are logged as counts per scheme;
+  - verify-links also checks the stored subId and exits 2 on any unexpected error.
 - **Not changed in H0** (these still build Hosts-blind links; to fix in H2):
   - at creation, when the panel gives no links, `VpnProvisioningService` stores links built from the inbound;
   - at display, a modern service with **no** stored links gets links built from the inbound
