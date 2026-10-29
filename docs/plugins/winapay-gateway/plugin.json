@@ -1,0 +1,76 @@
+{
+  "manifestVersion": 1,
+  "type": "payment_gateway",
+  "code": "winapay",
+  "name": {
+    "fa": "وینا پی",
+    "en": "Winapay"
+  },
+  "version": "1.0.0",
+  "description": {
+    "fa": "درگاه پرداخت تومانی وینا پی برای آموبات.",
+    "en": "Winapay Toman payment gateway for Amoobot."
+  },
+  "mainClass": "Amoobot\\Plugin\\Winapay\\WinapayGatewayPlugin",
+  "category": "payment",
+  "permissions": [
+    "payment.create",
+    "payment.verify"
+  ],
+  "supportsWebhook": false,
+  "supportsOnlinePayment": true,
+  "supportsManualConfirmation": false,
+  "configSchema": [
+    {
+      "key": "merchant_id",
+      "type": "password",
+      "required": true,
+      "label": {
+        "fa": "شناسه پذیرنده (MerchantID)",
+        "en": "Merchant ID"
+      }
+    },
+    {
+      "key": "callback_base_url",
+      "type": "url",
+      "required": true,
+      "label": {
+        "fa": "آدرس پایه Callback (همان دامنه ثبت‌شده در پنل وینا پی)",
+        "en": "Callback Base URL (the domain registered in the Winapay panel)"
+      }
+    },
+    {
+      "key": "request_format",
+      "type": "choice",
+      "required": false,
+      "default": "form",
+      "label": {
+        "fa": "قالب درخواست",
+        "en": "Request format"
+      },
+      "choices": {
+        "Form (application/x-www-form-urlencoded)": "form",
+        "JSON (application/json)": "json"
+      }
+    },
+    {
+      "key": "description_prefix",
+      "type": "text",
+      "required": false,
+      "label": {
+        "fa": "پیشوند توضیحات پرداخت",
+        "en": "Payment description prefix"
+      }
+    },
+    {
+      "key": "underpayment_tolerance_percent",
+      "type": "number",
+      "required": false,
+      "default": 0,
+      "label": {
+        "fa": "درصد مجاز کم‌پرداخت",
+        "en": "Underpayment tolerance (%)"
+      }
+    }
+  ]
+}
