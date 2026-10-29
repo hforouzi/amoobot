@@ -64,7 +64,7 @@ final class ServiceLinkRegenerator
         } catch (\Throwable $e) {
             return new ServiceLinkChange(ServiceLinkChange::FAILED, 'generated', $before, $before, false, $e->getMessage());
         }
-        $after = ServiceConfigRegenerator::normalizedLinks((array) ($links['configLinks'] ?? []));
+        $after = ServiceConfigRegenerator::normalizedLinks($links['configLinks']);
         if ($apply) {
             $service
                 ->setConfigLinks($after)
