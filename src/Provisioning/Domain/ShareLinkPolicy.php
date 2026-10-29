@@ -20,21 +20,23 @@ final class ShareLinkPolicy
     /**
      * @param mixed $obj the panel's answer: a list of links, or one text with a link per line
      *
-     * @return array{links: list<string>, rejected: int}
+     * @return array{links: list<string>, rejected: int, rejectedSchemes: array<string, int>} the dropped items are
+     *         counted per scheme (scheme(), "not_a_string", "not_a_list"), for logs that never show an item
      */
     public static function filter(mixed $obj): array
     {
         if (null === $obj) {
-            return ['links' => [], 'rejected' => 0];
+            return ['links' => [], 'rejected' => 0, 'rejectedSchemes' => []];
         }
         if (is_string($obj)) {
             $obj = preg_split('/\R/', $obj) ?: [];
         }
         if (!is_array($obj) || !array_is_list($obj)) {
-            return ['links' => [], 'rejected' => 1];
+            return ['links' => [], 'rejected' => 1, 'rejectedSchemes' => ['not_a_list' => 1]];
         }
         $links = [];
         $rejected = 0;
+        $schemes = [];
         foreach ($obj as $item) {
             // Surrounding whitespace only: trim() would also strip NUL and other control bytes, which make an item unusable.
             $link = is_string($item) ? trim($item, " \t\r\n") : null;
@@ -44,12 +46,15 @@ final class ShareLinkPolicy
             }
             if (null === $link || !self::isAcceptable($link) || count($links) >= self::MAX_LINKS) {
                 ++$rejected;
+                $scheme = null === $link ? 'not_a_string' : self::scheme($link);
+                $schemes[$scheme] = ($schemes[$scheme] ?? 0) + 1;
                 continue;
             }
             $links[$link] = true;
         }
+        ksort($schemes);
 
-        return ['links' => array_map('strval', array_keys($links)), 'rejected' => $rejected];
+        return ['links' => array_map('strval', array_keys($links)), 'rejected' => $rejected, 'rejectedSchemes' => $schemes];
     }
 
     public static function isAcceptable(string $link): bool

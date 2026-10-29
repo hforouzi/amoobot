@@ -222,7 +222,7 @@ class ModernClientsApi
      *
      * @param bool $recordHealth false: a failure is not counted towards the panel's "degraded" state (bulk refreshes)
      *
-     * @return array{links: list<string>, rejected: int}
+     * @return array{links: list<string>, rejected: int, rejectedSchemes: array<string, int>}
      */
     public function links(VpnPanel $panel, string $email, bool $recordHealth = true): array
     {
@@ -230,7 +230,7 @@ class ModernClientsApi
     }
 
     /**
-     * @return array{links: list<string>, rejected: int}
+     * @return array{links: list<string>, rejected: int, rejectedSchemes: array<string, int>}
      */
     public function subLinks(VpnPanel $panel, string $subId, bool $recordHealth = true): array
     {

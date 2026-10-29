@@ -360,7 +360,8 @@ final class Sanaei3xuiModernDriver implements VpnPanelDriverInterface, ExistingC
         $subId = null === $subId || '' === trim($subId) ? null : trim($subId);
         $answer = null === $subId ? $this->api->links($panel, $email, $recordHealth) : $this->api->subLinks($panel, $subId, $recordHealth);
         if ($answer['rejected'] > 0) {
-            $this->logger->warning('sanaei_modern_links_rejected', ['panel_id' => $panel->getId(), 'rejected' => $answer['rejected']]);
+            // Counted per scheme only (e.g. {"socks": 1, "not_a_string": 2}): never the item, it may carry a credential.
+            $this->logger->warning('sanaei_modern_links_rejected', ['panel_id' => $panel->getId(), 'rejected' => $answer['rejected'], 'schemes' => $answer['rejectedSchemes']]);
         }
 
         return new PanelLinks($answer['links'], $answer['rejected'], null === $subId ? 'links' : 'subLinks', null === $subId ? null : SubscriptionUrl::build($panel, $subId));

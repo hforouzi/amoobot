@@ -82,12 +82,11 @@ final class ServiceRegenerateConfigCommand extends Command
             sprintf('mode: %s', $apply ? 'APPLY (writes)' : 'dry run (nothing is written)'),
         ]);
 
-        if ($apply) {
-            $remoteRef = $this->remoteIdParser->parse((string) ($service->getRemoteId() ?? ''));
-            if (null !== $remoteRef && '' === trim((string) ($service->getSubId() ?? '')) && null !== $remoteRef->subId && '' !== trim($remoteRef->subId)) {
-                $service->setSubId(trim($remoteRef->subId));
-                $io->writeln('subId recovered from remoteId.');
-            }
+        // A dry run uses the same subId as --apply (so both ask the same panel endpoint); only --apply stores it.
+        $remoteRef = $this->remoteIdParser->parse((string) ($service->getRemoteId() ?? ''));
+        if (null !== $remoteRef && '' === trim((string) ($service->getSubId() ?? '')) && null !== $remoteRef->subId && '' !== trim($remoteRef->subId)) {
+            $service->setSubId(trim($remoteRef->subId));
+            $io->writeln($apply ? 'subId recovered from remoteId (stored with the links).' : 'subId recovered from remoteId (used for this dry run, not stored).');
         }
 
         $change = $this->linkRegenerator->run($service, 'console_service_regenerate_config', $apply);
