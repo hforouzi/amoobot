@@ -28,8 +28,10 @@ use App\Shop\Domain\OrderStatus;
 use App\Shop\Domain\OrderType;
 use App\Wallet\Application\WalletPayment;
 use App\Wallet\Domain\WalletException;
+use Doctrine\DBAL\Exception\RetryableException;
 use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
 use Doctrine\ORM\EntityManagerInterface;
+use Psr\Log\LoggerInterface;
 
 /**
  * A reseller's purchase at wholesale: a new service, a renewal or extra traffic for a service he sold. Shared by the
@@ -37,7 +39,7 @@ use Doctrine\ORM\EntityManagerInterface;
  *
  * Wallet only, created and paid in one call (docs/design/reseller-and-claim.md, 2.3 / 2.4):
  *
- * 1. One transaction, under the reseller row's lock: the reseller is still active (and reseller.enabled on), the
+ * 1. One transaction, under the locks of his user row and the reseller row: the reseller is still active (and reseller.enabled on), the
  *    daily cap is not exceeded (it counts this reseller's open and paid orders of today, so two parallel purchases
  *    are serialized here and the second sees the first), the price is quoted now (ResellerPricing) and the order is
  *    created with that snapshot, and WalletPayment::open() creates its wallet payment and debits it
@@ -46,8 +48,20 @@ use Doctrine\ORM\EntityManagerInterface;
  * 2. WalletPayment::pay() settles that payment through PaymentSettlementService as any wallet payment: provisioning,
  *    PROVISIONING_FAILED + retry, receipts and audit are the existing ones. The snapshot on the order is what is paid.
  *
- * Lock order: reseller, then (inside open()) order, payment, user, wallet: the order settlement already uses after
- * the order, so this never deadlocks with it; disabling a reseller takes the same reseller lock first.
+ * Lock order of everything that touches a reseller (the one place it is written down; ClaimLinks and the provisioning
+ * of a sold service follow it): the reseller's USER row, then the RESELLER row, then orders, payments, the wallet.
+ * - The purchase takes the user row (FOR UPDATE), then the reseller row (FOR UPDATE), then inside open() its own new
+ *   order and payment rows (invisible to everyone else until commit) and the wallet (WalletService::lock(): the user
+ *   row again, already held, then the wallet row).
+ * - Provisioning a sold service inserts vpn_service, whose foreign key checks take the user row, then the reseller row
+ *   (shared): the same order, so a purchase and the provisioning of the previous one wait for each other instead of
+ *   deadlocking. (With the reseller row first, as before, they did: a purchase held the reseller row and waited for
+ *   the user row that the provisioning's user_id check held while it waited for the reseller row.)
+ * - A new claim link takes the user row, then the reseller row (both shared), then claim and service rows.
+ * - Disabling a reseller takes only the reseller row, then his claim rows.
+ * Should the database still choose this purchase as a deadlock or lock-wait victim (an unforeseen interleaving), the
+ * transaction is rolled back completely and run again from the start, at most LOCK_ATTEMPTS times (busy after that,
+ * nothing was taken). Only the order + debit transaction is retried; the settlement after it never is.
  *
  * Every purchase carries the reseller's confirmation (ResellerConfirmations: the amount he was shown and a one-time
  * nonce; the quote*() methods issue it). Under the lock: a nonce already on one of his orders is a second delivery of the
@@ -69,6 +83,8 @@ class ResellerCheckout
 
     /** The order statuses that no longer count towards the daily cap (nothing was or will be paid). */
     private const CLOSED_STATUSES = [OrderStatus::CANCELLED, OrderStatus::EXPIRED, OrderStatus::FAILED];
+    /** Runs of the order + debit transaction when the database picked it as a deadlock / lock-wait victim. */
+    public const LOCK_ATTEMPTS = 3;
 
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
@@ -84,6 +100,7 @@ class ResellerCheckout
         private readonly TransactionRollback $transactionRollback,
         private readonly ResellerConfirmations $confirmations,
         private readonly PaymentStarter $paymentStarter,
+        private readonly LoggerInterface $logger,
     ) {
     }
 
@@ -300,8 +317,9 @@ class ResellerCheckout
     public function quoteAddTraffic(User $user, int $serviceId, int $trafficGb): array
     {
         $reseller = $this->resellerFor($user) ?? throw new ResellerException('reseller_unavailable');
-        $this->assertAddTrafficOpen($trafficGb);
+        // His service first: anybody else's (or none) is service_not_sold_by_you (not found), even while add-traffic is closed.
         $service = $this->soldService($reseller, $serviceId);
+        $this->assertAddTrafficOpen($trafficGb);
         $quote = $this->pricing->quoteAddTraffic($reseller, $service, $trafficGb);
 
         return [$reseller, $service, $quote, $this->confirmations->issue($reseller, ResellerConfirmations::KIND_TRAFFIC, $serviceId, $trafficGb, 0, $quote->wholesaleAmount)];
@@ -319,8 +337,8 @@ class ResellerCheckout
         self::refuseDiscountCode($discountCode);
 
         return $this->purchase($user, ResellerConfirmations::KIND_TRAFFIC, $serviceId, $trafficGb, 0, $confirmation, function (Reseller $reseller) use ($serviceId, $trafficGb): array {
-            $this->assertAddTrafficOpen($trafficGb);
             $service = $this->soldService($reseller, $serviceId);
+            $this->assertAddTrafficOpen($trafficGb);
             $quote = $this->pricing->quoteAddTraffic($reseller, $service, $trafficGb);
             $plan = $service->getOrder()?->getPlan() ?? throw new ResellerException('price_unavailable');
 
@@ -418,17 +436,49 @@ class ResellerCheckout
 
     /**
      * @param \Closure(Reseller): array{WholesaleQuote, Order} $build quotes now and builds the (unpersisted) order, under
-     *                                                              the reseller lock
+     *                                                              the reseller lock (again on a retried attempt)
      *
-     * @throws ResellerException|WalletException nothing was written
+     * @throws ResellerException|WalletException nothing was written (busy: still a lock victim after LOCK_ATTEMPTS)
      */
     private function purchase(User $user, string $kind, int $targetId, int $trafficGb, int $durationDays, ResellerConfirmation $confirmation, \Closure $build): SettlementResult
     {
         if (null === $this->resellerFor($user)) {
             throw new ResellerException('reseller_unavailable');
         }
+        $userId = (int) $user->getId();
         $resellerId = (int) $this->entityManager->getRepository(Reseller::class)->findOneBy(['user' => $user])?->getId();
+        $outer = $this->entityManager->getConnection()->getTransactionNestingLevel();
 
+        for ($attempt = 1; ; ++$attempt) {
+            try {
+                $order = $this->createPaidOrder($userId, $resellerId, $kind, $targetId, $trafficGb, $durationDays, $confirmation, $build);
+                break;
+            } catch (RetryableException $e) {
+                // Rolled back completely: nothing of this attempt exists. Inside a caller's transaction the whole of it is
+                // gone, so only the caller can decide.
+                $this->logger->warning('Reseller purchase was a deadlock / lock-wait victim.', ['reseller_id' => $resellerId, 'kind' => $kind, 'attempt' => $attempt, 'error' => $e::class]);
+                if (0 !== $outer) {
+                    throw $e;
+                }
+                if ($attempt >= self::LOCK_ATTEMPTS) {
+                    throw new ResellerException('busy');
+                }
+                usleep(random_int(20_000, 60_000) * $attempt);
+            }
+        }
+
+        return $this->walletPayment->pay($order, true);
+    }
+
+    /**
+     * The order + debit transaction of purchase(), run once (see the class comment for the lock order).
+     *
+     * @param \Closure(Reseller): array{WholesaleQuote, Order} $build
+     *
+     * @throws ResellerException|WalletException|RetryableException nothing was written
+     */
+    private function createPaidOrder(int $userId, int $resellerId, string $kind, int $targetId, int $trafficGb, int $durationDays, ResellerConfirmation $confirmation, \Closure $build): Order
+    {
         $connection = $this->entityManager->getConnection();
         $this->entityManager->flush();
         $level = $connection->getTransactionNestingLevel();
@@ -436,8 +486,10 @@ class ResellerCheckout
         $order = null;
 
         try {
-            // The lock is this transaction's first statement: its snapshot (REPEATABLE READ starts it at the first plain
-            // read) then begins after a parallel purchase of this reseller committed, so the daily cap below sees it.
+            // The locks are this transaction's first statements, the user row before the reseller row (class comment).
+            // Its snapshot (REPEATABLE READ starts it at the first plain read) then begins after a parallel purchase of
+            // this reseller committed, so the daily cap below sees it.
+            $connection->executeQuery('SELECT id FROM `user` WHERE id = ? FOR UPDATE', [$userId]);
             $connection->executeQuery('SELECT id FROM reseller WHERE id = ? FOR UPDATE', [$resellerId]);
             $reseller = $this->entityManager->find(Reseller::class, $resellerId) ?? throw new ResellerException('reseller_unavailable');
             $this->entityManager->refresh($reseller);
@@ -486,7 +538,7 @@ class ResellerCheckout
             throw $e;
         }
 
-        return $this->walletPayment->pay($order, true);
+        return $order;
     }
 
     /**

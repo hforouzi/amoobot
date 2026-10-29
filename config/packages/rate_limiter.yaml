@@ -34,8 +34,9 @@ framework:
             policy: sliding_window
             limit: 30
             interval: '1 minute'
-        # Reseller Mini App writes (purchases at wholesale, customer labels), per Telegram user (ResellerPurchases,
-        # ResellerCustomers via MiniAppResellerCustomerController). Higher than miniapp_checkout: a reseller buys in batches.
+        # Reseller Mini App, per Telegram user: every write (purchase steps incl. the 428 confirmation, customer labels,
+        # assigning a label, claim links) and every quote call (ResellerPurchases::throttle, the reseller controllers).
+        # Higher than miniapp_checkout: a reseller buys in batches.
         miniapp_reseller:
             policy: sliding_window
             limit: 60

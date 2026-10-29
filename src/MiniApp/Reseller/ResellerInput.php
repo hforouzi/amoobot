@@ -18,17 +18,33 @@ final class ResellerInput
     /** An id as a path / query / body value. */
     public const ID = '/^[1-9][0-9]{0,9}$/D';
 
+    /** The field of InvalidResellerInput when the body itself cannot be read (answered 400). */
+    public const BODY = 'body';
+
     /**
+     * The JSON object of the body. Anything else (another content type, malformed JSON, a list, a scalar) is refused,
+     * never read as an empty body: {} means "no fields", an unreadable body means nothing.
+     *
      * @return array<string, mixed>
+     *
+     * @throws InvalidResellerInput field BODY
      */
     public static function body(Request $request): array
     {
         if ('json' !== $request->getContentTypeFormat()) {
-            return [];
+            throw new InvalidResellerInput(self::BODY);
         }
-        $data = json_decode($request->getContent(), true);
+        try {
+            $data = json_decode($request->getContent(), false, 16, JSON_THROW_ON_ERROR);
+        } catch (\JsonException) {
+            throw new InvalidResellerInput(self::BODY);
+        }
+        if (!$data instanceof \stdClass) {
+            throw new InvalidResellerInput(self::BODY);
+        }
 
-        return is_array($data) ? $data : [];
+        /** @var array<string, mixed> */
+        return json_decode($request->getContent(), true, 16, JSON_THROW_ON_ERROR);
     }
 
     /**

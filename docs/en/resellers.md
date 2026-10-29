@@ -116,7 +116,9 @@ With resellers on, an active reseller gets a **Reseller** entry in the Mini App.
 page answers "not found" to anybody else and while resellers are off.
 
 - **Dashboard:** wallet balance and credit, what is left under today's cap, sales this month and in total (paid at
-  wholesale, the retail value and the margin between them; confirmed orders only), sold services (still his, claimed,
+  wholesale, the retail value and the margin between them; confirmed orders only; refunds on their own line, taken
+  out of both what was paid and the retail value in the month they were made, so a fully refunded order adds no
+  margin), sold services (still his, claimed,
   expiring soon), open claim links and the latest orders. The wallet button opens the usual wallet screen.
 - **New service:** fixed and customizable plans (traffic / days inside the plan's range) at the wholesale price, quoted
   by the server. **Buy from wallet** first shows the price and the balance after for confirmation; nothing is paid
@@ -132,6 +134,6 @@ page answers "not found" to anybody else and while resellers are off.
 
 ## Upgrading
 
-Run the migrations (`Version20261027090000`: new tables and nullable columns only; `Version20261029090000`: `order.reseller_nonce`, a nullable column and a unique key per reseller; `Version20261030090000`: the `service_claim` and `service_ownership_event` tables). Nothing existing is changed. Roll back newest first, and only while no data of that migration exists (no claim link or ownership event for the third, no order carrying a confirmation nonce for the second, no reseller data for the first); otherwise `down()` refuses and changes nothing.
+Run the migrations (`Version20261027090000`: new tables and nullable columns only; `Version20261029090000`: `order.reseller_nonce`, a nullable column and a unique key per reseller; `Version20261030090000`: the `service_claim` and `service_ownership_event` tables; `Version20261031090000`: the `reseller_customer` and `reseller_customer_service` tables for the Mini App customer labels, removed together with their reseller or service). Nothing existing is changed. Roll back newest first, and only while no data of that migration exists (no customer label or label assignment for the fourth, no claim link or ownership event for the third, no order carrying a confirmation nonce for the second, no reseller data for the first); otherwise `down()` refuses and changes nothing.
 
 After deploying S2, `deploy.sh` installs the new `claims` timer; `bin/post-deploy-check.sh` checks it with the other jobs and runs `app:wallet:reconcile`, which now includes the claim checks.

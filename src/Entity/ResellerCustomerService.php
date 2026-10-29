@@ -8,7 +8,8 @@ use Doctrine\ORM\Mapping as ORM;
 
 /**
  * Which of a reseller's own customer labels a service he sold is assigned to: at most one label per service (unique
- * service_id). Removed with its label (ON DELETE CASCADE); never removes or changes the service. Written only through
+ * service_id). Removed with its label and with its service (ON DELETE CASCADE: a label never blocks deleting a service);
+ * never removes or changes the service. Written only through
  * ResellerCustomers (both sides checked to be his).
  */
 #[ORM\Entity]
@@ -26,7 +27,7 @@ class ResellerCustomerService
     private ResellerCustomer $customer;
 
     #[ORM\OneToOne]
-    #[ORM\JoinColumn(nullable: false, onDelete: 'RESTRICT')]
+    #[ORM\JoinColumn(nullable: false, onDelete: 'CASCADE')]
     private VpnService $service;
 
     #[ORM\Column]

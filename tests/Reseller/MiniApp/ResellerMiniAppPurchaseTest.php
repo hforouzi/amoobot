@@ -4,8 +4,11 @@ declare(strict_types=1);
 
 namespace App\Tests\Reseller\MiniApp;
 
+use App\Entity\Order;
 use App\Entity\Plan;
 use App\Entity\VpnService;
+use App\Reseller\Application\ResellerRefunds;
+use App\Security\AdminActor;
 use App\Shop\Application\SalesSettingsProvider;
 use App\Tests\Support\IntegrationTestCase;
 use App\Tests\Support\ResellerMiniAppFixtures;
@@ -60,6 +63,32 @@ final class ResellerMiniAppPurchaseTest extends IntegrationTestCase
         self::assertStringContainsString('data-order-id=', $html);
         self::assertStringContainsString('data-tile="mine"><b>1</b>', $html);
         self::assertStringNotContainsString((string) $this->othersService->getUsername(), $html, 'never another reseller\'s figures');
+    }
+
+    /**
+     * L4: refunds have their own line, and wholesale, retail value and margin are net of them: a full refund takes the
+     * whole sale out, a partial one the same share of its retail value.
+     */
+    public function testTheDashboardShowsRefundsAndFiguresNetOfThem(): void
+    {
+        $this->buy();
+        $orders = $this->em->getRepository(Order::class)->findBy(['reseller' => $this->reseller], ['id' => 'ASC']);
+        self::assertCount(2, $orders);
+        $refunds = self::getContainer()->get(ResellerRefunds::class);
+        foreach ([[$orders[0], self::WHOLESALE], [$orders[1], 30000]] as [$order, $amount]) {
+            $this->em->getConnection()->executeStatement("UPDATE vpn_service SET status = 'suspended' WHERE order_id = ?", [$order->getId()]);
+            $refunds->refund($order, $amount, 'customer left', AdminActor::environmentBotAdmin('990001'));
+        }
+
+        $html = $this->appGet('/app/view/reseller', $this->authenticate(self::CUSTOMER));
+
+        self::assertSame(200, $this->httpStatus(), $html);
+        // Paid 2 x 120,000 (retail 2 x 150,000); refunded 120,000 + 30,000 (retail share 150,000 + 37,500).
+        foreach (['total', 'month'] as $period) {
+            self::assertStringContainsString('data-sales="'.$period.'" data-wholesale="90000" data-retail="112500" data-margin="22500" data-refunds="150000"', $html);
+        }
+        self::assertStringContainsString('data-refunds-line', $html);
+        self::assertSame(['balances' => [], 'payments' => []], self::getContainer()->get(WalletReconciler::class)->report());
     }
 
     public function testBuyingAFixedPlanAsksForConfirmationThenPaysFromTheWallet(): void

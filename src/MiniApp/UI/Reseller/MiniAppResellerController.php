@@ -121,11 +121,14 @@ final class MiniAppResellerController extends AbstractController
     public function quote(Request $request, #[CurrentUser] MiniAppUser $user): JsonResponse
     {
         $locale = MiniAppLocale::fromRequest($request);
+        if (!$this->purchases->throttle($user)) {
+            return self::answer(['error' => 'rate_limited', 'message' => $this->purchases->refusalMessage('rate_limited', $locale)], Response::HTTP_TOO_MANY_REQUESTS);
+        }
         try {
             $body = ResellerInput::body($request);
             $quote = $this->purchases->quote($user, ResellerPurchases::KIND_NEW, ResellerInput::id($body, 'planId'), ResellerInput::optionalNumber($body, 'trafficGb'), ResellerInput::optionalNumber($body, 'durationDays'));
-        } catch (InvalidResellerInput) {
-            return self::answer(['error' => 'invalid_options', 'message' => $this->purchases->refusalMessage('invalid_options', $locale)], Response::HTTP_UNPROCESSABLE_ENTITY);
+        } catch (InvalidResellerInput $e) {
+            return $this->invalidInput($e, $locale);
         } catch (ResellerException $e) {
             return self::answer(['error' => $e->error, 'message' => $this->purchases->refusalMessage($e->error, $locale)], 'invalid_options' === $e->error ? Response::HTTP_UNPROCESSABLE_ENTITY : Response::HTTP_CONFLICT);
         }
@@ -146,12 +149,22 @@ final class MiniAppResellerController extends AbstractController
         try {
             $body = ResellerInput::body($request);
             [$planId, $trafficGb, $days] = [ResellerInput::id($body, 'planId'), ResellerInput::optionalNumber($body, 'trafficGb'), ResellerInput::optionalNumber($body, 'durationDays')];
-        } catch (InvalidResellerInput) {
-            return self::answer(['error' => 'invalid_options', 'message' => $this->purchases->refusalMessage('invalid_options', $locale)], Response::HTTP_UNPROCESSABLE_ENTITY);
+        } catch (InvalidResellerInput $e) {
+            return $this->invalidInput($e, $locale);
         }
         [$status, $answer] = $this->purchases->purchase($user, ResellerPurchases::KIND_NEW, $planId, $trafficGb, $days, $request->headers->get(CheckoutIdempotency::HEADER), $request->headers->get(AdminConfirmTokens::HEADER), $locale);
 
         return self::answer($answer, $status);
+    }
+
+    /** An unreadable body is 400 (ResellerInput::body), a value off its pattern 422. */
+    private function invalidInput(InvalidResellerInput $e, string $locale): JsonResponse
+    {
+        if (ResellerInput::BODY === $e->field) {
+            return self::answer(['error' => 'bad_request', 'message' => $this->purchases->refusalMessage('bad_request', $locale)], Response::HTTP_BAD_REQUEST);
+        }
+
+        return self::answer(['error' => 'invalid_options', 'message' => $this->purchases->refusalMessage('invalid_options', $locale)], Response::HTTP_UNPROCESSABLE_ENTITY);
     }
 
     /**

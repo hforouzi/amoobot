@@ -103,8 +103,13 @@ final class MiniAppResellerCustomerController extends AbstractController
             return $this->failure('rate_limited', Response::HTTP_TOO_MANY_REQUESTS, $locale);
         }
         try {
-            $answer = $this->idempotency->once($user->customer(), $request->headers->get(CheckoutIdempotency::HEADER), 'reseller_customer_create', function () use ($reseller, $request, $locale): array {
-                $customer = $this->customers->create($reseller, ResellerInput::body($request));
+            $body = ResellerInput::body($request);
+        } catch (InvalidResellerInput) {
+            return $this->failure('bad_request', Response::HTTP_BAD_REQUEST, $locale);
+        }
+        try {
+            $answer = $this->idempotency->once($user->customer(), $request->headers->get(CheckoutIdempotency::HEADER), 'reseller_customer_create', function () use ($reseller, $body, $locale): array {
+                $customer = $this->customers->create($reseller, $body);
 
                 return ['redirect' => $this->generateUrl('miniapp_reseller_customer', ['id' => $customer->getId()]), 'message' => $this->translator->trans('reseller.customer.saved', [], 'miniapp', $locale)];
             });
@@ -127,6 +132,8 @@ final class MiniAppResellerCustomerController extends AbstractController
         }
         try {
             $customer = $this->customers->update($reseller, $id, ResellerInput::body($request));
+        } catch (InvalidResellerInput) {
+            return $this->failure('bad_request', Response::HTTP_BAD_REQUEST, $locale);
         } catch (ResellerCustomerInvalid $e) {
             return $this->invalid($e, $locale);
         }
@@ -143,6 +150,9 @@ final class MiniAppResellerCustomerController extends AbstractController
     {
         $reseller = $this->access->require($user);
         $locale = MiniAppLocale::fromRequest($request);
+        if (!$this->limiter->create($user->telegramUserId())->consume()->isAccepted()) {
+            return $this->failure('rate_limited', Response::HTTP_TOO_MANY_REQUESTS, $locale);
+        }
         if (!$this->customers->delete($reseller, $id)) {
             return $this->failure('not_found', Response::HTTP_NOT_FOUND, $locale);
         }
@@ -164,6 +174,7 @@ final class MiniAppResellerCustomerController extends AbstractController
     {
         $key = match ($error) {
             'not_found' => 'reseller.error.not_found',
+            'bad_request' => 'reseller.error.bad_request',
             default => 'checkout.message.'.$error,
         };
         $text = $this->translator->trans($key, [], 'miniapp', $locale);

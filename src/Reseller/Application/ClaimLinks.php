@@ -105,6 +105,7 @@ class ClaimLinks
         }
 
         $resellerId = (int) $reseller->getId();
+        $resellerUserId = (int) $reseller->getUser()->getId();
         $link = $this->create($service, function (VpnService $locked, string $tokenHash) use ($resellerId): ServiceClaim {
             // Read again by id: after a retried attempt the entity manager may be a new one. Locked (shared) first, below.
             $reseller = $this->entityManager->find(Reseller::class, $resellerId) ?? throw new ClaimException(ClaimException::RESELLER_UNAVAILABLE);
@@ -116,9 +117,13 @@ class ClaimLinks
             }
 
             return (new ServiceClaim($locked, $reseller->getUser(), $tokenHash, $this->clock->now(), $this->expiresAt()))->byReseller($reseller);
-        }, $reseller->getUser()->getId(), null, function () use ($resellerId): void {
-            // The reseller row first, shared: a disable (reseller row, then his claim rows) either finished before and is
-            // seen here, or waits until this link is made and then revokes it. Order: reseller, claim rows, service.
+        }, $reseller->getUser()->getId(), null, function () use ($resellerId, $resellerUserId): void {
+            // His user row, then the reseller row, both shared (the reseller lock order, ResellerCheckout's class comment):
+            // a purchase of his (user row, then reseller row, exclusive) either finished before or waits for this link,
+            // and the link's own insert (from_user_id / reseller_id checks) needs nothing more. A disable (reseller row,
+            // then his claim rows) either finished before and is seen here, or waits until this link is made and then
+            // revokes it. Order: user, reseller, claim rows, service.
+            $this->entityManager->getConnection()->executeQuery('SELECT id FROM `user` WHERE id = ? LOCK IN SHARE MODE', [$resellerUserId]);
             $reseller = $this->entityManager->find(Reseller::class, $resellerId) ?? throw new ClaimException(ClaimException::RESELLER_UNAVAILABLE);
             $this->entityManager->refresh($reseller, LockMode::PESSIMISTIC_READ);
         });
