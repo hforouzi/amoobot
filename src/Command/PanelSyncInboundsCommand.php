@@ -119,7 +119,12 @@ final class PanelSyncInboundsCommand extends Command
                     }
                     // Modern 3x-ui: the panel's own links (Hosts applied); a failure keeps the stored ones.
                     if (null !== $this->panelLinkSnapshot->driverFor($service)) {
-                        $refresh = $this->panelLinkSnapshot->refresh($service, 'console_panel_sync_regenerate_configs');
+                        try {
+                            $refresh = $this->panelLinkSnapshot->refresh($service, 'console_panel_sync_regenerate_configs');
+                        } catch (\Throwable) {
+                            ++$totalFailed;
+                            continue;
+                        }
                         match (true) {
                             $refresh->succeeded() => ++$totalUpdated,
                             PanelLinkRefresh::NO_IDENTITY === $refresh->outcome => ++$totalSkipped,

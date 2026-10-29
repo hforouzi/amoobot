@@ -11,7 +11,8 @@ use App\Provisioning\Domain\VpnServiceStatus;
  * The console regeneration of one service's links (app:service:regenerate-config, app:inbound:regenerate-service-
  * configs), as a dry run ($apply=false: the panel is read, nothing is changed) or applied (the caller flushes):
  *
- * - modern 3x-ui: the panel's own links (PanelLinkSnapshot); a failure or an empty answer keeps the stored links;
+ * - modern 3x-ui: the panel's own links (PanelLinkSnapshot, which writes and commits them itself, under the row lock
+ *   and only if the credentials did not change meanwhile); a failure or an empty answer keeps the stored links;
  * - legacy 3x-ui: the legacy driver's refresh, unchanged (VpnServiceConfigRefreshService);
  * - other drivers: links built from the inbound (VpnAccessLinkGenerator), as before.
  */
@@ -34,11 +35,14 @@ final class ServiceLinkRegenerator
         if (null !== $this->panelLinkSnapshot->driverFor($service)) {
             $refresh = $this->panelLinkSnapshot->refresh($service, $source, $apply);
 
+            $changed = $refresh->changedMeanwhile;
+
             return match ($refresh->outcome) {
-                PanelLinkRefresh::UPDATED, PanelLinkRefresh::UNCHANGED => new ServiceLinkChange(PanelLinkRefresh::UPDATED === $refresh->outcome ? ServiceLinkChange::UPDATED : ServiceLinkChange::UNCHANGED, 'panel', $before, $refresh->after, $apply),
-                PanelLinkRefresh::KEPT_EMPTY_ANSWER, PanelLinkRefresh::EMPTY => new ServiceLinkChange(ServiceLinkChange::KEPT, 'panel', $before, $before, false, $refresh->error),
+                PanelLinkRefresh::UPDATED, PanelLinkRefresh::UNCHANGED => new ServiceLinkChange(PanelLinkRefresh::UPDATED === $refresh->outcome ? ServiceLinkChange::UPDATED : ServiceLinkChange::UNCHANGED, 'panel', $refresh->before, $refresh->after, $apply, null, $changed),
+                PanelLinkRefresh::KEPT_EMPTY_ANSWER, PanelLinkRefresh::EMPTY => new ServiceLinkChange(ServiceLinkChange::KEPT, 'panel', $refresh->before, $refresh->before, false, $refresh->error, $changed),
                 PanelLinkRefresh::NO_IDENTITY => new ServiceLinkChange(ServiceLinkChange::SKIPPED, 'panel', $before, $before, false, 'no client identity'),
-                default => new ServiceLinkChange(ServiceLinkChange::FAILED, 'panel', $before, $before, false, $refresh->error),
+                PanelLinkRefresh::CHANGED_MEANWHILE => new ServiceLinkChange(ServiceLinkChange::CHANGED, 'panel', $before, $before, false, $refresh->error, true),
+                default => new ServiceLinkChange(ServiceLinkChange::FAILED, 'panel', $refresh->before, $refresh->before, false, $refresh->error, $changed),
             };
         }
 

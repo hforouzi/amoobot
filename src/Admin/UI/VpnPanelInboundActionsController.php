@@ -148,9 +148,15 @@ final class VpnPanelInboundActionsController extends AbstractController
                 ++$skipped;
                 continue;
             }
-            // Modern 3x-ui: the panel's own links (Hosts applied); a failure keeps the stored ones.
+            // Modern 3x-ui: the panel's own links (Hosts applied), written per service under the row lock; a failure,
+            // or credentials a reset changed meanwhile, keep the stored ones.
             if (null !== $this->panelLinkSnapshot->driverFor($service)) {
-                $refresh = $this->panelLinkSnapshot->refresh($service, 'admin_inbound_regenerate_configs');
+                try {
+                    $refresh = $this->panelLinkSnapshot->refresh($service, 'admin_inbound_regenerate_configs');
+                } catch (\Throwable) {
+                    ++$failed;
+                    continue;
+                }
                 match (true) {
                     $refresh->succeeded() => ++$updated,
                     PanelLinkRefresh::NO_IDENTITY === $refresh->outcome => ++$skipped,
@@ -204,6 +210,7 @@ final class VpnPanelInboundActionsController extends AbstractController
                     ->setConfigText($finalConfigText)
                     ->setSubscriptionUrl($subscriptionUrl ?? $service->getSubscriptionUrl())
                     ->setLastAccessInfoSyncedAt(new \DateTimeImmutable());
+                $this->entityManager->flush();
 
                 ++$updated;
             } catch (\Throwable) {

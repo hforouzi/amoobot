@@ -33,9 +33,13 @@ trait LinkChangeOutput
             ServiceLinkChange::UNCHANGED => 'unchanged',
             ServiceLinkChange::KEPT => 'kept (panel gave no links)',
             ServiceLinkChange::SKIPPED => 'skip',
+            ServiceLinkChange::CHANGED => 'changed meanwhile, nothing written',
             default => 'FAILED, stored links kept',
         };
         $io->writeln(sprintf('  service #%d [%s] %s: %d -> %d links%s', $serviceId, $change->source, $verb, count($change->before), count($change->outcome === ServiceLinkChange::UPDATED || $change->outcome === ServiceLinkChange::UNCHANGED ? $change->after : $change->before), null !== $change->error ? ' ('.$change->error.')' : ''));
+        if ($change->changedMeanwhile && ServiceLinkChange::CHANGED !== $change->outcome) {
+            $io->writeln('      ! credentials changed meanwhile (a link reset?): the links read first were discarded and read again');
+        }
         if (ServiceLinkChange::UPDATED !== $change->outcome) {
             return;
         }

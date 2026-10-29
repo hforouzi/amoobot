@@ -11,7 +11,8 @@ use Doctrine\ORM\EntityManagerInterface;
  * "Regenerate config" of one service (PANELS_MANAGE), from the web panel and the Mini App, and after the owner's
  * "reset my links" (claim links):
  * - a modern 3x-ui service stores the panel's own links (PanelLinkSnapshot: clients/subLinks, Hosts applied), never
- *   links built from the inbound; a failed call or an empty answer keeps the stored links and reports FAILED;
+ *   links built from the inbound; a failed call or an empty answer keeps the stored links and reports FAILED, and so
+ *   do links read for credentials that a reset changed before they could be written;
  * - a legacy 3x-ui service re-reads its links from the panel (ServiceConfigDeliveryRefresher);
  * - any other service rebuilds them from its inbound (VpnAccessLinkGenerator, de-duplicated by
  *   FinalConfigLinkProvider) and stores links, text and subscription URL.
@@ -93,7 +94,7 @@ final class ServiceConfigRegenerator
 
             return new ServiceConfigRegeneration(ServiceConfigRegeneration::FAILED, $previous, (string) $refresh->error, $previous);
         }
-        $this->entityManager->flush();
+        // Written and committed by PanelLinkSnapshot (row locked, credentials re-checked): nothing to flush here.
 
         return new ServiceConfigRegeneration(ServiceConfigRegeneration::REFRESHED_FROM_PANEL, $refresh->snapshotCount(), null, $previous);
     }

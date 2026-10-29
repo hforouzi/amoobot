@@ -17,6 +17,8 @@ final readonly class ServiceLinkChange
     public const KEPT = 'kept';
     public const FAILED = 'failed';
     public const SKIPPED = 'skipped';
+    /** The credentials changed while the links were read (a link reset), twice: nothing was written. */
+    public const CHANGED = 'changed_meanwhile';
 
     /**
      * @param list<string> $before
@@ -29,6 +31,7 @@ final readonly class ServiceLinkChange
         public array $after,
         public bool $applied,
         public ?string $error = null,
+        public bool $changedMeanwhile = false,
     ) {
     }
 

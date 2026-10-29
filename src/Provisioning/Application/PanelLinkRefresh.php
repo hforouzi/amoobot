@@ -23,10 +23,13 @@ final readonly class PanelLinkRefresh
     public const FAILED = 'failed';
     /** The service has no client on the panel to ask about (no panel, or a remote id the driver cannot read). */
     public const NO_IDENTITY = 'no_identity';
+    /** The service's credentials changed between the panel read and the write, twice: nothing was written. */
+    public const CHANGED_MEANWHILE = 'changed_meanwhile';
 
     /**
      * @param list<string> $before
-     * @param list<string> $after  what the panel gives now (empty after a failure)
+     * @param list<string> $after            what the panel gives now (empty after a failure)
+     * @param bool         $changedMeanwhile the credentials changed after a first read: the links were read again
      */
     public function __construct(
         public string $outcome,
@@ -35,7 +38,13 @@ final readonly class PanelLinkRefresh
         public int $rejected = 0,
         public ?string $error = null,
         public bool $applied = false,
+        public bool $changedMeanwhile = false,
     ) {
+    }
+
+    public function withChangedMeanwhile(): self
+    {
+        return new self($this->outcome, $this->before, $this->after, $this->rejected, $this->error, $this->applied, true);
     }
 
     public function succeeded(): bool

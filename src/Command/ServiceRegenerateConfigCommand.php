@@ -93,7 +93,7 @@ final class ServiceRegenerateConfigCommand extends Command
         $change = $this->linkRegenerator->run($service, 'console_service_regenerate_config', $apply);
         $this->printChange($io, $serviceId, $change, $apply);
 
-        if (in_array($change->outcome, [ServiceLinkChange::FAILED, ServiceLinkChange::KEPT, ServiceLinkChange::SKIPPED], true)) {
+        if (in_array($change->outcome, [ServiceLinkChange::FAILED, ServiceLinkChange::KEPT, ServiceLinkChange::SKIPPED, ServiceLinkChange::CHANGED], true)) {
             $io->error(sprintf('Service #%d: links not changed (%s).', $serviceId, $change->error ?? $change->outcome));
 
             return Command::FAILURE;
