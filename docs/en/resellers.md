@@ -116,7 +116,9 @@ With resellers on, an active reseller gets a **Reseller** entry in the Mini App.
 page answers "not found" to anybody else and while resellers are off.
 
 - **Dashboard:** wallet balance and credit, what is left under today's cap, sales this month and in total (paid at
-  wholesale, the retail value and the margin between them; confirmed orders only), sold services (still his, claimed,
+  wholesale, the retail value and the margin between them; confirmed orders only; refunds on their own line, taken
+  out of both what was paid and the retail value in the month they were made, so a fully refunded order adds no
+  margin), sold services (still his, claimed,
   expiring soon), open claim links and the latest orders. The wallet button opens the usual wallet screen.
 - **New service:** fixed and customizable plans (traffic / days inside the plan's range) at the wholesale price, quoted
   by the server. **Buy from wallet** first shows the price and the balance after for confirmation; nothing is paid

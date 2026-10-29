@@ -535,7 +535,7 @@ Differences from the plan above, all decided while implementing it:
   (copy, share via `t.me/share`, QR) and is not replayed by an `Idempotency-Key` (the stored answer would keep the token
   in `checkout_request`); a second tap makes a new link that revokes the first, as in the bot.
 - Dashboard (`ResellerDashboard`): wallet, credit, today's cap, sales this month / all time (confirmed orders:
-  wholesale, retail value, margin = retail - wholesale), sold / still mine / claimed / expiring, open links, latest 5
+  wholesale, retail value, margin = retail - wholesale, all net of refunds, which have their own line), sold / still mine / claimed / expiring, open links, latest 5
   orders; a fixed number of queries.
 
 ## 8. Open questions (prioritized)

@@ -1,7 +1,7 @@
 {% extends 'miniapp/view/_base.html.twig' %}
 {% trans_default_domain 'miniapp' %}
 {# The reseller dashboard (MiniAppResellerController::dashboard): wallet, today's cap, sales at wholesale against the
-   shop's retail value, his sold services, then the reseller screens and his latest orders. #}
+   shop's retail value (net of refunds, which have their own line), his sold services, then the reseller screens and his latest orders. #}
 {% block section %}reseller{% endblock %}
 {% block title %}{{ 'nav.reseller'|trans }}{% endblock %}
 {% block content %}
@@ -36,11 +36,12 @@
         {% for period in ['month', 'total'] %}
             {% set s = sales[period] %}
             <h3 class="muted">{{ ('reseller.sales_' ~ period)|trans }}</h3>
-            <div class="stats" data-sales="{{ period }}" data-wholesale="{{ s.wholesale }}" data-retail="{{ s.retail }}" data-margin="{{ s.margin }}">
+            <div class="stats" data-sales="{{ period }}" data-wholesale="{{ s.wholesale }}" data-retail="{{ s.retail }}" data-margin="{{ s.margin }}" data-refunds="{{ s.refunds }}">
                 <div class="stat"><span class="muted">{{ 'reseller.orders'|trans }}</span><b>{{ s.orders|number_format }}</b></div>
                 <div class="stat"><span class="muted">{{ 'reseller.wholesale'|trans }}</span><b>{{ 'money.toman'|trans({'%amount%': s.wholesale|number_format}) }}</b></div>
                 <div class="stat"><span class="muted">{{ 'reseller.retail_value'|trans }}</span><b>{{ 'money.toman'|trans({'%amount%': s.retail|number_format}) }}</b></div>
                 <div class="stat"><span class="muted">{{ 'reseller.margin'|trans }}</span><b>{{ 'money.toman'|trans({'%amount%': s.margin|number_format}) }}</b></div>
+                <div class="stat" data-refunds-line><span class="muted">{{ 'reseller.refunds'|trans }}</span><b>{{ 'money.toman'|trans({'%amount%': s.refunds|number_format}) }}</b></div>
             </div>
         {% endfor %}
         <p class="muted small-print">{{ 'reseller.margin_hint'|trans }}</p>

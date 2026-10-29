@@ -10,6 +10,7 @@ use App\Payment\Domain\PaymentStatus;
 use App\Provisioning\Domain\VpnServiceStatus;
 use App\Reseller\Domain\ClaimStatus;
 use App\Shop\Domain\OrderStatus;
+use App\Wallet\Domain\WalletTransactionType;
 use Doctrine\ORM\EntityManagerInterface;
 use Psr\Clock\ClockInterface;
 
@@ -19,7 +20,9 @@ use Psr\Clock\ClockInterface;
  *
  * Sales are his reseller orders whose wallet payment is confirmed (as in ResellerReport), by the time they were paid:
  * wholesale = what he paid (order.amount), retail value = what a retail customer would have paid then
- * (order.retail_amount), margin = retail value - wholesale. His real resale price is unknown to the shop, so the margin
+ * (order.retail_amount), margin = retail value - wholesale. Refunds of his orders are shown on their own line, by the
+ * time they were made, and taken out of both: the wholesale given back, and the same share of the order's retail
+ * value (so a fully refunded order adds nothing to the margin). His real resale price is unknown to the shop, so the margin
  * is measured against the shop's retail price, not his profit. "This month" starts on the 1st, 00:00 in the application
  * timezone (Kernel::TIMEZONE), like the daily cap.
  */
@@ -36,12 +39,14 @@ class ResellerDashboard
     }
 
     /**
-     * @return array{month: array{orders: int, wholesale: int, retail: int, margin: int}, total: array{orders: int, wholesale: int, retail: int, margin: int}}
+     * @return array{month: array{orders: int, refunds: int, wholesale: int, retail: int, margin: int}, total: array{orders: int, refunds: int, wholesale: int, retail: int, margin: int}}
      */
     public function sales(Reseller $reseller): array
     {
         $monthStart = $this->clock->now()->setTimezone(new \DateTimeZone(Kernel::TIMEZONE))->modify('first day of this month')->setTime(0, 0);
-        $row = $this->entityManager->getConnection()->fetchAssociative(
+        $connection = $this->entityManager->getConnection();
+        $parameters = ['reseller' => $reseller->getId(), 'month' => $monthStart->format('Y-m-d H:i:s')];
+        $row = $connection->fetchAssociative(
             'SELECT COUNT(*) AS orders,
                     COALESCE(SUM(o.amount), 0) AS wholesale,
                     COALESCE(SUM(COALESCE(o.retail_amount, o.amount)), 0) AS retail,
@@ -51,13 +56,29 @@ class ResellerDashboard
              FROM `order` o
              WHERE o.reseller_id = :reseller AND o.paid_at IS NOT NULL
                AND EXISTS (SELECT 1 FROM payment p WHERE p.order_id = o.id AND p.status = :confirmed)',
-            ['reseller' => $reseller->getId(), 'month' => $monthStart->format('Y-m-d H:i:s'), 'confirmed' => PaymentStatus::CONFIRMED],
+            $parameters + ['confirmed' => PaymentStatus::CONFIRMED],
         ) ?: [];
-        $figures = static fn (int $orders, int $wholesale, int $retail): array => ['orders' => $orders, 'wholesale' => $wholesale, 'retail' => $retail, 'margin' => max(0, $retail - $wholesale)];
+        // Refunds of his orders (refund:order:N, as ResellerReport counts them), by the time they were made: the
+        // wholesale given back, and the same share of the order's retail value (a full refund takes the whole sale out).
+        $refunds = $connection->fetchAssociative(
+            "SELECT COALESCE(SUM(t.amount), 0) AS refunds,
+                    COALESCE(SUM(ROUND(t.amount * COALESCE(o.retail_amount, o.amount) / o.amount)), 0) AS retail,
+                    COALESCE(SUM(CASE WHEN t.created_at >= :month THEN t.amount ELSE 0 END), 0) AS month_refunds,
+                    COALESCE(SUM(CASE WHEN t.created_at >= :month THEN ROUND(t.amount * COALESCE(o.retail_amount, o.amount) / o.amount) ELSE 0 END), 0) AS month_retail
+             FROM wallet_transaction t JOIN `order` o ON t.idempotency_key = CONCAT('refund:order:', o.id)
+             WHERE t.type = :refund AND o.reseller_id = :reseller AND o.amount > 0",
+            $parameters + ['refund' => WalletTransactionType::REFUND],
+        ) ?: [];
+        $figures = static function (int $orders, int $wholesale, int $retail, int $refunds, int $refundedRetail): array {
+            $wholesale -= $refunds;
+            $retail -= $refundedRetail;
+
+            return ['orders' => $orders, 'refunds' => $refunds, 'wholesale' => $wholesale, 'retail' => $retail, 'margin' => max(0, $retail - $wholesale)];
+        };
 
         return [
-            'month' => $figures((int) ($row['month_orders'] ?? 0), (int) ($row['month_wholesale'] ?? 0), (int) ($row['month_retail'] ?? 0)),
-            'total' => $figures((int) ($row['orders'] ?? 0), (int) ($row['wholesale'] ?? 0), (int) ($row['retail'] ?? 0)),
+            'month' => $figures((int) ($row['month_orders'] ?? 0), (int) ($row['month_wholesale'] ?? 0), (int) ($row['month_retail'] ?? 0), (int) ($refunds['month_refunds'] ?? 0), (int) ($refunds['month_retail'] ?? 0)),
+            'total' => $figures((int) ($row['orders'] ?? 0), (int) ($row['wholesale'] ?? 0), (int) ($row['retail'] ?? 0), (int) ($refunds['refunds'] ?? 0), (int) ($refunds['retail'] ?? 0)),
         ];
     }
 
