@@ -1,0 +1,9 @@
+{# A wholesale price computed by the server (WholesaleQuote): what he pays, the retail value, the margin against it and
+   his balance after paying. Shown in the forms' price box; the confirm dialog repeats it from a fresh quote. #}
+{% trans_default_domain 'miniapp' %}
+<dl class="price-lines" data-wholesale="{{ quote.wholesaleAmount }}" data-retail="{{ quote.retailAmount }}">
+    <div><dt>{{ 'reseller.retail_value'|trans }}</dt><dd>{{ 'money.toman'|trans({'%amount%': quote.retailAmount|number_format}) }}</dd></div>
+    <div><dt>{{ 'reseller.margin'|trans }}</dt><dd>{{ 'money.toman'|trans({'%amount%': quote.discountGiven|number_format}) }}</dd></div>
+    <div class="total"><dt>{{ 'reseller.you_pay'|trans }}</dt><dd>{{ 'money.toman'|trans({'%amount%': quote.wholesaleAmount|number_format}) }}</dd></div>
+    <div><dt>{{ 'reseller.balance_after'|trans }}</dt><dd class="ltr-num">{{ 'money.toman'|trans({'%amount%': (balance - quote.wholesaleAmount)|number_format}) }}</dd></div>
+</dl>

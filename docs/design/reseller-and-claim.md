@@ -1,6 +1,6 @@
 # Resellers and service claim links — design
 
-Status: **S1 (reseller core) and S2 (claim links) implemented** (admin guide: [docs/en/resellers.md](../en/resellers.md)); S3 not yet. Persian summary: [docs/fa/design/reseller-and-claim.md](../fa/design/reseller-and-claim.md). D4 and D5 were confirmed as recommended. Where S2 differs from the text below, see "S2 as built" at the end of section 7.
+Status: **S1 (reseller core), S2 (claim links) and S3 (reseller Mini App) implemented** (admin guide: [docs/en/resellers.md](../en/resellers.md)); see "S3 as built" at the end of section 7. Persian summary: [docs/fa/design/reseller-and-claim.md](../fa/design/reseller-and-claim.md). D4 and D5 were confirmed as recommended. Where S2 differs from the text below, see "S2 as built" at the end of section 7.
 
 Items marked **DECISION NEEDED** are decisions this document takes, with a recommendation, that the owner should
 confirm or change before S1 starts. Everything else is decided.
@@ -504,6 +504,39 @@ Differences from the plan above, all decided while implementing it:
   dashboard; translations complete.
 - **Review checklist:** reuses `ResellerCheckout` and `ClaimLinks` (no logic in controllers); same responses as the
   bot for the same state; screenshots light/dark at 390 px.
+
+#### S3 as built
+
+- Gating: one bottom-navigation entry, `MiniAppAudience::RESELLER` (`MiniAppResellerAccess`: `reseller.enabled` on and
+  an active profile, `ResellerCheckout::resellerFor`, the bot's rule). Every reseller route answers **404** to anybody
+  else (`MiniAppSectionGuard` and each controller); the claim-link parts need `reseller.claims_enabled` too.
+- Purchases (`ResellerPurchases`, shared by the controllers and the parallel test helper): the Mini App's existing 428
+  confirm step carries `<amount>.<nonce>` from `ResellerConfirmations` (the bot's signed one-time confirmation); the
+  amount is only compared, never charged. `price_changed` / expired / altered confirmations answer 428 again with the
+  price now and a notice. Runs once per `Idempotency-Key` (`CheckoutIdempotency::claimOnce`), and the nonce on the
+  order makes a second delivery with another key `already_processed`. Rate limit `miniapp_reseller` (60 / 10 min).
+- Customizable plans: traffic / days inside the plan's range, read exactly (`^[1-9][0-9]{0,5}$` with `/D`, a JSON
+  integer or digits; nothing trimmed). Forms with `data-exact` are sent untrimmed by app.js; the server refuses stray
+  spaces instead of removing them.
+- Sold services: `SoldServices` (filters all / still mine / claimed / expiring / active / expired / suspended, search
+  by username, `#id` or the reseller's own label name; one query per page). While the service is still his he gets
+  the owner's own screens (subscription page in the app, send link / QR / configs to the chat, refresh), which check
+  ownership themselves (`CustomerServiceFinder`), and a claim link. Once someone else owns it: the summary view
+  (status, plan, expiry, traffic), "claimed on" and renew / add traffic at wholesale only (D5).
+- **Not built:** reseller suspend / resume / regenerate / reset of a service. The customer side has none of these today
+  (only the claimer's "reset my links", in the bot), so the reseller gets exactly the owner's actions; adding the
+  others changes panel behaviour and needs an owner decision.
+- Customer labels: `reseller_customer` (name 1..64, phone `+?` and 4..15 ASCII / Persian / Arabic digits, note 0..255
+  with line breaks) and `reseller_customer_service` (one label per service, removed with its label), migration
+  `Version20261031090000` (additive; `down()` refuses while either table has a row). Values are stored as typed or
+  refused (spaces at either end, control and bidi characters; the ZWNJ is allowed). Ownership is checked on every id
+  (another reseller's label or service is 404). No export was added, so no CSV.
+- Claim links: `ClaimLinks` as in S2 (checks, locks, `claim_create` limit). The new link is rendered once into the page
+  (copy, share via `t.me/share`, QR) and is not replayed by an `Idempotency-Key` (the stored answer would keep the token
+  in `checkout_request`); a second tap makes a new link that revokes the first, as in the bot.
+- Dashboard (`ResellerDashboard`): wallet, credit, today's cap, sales this month / all time (confirmed orders:
+  wholesale, retail value, margin = retail - wholesale), sold / still mine / claimed / expiring, open links, latest 5
+  orders; a fixed number of queries.
 
 ## 8. Open questions (prioritized)
 

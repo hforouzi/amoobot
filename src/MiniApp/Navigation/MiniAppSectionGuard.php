@@ -14,7 +14,8 @@ use Symfony\Component\HttpKernel\KernelEvents;
 
 /**
  * Server-side half of the role-aware navigation: a route with the default "_miniapp_section" runs only for a user
- * MiniAppSections::isAllowed() lets into that section (403 otherwise), whatever the menu showed.
+ * MiniAppSections::isAllowed() lets into that section (403 otherwise), whatever the menu showed. A reseller section
+ * answers 404 instead: to anybody who is not an active reseller (or while resellers are off) it does not exist.
  */
 #[AsEventListener(event: KernelEvents::CONTROLLER)]
 final class MiniAppSectionGuard
@@ -37,6 +38,11 @@ final class MiniAppSectionGuard
             return;
         }
 
+        if ($user instanceof MiniAppUser && MiniAppAudience::RESELLER === $this->sections->get((string) $section)?->audience) {
+            $event->setController(static fn (): Response => MiniAppAuthenticator::error('not_found', Response::HTTP_NOT_FOUND));
+
+            return;
+        }
         $status = $user instanceof MiniAppUser ? Response::HTTP_FORBIDDEN : Response::HTTP_UNAUTHORIZED;
         $event->setController(static fn (): Response => MiniAppAuthenticator::error(Response::HTTP_FORBIDDEN === $status ? 'forbidden' : 'unauthenticated', $status));
     }

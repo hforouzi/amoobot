@@ -33,6 +33,9 @@
  *   form[data-dirty-guard] once edited, Telegram's BackButton asks (that text) before leaving it unsaved
  *   button[data-fill-from] fetches {code} from that URL into the form's field [name=data-fill-target]
  *   button[data-copy]      copies its value
+ *   form[data-exact]       its fields are sent exactly as typed (not trimmed; the server refuses stray spaces)
+ *   button[data-action][data-into]  the answer's (server-rendered, escaped) html goes into that element
+ *   a[data-telegram-link]  a t.me link, opened inside Telegram (openTelegramLink)
  *   button[data-close-app] closes the Mini App (back to the chat)
  *
  * Deep links: opened with startapp=<payload>, the app signs in again (even with a stored session) and opens the section
@@ -185,6 +188,14 @@
                 resolve(window.confirm(message));
             }
         });
+    }
+
+    function openTelegramLink(href) {
+        if (supports('6.1') && /^https:\/\/t\.me\//.test(href)) {
+            tg.openTelegramLink(href);
+        } else {
+            openLink(href);
+        }
     }
 
     function openLink(href) {
@@ -495,6 +506,12 @@
                 if (data.message) {
                     toast(data.message);
                 }
+                var into = el.getAttribute('data-into') && view.querySelector(el.getAttribute('data-into'));
+                if (into && typeof data.html === 'string') {
+                    into.innerHTML = data.html;
+                    into.hidden = false;
+                    into.scrollIntoView({block: 'nearest'});
+                }
                 if (data.redirect) {
                     return navigate(data.redirect, true);
                 }
@@ -571,18 +588,20 @@
         errorBox.scrollIntoView({block: 'nearest'});
     }
 
-    /* A form's fields as an object (empty ones left out). */
+    /* A form's fields as an object (empty ones left out); trimmed, except in a form[data-exact]. */
     function fieldsOf(form) {
         var data = {};
+        var exact = form.hasAttribute('data-exact');
         new FormData(form).forEach(function (value, name) {
-            if (typeof value !== 'string' || value.trim() === '') {
+            if (typeof value !== 'string' || (exact ? value === '' : value.trim() === '')) {
                 return;
             }
+            value = exact ? value : value.trim();
             if (name.slice(-2) === '[]') {
                 name = name.slice(0, -2);
-                data[name] = (data[name] || []).concat([value.trim()]);
+                data[name] = (data[name] || []).concat([value]);
             } else {
-                data[name] = value.trim();
+                data[name] = value;
             }
         });
         return data;
@@ -792,6 +811,9 @@
                 stack = [];
             }
             navigate(target.getAttribute('href'), true);
+        } else if (target.matches('a[data-telegram-link]')) {
+            e.preventDefault();
+            openTelegramLink(target.getAttribute('href'));
         } else if (target.matches('a[data-open-link]')) {
             e.preventDefault();
             openLink(target.getAttribute('href'));

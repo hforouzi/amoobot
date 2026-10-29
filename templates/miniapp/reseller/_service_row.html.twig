@@ -1,0 +1,26 @@
+{# One sold service in a list: username, plan, status, expiry, traffic, "claimed" and his own label; never the owner. #}
+{% trans_default_domain 'miniapp' %}
+{% set limit = service.trafficLimitBytes %}
+{% set used = service.trafficUsedBytes ?? 0 %}
+{% set percent = limit and limit > 0 ? min(100, (used * 100 / limit)|round) : null %}
+{% set claimed = service.user.id != ownerId %}
+<a class="list-item admin-row" href="{{ path('miniapp_reseller_service', {id: service.id}) }}" data-nav data-service-id="{{ service.id }}" data-status="{{ service.status }}"{% if claimed %} data-claimed{% endif %}>
+    <span class="list-main">
+        <span class="head">
+            <strong class="ltr">{{ service.username ?: ('#' ~ service.id) }}</strong>
+            <span class="badge {{ service.status }}">{{ ('reseller.status.' ~ service.status)|trans }}</span>
+        </span>
+        <span class="muted">
+            {{ service.order.plan.title ?? '' }}
+            {% if service.expiresAt %} · {{ 'reseller.until'|trans({'%date%': service.expiresAt|sub_date(lang)}) }}{% endif %}
+            {% if limit %} · <span class="ltr">{{ used|sub_bytes }} / {{ limit|sub_bytes }}</span>{% endif %}
+        </span>
+        {% if claimed or label is defined and label %}
+            <span class="muted">
+                {% if claimed %}<span class="badge muted-badge" data-claimed-badge>{{ 'reseller.claimed'|trans }}</span>{% endif %}
+                {% if label is defined and label %}<span data-label>👤 {{ label.name }}</span>{% endif %}
+            </span>
+        {% endif %}
+        {% if percent is not null %}<span class="bar thin{{ percent >= 100 ? ' full' : (percent >= 90 ? ' high' : '') }}"><span style="width: {{ percent }}%"></span></span>{% endif %}
+    </span>
+</a>

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\MiniApp\Navigation;
 
+use App\MiniApp\Reseller\MiniAppResellerAccess;
 use App\MiniApp\Security\MiniAppUser;
 use App\Security\AdminAccessPolicy;
 use Symfony\Component\DependencyInjection\Attribute\AutowireIterator;
@@ -24,6 +25,8 @@ final class MiniAppSections
         #[AutowireIterator('app.miniapp_section_provider')]
         private readonly iterable $providers,
         private readonly AdminAccessPolicy $accessPolicy,
+        // Null (a test's own registry): nobody is a reseller.
+        private readonly ?MiniAppResellerAccess $resellers = null,
     ) {
     }
 
@@ -54,6 +57,7 @@ final class MiniAppSections
             MiniAppAudience::CUSTOMER => [] === $section->anyOf || $this->accessPolicy->canAny($user->admin, $section->anyOf),
             MiniAppAudience::ADMIN => [] !== $this->accessPolicy->permissions($user->admin)
                 && ([] === $section->anyOf || $this->accessPolicy->canAny($user->admin, $section->anyOf)),
+            MiniAppAudience::RESELLER => null !== $this->resellers?->resellerOf($user),
         };
     }
 

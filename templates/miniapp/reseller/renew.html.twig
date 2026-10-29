@@ -1,0 +1,17 @@
+{% extends 'miniapp/view/_base.html.twig' %}
+{% trans_default_domain 'miniapp' %}
+{# Renewing a service he sold at wholesale (the plan's current price for the service's traffic and period). The
+   purchase asks for confirmation of the price first and is paid from the wallet. #}
+{% block section %}reseller{% endblock %}
+{% block title %}{{ 'reseller.renew'|trans }}{% endblock %}
+{% block attributes %} data-back data-main-button-text="{{ 'reseller.buy'|trans }}" data-main-button-form="reseller-renew-form"{% endblock %}
+{% block content %}
+    {% if view %}{{ include('subscription/_status.html.twig', {view: view}) }}{% endif %}
+    <form class="card form" id="reseller-renew-form" data-exact data-submit="{{ path('miniapp_reseller_renew_buy', {id: service.id}) }}" data-quote-url="{{ path('miniapp_reseller_renew_quote', {id: service.id}) }}" novalidate>
+        <h2>{{ 'reseller.renew'|trans }} <span class="ltr">{{ service.username ?: ('#' ~ service.id) }}</span></h2>
+        <div data-quote>{{ include('miniapp/reseller/_price.html.twig', {quote: quote, balance: balance}) }}</div>
+        <p class="muted small-print">{{ 'reseller.buy_hint'|trans }}</p>
+        <p class="field-error" data-form-error hidden></p>
+        <button type="submit" class="btn" data-buy>{{ 'reseller.buy'|trans }}</button>
+    </form>
+{% endblock %}
