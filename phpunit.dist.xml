@@ -24,6 +24,8 @@
     <testsuites>
         <testsuite name="Project Test Suite">
             <directory>tests</directory>
+            <!-- First-party plugin sources keep their own unit tests (mocked HTTP, no database). -->
+            <directory>docs/plugins/winapay-gateway/tests</directory>
         </testsuite>
     </testsuites>
 
