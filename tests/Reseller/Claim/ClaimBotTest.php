@@ -331,30 +331,49 @@ final class ClaimBotTest extends IntegrationTestCase
         $this->pressButton(self::CLAIMER, 'cl_rst:'.$serviceId);
         self::assertTrue($this->sentTextContains($this->botText('claim.reset_warning', ['service' => ['id' => $serviceId]])));
         self::assertSame($before['client_uuid'], $this->row('vpn_service', $serviceId)['client_uuid'], 'the warning changes nothing');
+        $confirm = $this->callbackStartingWith('cl_rst_ok:');
+        self::assertMatchesRegularExpression('/^cl_rst_ok:'.$serviceId.':[0-9a-f]{12}$/D', $confirm);
 
-        $this->pressButton(self::CLAIMER, 'cl_rst_ok:'.$serviceId);
+        $this->resetHttp();
+        $this->pressButton(self::CLAIMER, $confirm);
         $after = $this->row('vpn_service', $serviceId);
         self::assertNotSame($before['client_uuid'], $after['client_uuid']);
         self::assertNotSame($before['sub_id'], $after['sub_id']);
         self::assertNotSame($before['remote_id'], $after['remote_id']);
         self::assertNotSame($before['config_links'], $after['config_links']);
         self::assertSame(1, $this->driver()->rotations);
+        self::assertTrue($this->sentTextContains($this->botText('claim.reset_done', ['service' => ['id' => $serviceId]])));
+
+        // The same button again (a double tap, Telegram's redelivery): "already done", nothing rotated.
+        $this->resetHttp();
+        $this->pressButton(self::CLAIMER, $confirm);
+        self::assertSame(1, $this->driver()->rotations);
+        self::assertSame($after['client_uuid'], $this->row('vpn_service', $serviceId)['client_uuid']);
+        self::assertTrue($this->sentTextContains($this->botText('claim.reset_already_done', ['service' => ['id' => $serviceId]])));
+
+        // A button from before the nonce existed only shows the warning again.
+        $this->resetHttp();
+        $this->pressButton(self::CLAIMER, 'cl_rst_ok:'.$serviceId);
+        self::assertSame(1, $this->driver()->rotations);
+        self::assertTrue($this->sentTextContains($this->botText('claim.reset_warning', ['service' => ['id' => $serviceId]])));
 
         // Not for the reseller (not the owner), nor for an owner who did not get it by a link.
-        $this->pressButton(self::CUSTOMER, 'cl_rst_ok:'.$serviceId);
+        $this->pressButton(self::CUSTOMER, $confirm);
         self::assertSame(1, $this->driver()->rotations);
         $this->buy();
         $own = (int) $this->em->getConnection()->fetchOne('SELECT MAX(id) FROM vpn_service');
         $this->resetHttp();
         $this->pressButton(self::CUSTOMER, 'service_view:'.$own);
         self::assertNotContains('cl_rst:'.$own, $this->callbacks());
-        $this->pressButton(self::CUSTOMER, 'cl_rst_ok:'.$own);
+        $this->pressButton(self::CUSTOMER, 'cl_rst_ok:'.$own.':0123456789ab');
         self::assertSame(1, $this->driver()->rotations);
 
-        // A panel failure changes nothing.
+        // A panel failure before anything changed: nothing changed, and the customer is told so.
         $this->driver()->rotationFails = true;
         $uuid = $this->row('vpn_service', $serviceId)['client_uuid'];
-        $this->pressButton(self::CLAIMER, 'cl_rst_ok:'.$serviceId);
+        $this->resetHttp();
+        $this->pressButton(self::CLAIMER, 'cl_rst:'.$serviceId);
+        $this->pressButton(self::CLAIMER, $this->callbackStartingWith('cl_rst_ok:'));
         self::assertSame($uuid, $this->row('vpn_service', $serviceId)['client_uuid']);
         self::assertTrue($this->sentTextContains($this->botText('claim.reset_failed')));
     }

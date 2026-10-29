@@ -28,7 +28,9 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
  * status) and, per service, its links and ownership history. The writes need SERVICES_MANAGE (AdminCrudPermissions::
  * ROUTES), are POST only with a CSRF token and audited: make a link for a service (support case; its token is shown on
  * the answer page once and never again), revoke an open link, and "Return to reseller" (with a reason) when the wrong
- * person claimed a service. Tokens are never stored, so no page can show one later.
+ * person claimed a service. Tokens are never stored, so no page can show one later. A write that meets a concurrent
+ * one (a claim, a reset, a settlement of the service) is retried a few times and otherwise answered with a "busy, try
+ * again" message, never a database error page (ClaimTransactions).
  */
 final class ClaimAdminController extends AbstractController
 {
@@ -96,7 +98,11 @@ final class ClaimAdminController extends AbstractController
         try {
             $link = $this->claimLinks->createForAdmin($service, $this->admin());
         } catch (ClaimException $e) {
-            return $this->back($service, ClaimException::FEATURE_OFF === $e->error ? 'claim_admin.error.feature_off' : 'claim_admin.error.not_claimable', 'danger');
+            return $this->back($service, match ($e->error) {
+                ClaimException::FEATURE_OFF => 'claim_admin.error.feature_off',
+                ClaimException::BUSY => 'claim_admin.error.busy',
+                default => 'claim_admin.error.not_claimable',
+            }, 'danger');
         }
         $response = $this->servicePage($service, $link);
         // The token is on this page only: never cached, never stored.
@@ -112,7 +118,12 @@ final class ClaimAdminController extends AbstractController
         if (!$this->validToken($request)) {
             return $this->back($claim->getService(), 'flash.csrf_expired', 'danger');
         }
-        $revoked = $this->claimLinks->revokeByAdmin($id, $this->admin());
+        try {
+            $revoked = $this->claimLinks->revokeByAdmin($id, $this->admin());
+        } catch (ClaimException $e) {
+            // The link is being used right now (its row stayed locked): nothing changed.
+            return $this->back($claim->getService(), 'claim_admin.error.busy', 'danger');
+        }
 
         return $this->back($claim->getService(), $revoked ? 'claim_admin.flash.revoked' : 'claim_admin.flash.not_open', $revoked ? 'success' : 'warning');
     }

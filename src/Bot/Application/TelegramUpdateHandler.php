@@ -10,6 +10,7 @@ use App\Bot\Application\Admin\AdminBotHandler;
 use App\Bot\Application\DeepLink\StartPayload;
 use App\Bot\Application\DeepLink\StartPayloadRouter;
 use App\Reseller\UI\ClaimBotHandler;
+use App\Shop\Application\OrderServiceAccess;
 use App\Bot\Application\ServiceAction\ServiceActionContext;
 use App\Bot\Application\ServiceAction\ServiceActionResolver;
 use App\Bot\Infrastructure\TelegramApiClient;
@@ -116,6 +117,7 @@ class TelegramUpdateHandler
         private readonly ResellerCheckout $resellerCheckout,
         private readonly StartPayloadRouter $startPayloadRouter,
         private readonly ClaimBotHandler $claimBotHandler,
+        private readonly OrderServiceAccess $orderServices,
     ) {
     }
 
@@ -2483,6 +2485,9 @@ class TelegramUpdateHandler
         }
 
         $payment = $this->findLatestOrderPayment($order);
+        // The service only while it is still his (a renewal of a service he handed over with a claim link: no way in).
+        $target = $order->getTargetService();
+        $ownedTarget = null !== $target && $this->orderServices->ownedByOrderCustomer($order, $target) ? $target : null;
         $amount = $payment instanceof Payment && null !== $payment->getPayableAmount() ? $payment->getPayableAmount() : $order->getAmount();
         $message = sprintf(
             "پیگیری سفارش\n\nکد پیگیری: %s\nشماره سفارش: #%d\nنوع سفارش: %s\nوضعیت سفارش: %s\nمبلغ: %d تومان\nروش پرداخت: %s\nوضعیت پرداخت: %s\nایجاد: %s\nآخرین تغییر: %s\nشناسه سرویس: %s\n\n%s",
@@ -2496,7 +2501,7 @@ class TelegramUpdateHandler
             $order->getCreatedAt()->format('Y-m-d H:i'),
             $this->resolveOrderUpdatedAt($order, $payment)->format('Y-m-d H:i'),
             (string) ($order->getTargetService()?->getId() ?? '-'),
-            $this->resolveTrackOrderNextActionText($order, $payment)
+            $this->resolveTrackOrderNextActionText($order, $payment, null !== $target && null === $ownedTarget)
         );
 
         $this->acknowledgeCallback($callbackId);
@@ -2505,8 +2510,7 @@ class TelegramUpdateHandler
         $this->telegramApiClient->sendMessage(
             $chatId,
             $message,
-            // The service button only for its owner (a reseller's renewal of a service his customer claimed: no way in).
-            $this->keyboardFactory->trackOrderDetailMenu((int) ($order->getId() ?? 0), $order->getTargetService()?->getUser()->getId() === $account->getUser()->getId() ? $order->getTargetService()?->getId() : null, $canResume)
+            $this->keyboardFactory->trackOrderDetailMenu((int) ($order->getId() ?? 0), $ownedTarget?->getId(), $canResume)
         );
     }
 
@@ -2673,7 +2677,10 @@ class TelegramUpdateHandler
         return $order->getCreatedAt();
     }
 
-    private function resolveTrackOrderNextActionText(Order $order, ?Payment $payment): string
+    /**
+     * @param bool $serviceOwnedElsewhere the order's service belongs to someone else now (handed over after this order)
+     */
+    private function resolveTrackOrderNextActionText(Order $order, ?Payment $payment, bool $serviceOwnedElsewhere = false): string
     {
         if (in_array($order->getStatus(), [OrderStatus::WAITING_PAYMENT, OrderStatus::PAYMENT_PENDING], true)) {
             if ($payment instanceof Payment && PaymentStatus::SUBMITTED === $payment->getStatus()) {
@@ -2684,6 +2691,9 @@ class TelegramUpdateHandler
         }
         if (PaymentStatus::REJECTED === $payment?->getStatus() || OrderStatus::FAILED === $order->getStatus()) {
             return (string) ($payment?->getAdminNote() ?: 'پرداخت رد شده است. می‌توانید سفارش جدید ثبت کنید.');
+        }
+        if (in_array($order->getStatus(), [OrderStatus::COMPLETED, OrderStatus::PROVISIONED], true) && $serviceOwnedElsewhere) {
+            return 'پرداخت انجام شد و سفارش تکمیل شده است.';
         }
         if (in_array($order->getStatus(), [OrderStatus::COMPLETED, OrderStatus::PROVISIONED], true) && null !== $order->getTargetService()) {
             return 'برای مشاهده سرویس از دکمه «مشاهده سرویس» استفاده کنید.';

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Reseller\Application;
 
 use App\Shared\Infrastructure\SettingValueProvider;
+use Symfony\Contracts\Service\ResetInterface;
 
 /**
  * The reseller switches (Setting rows, edited on the web settings page, "resellers" tab, SETTINGS_MANAGE). Off by
@@ -13,8 +14,12 @@ use App\Shared\Infrastructure\SettingValueProvider;
  * Claim links (S2) have their own switch on top, reseller.claims_enabled, also off by default: claimsEnabled() is true
  * only with both on. With it off no link can be made or used, /start claim_... is a plain /start and nothing changes
  * for any customer.
+ *
+ * enabled() and claimsEnabled() are asked on hot paths (every service screen of the bot): the answers are remembered for the request
+ * and forgotten when a setting is saved through Doctrine (SettingChangeListener) and between requests / worker
+ * messages (ResetInterface, kernel.reset).
  */
-class ResellerSettings
+class ResellerSettings implements ResetInterface
 {
     public const ENABLED = 'reseller.enabled';
     /** The lowest wholesale price as a share of the base price, in basis points (5000 = 50 %). */
@@ -34,19 +39,28 @@ class ResellerSettings
     /** 30 days. */
     public const MAX_CLAIM_TTL_HOURS = 720;
 
+    private ?bool $enabled = null;
+    private ?bool $claimsEnabled = null;
+
     public function __construct(private readonly SettingValueProvider $settings)
     {
     }
 
+    public function reset(): void
+    {
+        $this->enabled = null;
+        $this->claimsEnabled = null;
+    }
+
     public function enabled(): bool
     {
-        return $this->settings->getBool(self::ENABLED, false);
+        return $this->enabled ??= $this->settings->getBool(self::ENABLED, false);
     }
 
     /** Claim links may be made and used: resellers on and claim links on. */
     public function claimsEnabled(): bool
     {
-        return $this->enabled() && $this->settings->getBool(self::CLAIMS_ENABLED, false);
+        return $this->claimsEnabled ??= $this->enabled() && $this->settings->getBool(self::CLAIMS_ENABLED, false);
     }
 
     /** The claim-links switch alone (the settings form shows it as saved, whatever reseller.enabled is). */

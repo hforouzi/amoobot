@@ -256,8 +256,14 @@ the specific reason in the server log and on the reseller's list.
 
 ### 3.4 What changes on claim (one transaction)
 
-Lock order: `service_claim` row (`SELECT … FOR UPDATE` by `token_hash`), then `vpn_service` row. No wallet, order or
-payment row is touched, so this cannot deadlock with settlement (order → payment → user → wallet).
+Lock order (every claim-link write; S2 review fixes): `service_claim` rows **by primary key** (found by a plain read,
+locked by id in ascending order, checked again; never through `open_service_id` / `service_id` / `status`, which takes
+the index entry before the row and deadlocks with a claim that takes the row before the index entry), then the
+service's `order` / `payment` rows under a **shared** lock (`LOCK IN SHARE MODE`: the in-flight check sees every
+settlement step committed before and keeps them from moving on until the change commits), then the `vpn_service` row.
+Settlement locks order → payment → user → wallet and writes the service row last, so there is no cycle. Run in READ
+COMMITTED with a bounded retry of deadlocks and lock wait timeouts, then "busy" (`ClaimTransactions`). No wallet row
+is touched or locked.
 
 Checks under the lock: claim `open`, `expires_at > now`, service still owned by the creator, service not deleted, no
 order of that service in settlement, claimer ≠ creator.

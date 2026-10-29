@@ -7,6 +7,7 @@ namespace App\Reseller\Application;
 use App\Entity\ServiceClaim;
 use App\Entity\VpnService;
 use App\Provisioning\Domain\ClientOwnerDriverInterface;
+use App\Provisioning\Domain\ClientOwnerNotApplicable;
 use App\Provisioning\Infrastructure\VpnPanelDriverRegistry;
 use Doctrine\ORM\EntityManagerInterface;
 use Psr\Clock\ClockInterface;
@@ -15,10 +16,13 @@ use Psr\Log\LoggerInterface;
 /**
  * Tells the panel who owns a client after its service changed owner (docs/design/reseller-and-claim.md, 3.4), best
  * effort and always after the ownership change was committed: on a modern 3x-ui panel tgId = the owner's Telegram id
- * and comment = "amoobot order #N, claimed" (or "amoobot order #N" when the reseller who sold it owns it again), through
- * ModernClientsApi::updateClient() (ClientOwnerDriverInterface). A panel whose driver cannot do it (legacy 3x-ui: no
- * tgId support) is skipped. The database stays the source of truth for ownership; this only keeps the panel's own
- * view in line.
+ * and the comment marker "amoobot order #N, claimed" (or "amoobot order #N" when the reseller who sold it owns it
+ * again), through ModernClientsApi::updateClient() (ClientOwnerDriverInterface). What an admin wrote in the panel's
+ * comment is kept: the marker goes after it ("admin note | amoobot order #N, claimed"; ClientOwnerComment). A panel
+ * whose driver cannot do it (legacy 3x-ui: no tgId support) is skipped. A client that cannot take an owner by a row
+ * update (password-based: Trojan / Shadowsocks; an id that is not a UUID - never sent back) is "not applicable" after
+ * the first attempt, never retried. The database stays the source of truth for ownership; this only keeps the panel's
+ * own view in line.
  *
  * It always writes the service's CURRENT owner, read now, so a retry after another change is still right. The state is
  * on the claim row (ServiceClaim::panelSync*): a failure is retried by app:claims:expire after a growing delay
@@ -59,7 +63,15 @@ class ClaimPanelSync
 
                 return ServiceClaim::SYNC_SKIPPED;
             }
-            $driver->updateClientOwner($remoteId, $this->ownerTelegramId($service), $this->comment($service), $panel);
+            try {
+                $driver->updateClientOwner($remoteId, $this->ownerTelegramId($service), $this->comment($service), $panel);
+            } catch (ClientOwnerNotApplicable $e) {
+                $claim->panelSyncNotApplicable($e->getMessage());
+                $this->entityManager->flush();
+                $this->logger->info('claim_panel_sync_not_applicable', ['claim_id' => $claim->getId(), 'service_id' => $service->getId()]);
+
+                return ServiceClaim::SYNC_NOT_APPLICABLE;
+            }
             $claim->panelSynced($now);
             $this->entityManager->flush();
             $this->logger->info('claim_panel_synced', ['claim_id' => $claim->getId(), 'service_id' => $service->getId()]);
@@ -69,8 +81,13 @@ class ClaimPanelSync
             $attempt = $claim->getPanelSyncAttempts() + 1;
             $nextAt = $attempt >= self::MAX_ATTEMPTS ? null : $now->modify(sprintf('+%d seconds', min(self::MAX_DELAY_SECONDS, self::FIRST_DELAY_SECONDS * (2 ** ($attempt - 1)))));
             $claim->panelSyncFailed($e->getMessage(), $nextAt);
-            if ($this->entityManager->isOpen()) {
-                $this->entityManager->flush();
+            try {
+                if ($this->entityManager->isOpen()) {
+                    $this->entityManager->flush();
+                }
+            } catch (\Throwable $saveError) {
+                // Even the bookkeeping failed: the row stays pending and is tried again; never an error for the caller.
+                $this->logger->error('claim_panel_sync_state_not_saved', ['claim_id' => $claim->getId(), 'error' => $saveError->getMessage()]);
             }
             $this->logger->warning('claim_panel_sync_failed', ['claim_id' => $claim->getId(), 'service_id' => $service->getId(), 'attempt' => $attempt, 'gave_up' => null === $nextAt, 'error' => $e->getMessage()]);
 

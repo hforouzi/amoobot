@@ -47,7 +47,7 @@ final class ClaimsExpireCommand extends Command
         $sync = $this->maintenance->retryPanelSync($limit, $dryRun);
         $io->listing([
             sprintf('expired: %d', $expired),
-            sprintf('panel updates tried: %d (synced %d, skipped %d, failed %d)', $sync['tried'], $sync['synced'], $sync['skipped'], $sync['failed']),
+            sprintf('panel updates tried: %d (synced %d, skipped %d, not applicable %d, failed %d)', $sync['tried'], $sync['synced'], $sync['skipped'], $sync['not_applicable'], $sync['failed']),
         ]);
         if ($dryRun) {
             $io->note('Dry-run: nothing was changed.');

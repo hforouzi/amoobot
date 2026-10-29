@@ -599,6 +599,7 @@ final class ResellerBotHandler
         } catch (ClaimException $e) {
             $this->popup($chatId, $callbackId, $this->texts->message(match ($e->error) {
                 ClaimException::RATE_LIMITED => 'reseller.claim_error.rate_limited',
+                ClaimException::BUSY => 'reseller.claim_error.busy',
                 ClaimException::FEATURE_OFF, ClaimException::RESELLER_UNAVAILABLE => 'reseller.unavailable',
                 default => 'reseller.claim_error.not_claimable',
             }));
@@ -667,7 +668,14 @@ final class ResellerBotHandler
 
     private function revokeClaimLink(TelegramAccount $account, Reseller $reseller, string $chatId, string $callbackId, int $claimId): void
     {
-        $revoked = $this->claimLinks->revokeByReseller($account->getUser(), $claimId);
+        try {
+            $revoked = $this->claimLinks->revokeByReseller($account->getUser(), $claimId);
+        } catch (ClaimException) {
+            // Its row stayed locked (someone is using the link right now): nothing changed.
+            $this->popup($chatId, $callbackId, $this->texts->message('reseller.claim_error.busy'));
+
+            return;
+        }
         $this->telegram->answerCallbackQuery($callbackId, $this->texts->message($revoked ? 'reseller.claim_revoked' : 'reseller.claim_not_open'), true);
         $this->showClaimLinks($reseller, $chatId, '', 1);
     }

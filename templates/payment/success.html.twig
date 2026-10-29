@@ -73,6 +73,10 @@
             </dl>
         {% endif %}
 
+        {% if ownedElsewhere|default(false) %}
+            {# The service changed owner after this order (a transfer): the payment is done; nothing of the service is shown. #}
+            <p>پرداخت انجام شد و سفارش تکمیل شده است.</p>
+        {% else %}
         {% if accessWithheld|default(false) %}
             <p class="danger">لینک اشتراک این سرویس فعلاً قابل استفاده نیست. لطفاً با پشتیبانی تماس بگیرید.</p>
         {% endif %}
@@ -88,6 +92,7 @@
             <p class="muted">اطلاعات سرویس در تلگرام نیز ارسال می‌شود.</p>
         {% elseif not accessWithheld|default(false) %}
             <p>پرداخت تایید شد و سرویس در حال آماده‌سازی است. اطلاعات سرویس در تلگرام ارسال می‌شود.</p>
+        {% endif %}
         {% endif %}
     {% elseif state == 'pending' %}
         <h1 class="pending">در انتظار تایید پرداخت</h1>
