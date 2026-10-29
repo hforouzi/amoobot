@@ -140,6 +140,7 @@ class ResellerPurchases
             'discount_not_for_resellers', 'wallet_insufficient', 'wallet_frozen', 'reseller_unavailable' => 'reseller.error.'.$error,
             'wallet_disabled', 'wallet_payment_disabled' => 'reseller.error.wallet_disabled',
             'rate_limited', 'idempotency_conflict', 'idempotency_key_required' => 'checkout.message.'.$error,
+            'bad_request' => 'reseller.error.bad_request',
             'idempotency_in_progress' => 'reseller.error.in_progress',
             default => 'reseller.error.failed',
         };

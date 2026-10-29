@@ -183,16 +183,23 @@ final class MiniAppResellerServiceController extends AbstractController
         return $this->purchaseAnswer($request, $user, ResellerPurchases::KIND_TRAFFIC, $id, true);
     }
 
-    /** Assigns the service to one of his labels ({customerId}), or unassigns it ({customerId: ""}). */
+    /**
+     * Assigns the service to one of his labels ({customerId}), or unassigns it ({customerId: ""}, or {} as the form
+     * sends an empty choice). A body that is not a JSON object is 400 and changes nothing.
+     */
     #[Route('/app/api/reseller/services/{id}/customer', name: 'miniapp_reseller_service_customer', requirements: ['id' => '[1-9]\d{0,9}'], defaults: ['_miniapp_section' => 'reseller'], methods: ['POST'])]
     public function assign(Request $request, #[CurrentUser] MiniAppUser $user, int $id): JsonResponse
     {
         $reseller = $this->access->require($user);
         $locale = MiniAppLocale::fromRequest($request);
-        $body = ResellerInput::body($request);
         try {
+            $body = ResellerInput::body($request);
             $customerId = null === ($body['customerId'] ?? null) || '' === $body['customerId'] ? null : ResellerInput::id($body, 'customerId');
-        } catch (InvalidResellerInput) {
+        } catch (InvalidResellerInput $e) {
+            if (ResellerInput::BODY === $e->field) {
+                return $this->invalidInput($e, $locale);
+            }
+
             return self::answer(['error' => 'not_found', 'message' => $this->translator->trans('reseller.error.not_found', [], 'miniapp', $locale)], Response::HTTP_NOT_FOUND);
         }
         if (!$this->customers->assign($reseller, $id, $customerId)) {
@@ -208,8 +215,8 @@ final class MiniAppResellerServiceController extends AbstractController
         try {
             $trafficGb = $asksTraffic ? ResellerInput::optionalNumber(ResellerInput::body($request), 'trafficGb') : 0;
             $quote = $this->purchases->quote($user, $kind, $id, $trafficGb, 0);
-        } catch (InvalidResellerInput) {
-            return self::answer(['error' => 'invalid_options', 'message' => $this->purchases->refusalMessage('invalid_options', $locale)], Response::HTTP_UNPROCESSABLE_ENTITY);
+        } catch (InvalidResellerInput $e) {
+            return $this->invalidInput($e, $locale);
         } catch (ResellerException $e) {
             $status = match ($e->error) {
                 'service_not_sold_by_you' => Response::HTTP_NOT_FOUND,
@@ -229,8 +236,8 @@ final class MiniAppResellerServiceController extends AbstractController
         $locale = MiniAppLocale::fromRequest($request);
         try {
             $trafficGb = $asksTraffic ? ResellerInput::optionalNumber(ResellerInput::body($request), 'trafficGb') : 0;
-        } catch (InvalidResellerInput) {
-            return self::answer(['error' => 'invalid_options', 'message' => $this->purchases->refusalMessage('invalid_options', $locale)], Response::HTTP_UNPROCESSABLE_ENTITY);
+        } catch (InvalidResellerInput $e) {
+            return $this->invalidInput($e, $locale);
         }
         [$status, $answer] = $this->purchases->purchase($user, $kind, $id, $trafficGb, 0, $request->headers->get(CheckoutIdempotency::HEADER), $request->headers->get(AdminConfirmTokens::HEADER), $locale);
 
@@ -261,6 +268,16 @@ final class MiniAppResellerServiceController extends AbstractController
     private function balance(MiniAppUser $user): int
     {
         return $this->wallets->find($user->customer())?->getBalance() ?? 0;
+    }
+
+    /** An unreadable body is 400 (ResellerInput::body), a value off its pattern 422. */
+    private function invalidInput(InvalidResellerInput $e, string $locale): JsonResponse
+    {
+        if (ResellerInput::BODY === $e->field) {
+            return self::answer(['error' => 'bad_request', 'message' => $this->purchases->refusalMessage('bad_request', $locale)], Response::HTTP_BAD_REQUEST);
+        }
+
+        return self::answer(['error' => 'invalid_options', 'message' => $this->purchases->refusalMessage('invalid_options', $locale)], Response::HTTP_UNPROCESSABLE_ENTITY);
     }
 
     /**

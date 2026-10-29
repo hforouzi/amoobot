@@ -825,6 +825,7 @@ reseller.error.reseller_unavailable: "پنل نمایندگی برای حساب 
 reseller.error.in_progress: "این خرید در حال انجام است. لطفاً کمی صبر کنید."
 reseller.error.failed: "خرید انجام نشد. مبلغی از کیف پول شما کم نشد؛ لطفاً دوباره تلاش کنید."
 reseller.error.not_found: "پیدا نشد."
+reseller.error.bad_request: "این درخواست قابل خواندن نبود. لطفاً صفحه را دوباره باز کنید و دوباره تلاش کنید."
 reseller.status.active: "فعال"
 reseller.status.suspended: "معلق"
 reseller.status.expired: "منقضی"

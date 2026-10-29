@@ -825,6 +825,7 @@ reseller.error.reseller_unavailable: "The reseller panel is not active for your 
 reseller.error.in_progress: "This purchase is already being processed. Please wait a moment."
 reseller.error.failed: "The purchase did not go through. Nothing was taken from your wallet; please try again."
 reseller.error.not_found: "Not found."
+reseller.error.bad_request: "This request could not be read. Please reload the page and try again."
 reseller.status.active: "Active"
 reseller.status.suspended: "Suspended"
 reseller.status.expired: "Expired"
