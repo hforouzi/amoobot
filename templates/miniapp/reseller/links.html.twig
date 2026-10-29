@@ -1,0 +1,41 @@
+{% extends 'miniapp/view/_base.html.twig' %}
+{% import 'miniapp/admin/_macros.html.twig' as ui %}
+{% trans_default_domain 'miniapp' %}
+{# His claim links, open first (ClaimLinks::linksOf): service, status and its date; revoke an open one. Never the
+   token (shown once, when made) and never who claimed. #}
+{% block section %}reseller{% endblock %}
+{% block title %}{{ 'reseller.links'|trans }}{% endblock %}
+{% block attributes %} data-back{% endblock %}
+{% block content %}
+    <section class="card">
+        <h1>{{ 'reseller.links'|trans }}</h1>
+        <p class="muted">{{ 'reseller.links_intro'|trans }}</p>
+    </section>
+    {% if list.items is empty %}
+        {{ ui.empty('reseller.claim.empty') }}
+    {% else %}
+        <div class="list">
+            {% for claim in list.items %}
+                {% set date = claim.status == 'open' ? claim.expiresAt : (claim.status == 'claimed' ? claim.claimedAt : (claim.status == 'revoked' ? claim.revokedAt : (claim.expiredAt ?? claim.expiresAt))) %}
+                <div class="list-item" data-claim-id="{{ claim.id }}" data-claim-status="{{ claim.status }}">
+                    <span class="list-main">
+                        <span class="head">
+                            <a href="{{ path('miniapp_reseller_service', {id: claim.service.id}) }}" data-nav><strong class="ltr">{{ claim.service.username ?: ('#' ~ claim.service.id) }}</strong></a>
+                            <span class="badge{{ claim.status == 'open' ? ' active' : ' muted-badge' }}">{{ ('reseller.claim.status.' ~ claim.status)|trans }}</span>
+                        </span>
+                        <span class="muted">{{ ('reseller.claim.date.' ~ claim.status)|trans({'%date%': date ? date|date('Y-m-d H:i') : '-'}) }}</span>
+                        {% if claim.status == 'open' %}
+                            <button type="button" class="btn danger small fit" data-action="{{ path('miniapp_reseller_claim_revoke', {id: claim.id}) }}" data-confirm="{{ 'reseller.claim.revoke_confirm'|trans }}" data-reload data-revoke>{{ 'reseller.claim.revoke'|trans }}</button>
+                        {% endif %}
+                    </span>
+                </div>
+            {% endfor %}
+        </div>
+    {% endif %}
+    {% if list.page > 1 or list.hasNext %}
+        <nav class="row pager">
+            {% if list.page > 1 %}<a class="btn secondary small" href="{{ path('miniapp_reseller_links', {page: list.page - 1}) }}" data-nav data-replace data-previous-page>{{ 'orders.previous'|trans }}</a>{% else %}<span></span>{% endif %}
+            {% if list.hasNext %}<a class="btn secondary small" href="{{ path('miniapp_reseller_links', {page: list.page + 1}) }}" data-nav data-replace data-next-page>{{ 'orders.next'|trans }}</a>{% endif %}
+        </nav>
+    {% endif %}
+{% endblock %}

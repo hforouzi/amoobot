@@ -1,0 +1,31 @@
+{% extends 'miniapp/view/_base.html.twig' %}
+{% trans_default_domain 'miniapp' %}
+{# A new customer label, or one of his to edit. Sent exactly as typed (data-exact): the server refuses a space at
+   either end or invisible characters instead of changing what he wrote. #}
+{% block section %}reseller{% endblock %}
+{% block title %}{{ (customer ? 'reseller.customer.edit' : 'reseller.customer.new')|trans }}{% endblock %}
+{% block attributes %} data-back{% endblock %}
+{% block content %}
+    <form class="card form" data-exact data-submit="{{ customer ? path('miniapp_reseller_customer_update', {id: customer.id}) : path('miniapp_reseller_customer_create') }}" data-dirty-guard="{{ 'reseller.customer.leave_unsaved'|trans }}" data-customer-form novalidate>
+        <h1>{{ (customer ? 'reseller.customer.edit' : 'reseller.customer.new')|trans }}</h1>
+        <p class="muted">{{ 'reseller.customer.form_hint'|trans }}</p>
+        <label class="field">
+            <span>{{ 'reseller.customer.name'|trans }} <span class="req">*</span></span>
+            <input type="text" class="input" name="name" value="{{ customer.name ?? '' }}" maxlength="64" required autocomplete="off">
+            <small class="field-error" data-error-for="name" hidden></small>
+        </label>
+        <label class="field">
+            <span>{{ 'reseller.customer.phone'|trans }}</span>
+            <input type="tel" class="input ltr" name="phone" value="{{ customer.phone ?? '' }}" maxlength="20" inputmode="tel" autocomplete="off" dir="ltr">
+            <small class="muted">{{ 'reseller.customer.phone_hint'|trans }}</small>
+            <small class="field-error" data-error-for="phone" hidden></small>
+        </label>
+        <label class="field">
+            <span>{{ 'reseller.customer.note'|trans }}</span>
+            <textarea name="note" class="input" maxlength="255" rows="3">{{ customer.note ?? '' }}</textarea>
+            <small class="field-error" data-error-for="note" hidden></small>
+        </label>
+        <p class="field-error" data-form-error hidden></p>
+        <button type="submit" class="btn">{{ 'reseller.customer.save'|trans }}</button>
+    </form>
+{% endblock %}

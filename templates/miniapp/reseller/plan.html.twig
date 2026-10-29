@@ -1,0 +1,40 @@
+{% extends 'miniapp/view/_base.html.twig' %}
+{% trans_default_domain 'miniapp' %}
+{# A new service of one plan at wholesale: traffic / days within the plan's range when it lets the reseller choose,
+   the server's quote (/app/api/reseller/new/quote), then the purchase, which asks for confirmation of the price
+   first (428) and is paid from the wallet. The form sends ids and choices, never a price, exactly as typed. #}
+{% block section %}reseller{% endblock %}
+{% block title %}{{ plan.title }}{% endblock %}
+{% block attributes %} data-back data-main-button-text="{{ 'reseller.buy'|trans }}" data-main-button-form="reseller-buy-form"{% endblock %}
+{% block content %}
+    <section class="card">
+        <h1>{{ plan.title }}</h1>
+        {% if not choices.asksTraffic and not choices.asksDuration %}
+            <p class="muted">
+                {{ plan.trafficGb ? 'plan.traffic'|trans({'%gb%': plan.trafficGb}) : 'plan.traffic_unlimited'|trans }}
+                · {{ plan.durationDays ? 'plan.duration'|trans({'%days%': plan.durationDays}) : 'plan.duration_unlimited'|trans }}
+            </p>
+        {% endif %}
+    </section>
+    <form class="card form" id="reseller-buy-form" data-exact data-submit="{{ path('miniapp_reseller_buy') }}" data-quote-url="{{ path('miniapp_reseller_new_quote') }}" novalidate>
+        <input type="hidden" name="planId" value="{{ plan.id }}">
+        {% if choices.asksTraffic %}
+            <label class="field">
+                <span>{{ 'checkout.traffic'|trans({'%min%': choices.minTraffic, '%max%': choices.maxTraffic}) }}</span>
+                <input type="number" name="trafficGb" inputmode="numeric" min="{{ choices.minTraffic }}" max="{{ choices.maxTraffic }}" step="1" value="{{ choices.minTraffic }}" data-requote dir="ltr" required>
+                <small class="field-error" data-error-for="trafficGb" hidden></small>
+            </label>
+        {% endif %}
+        {% if choices.asksDuration %}
+            <label class="field">
+                <span>{{ 'checkout.duration'|trans({'%min%': choices.minDays, '%max%': choices.maxDays}) }}</span>
+                <input type="number" name="durationDays" inputmode="numeric" min="{{ choices.minDays }}" max="{{ choices.maxDays }}" step="1" value="{{ choices.minDays }}" data-requote dir="ltr" required>
+                <small class="field-error" data-error-for="durationDays" hidden></small>
+            </label>
+        {% endif %}
+        <div data-quote>{{ include('miniapp/reseller/_price.html.twig', {quote: quote, balance: balance}) }}</div>
+        <p class="muted small-print">{{ 'reseller.buy_hint'|trans }}</p>
+        <p class="field-error" data-form-error hidden></p>
+        <button type="submit" class="btn" data-buy>{{ 'reseller.buy'|trans }}</button>
+    </form>
+{% endblock %}

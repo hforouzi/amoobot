@@ -1,0 +1,10 @@
+{% extends 'miniapp/view/_base.html.twig' %}
+{% trans_default_domain 'miniapp' %}
+{# Why a reseller screen cannot be used now (sales closed, price unavailable, ...), worded as in the bot. #}
+{% block section %}reseller{% endblock %}
+{% block title %}{{ 'reseller.title'|trans }}{% endblock %}
+{% block attributes %} data-back{% endblock %}
+{% block content %}
+    <section class="card notice" data-refused><p class="pre-line">{{ message }}</p></section>
+    <a class="btn secondary small" href="{{ path('miniapp_reseller') }}" data-nav>{{ 'reseller.back'|trans }}</a>
+{% endblock %}

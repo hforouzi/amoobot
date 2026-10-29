@@ -1,0 +1,32 @@
+{% extends 'miniapp/view/_base.html.twig' %}
+{% trans_default_domain 'miniapp' %}
+{# The plans a reseller can buy now at wholesale (ResellerCheckout::newServiceOffers), retail for comparison; a
+   customizable plan shows its lowest choice as "from". When none, why (as in the bot). #}
+{% block section %}reseller{% endblock %}
+{% block title %}{{ 'reseller.new_service'|trans }}{% endblock %}
+{% block attributes %} data-back{% endblock %}
+{% block content %}
+    <section class="card">
+        <h1>{{ 'reseller.new_service'|trans }}</h1>
+        <p class="muted">{{ 'reseller.new_intro'|trans }}</p>
+    </section>
+    {% if reason %}
+        <section class="card notice" data-offers-empty="{{ reason }}"><p>{{ ('reseller.offers.' ~ reason)|trans }}</p></section>
+    {% else %}
+        <div class="list">
+            {% for offer in offers %}
+                <a class="list-item plan-card" href="{{ path('miniapp_reseller_plan', {id: offer.plan.id}) }}" data-nav data-plan-id="{{ offer.plan.id }}" data-wholesale="{{ offer.quote.wholesaleAmount }}">
+                    <span class="list-main">
+                        <span class="head">
+                            <strong>{{ offer.plan.title }}</strong>
+                            {% if offer.from %}<span class="badge muted-badge">{{ 'reseller.customizable'|trans }}</span>{% endif %}
+                        </span>
+                        <span class="price">{{ (offer.from ? 'reseller.price_from' : 'reseller.price')|trans({'%amount%': offer.quote.wholesaleAmount|number_format}) }}</span>
+                        <span class="muted">{{ 'reseller.retail_compare'|trans({'%amount%': offer.quote.retailAmount|number_format}) }}</span>
+                    </span>
+                    <span class="chevron" aria-hidden="true">›</span>
+                </a>
+            {% endfor %}
+        </div>
+    {% endif %}
+{% endblock %}

@@ -1,0 +1,96 @@
+{% extends 'miniapp/view/_base.html.twig' %}
+{% trans_default_domain 'miniapp' %}
+{# The reseller dashboard (MiniAppResellerController::dashboard): wallet, today's cap, sales at wholesale against the
+   shop's retail value, his sold services, then the reseller screens and his latest orders. #}
+{% block section %}reseller{% endblock %}
+{% block title %}{{ 'nav.reseller'|trans }}{% endblock %}
+{% block content %}
+    <section class="card wallet-summary" data-reseller-wallet>
+        <h1>{{ 'reseller.title'|trans }}</h1>
+        <div class="head">
+            <span class="muted">👛 {{ 'reseller.balance'|trans }}</span>
+            <b class="amount" data-balance="{{ wallet.balance ?? 0 }}">{{ 'money.toman'|trans({'%amount%': (wallet.balance ?? 0)|number_format}) }}</b>
+        </div>
+        {% if wallet and wallet.creditLimit > 0 %}
+            <p class="muted" data-credit>{{ 'reseller.credit'|trans({'%limit%': wallet.creditLimit|number_format, '%available%': wallet.available|number_format}) }}</p>
+        {% endif %}
+        {% if remainingToday is not null %}
+            <p class="muted" data-remaining-today="{{ remainingToday }}">{{ 'reseller.remaining_today'|trans({'%amount%': remainingToday|number_format}) }}</p>
+        {% endif %}
+        {% if wallet and wallet.frozen %}
+            <p class="notice-line bad" data-wallet-frozen>{{ 'reseller.error.wallet_frozen'|trans }}</p>
+        {% endif %}
+        {% if walletEnabled %}
+            <a class="btn secondary small" style="margin-top:10px" href="{{ path('miniapp_wallet') }}" data-nav data-wallet-link>👛 {{ 'reseller.wallet_link'|trans }}</a>
+        {% endif %}
+    </section>
+
+    <section class="card">
+        <div class="row">
+            <a class="btn" href="{{ path('miniapp_reseller_new') }}" data-nav data-new-service>➕ {{ 'reseller.new_service'|trans }}</a>
+        </div>
+    </section>
+
+    <section class="card" data-card="sales">
+        <h2>{{ 'reseller.sales'|trans }}</h2>
+        {% for period in ['month', 'total'] %}
+            {% set s = sales[period] %}
+            <h3 class="muted">{{ ('reseller.sales_' ~ period)|trans }}</h3>
+            <div class="stats" data-sales="{{ period }}" data-wholesale="{{ s.wholesale }}" data-retail="{{ s.retail }}" data-margin="{{ s.margin }}">
+                <div class="stat"><span class="muted">{{ 'reseller.orders'|trans }}</span><b>{{ s.orders|number_format }}</b></div>
+                <div class="stat"><span class="muted">{{ 'reseller.wholesale'|trans }}</span><b>{{ 'money.toman'|trans({'%amount%': s.wholesale|number_format}) }}</b></div>
+                <div class="stat"><span class="muted">{{ 'reseller.retail_value'|trans }}</span><b>{{ 'money.toman'|trans({'%amount%': s.retail|number_format}) }}</b></div>
+                <div class="stat"><span class="muted">{{ 'reseller.margin'|trans }}</span><b>{{ 'money.toman'|trans({'%amount%': s.margin|number_format}) }}</b></div>
+            </div>
+        {% endfor %}
+        <p class="muted small-print">{{ 'reseller.margin_hint'|trans }}</p>
+    </section>
+
+    <section class="card" data-card="services">
+        <h2>{{ 'reseller.services'|trans }}</h2>
+        <div class="tiles">
+            <a class="tile" href="{{ path('miniapp_reseller_services') }}" data-nav data-tile="all"><b>{{ counts.sold|number_format }}</b><span>{{ 'reseller.tab.all'|trans }}</span></a>
+            <a class="tile" href="{{ path('miniapp_reseller_services', {tab: 'mine'}) }}" data-nav data-tile="mine"><b>{{ counts.unclaimed|number_format }}</b><span>{{ 'reseller.tab.mine'|trans }}</span></a>
+            <a class="tile" href="{{ path('miniapp_reseller_services', {tab: 'claimed'}) }}" data-nav data-tile="claimed"><b>{{ counts.claimed|number_format }}</b><span>{{ 'reseller.tab.claimed'|trans }}</span></a>
+            <a class="tile{{ counts.expiring > 0 ? ' hot' : '' }}" href="{{ path('miniapp_reseller_services', {tab: 'expiring'}) }}" data-nav data-tile="expiring"><b>{{ counts.expiring|number_format }}</b><span>{{ 'reseller.tab.expiring'|trans }}</span></a>
+        </div>
+    </section>
+
+    <nav class="list" aria-label="{{ 'reseller.title'|trans }}">
+        <a class="list-item" href="{{ path('miniapp_reseller_services') }}" data-nav data-reseller-link="services">
+            <span class="list-icon" aria-hidden="true">📦</span><span class="list-main"><strong>{{ 'reseller.services'|trans }}</strong></span><span class="chevron" aria-hidden="true">›</span>
+        </a>
+        <a class="list-item" href="{{ path('miniapp_reseller_customers') }}" data-nav data-reseller-link="customers">
+            <span class="list-icon" aria-hidden="true">👥</span><span class="list-main"><span class="head"><strong>{{ 'reseller.customers'|trans }}</strong></span><span class="muted">{{ 'reseller.customers_count'|trans({'%count%': customerCount}) }}</span></span><span class="chevron" aria-hidden="true">›</span>
+        </a>
+        {% if claimsEnabled %}
+            <a class="list-item" href="{{ path('miniapp_reseller_links') }}" data-nav data-reseller-link="links">
+                <span class="list-icon" aria-hidden="true">🔗</span><span class="list-main"><span class="head"><strong>{{ 'reseller.links'|trans }}</strong></span><span class="muted" data-open-links="{{ openLinks }}">{{ 'reseller.links_open'|trans({'%count%': openLinks}) }}</span></span><span class="chevron" aria-hidden="true">›</span>
+            </a>
+        {% endif %}
+    </nav>
+
+    <section class="card" data-card="orders">
+        <h2>{{ 'reseller.recent_orders'|trans }}</h2>
+        {% if recentOrders is empty %}
+            <p class="muted" data-no-orders>{{ 'reseller.no_orders'|trans }}</p>
+        {% else %}
+            <div class="list compact">
+                {% for order in recentOrders %}
+                    <a class="list-item order-row" href="{{ path('miniapp_order', {id: order.id}) }}" data-nav data-order-id="{{ order.id }}">
+                        <span class="list-main">
+                            <span class="head">
+                                <strong>{{ ('reseller.order_type.' ~ order.type)|trans }}</strong>
+                                <span class="badge order-{{ order.status }}">{{ ('reseller.order_status.' ~ order.status)|trans }}</span>
+                            </span>
+                            <span class="muted">
+                                {{ 'money.toman'|trans({'%amount%': order.amount|number_format}) }}
+                                · <span class="ltr">{{ order.createdAt|date('Y-m-d H:i') }}</span>
+                            </span>
+                        </span>
+                    </a>
+                {% endfor %}
+            </div>
+        {% endif %}
+    </section>
+{% endblock %}

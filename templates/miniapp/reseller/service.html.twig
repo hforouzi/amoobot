@@ -1,0 +1,78 @@
+{% extends 'miniapp/view/_base.html.twig' %}
+{% trans_default_domain 'miniapp' %}
+{# One service he sold (MiniAppResellerServiceController::show). Status, plan, expiry and traffic (the summary view:
+   no link, no config), renew / add traffic at wholesale, his label. While it is still his own: what its owner gets (the
+   in-app subscription page, send to chat, refresh) and a claim link. Once claimed (D5): the date it was claimed only;
+   never its links, its page or anything about who owns it now. #}
+{% block section %}reseller{% endblock %}
+{% block title %}{{ service.username ?: ('#' ~ service.id) }}{% endblock %}
+{% block attributes %} data-back{% endblock %}
+{% block content %}
+    {% if view %}{{ include('subscription/_status.html.twig', {view: view}) }}{% endif %}
+    <section class="card" data-ownership="{{ claimed ? 'claimed' : 'mine' }}">
+        <p class="muted"><span class="ltr">{{ service.username ?: ('#' ~ service.id) }}</span> · #{{ service.id }}</p>
+        {% if claimed %}
+            <p data-claimed-note>{{ claimedAt ? 'reseller.claimed_on'|trans({'%date%': claimedAt|date('Y-m-d H:i')}) : 'reseller.claimed_by_customer'|trans }}</p>
+            <p class="muted small-print">{{ 'reseller.claimed_hint'|trans }}</p>
+        {% elseif openLink %}
+            <p data-open-link-note>{{ 'reseller.claim.open_until'|trans({'%date%': openLink.expiresAt|date('Y-m-d H:i')}) }}</p>
+        {% endif %}
+    </section>
+
+    {% if canRenew or canAddTraffic %}
+        <section class="card">
+            <h2>{{ 'reseller.buy_more'|trans }}</h2>
+            <div class="row">
+                {% if canRenew %}<a class="btn small" href="{{ path('miniapp_reseller_renew', {id: service.id}) }}" data-nav data-renew>🔄 {{ 'reseller.renew'|trans }}</a>{% endif %}
+                {% if canAddTraffic %}<a class="btn secondary small" href="{{ path('miniapp_reseller_add_traffic', {id: service.id}) }}" data-nav data-add-traffic>➕ {{ 'reseller.add_traffic'|trans }}</a>{% endif %}
+            </div>
+        </section>
+    {% endif %}
+
+    {% if not claimed %}
+        <section class="card" data-owner-tools>
+            <h2>{{ 'reseller.access'|trans }}</h2>
+            <p class="muted">{{ 'reseller.access_hint'|trans }}</p>
+            <a class="btn" href="{{ path('miniapp_subscription', {id: service.id}) }}" data-nav data-subscription-view>🔗 {{ 'service.view_subscription'|trans }}</a>
+            {% if pageUrl %}
+                <button type="button" class="btn secondary small" style="margin-top:10px" data-copy="{{ pageUrl }}">📋 {{ 'service.copy_page_link'|trans }}</button>
+            {% endif %}
+            {% if view and view.isUsable %}
+                <div class="row" style="margin-top:10px">
+                    <button type="button" class="btn secondary small" data-action="{{ path('miniapp_service_action', {id: service.id, action: 'send-link'}) }}">🔗 {{ 'service.send_link'|trans }}</button>
+                    <button type="button" class="btn secondary small" data-action="{{ path('miniapp_service_action', {id: service.id, action: 'send-qr'}) }}">🔳 {{ 'service.send_qr'|trans }}</button>
+                    <button type="button" class="btn secondary small" data-action="{{ path('miniapp_service_action', {id: service.id, action: 'resend-config'}) }}">📄 {{ 'service.resend_config'|trans }}</button>
+                </div>
+            {% endif %}
+            <button type="button" class="btn secondary small" style="margin-top:10px" data-action="{{ path('miniapp_service_action', {id: service.id, action: 'refresh'}) }}" data-reload>🔄 {{ 'service.refresh'|trans }}</button>
+        </section>
+        {% if canMakeLink %}
+            <section class="card" data-claim-tools>
+                <h2>{{ 'reseller.claim.title'|trans }}</h2>
+                <p class="muted">{{ 'reseller.claim.hint'|trans }}</p>
+                <button type="button" class="btn" data-action="{{ path('miniapp_reseller_claim_create', {id: service.id}) }}" data-into="#claim-link-result" data-make-link{% if openLink %} data-confirm="{{ 'reseller.claim.replace_confirm'|trans }}"{% endif %}>🎁 {{ (openLink ? 'reseller.claim.new' : 'reseller.claim.make')|trans }}</button>
+                <div id="claim-link-result" hidden></div>
+            </section>
+        {% endif %}
+    {% endif %}
+
+    <form class="card form" data-exact data-submit="{{ path('miniapp_reseller_service_customer', {id: service.id}) }}" data-reload data-assign-form novalidate>
+        <h2>{{ 'reseller.customer.label'|trans }}</h2>
+        {% if choices is empty %}
+            <p class="muted">{{ 'reseller.customer.none_yet'|trans }}</p>
+            <a class="btn secondary small" href="{{ path('miniapp_reseller_customer_new') }}" data-nav>➕ {{ 'reseller.customer.new'|trans }}</a>
+        {% else %}
+            <label class="field">
+                <span>{{ 'reseller.customer.assign'|trans }}</span>
+                <select name="customerId" class="input" data-customer-select>
+                    <option value="">{{ 'reseller.customer.unassigned_option'|trans }}</option>
+                    {% for choice in choices %}
+                        <option value="{{ choice.id }}"{% if label and label.id == choice.id %} selected{% endif %}>{{ choice.name }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <p class="field-error" data-form-error hidden></p>
+            <button type="submit" class="btn secondary small">{{ 'reseller.customer.save_assignment'|trans }}</button>
+        {% endif %}
+    </form>
+{% endblock %}

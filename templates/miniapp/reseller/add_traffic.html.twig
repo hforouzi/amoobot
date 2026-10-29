@@ -1,0 +1,21 @@
+{% extends 'miniapp/view/_base.html.twig' %}
+{% trans_default_domain 'miniapp' %}
+{# Extra traffic for a service he sold at wholesale: GB within the add-on range, the server's quote, then the purchase
+   (confirmation of the price first, paid from the wallet). #}
+{% block section %}reseller{% endblock %}
+{% block title %}{{ 'reseller.add_traffic'|trans }}{% endblock %}
+{% block attributes %} data-back data-main-button-text="{{ 'reseller.buy'|trans }}" data-main-button-form="reseller-traffic-form"{% endblock %}
+{% block content %}
+    {% if view %}{{ include('subscription/_status.html.twig', {view: view}) }}{% endif %}
+    <form class="card form" id="reseller-traffic-form" data-exact data-submit="{{ path('miniapp_reseller_add_traffic_buy', {id: service.id}) }}" data-quote-url="{{ path('miniapp_reseller_add_traffic_quote', {id: service.id}) }}" novalidate>
+        <h2>{{ 'reseller.add_traffic'|trans }} <span class="ltr">{{ service.username ?: ('#' ~ service.id) }}</span></h2>
+        <label class="field">
+            <span>{{ 'reseller.traffic_gb'|trans({'%min%': minGb, '%max%': maxGb}) }}</span>
+            <input type="number" name="trafficGb" inputmode="numeric" min="{{ minGb }}" max="{{ maxGb }}" step="1" value="{{ minGb }}" data-requote dir="ltr" required>
+        </label>
+        <div data-quote>{{ include('miniapp/reseller/_price.html.twig', {quote: quote, balance: balance}) }}</div>
+        <p class="muted small-print">{{ 'reseller.buy_hint'|trans }}</p>
+        <p class="field-error" data-form-error hidden></p>
+        <button type="submit" class="btn" data-buy>{{ 'reseller.buy'|trans }}</button>
+    </form>
+{% endblock %}

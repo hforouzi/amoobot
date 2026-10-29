@@ -1,0 +1,21 @@
+{# A claim link just made, shown once in the service screen (MiniAppResellerClaimController::create): the link (or the
+   /start text when the bot's username is unknown), copy and share buttons and a QR. Never stored or shown again. #}
+{% trans_default_domain 'miniapp' %}
+<div class="form-section" data-claim-link>
+    <p>{{ 'reseller.claim.shown_once'|trans({'%date%': link.claim.expiresAt|date('Y-m-d H:i')}) }}</p>
+    {% if link.replacedOpenLink %}<p class="muted" data-replaced>{{ 'reseller.claim.replaced'|trans }}</p>{% endif %}
+    {% if shareable %}
+        <p class="copy-line ltr" data-link><span style="min-width:0;overflow-wrap:anywhere">{{ shareable }}</span></p>
+        <div class="row">
+            <button type="button" class="btn small" data-copy="{{ shareable }}">📋 {{ 'reseller.claim.copy'|trans }}</button>
+            <a class="btn secondary small" href="{{ shareUrl }}" data-telegram-link data-share>📤 {{ 'reseller.claim.share'|trans }}</a>
+        </div>
+        {% if link.botLink and link.appLink %}
+            <p class="muted small-print">{{ 'reseller.claim.bot_link'|trans }} <span class="ltr" style="overflow-wrap:anywhere">{{ link.botLink }}</span></p>
+        {% endif %}
+        {% if qr %}<img class="qr" src="{{ qr }}" alt="{{ 'reseller.claim.qr_alt'|trans({'%id%': serviceId}) }}" width="220" height="220">{% endif %}
+    {% else %}
+        <p class="copy-line ltr" data-link><span style="min-width:0;overflow-wrap:anywhere">/start {{ link.payload }}</span></p>
+        <button type="button" class="btn small" data-copy="/start {{ link.payload }}">📋 {{ 'reseller.claim.copy'|trans }}</button>
+    {% endif %}
+</div>

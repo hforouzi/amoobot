@@ -1,0 +1,33 @@
+{% extends 'miniapp/view/_base.html.twig' %}
+{% trans_default_domain 'miniapp' %}
+{# One of his customer labels with its services (ResellerCustomers::servicesOf); edit or delete it. #}
+{% block section %}reseller{% endblock %}
+{% block title %}{{ customer.name }}{% endblock %}
+{% block attributes %} data-back{% endblock %}
+{% block content %}
+    <section class="card" data-customer="{{ customer.id }}">
+        <h1>👤 {{ customer.name }}</h1>
+        {% if customer.phone %}<p><span class="muted">{{ 'reseller.customer.phone'|trans }}:</span> <span class="ltr">{{ customer.phone }}</span></p>{% endif %}
+        {% if customer.note %}<p class="pre-line" data-note>{{ customer.note }}</p>{% endif %}
+        <div class="row" style="margin-top:10px">
+            <a class="btn secondary small" href="{{ path('miniapp_reseller_customer_edit', {id: customer.id}) }}" data-nav data-edit-customer>✏️ {{ 'reseller.customer.edit'|trans }}</a>
+            <a class="btn secondary small" href="{{ path('miniapp_reseller_services', {customer: customer.id}) }}" data-nav>🔎 {{ 'reseller.customer.filter_services'|trans }}</a>
+        </div>
+    </section>
+    <section class="card">
+        <h2>{{ 'reseller.services'|trans }}</h2>
+        {% if services is empty %}
+            <p class="muted" data-no-services>{{ 'reseller.customer.no_services'|trans }}</p>
+        {% endif %}
+    </section>
+    {% if services is not empty %}
+        <div class="list">
+            {% for service in services %}
+                {{ include('miniapp/reseller/_service_row.html.twig', {service: service, ownerId: ownerId}) }}
+            {% endfor %}
+        </div>
+    {% endif %}
+    <section class="card danger-zone">
+        <button type="button" class="btn danger small" data-action="{{ path('miniapp_reseller_customer_delete', {id: customer.id}) }}" data-confirm="{{ 'reseller.customer.delete_confirm'|trans }}" data-delete-customer>🗑 {{ 'reseller.customer.delete'|trans }}</button>
+    </section>
+{% endblock %}

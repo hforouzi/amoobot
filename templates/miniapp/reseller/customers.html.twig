@@ -1,0 +1,45 @@
+{% extends 'miniapp/view/_base.html.twig' %}
+{% import 'miniapp/admin/_macros.html.twig' as ui %}
+{% trans_default_domain 'miniapp' %}
+{# His own customer labels (ResellerCustomers::list): each with its services, how many are active and the soonest
+   expiry. Only what he typed; nothing of a Telegram account. #}
+{% block section %}reseller{% endblock %}
+{% block title %}{{ 'reseller.customers'|trans }}{% endblock %}
+{% block attributes %} data-back{% endblock %}
+{% block content %}
+    <section class="card">
+        <h1>{{ 'reseller.customers'|trans }}</h1>
+        <p class="muted">{{ 'reseller.customers_intro'|trans }}</p>
+        {{ ui.search('miniapp_reseller_customers', query, 'reseller.customer.search', {}) }}
+        <a class="btn small" style="margin-top:10px" href="{{ path('miniapp_reseller_customer_new') }}" data-nav data-new-customer>➕ {{ 'reseller.customer.new'|trans }}</a>
+    </section>
+    {% if list.items is empty %}
+        {{ ui.empty(query ? 'admin.no_results' : 'reseller.customer.empty') }}
+    {% else %}
+        <div class="list">
+            {% for c in list.items %}
+                <a class="list-item" href="{{ path('miniapp_reseller_customer', {id: c.id}) }}" data-nav data-customer-id="{{ c.id }}" data-services="{{ c.services }}">
+                    <span class="list-main">
+                        <span class="head">
+                            <strong>{{ c.name }}</strong>
+                            <span class="badge muted-badge">{{ 'reseller.customer.services_count'|trans({'%count%': c.services}) }}</span>
+                        </span>
+                        <span class="muted">
+                            {% if c.phone %}<span class="ltr">{{ c.phone }}</span> · {% endif %}
+                            {{ 'reseller.customer.active_count'|trans({'%count%': c.active}) }}
+                            {% if c.soonestExpiry %} · {{ 'reseller.customer.soonest'|trans({'%date%': c.soonestExpiry|sub_date(lang)}) }}{% endif %}
+                        </span>
+                    </span>
+                    <span class="chevron" aria-hidden="true">›</span>
+                </a>
+            {% endfor %}
+        </div>
+    {% endif %}
+    {% if list.page > 1 or list.hasNext %}
+        {% set params = query ? {q: query} : {} %}
+        <nav class="row pager">
+            {% if list.page > 1 %}<a class="btn secondary small" href="{{ path('miniapp_reseller_customers', params|merge({page: list.page - 1})) }}" data-nav data-replace data-previous-page>{{ 'orders.previous'|trans }}</a>{% else %}<span></span>{% endif %}
+            {% if list.hasNext %}<a class="btn secondary small" href="{{ path('miniapp_reseller_customers', params|merge({page: list.page + 1})) }}" data-nav data-replace data-next-page>{{ 'orders.next'|trans }}</a>{% endif %}
+        </nav>
+    {% endif %}
+{% endblock %}

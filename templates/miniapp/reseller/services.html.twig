@@ -1,0 +1,36 @@
+{% extends 'miniapp/view/_base.html.twig' %}
+{% import 'miniapp/admin/_macros.html.twig' as ui %}
+{% trans_default_domain 'miniapp' %}
+{# The services he sold (SoldServices::list): search (username, #id, his label's name), filter chips, one label's
+   services (?customer=), paged. #}
+{% block section %}reseller{% endblock %}
+{% block title %}{{ 'reseller.services'|trans }}{% endblock %}
+{% block attributes %} data-back{% endblock %}
+{% block content %}
+    <section class="card">
+        <h1>{{ 'reseller.services'|trans }}</h1>
+        {% if customer %}<p class="muted" data-filter-customer="{{ customer.id }}">👤 {{ customer.name }}</p>{% endif %}
+        {{ ui.search('miniapp_reseller_services', query, 'reseller.search', {tab: tab, customer: customer ? customer.id : null}) }}
+    </section>
+    <nav class="chips" aria-label="{{ 'admin.filter'|trans }}">
+        {% for key in tabs %}
+            <a class="chip{{ key == tab ? ' active' : '' }}" href="{{ path('miniapp_reseller_services', (customer ? {customer: customer.id} : {})|merge(key == 'all' ? {} : {tab: key})) }}" data-nav data-replace data-chip="{{ key }}"{% if key == tab %} aria-current="true"{% endif %}>{{ ('reseller.tab.' ~ key)|trans }}</a>
+        {% endfor %}
+    </nav>
+    {% if list.items is empty %}
+        {{ ui.empty(query ? 'admin.no_results' : 'reseller.no_services') }}
+    {% else %}
+        <div class="list">
+            {% for service in list.items %}
+                {{ include('miniapp/reseller/_service_row.html.twig', {service: service, ownerId: ownerId, label: labels[service.id] ?? null}) }}
+            {% endfor %}
+        </div>
+    {% endif %}
+    {% set params = {q: query}|merge(tab != 'all' ? {tab: tab} : {})|merge(customer ? {customer: customer.id} : {}) %}
+    {% if list.page > 1 or list.hasNext %}
+        <nav class="row pager">
+            {% if list.page > 1 %}<a class="btn secondary small" href="{{ path('miniapp_reseller_services', params|merge({page: list.page - 1})) }}" data-nav data-replace data-previous-page>{{ 'orders.previous'|trans }}</a>{% else %}<span></span>{% endif %}
+            {% if list.hasNext %}<a class="btn secondary small" href="{{ path('miniapp_reseller_services', params|merge({page: list.page + 1})) }}" data-nav data-replace data-next-page>{{ 'orders.next'|trans }}</a>{% endif %}
+        </nav>
+    {% endif %}
+{% endblock %}
