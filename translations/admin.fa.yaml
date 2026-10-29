@@ -967,7 +967,7 @@ flash:
   inbound.configs_updated: "کانفیگ %count% سرویس بروزرسانی شد."
   service.no_uuid: "سرویس uuid یا subId ندارد. بازسازی امکان‌پذیر نیست."
   service.regenerate_failed: "بازسازی کانفیگ ناموفق: %error%"
-  service.refreshed_from_panel: "کانفیگ سرویس #%id% از پنل بروزرسانی شد. %count% لینک."
+  service.refreshed_from_panel: "کانفیگ سرویس #%id% از پنل بروزرسانی شد. %count% لینک (قبلاً %previous%)."
   service.regenerated: "کانفیگ سرویس #%id% بازسازی شد. %count% لینک."
   payment.confirmed: "پرداخت تأیید شد. %detail%"
   payment.already_processed: "این پرداخت قبلاً پردازش شده است. %detail%"

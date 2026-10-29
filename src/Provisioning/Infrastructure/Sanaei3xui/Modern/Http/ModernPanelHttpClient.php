@@ -147,7 +147,10 @@ class ModernPanelHttpClient
                 throw new PanelApiException($failure, sprintf('%s %s: the panel certificate does not match the pinned public key (was the certificate replaced?).', $method, $path));
             }
 
-            throw new PanelApiException($failure, sprintf('%s %s: %s', $method, $path, SecretRedactor::redact($e->getMessage(), [$token], 300)));
+            // Transport messages may quote the request URL (base path, subscription id): only the label is shown.
+            $message = str_replace([$url, rawurldecode($url)], '<panel>/'.$path, $e->getMessage());
+
+            throw new PanelApiException($failure, sprintf('%s %s: %s', $method, $path, SecretRedactor::redact($message, [$token], 300)));
         }
 
         $latencyMs = self::elapsedMs($startedAt);

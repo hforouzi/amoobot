@@ -188,7 +188,7 @@ final class MiniAppAdminServiceController extends AbstractController
             $result = $this->regenerator->regenerate($service, 'miniapp_admin_regenerate_config');
             $this->audit($user, 'service.regenerate_config', $id, ['outcome' => $result->outcome, 'links' => $result->linkCount]);
 
-            return $this->answer($request, 'service.regenerate.'.$result->outcome, $result->succeeded() ? Response::HTTP_OK : (ServiceConfigRegeneration::NO_IDENTITY === $result->outcome ? Response::HTTP_CONFLICT : Response::HTTP_BAD_GATEWAY), ['%count%' => $result->linkCount])
+            return $this->answer($request, 'service.regenerate.'.$result->outcome, $result->succeeded() ? Response::HTTP_OK : (ServiceConfigRegeneration::NO_IDENTITY === $result->outcome ? Response::HTTP_CONFLICT : Response::HTTP_BAD_GATEWAY), ['%count%' => $result->linkCount, '%previous%' => $result->previousLinkCount ?? $result->linkCount])
                 + ['detail' => AdminText::safe($result->error)];
         });
     }

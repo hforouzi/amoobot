@@ -160,6 +160,7 @@ final class ModernPanelLinksTest extends TestCase
         yield '401' => [Fake3xuiPanel::envelope(false, null, 'unauthorized', 401), PanelFailure::AUTH_REJECTED];
         yield '404 page' => [new MockResponse('404 page not found', ['http_code' => 404, 'response_headers' => ['content-type' => 'text/plain']]), PanelFailure::WRONG_URL];
         yield 'timeout' => [Fake3xuiPanel::networkError('Operation timed out after 3001 milliseconds'), PanelFailure::NETWORK_TIMEOUT];
+        yield 'idle timeout quoting the URL' => [new MockResponse([new \Symfony\Component\HttpClient\Exception\TransportException('Idle timeout reached for "'.Fake3xuiPanel::ORIGIN.'/secret/panel/api/clients/subLinks/'.self::SUB_ID.'".')]), PanelFailure::NETWORK_TIMEOUT];
         yield 'refused' => [Fake3xuiPanel::envelope(false, null, 'sub not found'), PanelFailure::PANEL_REJECTED];
     }
 
@@ -177,6 +178,7 @@ final class ModernPanelLinksTest extends TestCase
             self::assertSame($failure, $e->failure);
             self::assertStringNotContainsString(self::SUB_ID, $e->getMessage());
             self::assertStringNotContainsString(Fake3xuiPanel::TOKEN, $e->getMessage());
+            self::assertStringNotContainsString('/secret/', $e->getMessage(), 'the web base path is not shown');
         }
         self::assertSame([], $this->driver->fetchLinks($this->panel, self::EMAIL, self::SUB_ID), 'creation keeps working without links');
         $log = $this->logger->all;

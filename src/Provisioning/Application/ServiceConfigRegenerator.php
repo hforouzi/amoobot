@@ -8,9 +8,13 @@ use App\Entity\VpnService;
 use Doctrine\ORM\EntityManagerInterface;
 
 /**
- * "Regenerate config" of one service (PANELS_MANAGE), from the web panel and the Mini App: a legacy 3x-ui service
- * re-reads its links from the panel (ServiceConfigDeliveryRefresher); any other service rebuilds them from its
- * inbound (VpnAccessLinkGenerator, de-duplicated by FinalConfigLinkProvider) and stores links, text and subscription URL.
+ * "Regenerate config" of one service (PANELS_MANAGE), from the web panel and the Mini App, and after the owner's
+ * "reset my links" (claim links):
+ * - a modern 3x-ui service stores the panel's own links (PanelLinkSnapshot: clients/subLinks, Hosts applied), never
+ *   links built from the inbound; a failed call or an empty answer keeps the stored links and reports FAILED;
+ * - a legacy 3x-ui service re-reads its links from the panel (ServiceConfigDeliveryRefresher);
+ * - any other service rebuilds them from its inbound (VpnAccessLinkGenerator, de-duplicated by
+ *   FinalConfigLinkProvider) and stores links, text and subscription URL.
  */
 final class ServiceConfigRegenerator
 {
@@ -20,11 +24,17 @@ final class ServiceConfigRegenerator
         private readonly FinalConfigLinkProvider $finalConfigLinkProvider,
         private readonly VpnServiceConfigRefreshService $configRefreshService,
         private readonly ServiceConfigDeliveryRefresher $deliveryRefresher,
+        private readonly PanelLinkSnapshot $panelLinkSnapshot,
     ) {
     }
 
     public function regenerate(VpnService $service, string $source): ServiceConfigRegeneration
     {
+        $previous = count(self::normalizedLinks($service->getConfigLinks() ?? []));
+        if (null !== $this->panelLinkSnapshot->driverFor($service)) {
+            return $this->fromPanelSnapshot($service, $source, $previous);
+        }
+
         $uuid = $service->getClientUuid();
         $subId = $service->getSubId();
         $isLegacySanaei = $this->configRefreshService->isSanaeiLegacyService($service);
@@ -46,7 +56,7 @@ final class ServiceConfigRegenerator
                 $this->entityManager->flush();
                 $this->log(sprintf('admin_regenerate_config_refresh_success service_id=%d', $service->getId() ?? 0));
 
-                return new ServiceConfigRegeneration(ServiceConfigRegeneration::REFRESHED_FROM_PANEL, $refresh->refreshedLinkCount);
+                return new ServiceConfigRegeneration(ServiceConfigRegeneration::REFRESHED_FROM_PANEL, $refresh->refreshedLinkCount, null, $previous);
             }
 
             $rawLinks = self::normalizedLinks($service->getConfigLinks() ?? []);
@@ -62,10 +72,30 @@ final class ServiceConfigRegenerator
                 ->setLastAccessInfoSyncedAt(new \DateTimeImmutable());
             $this->entityManager->flush();
 
-            return new ServiceConfigRegeneration(ServiceConfigRegeneration::REGENERATED, count($configLinks));
+            return new ServiceConfigRegeneration(ServiceConfigRegeneration::REGENERATED, count($configLinks), null, $previous);
         } catch (\Throwable $e) {
             return new ServiceConfigRegeneration(ServiceConfigRegeneration::FAILED, error: $e->getMessage());
         }
+    }
+
+    private function fromPanelSnapshot(VpnService $service, string $source, int $previous): ServiceConfigRegeneration
+    {
+        try {
+            $refresh = $this->panelLinkSnapshot->refresh($service, $source);
+        } catch (\Throwable $e) {
+            return new ServiceConfigRegeneration(ServiceConfigRegeneration::FAILED, $previous, $e->getMessage(), $previous);
+        }
+        if (PanelLinkRefresh::NO_IDENTITY === $refresh->outcome) {
+            return new ServiceConfigRegeneration(ServiceConfigRegeneration::NO_IDENTITY, $previous, null, $previous);
+        }
+        if (!$refresh->succeeded()) {
+            $this->log(sprintf('admin_regenerate_config_panel_links_kept service_id=%d outcome="%s"', $service->getId() ?? 0, $refresh->outcome));
+
+            return new ServiceConfigRegeneration(ServiceConfigRegeneration::FAILED, $previous, (string) $refresh->error, $previous);
+        }
+        $this->entityManager->flush();
+
+        return new ServiceConfigRegeneration(ServiceConfigRegeneration::REFRESHED_FROM_PANEL, $refresh->snapshotCount(), null, $previous);
     }
 
     /**

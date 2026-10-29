@@ -382,7 +382,7 @@ admin.service.invalid_days: "تعداد روز را بین ۱ تا %max% وار�
 admin.service.invalid_traffic: "حجم را بین ۱ تا %max% گیگ وارد کنید."
 admin.service.delete_name_mismatch: "نامی که نوشتید با نام سرویس یکی نیست."
 admin.service.regenerate.no_identity: "این سرویس شناسه کاربری برای ساخت کانفیگ ندارد."
-admin.service.regenerate.refreshed_from_panel: "کانفیگ دوباره از پنل خوانده شد (%count% لینک)."
+admin.service.regenerate.refreshed_from_panel: "کانفیگ دوباره از پنل خوانده شد (%count% لینک، قبلاً %previous%)."
 admin.service.regenerate.regenerated: "کانفیگ دوباره ساخته شد (%count% لینک)."
 admin.service.regenerate.failed: "ساخت دوباره کانفیگ ناموفق بود."
 admin.error.rate_limited: "تعداد کارها در زمان کوتاه زیاد است. یک دقیقه صبر کنید و دوباره تلاش کنید."

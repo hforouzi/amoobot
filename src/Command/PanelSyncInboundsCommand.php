@@ -7,6 +7,8 @@ namespace App\Command;
 use App\Entity\VpnInbound;
 use App\Entity\VpnPanel;
 use App\Entity\VpnService;
+use App\Provisioning\Application\PanelLinkRefresh;
+use App\Provisioning\Application\PanelLinkSnapshot;
 use App\Provisioning\Application\VpnAccessLinkGenerator;
 use App\Provisioning\Application\VpnInboundSyncService;
 use App\Provisioning\Application\VpnServiceConfigRefreshService;
@@ -30,6 +32,7 @@ final class PanelSyncInboundsCommand extends Command
         private readonly Sanaei3xuiApiClient $apiClient,
         private readonly VpnAccessLinkGenerator $vpnAccessLinkGenerator,
         private readonly VpnServiceConfigRefreshService $configRefreshService,
+        private readonly PanelLinkSnapshot $panelLinkSnapshot,
     ) {
         parent::__construct();
     }
@@ -112,6 +115,16 @@ final class PanelSyncInboundsCommand extends Command
                 foreach ($services as $service) {
                     if (VpnServiceStatus::DELETED === $service->getStatus()) {
                         ++$totalSkipped;
+                        continue;
+                    }
+                    // Modern 3x-ui: the panel's own links (Hosts applied); a failure keeps the stored ones.
+                    if (null !== $this->panelLinkSnapshot->driverFor($service)) {
+                        $refresh = $this->panelLinkSnapshot->refresh($service, 'console_panel_sync_regenerate_configs');
+                        match (true) {
+                            $refresh->succeeded() => ++$totalUpdated,
+                            PanelLinkRefresh::NO_IDENTITY === $refresh->outcome => ++$totalSkipped,
+                            default => ++$totalFailed,
+                        };
                         continue;
                     }
                     $isLegacySanaei = $this->configRefreshService->isSanaeiLegacyService($service);
