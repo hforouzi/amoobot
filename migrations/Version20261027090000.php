@@ -70,6 +70,9 @@ final class Version20261027090000 extends AbstractMigration
         // Claim links (S2) point at reseller: rolling this one back first would fail half-way on their foreign key.
         $claims = false !== $this->connection->fetchOne("SELECT 1 FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'service_claim'");
         $this->abortIf($claims, 'Roll back Version20261030090000 (claim links) first. Nothing was changed.');
+        // The reseller Mini App's customer labels (S3) point at reseller too.
+        $labels = false !== $this->connection->fetchOne("SELECT 1 FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'reseller_customer'");
+        $this->abortIf($labels, 'Roll back Version20261031090000 (reseller customer labels) first. Nothing was changed.');
 
         $this->addSql('ALTER TABLE `order` DROP FOREIGN KEY FK_F529939891E6A19D');
         $this->addSql('ALTER TABLE vpn_service DROP FOREIGN KEY FK_EF0F523425E4B3DC');
