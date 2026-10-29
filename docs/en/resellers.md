@@ -1,6 +1,6 @@
 # Resellers
 
-A reseller is a customer account that buys services at a **wholesale price from its own wallet** and hands them to its own customers. Phases S1 and S2 of [the design](../design/reseller-and-claim.md): reseller profiles, wholesale pricing, purchases from the wallet in the bot, the admin pages and the report (S1), and **claim links** that hand one service to the end customer's Telegram account (S2, [below](#claim-links)). The reseller Mini App comes later.
+A reseller is a customer account that buys services at a **wholesale price from its own wallet** and hands them to its own customers. Phases S1 and S2 of [the design](../design/reseller-and-claim.md): reseller profiles, wholesale pricing, purchases from the wallet in the bot, the admin pages and the report (S1), and **claim links** that hand one service to the end customer's Telegram account (S2, [below](#claim-links)). The reseller **Mini App** (S3) is [below](#mini-app).
 
 Resellers are **off by default**. While they are off nothing changes for anybody: no reseller menu, no wholesale purchase.
 
@@ -109,6 +109,26 @@ Customers → **Claim links** (SERVICES_VIEW): every link by status; a service's
 
 - `app:claims:expire` (scheduled as `app:automation:run --only=claims`, every 15 minutes, in the `lifecycle` lock group) marks links past their expiry as expired and retries pending panel updates. Safe to run by hand; `--dry-run` only counts.
 - `app:wallet:reconcile` also checks the claim invariants (no money involved, listed with the payments): `claim_open_owner_changed`, `claim_open_service_mismatch`, `claim_open_reseller_disabled`, `claim_without_ownership_event`, `claim_owner_mismatch`, `ownership_event_owner_mismatch`.
+
+## Mini App
+
+With resellers on, an active reseller gets a **Reseller** entry in the Mini App. Nobody else sees it; every reseller
+page answers "not found" to anybody else and while resellers are off.
+
+- **Dashboard:** wallet balance and credit, what is left under today's cap, sales this month and in total (paid at
+  wholesale, the retail value and the margin between them; confirmed orders only), sold services (still his, claimed,
+  expiring soon), open claim links and the latest orders. The wallet button opens the usual wallet screen.
+- **New service:** fixed and customizable plans (traffic / days inside the plan's range) at the wholesale price, quoted
+  by the server. **Buy from wallet** first shows the price and the balance after for confirmation; nothing is paid
+  before OK. A changed price asks again with the new price. A double tap is one purchase.
+- **Services sold:** search (username, `#id`, customer label), filters (still mine, claimed, expiring, status), renew /
+  add traffic at wholesale. While a service is still the reseller's own, its subscription page, the "send to chat"
+  actions and a claim link are there too; once a customer claimed it, only plan, status, expiry, traffic and the date
+  it was claimed are shown, never its links or who has it.
+- **My customers:** the reseller's own labels (name, optional phone and note) and which of the sold services each one
+  has. Only what was typed; nothing is linked to a Telegram account.
+- **Claim links** (with claim links on): the links with status and date, revoke an open one; a new link is shown once
+  with copy, share and a QR.
 
 ## Upgrading
 
