@@ -11,6 +11,7 @@ use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 use Symfony\Contracts\HttpClient\Exception\ExceptionInterface as HttpClientException;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
+use Symfony\Contracts\HttpClient\ResponseInterface;
 
 /**
  * Bearer-token calls to the 3x-ui REST API (paths relative to the panel's base URL, e.g. "panel/api/clients/list").
@@ -25,7 +26,9 @@ use Symfony\Contracts\HttpClient\HttpClientInterface;
  * - HTTPS certificates are verified; a self-signed panel is trusted only through its pinned public key;
  * - plain http:// only to loopback or private addresses (the bearer token would otherwise travel in clear text);
  * - the per-panel proxy setting (PANEL_PROXY_*) is honoured;
- * - a GET may cap the answer's size (maxBodyBytes: the transfer is aborted beyond it) and name itself with a label for
+ * - answers are requested uncompressed (Accept-Encoding: identity);
+ * - a GET may cap the answer's size (maxBodyBytes: counted on the decoded body as it arrives, the transfer is aborted
+ *   beyond it and not retried) and name itself with a label for
  *   logs and errors, so a path that carries a credential (a subscription id) is never written out.
  * Each finished call is recorded on the panel (consecutive failures -> degraded); the caller flushes.
  */
@@ -126,11 +129,9 @@ class ModernPanelHttpClient
         try {
             $response = $this->httpClient->request($method, $url, $options);
             $status = $response->getStatusCode();
+            // Headers first, without throwing: a 4xx/5xx is classified from its body below, not by the transport.
             $headers = $response->getHeaders(false);
-            $body = $response->getContent(false);
-            if (null !== $maxBodyBytes && strlen($body) > $maxBodyBytes) {
-                throw new AnswerTooLarge();
-            }
+            $body = null === $maxBodyBytes ? $response->getContent(false) : $this->cappedBody($response, $maxBodyBytes);
         } catch (AnswerTooLarge) {
             $this->logFailure($panel, $method, $path, PanelFailure::UNEXPECTED_RESPONSE, null, $startedAt);
 
@@ -164,6 +165,27 @@ class ModernPanelHttpClient
         $this->logger->debug('sanaei_modern_request', ['panel_id' => $panel->getId(), 'method' => $method, 'path' => $path, 'status' => $status, 'latency_ms' => $latencyMs]);
 
         return $result;
+    }
+
+    /**
+     * The body, read chunk by chunk and counted after decoding (a compressed answer is counted as it unpacks), so an
+     * answer beyond the cap is aborted without ever being held whole in memory.
+     *
+     * @throws AnswerTooLarge
+     */
+    private function cappedBody(ResponseInterface $response, int $maxBodyBytes): string
+    {
+        $body = '';
+        foreach ($this->httpClient->stream($response) as $chunk) {
+            $body .= $chunk->getContent();
+            if (strlen($body) > $maxBodyBytes) {
+                $response->cancel();
+
+                throw new AnswerTooLarge();
+            }
+        }
+
+        return $body;
     }
 
     /**
@@ -231,7 +253,8 @@ class ModernPanelHttpClient
         $options['timeout'] = self::CONNECT_TIMEOUT_S;
         $options['max_duration'] = self::MAX_DURATION_S;
         $options['max_redirects'] = 0;
-        $options['headers'] = ['Accept' => 'application/json', 'Authorization' => 'Bearer '.$token];
+        // identity: no compressed answer, so a size cap counts what is really received (a small gzip can unpack to GBs).
+        $options['headers'] = ['Accept' => 'application/json', 'Accept-Encoding' => 'identity', 'Authorization' => 'Bearer '.$token];
         if (null !== $json) {
             $options['json'] = $json;
         }
