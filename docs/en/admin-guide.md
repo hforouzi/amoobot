@@ -196,6 +196,32 @@ additional inbounds from every plan first) or while M2b's migration is applied (
 (`amoobot-job-attach-inbounds`) is installed by a **full** `deploy.sh` run, not `--app-only`; until then run the command
 by hand.
 
+## Branding (customer pages)
+
+`Settings -> Branding` (needs the *Manage settings* permission) sets what customers see on the payment result pages
+(`/payment/return/...` and the cancel page). Every change is in the audit log (`settings.update`, page `branding`).
+
+- **Brand name**: shown in the page header when there is no logo, and in the browser tab. At most 60 characters,
+  saved exactly as typed: no space at either end and no invisible or control characters (the Persian zero-width
+  non-joiner is fine). Leave it empty for none.
+- **Accent colour**: the top bar and the main button, as `#rrggbb`. Empty means the default green `#166534`. On a
+  light colour the button text turns dark so it stays readable.
+- **Logo**: PNG, JPEG or WebP (SVG is not accepted), at most 512 KB, 16 to 1024 pixels per side. A **square PNG of
+  about 256×256 with a transparent background** works best: it is shown 56 px high, on light and dark backgrounds.
+  The file is checked and saved again without its metadata (EXIF, comments). Choosing a new file replaces the old one
+  (the old file is deleted); **Remove logo** deletes it. A JPEG photo is saved as it is stored, without its rotation
+  flag, so export it upright.
+
+Nothing is required: without branding the pages have no header and use the default green. The logo is kept outside
+`public/` in `var/branding` (or `APP_BRANDING_DIR`) and served at `/brand/logo/...` with long caching; it is not in
+the database backup, so back that directory up with `var/downloads` or upload the logo again after a restore.
+
+The pages follow the phone's light or dark mode. Screenshots of every state (390 px and desktop, light and dark):
+[`docs/screenshots/branding/`](../screenshots/branding/), for example
+[paid](../screenshots/branding/paid-light.png), [pending](../screenshots/branding/pending-dark.png).
+
+The subscription page (`/s/...`) and the Mini App do not use the brand yet; they will adopt it later.
+
 ## Sales Controls
 
 Use `Settings -> Sales` to enable or disable new service sales, renewals, and extra traffic purchases independently. Closing sales does not block existing waiting-payment orders, service viewing, config delivery, or approval of already-submitted payments.
