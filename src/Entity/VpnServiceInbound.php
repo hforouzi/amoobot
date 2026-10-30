@@ -8,8 +8,8 @@ use Doctrine\ORM\Mapping as ORM;
 
 /**
  * An additional inbound a service's client should be attached to on the panel (docs/design/multi-inbound-plans.md 2.2),
- * with the state of that attachment. The primary stays vpn_service.inbound / remoteId. Phase M1 creates the table only:
- * nothing writes rows before provisioning supports several inbounds (M2).
+ * with the state of that attachment. The primary stays vpn_service.inbound / remoteId. Written by provisioning (one row
+ * per additional inbound, attached or failed), "Retry attach" (ServiceInboundAttacher) and a panel delete (detached).
  *
  * Removed with its service (ON DELETE CASCADE: it never blocks deleting a service or the user it goes with). The inbound
  * is RESTRICT: an inbound a service is attached to cannot be deleted.
@@ -108,5 +108,29 @@ class VpnServiceInbound
     public function getUpdatedAt(): \DateTimeImmutable
     {
         return $this->updatedAt;
+    }
+
+    /**
+     * One attach attempt: attached, or failed with a reason that is safe to show (ServiceErrorText). An attached row
+     * keeps its first attachedAt.
+     */
+    public function recordAttempt(bool $attached, ?string $error, \DateTimeImmutable $now): self
+    {
+        ++$this->attempts;
+        $this->status = $attached ? self::STATUS_ATTACHED : self::STATUS_FAILED;
+        $this->lastError = $attached || null === $error ? null : mb_substr($error, 0, 255);
+        $this->attachedAt = $attached ? ($this->attachedAt ?? $now) : $this->attachedAt;
+        $this->updatedAt = $now;
+
+        return $this;
+    }
+
+    /** The client was deleted on the panel (del/{email} removes it from every inbound). */
+    public function markDetached(\DateTimeImmutable $now): self
+    {
+        $this->status = self::STATUS_DETACHED;
+        $this->updatedAt = $now;
+
+        return $this;
     }
 }

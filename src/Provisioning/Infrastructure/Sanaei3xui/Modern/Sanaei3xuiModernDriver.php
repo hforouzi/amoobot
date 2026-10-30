@@ -10,6 +10,7 @@ use App\Provisioning\Domain\BatchUsageDriverInterface;
 use App\Provisioning\Domain\Dto\AdoptedVpnService;
 use App\Provisioning\Domain\Dto\CreatedVpnService;
 use App\Provisioning\Domain\Dto\CreateVpnServiceRequest;
+use App\Provisioning\Domain\Dto\InboundAttachment;
 use App\Provisioning\Domain\Dto\RenewVpnServiceRequest;
 use App\Provisioning\Domain\Dto\VpnUsage;
 use App\Provisioning\Domain\ClientOwnerComment;
@@ -20,6 +21,7 @@ use App\Provisioning\Domain\CredentialRotationDriverInterface;
 use App\Provisioning\Domain\Dto\PanelLinks;
 use App\Provisioning\Domain\Dto\RotatedCredentials;
 use App\Provisioning\Domain\ExistingClientAwareDriverInterface;
+use App\Provisioning\Domain\InboundAttachDriverInterface;
 use App\Provisioning\Domain\PanelLinkSourceDriverInterface;
 use App\Provisioning\Domain\ServiceActivationDriverInterface;
 use App\Provisioning\Domain\TrafficLimitDriverInterface;
@@ -43,8 +45,12 @@ use Symfony\Component\Uid\Uuid;
  * - Every write is verified with a follow-up GET; obj of a write answer is never trusted.
  * - create is idempotent: the UUID is sent explicitly (derived from the order), and after a failed or lost add the
  *   client is looked up and adopted when it carries that UUID.
+ * - A plan's additional inbounds (docs/design/multi-inbound-plans.md 3.2) go into the same add; the ones the client is
+ *   not on afterwards are attached (only the missing ids), and what is still missing then is reported per inbound, not
+ *   thrown: the primary alone makes a working service. Without additional inbounds the requests are exactly the
+ *   single-inbound ones.
  */
-final class Sanaei3xuiModernDriver implements VpnPanelDriverInterface, ExistingClientAwareDriverInterface, TrafficLimitDriverInterface, ServiceActivationDriverInterface, BatchUsageDriverInterface, ClientOwnerDriverInterface, CredentialRotationDriverInterface, PanelLinkSourceDriverInterface
+final class Sanaei3xuiModernDriver implements VpnPanelDriverInterface, ExistingClientAwareDriverInterface, TrafficLimitDriverInterface, ServiceActivationDriverInterface, BatchUsageDriverInterface, ClientOwnerDriverInterface, CredentialRotationDriverInterface, PanelLinkSourceDriverInterface, InboundAttachDriverInterface
 {
     public const BYTES_PER_GB = 1073741824;
     private const MS_PER_DAY = 86400000;
@@ -70,6 +76,7 @@ final class Sanaei3xuiModernDriver implements VpnPanelDriverInterface, ExistingC
     {
         $panel = $this->requirePanel($panel);
         [$inbound, $remoteInboundId] = $this->requireInbound($request, $panel);
+        $additional = $this->additionalInbounds($request->additionalInbounds, $panel, $remoteInboundId);
         $email = trim($request->username);
         if ('' === $email) {
             throw new \RuntimeException('Sanaei provisioning requires a client email/username.');
@@ -90,7 +97,7 @@ final class Sanaei3xuiModernDriver implements VpnPanelDriverInterface, ExistingC
         ];
 
         try {
-            $this->api->addClient($panel, $client, [$remoteInboundId]);
+            $this->api->addClient($panel, $client, [$remoteInboundId, ...array_keys($additional)]);
         } catch (PanelApiException $e) {
             // The add may have been applied and only its answer lost (timeout), or a previous attempt created it.
             // Adopt only a client that carries this order's UUID; anything else stays an error.
@@ -99,17 +106,28 @@ final class Sanaei3xuiModernDriver implements VpnPanelDriverInterface, ExistingC
             }
             $existing = $this->api->getClient($panel, $email);
             if (null === $existing) {
-                throw $e;
-            }
-            if (0 !== strcasecmp((string) ($existing['id'] ?? ''), $uuid)) {
+                if ([] === $additional || PanelFailure::PANEL_REJECTED !== $e->failure) {
+                    throw $e;
+                }
+                // The panel refused the whole add: one additional inbound may be the reason (e.g. deleted there). The
+                // primary alone makes the service; the others are attached below, one by one if need be (D2).
+                $this->logger->warning('sanaei_modern_create_retried_with_primary_only', ['panel_id' => $panel->getId(), 'failure' => $e->failure->value]);
+                $this->api->addClient($panel, $client, [$remoteInboundId]);
+            } elseif (0 !== strcasecmp((string) ($existing['id'] ?? ''), $uuid)) {
                 throw new \RuntimeException(sprintf('A client named "%s" already exists on the panel with another UUID; resolve it on the panel, then retry.', $email), 0);
+            } else {
+                $this->logger->warning('sanaei_modern_create_adopted_after_failure', ['panel_id' => $panel->getId(), 'email' => $email, 'failure' => $e->failure->value]);
             }
-            $this->logger->warning('sanaei_modern_create_adopted_after_failure', ['panel_id' => $panel->getId(), 'email' => $email, 'failure' => $e->failure->value]);
         }
 
         $created = $this->api->getClient($panel, $email);
         if (null === $created || 0 !== strcasecmp((string) ($created['id'] ?? ''), $uuid)) {
             throw new \RuntimeException(sprintf('The panel did not confirm client "%s" after adding it.', $email));
+        }
+        if ([] !== $additional) {
+            [$created, $attachments] = $this->attachMissing($panel, $created, $remoteInboundId, $additional);
+
+            return $this->createdService($panel, $inbound, (string) $remoteInboundId, $created, $attachments);
         }
         if (isset($created['inboundIds']) && !in_array($remoteInboundId, $created['inboundIds'], true)) {
             $this->api->attach($panel, $email, [$remoteInboundId]);
@@ -122,6 +140,7 @@ final class Sanaei3xuiModernDriver implements VpnPanelDriverInterface, ExistingC
     {
         $panel = $this->requirePanel($panel);
         [$inbound, $remoteInboundId] = $this->requireInbound($request, $panel);
+        $additional = $this->additionalInbounds($request->additionalInbounds, $panel, $remoteInboundId);
         $email = trim($request->username);
         $uuid = (string) $request->clientUuid;
 
@@ -146,18 +165,149 @@ final class Sanaei3xuiModernDriver implements VpnPanelDriverInterface, ExistingC
 
         $expiryMs = (int) ($client['expiryTime'] ?? 0);
         $totalBytes = (int) ($client['totalGB'] ?? 0);
-        // Only a client that belongs to this order may be attached to the plan's inbound here; an email match on a
+        // Only a client that belongs to this order may be attached to the plan's inbounds here; an email match on a
         // customer-chosen name is refused by the caller (VpnProvisioningService) before anything is changed.
-        if (AdoptedVpnService::MATCHED_BY_UUID === $matchedBy && isset($client['inboundIds']) && !in_array($remoteInboundId, $client['inboundIds'], true)) {
+        $attachments = [];
+        if ([] !== $additional && AdoptedVpnService::MATCHED_BY_UUID === $matchedBy) {
+            [$client, $attachments] = $this->attachMissing($panel, $client, $remoteInboundId, $additional);
+        } elseif ([] !== $additional) {
+            $attachments = self::attachments($client, $additional, [], 'not attached: the client was adopted by its name only (use "Retry attach")');
+        } elseif (AdoptedVpnService::MATCHED_BY_UUID === $matchedBy && isset($client['inboundIds']) && !in_array($remoteInboundId, $client['inboundIds'], true)) {
             $this->api->attach($panel, (string) $client['email'], [$remoteInboundId]);
         }
 
         return new AdoptedVpnService(
-            service: $this->createdService($panel, $inbound, (string) $remoteInboundId, $client),
+            service: $this->createdService($panel, $inbound, (string) $remoteInboundId, $client, $attachments),
             matchedBy: $matchedBy,
             expiresAt: $expiryMs > 0 ? self::msToDate($expiryMs) : null,
             trafficLimitGb: $totalBytes > 0 ? (int) round($totalBytes / self::BYTES_PER_GB) : null,
         );
+    }
+
+    public function attachInbounds(string $remoteId, array $inbounds, ?VpnPanel $panel = null): array
+    {
+        $panel = $this->requirePanel($panel);
+        $ref = $this->ref($remoteId);
+        $client = $this->api->getClient($panel, $ref->email);
+        if (null === $client) {
+            throw new \RuntimeException(sprintf('Client "%s" does not exist on the panel.', $ref->email));
+        }
+
+        return $this->attachMissing($panel, $client, null, $this->additionalInbounds($inbounds, $panel, null))[1];
+    }
+
+    /**
+     * The additional inbounds by their remote id (repeats and the primary dropped).
+     *
+     * @param list<VpnInbound> $inbounds
+     *
+     * @return array<int, VpnInbound>
+     */
+    private function additionalInbounds(array $inbounds, VpnPanel $panel, ?int $primaryRemoteId): array
+    {
+        $byRemoteId = [];
+        foreach ($inbounds as $inbound) {
+            $other = $inbound->getPanel();
+            if ($other !== $panel && (null === $other->getId() || $other->getId() !== $panel->getId())) {
+                throw new \RuntimeException('An additional inbound does not belong to the selected panel.');
+            }
+            $raw = trim($inbound->getRemoteInboundId());
+            if (!ctype_digit($raw) || (int) $raw <= 0) {
+                throw new \RuntimeException(sprintf('Invalid remote inbound id "%s".', $raw));
+            }
+            if ((int) $raw !== $primaryRemoteId) {
+                $byRemoteId[(int) $raw] ??= $inbound;
+            }
+        }
+
+        return $byRemoteId;
+    }
+
+    /**
+     * GET was done ($client): attaches the inbounds the client is not on (one call with the missing ids only; one by one
+     * when the panel refuses the batch, so one bad inbound does not keep the others off), then GETs again. The primary,
+     * when given, must be attached afterwards (as before: no service without it); the additional ones are reported.
+     *
+     * @param array<string, mixed>   $client
+     * @param array<int, VpnInbound> $additional
+     *
+     * @return array{array<string, mixed>, list<InboundAttachment>} the client as read last, one result per additional inbound
+     */
+    private function attachMissing(VpnPanel $panel, array $client, ?int $primaryRemoteId, array $additional): array
+    {
+        $email = (string) $client['email'];
+        $wanted = [...(null === $primaryRemoteId ? [] : [$primaryRemoteId]), ...array_keys($additional)];
+        // A client whose answer lists no inbounds: attach all of them (attaching an attached one is harmless).
+        $missing = isset($client['inboundIds']) ? array_values(array_diff($wanted, $client['inboundIds'])) : $wanted;
+        $errors = [];
+        if ([] !== $missing) {
+            $errors = $this->attachIds($panel, $email, $missing);
+            $client = $this->api->getClient($panel, $email) ?? throw new \RuntimeException(sprintf('Client "%s" is missing after attaching inbounds.', $email));
+        }
+        if (null !== $primaryRemoteId && isset($client['inboundIds']) && !in_array($primaryRemoteId, $client['inboundIds'], true)) {
+            throw new \RuntimeException(sprintf('The panel did not attach client "%s" to the plan\'s inbound %d%s', $email, $primaryRemoteId, isset($errors[$primaryRemoteId]) ? ': '.$errors[$primaryRemoteId] : '.'));
+        }
+
+        return [$client, self::attachments($client, $additional, $errors, 'the panel did not attach it')];
+    }
+
+    /**
+     * @param list<int> $ids
+     *
+     * @return array<int, string> remote inbound id => why its attach failed (a safe text)
+     */
+    private function attachIds(VpnPanel $panel, string $email, array $ids): array
+    {
+        try {
+            $this->api->attach($panel, $email, $ids);
+
+            return [];
+        } catch (PanelApiException $e) {
+            if (1 === count($ids) || PanelFailure::NOT_CONFIGURED === $e->failure || $e->failure->isUnreachable() && PanelFailure::NETWORK_TIMEOUT !== $e->failure) {
+                return array_fill_keys($ids, self::attachError($e));
+            }
+            $this->logger->warning('sanaei_modern_attach_batch_refused', ['panel_id' => $panel->getId(), 'inbounds' => count($ids), 'failure' => $e->failure->value]);
+        }
+        $errors = [];
+        foreach ($ids as $id) {
+            try {
+                $this->api->attach($panel, $email, [$id]);
+            } catch (PanelApiException $e) {
+                $errors[$id] = self::attachError($e);
+            }
+        }
+
+        return $errors;
+    }
+
+    private static function attachError(PanelApiException $e): string
+    {
+        // PanelApiException messages are redacted already (no token, URL or base path).
+        return mb_substr(sprintf('%s: %s', $e->failure->value, $e->getMessage()), 0, 200);
+    }
+
+    /**
+     * What the panel says about each additional inbound: on the client's inboundIds = attached.
+     *
+     * @param array<string, mixed>   $client
+     * @param array<int, VpnInbound> $additional
+     * @param array<int, string>     $errors
+     *
+     * @return list<InboundAttachment>
+     */
+    private static function attachments(array $client, array $additional, array $errors, string $notAttached): array
+    {
+        $listed = isset($client['inboundIds']) && is_array($client['inboundIds']);
+        $result = [];
+        foreach ($additional as $remoteId => $inbound) {
+            $result[] = match (true) {
+                !$listed => new InboundAttachment($inbound, false, 'the panel does not list the client\'s inbounds: not confirmed'),
+                in_array($remoteId, $client['inboundIds'], true) => new InboundAttachment($inbound, true),
+                default => new InboundAttachment($inbound, false, $errors[$remoteId] ?? $notAttached),
+            };
+        }
+
+        return $result;
     }
 
     public function renewService(string $remoteId, RenewVpnServiceRequest $request, ?VpnPanel $panel = null): void
@@ -406,9 +556,10 @@ final class Sanaei3xuiModernDriver implements VpnPanelDriverInterface, ExistingC
     }
 
     /**
-     * @param array<string, mixed> $client normalised client from the panel
+     * @param array<string, mixed>    $client      normalised client from the panel
+     * @param list<InboundAttachment> $attachments
      */
-    private function createdService(VpnPanel $panel, VpnInbound $inbound, string $remoteInboundId, array $client): CreatedVpnService
+    private function createdService(VpnPanel $panel, VpnInbound $inbound, string $remoteInboundId, array $client, array $attachments = []): CreatedVpnService
     {
         $email = (string) $client['email'];
         $uuid = (string) ($client['id'] ?? '');
@@ -426,6 +577,7 @@ final class Sanaei3xuiModernDriver implements VpnPanelDriverInterface, ExistingC
             subId: $subId,
             ipLimit: 0 === $limitIp ? null : $limitIp,
             configLinks: $links,
+            attachments: $attachments,
         );
     }
 

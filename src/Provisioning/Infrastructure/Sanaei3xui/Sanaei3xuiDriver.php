@@ -11,6 +11,7 @@ use App\Provisioning\Application\VpnServiceConfigRefreshResult;
 use App\Provisioning\Domain\Dto\AdoptedVpnService;
 use App\Provisioning\Domain\Dto\CreatedVpnService;
 use App\Provisioning\Domain\Dto\CreateVpnServiceRequest;
+use App\Provisioning\Domain\InboundAttachDriverInterface;
 use App\Provisioning\Domain\Dto\RenewVpnServiceRequest;
 use App\Provisioning\Domain\Dto\VpnUsage;
 use App\Provisioning\Domain\ExistingClientAwareDriverInterface;
@@ -45,6 +46,10 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface, ExistingClientA
 
     public function createService(CreateVpnServiceRequest $request, ?VpnPanel $panel = null): CreatedVpnService
     {
+        if ([] !== $request->additionalInbounds) {
+            // One client cannot span several inbounds on the legacy API: never the primary alone (design 3.1).
+            throw new \RuntimeException(InboundAttachDriverInterface::MODERN_PANEL_REQUIRED);
+        }
         $panel = $this->requireSupportedPanel($panel);
         $config = $this->panelConfig($panel);
         $inbound = $request->inbound;
