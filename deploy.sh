@@ -2357,6 +2357,11 @@ for entry in "${SCHEDULED_JOBS[@]}"; do
   write_file "/etc/systemd/system/amoobot-job-${JOB_NAME}.timer" 644 root:root --show-diff < <(render_job_timer)
   (( FILE_CHANGED )) && units_changed=1 && changed_timers+=("amoobot-job-${JOB_NAME}.timer")
   manifest+=$'\n'"${JOB_NAME} $((3 * JOB_INTERVAL + JOB_TIMEOUT)) ${JOB_CALENDAR}"
+  # First install of a job (no success, no stamp): bin/check-scheduled-jobs.sh reports it NEW, not NEVER, until its
+  # max age has passed, so this deploy's own post-deploy check does not fail on a job that has not had its turn yet.
+  if [[ ! -e "${JOBS_STATE_DIR}/${JOB_NAME}.last-success" && ! -e "${JOBS_STATE_DIR}/${JOB_NAME}.installed" ]]; then
+    run install -m 644 -o "$WEB_USER" -g "$WEB_USER" /dev/null "${JOBS_STATE_DIR}/${JOB_NAME}.installed"
+  fi
 done
 write_file "$JOBS_MANIFEST" 644 root:root --show-diff <<< "$manifest"
 

@@ -161,6 +161,24 @@ if [[ -e "$ROOT/bin/check-scheduled-jobs.sh" ]]; then
   printf '#!/usr/bin/env bash\ncase "$1" in\n  is-active) exit 0 ;;\n  is-failed) exit 1 ;;\nesac\n' > "$WORK/systemctl-ok"
   out="$(bash "$CHECK" 2>&1)"; rc=$?
   check "reset-failed cannot hide the last failed command" bash -c '[[ $1 -eq 2 ]] && grep -qE "^FAILED +broken.*last run rc=1" <<< "$2"' _ "$rc" "$out"
+
+  # A job just installed by a deploy (<job>.installed, no success yet): NEW, a warning, until its max age has passed.
+  rm -rf "$WORK/state"; mkdir -p "$WORK/state"
+  printf 'fresh 600 *:0/2\nnewjob 600 *:25/30\n' > "$WORK/manifest"
+  touch "$WORK/state/fresh.last-success" "$WORK/state/newjob.installed"
+  out="$(bash "$CHECK" 2>&1)"; rc=$?
+  check "job installed within its max age, not run yet -> NEW, exit 0" bash -c \
+    '[[ $1 -eq 0 ]] && grep -qE "^NEW +newjob +- .*installed [0-9]+s ago, first run pending" <<< "$2" && grep -q "1 of 2 jobs newly installed, first run pending (WARN: NEW)" <<< "$2"' _ "$rc" "$out"
+  touch -d '11 minutes ago' "$WORK/state/newjob.installed"
+  out="$(bash "$CHECK" 2>&1)"; rc=$?
+  check "  ...still no success after its max age -> NEVER, exit 2" bash -c '[[ $1 -eq 2 ]] && grep -qE "^NEVER +newjob" <<< "$2"' _ "$rc" "$out"
+  touch "$WORK/state/newjob.installed"; printf '2026-01-01T00:00:00Z rc=1 duration=3s\n' > "$WORK/state/newjob.last-run"
+  out="$(bash "$CHECK" 2>&1)"; rc=$?
+  check "  ...a failed first run is FAILED, never hidden as NEW" bash -c '[[ $1 -eq 2 ]] && grep -qE "^FAILED +newjob" <<< "$2"' _ "$rc" "$out"
+  rm -f "$WORK/state/newjob.last-run" "$WORK/state/newjob.installed"
+  out="$(bash "$CHECK" 2>&1)"; rc=$?
+  check "  ...without the installed stamp (older deploys) -> NEVER as before" bash -c '[[ $1 -eq 2 ]] && grep -qE "^NEVER +newjob" <<< "$2"' _ "$rc" "$out"
+  printf '# comment\n\nfresh 600 *:0/2\nstale 600 *:0/2\nnever 600 *:0/2\nbroken 600 *:0/2\n' > "$WORK/manifest"
   printf '# empty manifest\n' > "$WORK/manifest"
   bash "$CHECK" > /dev/null 2>&1; rc=$?
   check "empty manifest -> exit code 3 (unknown)" test "$rc" -eq 3
@@ -200,6 +218,22 @@ if [[ -e "$ROOT/bin/check-scheduled-jobs.sh" ]]; then
 else
   skip "check script not present yet"
 fi
+
+echo "== job max ages and first-install stamp (deploy.sh)"
+(
+  eval "$(sed -n '/^SCHEDULED_JOBS=(/,/^)/p' "$ROOT/deploy.sh")"
+  eval "$(sed -n '/^parse_job()/,/^}/p' "$ROOT/deploy.sh")"
+  ok=1
+  for entry in "${SCHEDULED_JOBS[@]}"; do
+    parse_job "$entry"
+    # The manifest's max age is 3 x interval + timeout: one skipped (or slow) run never shows STALE.
+    (( 3 * JOB_INTERVAL + JOB_TIMEOUT > 2 * JOB_INTERVAL + JOB_TIMEOUT )) || ok=0
+    [[ "$JOB_NAME" == attach-inbounds ]] && { [[ "$JOB_INTERVAL" == 1800 && $((3 * JOB_INTERVAL + JOB_TIMEOUT)) == 5700 ]] || ok=0; }
+  done
+  (( ok ))
+) && pass "attach-inbounds max age is 5700 s (3 x 1800 + 300): one skipped run tolerated" || fail "job max ages"
+check "manifest max age is 3 x interval + timeout" grep -qF 'manifest+=$'"'"'\n'"'"'"${JOB_NAME} $((3 * JOB_INTERVAL + JOB_TIMEOUT)) ${JOB_CALENDAR}"' "$ROOT/deploy.sh"
+check "deploy writes <job>.installed only for a job never run and never stamped" grep -qF 'if [[ ! -e "${JOBS_STATE_DIR}/${JOB_NAME}.last-success" && ! -e "${JOBS_STATE_DIR}/${JOB_NAME}.installed" ]]; then' "$ROOT/deploy.sh"
 
 echo "== units rendered by deploy.sh"
 if have systemd-analyze; then
@@ -262,6 +296,8 @@ EOF
   check "dry-run shows each new timer file" grep -q '+ OnCalendar=\*:5/15' <<< "$jobs_part"
   check "dry-run shows the alert unit and logrotate" bash -c 'grep -q "amoobot-job-alert@.service" <<< "$1" && grep -q "+     rotate 14" <<< "$1"' _ "$jobs_part"
   check "dry-run shows the manifest" grep -q '+ sync 4200 \*:0/15' <<< "$jobs_part"
+  check "dry-run manifest: attach-inbounds max age 5700" grep -q '+ attach-inbounds 5700 \*:25/30' <<< "$jobs_part"
+  check "dry-run stamps every first-installed job" test "$(grep -c '\[dry-run\] install -m 644 -o www-data -g www-data /dev/null .*/jobs/.*\.installed' <<< "$jobs_part")" -eq 8
   check "dry-run would enable every timer" test "$(grep -c 'systemctl enable --now amoobot-job-' <<< "$jobs_part")" -eq 8
   check "dry-run pauses jobs before the checkout" grep -q 'pause scheduled jobs' <<< "$out"
   leak=0
