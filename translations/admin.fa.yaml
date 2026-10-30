@@ -547,6 +547,7 @@ panel_inbounds:
 action:
   rotate_page_link_confirm: "لینک فعلی صفحه اشتراک این سرویس از کار می‌افتد و مشتری باید لینک جدید را از ربات بگیرد. ادامه می‌دهید؟"
   claims_history: "لینک‌های واگذاری و مالکان"
+  retry_attach: "تلاش دوباره برای اتصال"
   rotate_page_link: "لینک جدید صفحه اشتراک"
   confirm_payment: "تأیید"
   retry_provisioning: "تلاش دوباره برای ساخت سرویس"
@@ -939,6 +940,14 @@ flash:
   customer.batch_delete_is_reseller: "چیزی حذف نشد: مشتری(های) #%ids% نماینده‌اند و قابل حذف نیستند. آن‌ها را از انتخاب خارج کنید و دوباره تلاش کنید."
   service.page_link_csrf: "درخواست نامعتبر بود (توکن امنیتی). صفحه را تازه کنید و دوباره امتحان کنید."
   service.page_link_rotated: "لینک صفحه اشتراک سرویس #%id% عوض شد؛ لینک قبلی دیگر کار نمی‌کند."
+  service.retry_attach_done: "تلاش دوباره: %attached% اینباند وصل شد، %failed% هنوز وصل نیست."
+  service.retry_attach_failed: "تلاش دوباره ناموفق بود و روی پنل چیزی عوض نشد: %error%"
+  service.retry_attach_nothing_to_do: "همهٔ اینباندهای اضافهٔ این سرویس از قبل وصل‌اند."
+  service.retry_attach_in_progress: "تلاش دیگری برای همین سرویس در جریان است؛ کمی بعد دوباره امتحان کنید."
+  service.retry_attach_switched_off: "پلن‌های چنداینباندی خاموش‌اند (تنظیمات، زبانهٔ پلن‌ها): چیزی وصل نشد."
+  service.retry_attach_not_applicable: "این سرویس قابل اتصال نیست (حذف شده یا بدون پنل)."
+  service.retry_attach_not_modern: "چند اینباند به پنل در حالت modern نیاز دارد (پنل‌ها ← آزمایش اتصال)."
+  service.retry_attach_rate_limited: "برای این سرویس بیش از حد تلاش شد؛ چند دقیقه صبر کنید."
   error: "خطا: %error%"
   csrf_expired: "توکن امنیتی نامعتبر یا منقضی است. صفحه را دوباره بارگذاری کنید و دوباره تلاش کنید."
   settings.discount_range: "درصد تخفیف باید بین ۰ تا ۱۰۰ باشد."
@@ -1188,6 +1197,14 @@ plan_inbounds:
     inactive: "%inbound% از وقتی انتخاب شد غیرفعال شده است."
     not_modern: "پنل در حالت modern نیست؛ چند اینباند به آن نیاز دارد (پنل‌ها ← آزمایش اتصال)."
     mixed: "پروتکل‌های %protocols% با هم: پیش از اتکا به این ترکیب، آزمون روی پنل واقعی (طراحی ۷.۳) را انجام دهید."
+
+service_inbounds:
+  attempts: "%count% بار تلاش"
+  status:
+    attached: "وصل"
+    pending: "در حال اتصال…"
+    failed: "وصل نشده"
+    detached: "جدا شده"
 
 plan_settings:
   subtitle: "پلن با چند اینباند از یک پنل: خریدار یک کلاینت روی همهٔ آن‌ها می‌گیرد. پیش‌فرض خاموش است و تا خاموش باشد هیچ چیز برای هیچ‌کس تغییر نمی‌کند."

@@ -548,6 +548,7 @@ action:
   rotate_page_link_confirm: "The current subscription page link of this service will stop working; the customer gets the new one from the bot. Continue?"
   rotate_page_link: "New subscription page link"
   claims_history: "Claim links and owners"
+  retry_attach: "Retry attach"
   confirm_payment: "Approve"
   retry_provisioning: "Retry provisioning"
   reject_payment: "Reject"
@@ -939,6 +940,14 @@ flash:
   customer.batch_delete_is_reseller: "Nothing was deleted: customer(s) #%ids% are resellers and cannot be deleted. Deselect them and try again."
   service.page_link_csrf: "Invalid request (security token). Reload the page and try again."
   service.page_link_rotated: "The subscription page link of service #%id% was replaced; the old link no longer works."
+  service.retry_attach_done: "Retry attach: %attached% inbound(s) attached, %failed% still not attached."
+  service.retry_attach_failed: "Retry attach failed, nothing changed on the panel: %error%"
+  service.retry_attach_nothing_to_do: "Every additional inbound of this service is attached already."
+  service.retry_attach_in_progress: "Another retry of this service is running; try again in a moment."
+  service.retry_attach_switched_off: "Plans with several inbounds are switched off (Settings, Plans tab): nothing was attached."
+  service.retry_attach_not_applicable: "This service cannot be attached (deleted, or without a panel)."
+  service.retry_attach_not_modern: "Several inbounds need the panel in modern mode (Panels → test connection)."
+  service.retry_attach_rate_limited: "Too many retries for this service; wait a few minutes."
   error: "Error: %error%"
   csrf_expired: "Invalid or expired security token. Please reload the page and try again."
   settings.discount_range: "The discount must be between 0 and 100 percent."
@@ -1188,6 +1197,14 @@ plan_inbounds:
     inactive: "%inbound% became inactive since it was chosen."
     not_modern: "The panel is not in modern mode: several inbounds need it (Panels → test connection)."
     mixed: "Protocols %protocols% together: run the real-panel check (design 7.3) before relying on this mix."
+
+service_inbounds:
+  attempts: "%count% attempt(s)"
+  status:
+    attached: "attached"
+    pending: "attaching…"
+    failed: "not attached"
+    detached: "detached"
 
 plan_settings:
   subtitle: "Plans with several inbounds of one panel: a buyer gets one client on all of them. Off by default: with it off, nothing changes for anybody."

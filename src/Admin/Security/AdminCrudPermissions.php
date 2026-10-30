@@ -85,6 +85,8 @@ final class AdminCrudPermissions
             Crud\VpnServiceCrudController::class => $p(AdminPermission::SERVICES_VIEW, AdminPermission::SERVICES_MANAGE, AdminPermission::SERVICES_DELETE),
             // "New subscription page link" of a service.
             \App\Admin\UI\SubscriptionPageLinkController::class => $p(AdminPermission::SERVICES_MANAGE),
+            // "Retry attach" of a service's additional inbounds.
+            \App\Admin\UI\ServiceInboundsController::class => $p(AdminPermission::SERVICES_MANAGE),
             Crud\BroadcastMessageCrudController::class => $p(AdminPermission::BROADCAST_SEND),
             Crud\BroadcastDeliveryCrudController::class => $p(AdminPermission::BROADCAST_SEND),
             \App\Admin\UI\BroadcastActionsController::class => $p(AdminPermission::BROADCAST_SEND),
