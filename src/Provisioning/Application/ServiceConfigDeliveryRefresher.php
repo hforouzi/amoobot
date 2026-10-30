@@ -48,7 +48,7 @@ final class ServiceConfigDeliveryRefresher
             'config_delivery_online_refresh_failed source_flow="%s" service_id=%d reason="%s" fallback_to_stored=%s',
             $sourceFlow,
             $service->getId() ?? 0,
-            $this->sanitize((string) ($result->failureReason ?? 'unknown')),
+            ServiceErrorText::redact($service, (string) ($result->failureReason ?? 'unknown'), 240),
             $fallbackToStored ? 'yes' : 'no'
         ));
 
@@ -79,14 +79,6 @@ final class ServiceConfigDeliveryRefresher
             array_map(static fn (mixed $link): string => trim((string) $link), (array) ($service->getConfigLinks() ?? [])),
             static fn (string $link): bool => '' !== $link
         ));
-    }
-
-    private function sanitize(string $value): string
-    {
-        $text = preg_replace('/https?:\/\/\S+/i', '[url-redacted]', $value) ?? $value;
-        $text = preg_replace('/\s+/', ' ', $text) ?? $text;
-
-        return mb_substr(trim($text), 0, 240);
     }
 
     private function log(string $message): void

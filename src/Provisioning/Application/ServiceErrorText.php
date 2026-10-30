@@ -12,7 +12,8 @@ use App\Provisioning\Infrastructure\Sanaei3xui\Sanaei3xuiRemoteIdParser;
 /**
  * An error text about one service as logs, command output, admin flashes and verify-links may show it: the service's
  * subscription id, client UUID, panel base path and every URL are removed directly, whatever produced the text (a
- * panel call, a database exception quoting its parameters, a driver).
+ * panel call, a database exception quoting its parameters, a driver); then SecretRedactor::redactAccess() for any
+ * other service's link or UUID the text carries.
  */
 final class ServiceErrorText
 {
@@ -44,7 +45,7 @@ final class ServiceErrorText
             }
         }
 
-        return SecretRedactor::redact($text, [], $maxLength);
+        return SecretRedactor::redactAccess($text, $maxLength);
     }
 
     /** The subscription id a 3x-ui remote id carries (it can differ from the stored column). */

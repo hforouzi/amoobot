@@ -17,6 +17,7 @@ use App\Payment\Domain\PaymentStatus;
 use App\Provisioning\Application\ServiceRenewalService;
 use App\Provisioning\Application\ServiceTrafficAddonService;
 use App\Provisioning\Application\VpnProvisioningService;
+use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http\SecretRedactor;
 use App\Shared\Infrastructure\TransactionRollback;
 use App\Shop\Application\DiscountCodeService;
 use App\Shop\Domain\OrderStatus;
@@ -842,6 +843,7 @@ class PaymentSettlementService
         $message = (string) preg_replace('/Bearer\s+\S+/i', 'Bearer [redacted]', $message);
         $message = (string) preg_replace('#(https?://)[^/\s:@]+:[^@\s/]+@#i', '$1[redacted]@', $message);
 
-        return mb_substr(trim((string) preg_replace('/\s+/', ' ', $message)), 0, 1000);
+        // The service is rolled back, so nothing names its credentials: a query exception quotes them as parameters.
+        return SecretRedactor::redactAccess($message, 1000);
     }
 }
