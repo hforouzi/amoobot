@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace App\Shop\Application\Catalog;
 
+use App\Entity\Plan;
 use Doctrine\DBAL\ArrayParameterType;
 use Doctrine\ORM\EntityManagerInterface;
+use Doctrine\ORM\Query;
 use Symfony\Contracts\Service\ResetInterface;
 
 /**
@@ -20,6 +22,8 @@ final class PlanInboundUsage implements ResetInterface
     private ?array $additionalByPlan = null;
     /** @var array<int, list<array{planId: int, planTitle: string, role: string}>>|null inbound id => plans */
     private ?array $plansByInbound = null;
+    /** @var array<int, string|null>|null plan id => why it is not sold (MultiInboundSale), plans with additional inbounds only */
+    private ?array $saleBlockers = null;
 
     public const ROLE_PRIMARY = 'primary';
     public const ROLE_ADDITIONAL = 'additional';
@@ -32,6 +36,30 @@ final class PlanInboundUsage implements ResetInterface
     {
         $this->additionalByPlan = null;
         $this->plansByInbound = null;
+        $this->saleBlockers = null;
+    }
+
+    /**
+     * Why a plan with additional inbounds is not sold with the switch on (MultiInboundSale::blocker(), the rule of
+     * PlanSaleRule), or null: sold, or no additional inbounds. One query for every plan of the page.
+     */
+    public function saleBlockerOf(int $planId): ?string
+    {
+        if (null === $this->saleBlockers) {
+            $this->saleBlockers = [];
+            /** @var list<Plan> $plans */
+            $plans = $this->entityManager->createQueryBuilder()
+                ->select('p', 'i', 'pn', 'a', 'ai', 'apn')->from(Plan::class, 'p')
+                ->join('p.additionalInbounds', 'a')->join('a.inbound', 'ai')->join('ai.panel', 'apn')
+                ->leftJoin('p.inbound', 'i')->leftJoin('i.panel', 'pn')
+                // As the database has them now, not as entities this request loaded earlier.
+                ->getQuery()->setHint(Query::HINT_REFRESH, true)->getResult();
+            foreach ($plans as $plan) {
+                $this->saleBlockers[(int) $plan->getId()] = $plan->multiInboundSaleBlocker(true);
+            }
+        }
+
+        return $this->saleBlockers[$planId] ?? null;
     }
 
     /**

@@ -179,8 +179,9 @@ final class PlanInboundRulesTest extends IntegrationTestCase
         $plan = $this->em->find(Plan::class, $plan->getId()) ?? self::fail('plan gone');
         $this->plans()->save($plan->setTitle('renamed'));
 
-        self::assertSame(['plan_inbounds.warning.not_sold', 'plan_inbounds.warning.inactive', 'plan_inbounds.warning.mixed'], array_column(PlanInboundWarnings::of($plan), 'key'));
-        self::assertFalse($plan->isAvailableForSale());
+        self::assertSame(['plan_inbounds.not_sold.inactive_inbound', 'plan_inbounds.warning.inactive', 'plan_inbounds.warning.mixed'], array_column(PlanInboundWarnings::of($plan, true), 'key'));
+        self::assertSame(['plan_inbounds.not_sold.switched_off', 'plan_inbounds.warning.inactive', 'plan_inbounds.warning.mixed'], array_column(PlanInboundWarnings::of($plan, false), 'key'));
+        self::assertFalse($plan->isAvailableForSale(true));
     }
 
     public function testChangingThePrimaryToAnotherPanelIsRefusedWhileAdditionalInboundsStay(): void

@@ -36,6 +36,7 @@ final class PaymentStarter
         private readonly StorePaymentMethodResolver $methodResolver,
         private readonly PaymentGatewayRegistry $paymentGatewayRegistry,
         private readonly SettingValueProvider $settingValueProvider,
+        private readonly PlanSaleRule $saleRule,
         private readonly string $paymentCardNumber = '',
         private readonly string $paymentCardHolder = '',
         private readonly ?string $paymentDescription = null,
@@ -101,7 +102,7 @@ final class PaymentStarter
             throw new \LogicException(sprintf('Reseller order #%d is paid from the wallet only.', (int) $order->getId()));
         }
         $gateway = $storePaymentMethod->getGateway();
-        if (OrderType::NEW_SERVICE === $order->getType() && !$order->requirePlan()->isActive()) {
+        if (!$this->saleRule->acceptsPayment($order)) {
             return new PaymentStart(PaymentStart::KIND_PLAN_INACTIVE, null, false, null, 0);
         }
 

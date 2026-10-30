@@ -38,6 +38,7 @@ final class NewServiceCheckout
         private readonly OrderTrackingCodeService $orderTrackingCodeService,
         private readonly IncompleteOrderSettingsProvider $incompleteOrderSettingsProvider,
         private readonly PlanOptions $planOptions,
+        private readonly PlanSaleRule $saleRule,
     ) {
     }
 
@@ -271,7 +272,7 @@ final class NewServiceCheckout
         }
 
         $plan = $draft->getPlan();
-        if (!$plan->isActive()) {
+        if (!$this->saleRule->acceptsOrders($plan)) {
             return null;
         }
 

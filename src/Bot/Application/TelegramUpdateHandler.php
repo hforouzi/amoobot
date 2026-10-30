@@ -47,6 +47,7 @@ use App\Shop\Application\Checkout\PaymentStart;
 use App\Shop\Application\Checkout\PaymentStarter;
 use App\Shop\Application\Checkout\PlanCatalog;
 use App\Shop\Application\Checkout\PlanOptions;
+use App\Shop\Application\Checkout\PlanSaleRule;
 use App\Shop\Application\Checkout\ReceiptSubmission;
 use App\Shop\Application\Checkout\TrialCheckout;
 use App\Shop\Domain\OrderDraftStatus;
@@ -104,6 +105,7 @@ class TelegramUpdateHandler
         private readonly SubscriptionPageButton $subscriptionPageButton,
         private readonly AppDownloadCatalog $appDownloads,
         private readonly PlanCatalog $planCatalog,
+        private readonly PlanSaleRule $planSaleRule,
         private readonly PlanOptions $planOptions,
         private readonly NewServiceCheckout $newServiceCheckout,
         private readonly DiscountApplication $discountApplication,
@@ -1024,7 +1026,7 @@ class TelegramUpdateHandler
         }
 
         $plan = $draft->getPlan();
-        if (!$plan->isActive()) {
+        if (!$this->planSaleRule->acceptsOrders($plan)) {
             $this->showPopupOrMessage($chatId, $callbackId, 'این پلن دیگر فعال نیست یا وجود ندارد.', 'popup_invalid_plan_select_payment_method_draft');
 
             return;
@@ -1135,8 +1137,8 @@ class TelegramUpdateHandler
             return;
         }
 
-        $plan = $this->entityManager->getRepository(Plan::class)->find($planId);
-        if (!$plan instanceof Plan || !$plan->isAvailableForSale()) {
+        $plan = $this->planCatalog->findForSale($planId);
+        if (!$plan instanceof Plan) {
             $this->showPopupOrMessage($chatId, $callbackId, 'این پلن دیگر فعال نیست یا وجود ندارد.', 'popup_invalid_plan_select_payment_method');
 
             return;
