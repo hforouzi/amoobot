@@ -238,6 +238,26 @@ final class MultiInboundScheduledAttachTest extends IntegrationTestCase
         self::assertSame([], array_values(array_filter(array_slice($this->http->telegramTexts(), $before), static fn (string $t): bool => str_contains($t, $serviceLine))), 'no alert');
     }
 
+    public function testTheScheduledAttachStepNeverMarksThePanelDegraded(): void
+    {
+        // M2c F12: the panel answers the read (so the attach step runs) and then refuses every attach, many times over.
+        for ($n = 0; $n < 6; ++$n) {
+            $this->sell();
+        }
+        $this->fake->inbounds[2] = $this->vmessOnPanel;
+        $this->due();
+        $this->fake->script('POST', null, Fake3xuiPanel::networkError('Failed to connect to panel.example.test port 2053: Connection refused'), 100);
+
+        $run = $this->scheduled();
+
+        self::assertSame(0, $run->panelFailures, 'every read worked');
+        self::assertGreaterThanOrEqual(7, count($this->attachCalls()), 'the attach step ran for every service and failed');
+        $panel = $this->em->find(VpnPanel::class, (int) $this->service->getPanel()?->getId()) ?? self::fail('panel');
+        $this->em->refresh($panel);
+        self::assertFalse($panel->isDegraded());
+        self::assertSame(0, $panel->getConsecutiveFailures(), 'the scheduled attach does not count towards degraded');
+    }
+
     public function testAPanelThatIsDownIsStoppedAfterFiveServicesAndNeverMarkedDegraded(): void
     {
         for ($n = 0; $n < 6; ++$n) {
