@@ -169,6 +169,23 @@ class VpnServiceInbound
         return $this;
     }
 
+    /**
+     * The outcome at the sale is not known (M2c F2: the panel could not be read back after the attach; F5: the attach
+     * was not tried within the time budget): pending, with why; an attempt is counted only when the attach was sent. The
+     * scheduled run takes a pending row over once its claim is stale (ServiceInboundAttacher::STALE_CLAIM) and either
+     * finds it attached on the panel or attaches it.
+     */
+    public function recordPending(string $why, bool $tried, \DateTimeImmutable $now): self
+    {
+        $this->attempts += $tried ? 1 : 0;
+        $this->status = self::STATUS_PENDING;
+        $this->lastError = mb_substr($why, 0, 255);
+        $this->nextAttemptAt = null;
+        $this->updatedAt = $now;
+
+        return $this;
+    }
+
     /** The client was deleted on the panel (del/{email} removes it from every inbound). */
     public function markDetached(\DateTimeImmutable $now): self
     {

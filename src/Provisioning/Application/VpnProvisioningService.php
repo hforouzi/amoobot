@@ -307,17 +307,21 @@ class VpnProvisioningService
     private function recordAttachments(VpnService $service, array $attachments, array $notAttached): void
     {
         $now = new \DateTimeImmutable();
-        $results = array_map(static fn ($a): array => [$a->inbound, $a->attached, $a->error], $attachments);
+        $results = array_map(static fn ($a): array => [$a->inbound, $a->attached, $a->error, $a->pending], $attachments);
         foreach ($notAttached as [$inbound, $reason]) {
-            $results[] = [$inbound, false, $reason];
+            $results[] = [$inbound, false, $reason, false];
         }
-        foreach ($results as [$inbound, $attached, $error]) {
+        foreach ($results as [$inbound, $attached, $error, $pending]) {
             $row = null === $service->getId() ? null : $this->entityManager->getRepository(VpnServiceInbound::class)->findOneBy(['service' => $service, 'inbound' => $inbound]);
             if (!$row instanceof VpnServiceInbound) {
                 $row = new VpnServiceInbound($service, $inbound, $now);
                 $this->entityManager->persist($row);
             }
-            $row->recordAttempt($attached, null === $error ? null : ServiceErrorText::redact($service, $error, 255), $now);
+            if ($pending) {
+                $row->recordPending((string) $error, InboundAttachDriverInterface::NOT_TRIED !== $error, $now);
+            } else {
+                $row->recordAttempt($attached, null === $error ? null : ServiceErrorText::redact($service, $error, 255), $now);
+            }
         }
         $failed = count(array_filter($results, static fn (array $r): bool => !$r[1]));
         if ($failed > 0) {

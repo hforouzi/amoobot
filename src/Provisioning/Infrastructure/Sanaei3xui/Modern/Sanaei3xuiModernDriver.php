@@ -256,7 +256,23 @@ final class Sanaei3xuiModernDriver implements VpnPanelDriverInterface, ExistingC
         $errors = [];
         if ([] !== $missing) {
             $errors = $this->attachIds($panel, $email, $missing, $recordHealth);
-            $client = $this->api->getClient($panel, $email, $recordHealth) ?? throw new \RuntimeException(sprintf('Client "%s" is missing after attaching inbounds.', $email));
+            try {
+                $read = $this->api->getClient($panel, $email, $recordHealth);
+            } catch (PanelApiException $e) {
+                $read = null;
+                $this->logger->warning('sanaei_modern_read_after_attach_failed', ['panel_id' => $panel->getId(), 'failure' => $e->failure->value]);
+            }
+            if (null === $read) {
+                // Not known (M2c F2). The primary as read before the attach decides the service; the additional inbounds
+                // that were sent stay pending for the scheduled run, the refused ones failed. A paid order whose primary
+                // works is never failed here.
+                if (null !== $primaryRemoteId && in_array($primaryRemoteId, $missing, true)) {
+                    throw new \RuntimeException(sprintf('The panel could not be read after attaching client "%s" to the plan\'s inbound %d.', $email, $primaryRemoteId));
+                }
+
+                return [$client, self::unconfirmed($client, $additional, $errors)];
+            }
+            $client = $read;
         }
         if (null !== $primaryRemoteId && isset($client['inboundIds']) && !in_array($primaryRemoteId, $client['inboundIds'], true)) {
             throw new \RuntimeException(sprintf('The panel did not attach client "%s" to the plan\'s inbound %d%s', $email, $primaryRemoteId, isset($errors[$primaryRemoteId]) ? ': '.$errors[$primaryRemoteId] : '.'));
@@ -298,6 +314,31 @@ final class Sanaei3xuiModernDriver implements VpnPanelDriverInterface, ExistingC
     {
         // PanelApiException messages are redacted already (no token, URL or base path).
         return mb_substr(sprintf('%s: %s', $e->failure->value, $e->getMessage()), 0, 200);
+    }
+
+    /**
+     * After an attach whose result could not be read back: on the client as read before = attached; refused by the
+     * panel = failed with its reason; sent (or not tried) = pending.
+     *
+     * @param array<string, mixed>   $client
+     * @param array<int, VpnInbound> $additional
+     * @param array<int, string>     $errors
+     *
+     * @return list<InboundAttachment>
+     */
+    private static function unconfirmed(array $client, array $additional, array $errors): array
+    {
+        $before = is_array($client['inboundIds'] ?? null) ? $client['inboundIds'] : [];
+        $result = [];
+        foreach ($additional as $remoteId => $inbound) {
+            $result[] = match (true) {
+                in_array($remoteId, $before, true) => new InboundAttachment($inbound, true),
+                isset($errors[$remoteId]) && InboundAttachDriverInterface::NOT_TRIED !== $errors[$remoteId] => new InboundAttachment($inbound, false, $errors[$remoteId]),
+                default => InboundAttachment::pending($inbound, $errors[$remoteId] ?? InboundAttachDriverInterface::NOT_CONFIRMED),
+            };
+        }
+
+        return $result;
     }
 
     /**
