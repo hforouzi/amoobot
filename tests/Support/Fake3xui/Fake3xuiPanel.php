@@ -102,6 +102,16 @@ final class Fake3xuiPanel
         return $this;
     }
 
+    /**
+     * Drops the scripted answers not used yet (e.g. a "panel down" script that outlived the attempt it was meant for).
+     */
+    public function clearScripts(): self
+    {
+        $this->scripts = [];
+
+        return $this;
+    }
+
     public static function networkError(string $curlMessage): MockResponse
     {
         return new MockResponse('', ['error' => $curlMessage]);
