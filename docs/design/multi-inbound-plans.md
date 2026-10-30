@@ -1,6 +1,6 @@
 # Plans with several inbounds of one panel — design
 
-Status: **design for review**; only phase **H0** (section 9.7) is implemented, see "H0 as built". Persian summary: [docs/fa/design/multi-inbound-plans.md](../fa/design/multi-inbound-plans.md).
+Status: **design for review**; phases **H0** and **M1** (section 9.7) are implemented, see "H0 as built" and "M1 as built". Persian summary: [docs/fa/design/multi-inbound-plans.md](../fa/design/multi-inbound-plans.md).
 
 **Updated 2026-10-29: 3x-ui Hosts.** New section 9 covers Hosts. Lines changed elsewhere are marked **[Hosts]**. Where they
 disagree, section 9 overrides the phase plan (7.4) and adds to the open questions (8).
@@ -557,7 +557,7 @@ and if possible one host with 2 addresses):
 | **H0** (first; fixes existing single-inbound services) — **built**, see below | Modern 3x-ui: regenerate / reset-links / both regenerate commands re-read the snapshot from the panel (`fetchLinks`) instead of `VpnAccessLinkGenerator`; `fetchLinks` = `subLinks` only (fallback `links/{email}` without subId); never store an empty list over a non-empty one; `app:service:verify-links` (9.6); capability probe `hosts=yes/no/forbidden` | Fake3xui `subLinks` with hosts fixture: regenerate stores panel links only; generator not called for modern; empty answer keeps old; reset-links stores new-UUID panel links; verifier parsing (vless/vmess/trojan/ss, VLESS route mask, CIDR/SNI-pool tolerance); real panel: 9.6 steps 1–7 | Revert PR (no schema) | Nothing to switch: a bug fix. The commands print "source=panel" |
 | **H1** | Admin read-only links preview (9.4) + Hosts cache + warnings; panel page shows Hosts capability | Preview count per 9.2 against fixtures (disabled, excluded, CIDR, no hosts, bindings); API 404/403 → "unknown" not "0"; real panel: preview count = verifier count for the test plan | Revert | Preview only; no customer effect |
 | **H2** | Scheduled snapshot refresh (TTL 6 h, batches), triggers after attach/renew/resume, admin "Refresh links" per service / inbound / panel, doctor counters, display cap 30 with "N more" | Job batches and pause; failure keeps snapshot; alert once on empty; display cap text; real panel: 9.6 step 3 | Disable the schedule entry; revert | `provisioning.links_refresh_enabled` default **off** (manual buttons work regardless) |
-| M1–M3 | As 7.4; M2 uses `subLinks` (no generator loop) | As 7.2 | As 7.4 | `plans.multi_inbound_enabled` off |
+| M1–M3 | As 7.4; M2 uses `subLinks` (no generator loop). **M1 built**, see below | As 7.2 | As 7.4 | `plans.multi_inbound_enabled` off |
 | **H4** (optional) | Per-plan host allow-list via `clientHostRuleIds` | Binding written at create/attach; deleted row → verifier warns | Clear bindings (empty list) | `plans.host_selection_enabled` off |
 
 #### H0 as built
@@ -617,6 +617,55 @@ Hosts"](../en/vpn-panels.md#config-links-and-3x-ui-hosts).
   - U1–U6;
   - the 1 MiB cap with curl (tested with the mock transport);
   - VMess/Trojan/SS link parsing in the verifier against real panel output.
+
+#### M1 as built
+
+Branch `feat/multi-inbound-m1`. Owner's decisions: D1 to D4 and Q5 as recommended in section 8. Admin guide:
+[admin-guide.md, "Plans with several inbounds"](../en/admin-guide.md#plans-with-several-inbounds-preview).
+
+- **Migration `Version20261101090000`:**
+  - `plan_additional_inbound` and `vpn_service_inbound` as in 2.1 and 2.2: plan / service CASCADE, inbound RESTRICT,
+    unique (plan, inbound) and (service, inbound);
+  - no backfill; `down()` refuses (nothing changed) while either table has a row;
+  - `vpn_service_inbound` stays empty until M2.
+- **`Plan`:**
+  - `getInbounds()` = primary, then additional by `sort_order`;
+  - `plan.inbound` and all its readers are unchanged;
+  - saving keeps the rows of inbounds that stay, so a reorder never hits the unique key.
+- **Fail closed:** a plan with any additional inbound is **not sold** (`isAvailableForSale()`), whatever the switch
+  says, until M2 attaches them.
+  - The plan list shows "not sold yet"; the form and the warnings say "takes effect when provisioning support ships".
+  - `PlanCatalog::forSale()` now loads plans, primary inbound, panel and additional rows in one query.
+- **Switch** `plans.multi_inbound_enabled` (off): its own web settings tab "Plans", because the Mini App sales form
+  rewrites every sales key.
+  - With it off, the plan form, plan list and inbound page send no query to the new tables, and a crafted POST with
+    additional inbounds is refused (nothing saved).
+- **Save rules** (`PlanInbounds` constraint on `Plan`: web inline errors; bot and Mini App through
+  `PlanAdminService::save()`):
+  - not changeable with the switch off;
+  - primary required;
+  - same panel, not the primary, newly chosen ones active;
+  - panel 3x-ui in effective modern mode when inbounds or primary change;
+  - at most 20;
+  - **customizable plans stay single-inbound** (the design is silent: decided here);
+  - D1 protocols: VLESS/VMess/Trojan/Shadowsocks only. The SS-method and vision/flow-capable rules read
+    `inbounds/options` (not stored locally), only when they apply and something changed; an unreadable panel refuses the
+    save.
+- **Warnings (section 6), not refusals:**
+  - not sold yet;
+  - an inbound inactive since it was chosen;
+  - panel not modern;
+  - a protocol mix to check on a real panel.
+- **Admin pages (switch on):**
+  - plan form multi-select (ids not offered are form errors; repeats are stored once);
+  - plan list "Inbounds: N" with badges;
+  - panel inbound page "Used by plans" (primary / additional).
+  - A fixed number of queries per page (`PlanInboundUsage`).
+- **Deleting** an inbound that is an additional inbound of a plan (or held by a service row), or its panel (inbounds
+  cascade from the panel), is refused with the plans named. Deleting a **primary** inbound is unchanged (SET NULL), by
+  the owner's decision.
+- **Not in M1** (as 7.4): provisioning / attach / retries, display, the Mini App plan field, "apply to existing
+  services", trials (single-inbound). The Mini App's "copy plan" copies no additional inbounds.
 
 ### 9.8 Open questions and risks (Hosts)
 
