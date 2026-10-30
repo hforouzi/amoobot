@@ -22,6 +22,7 @@ use App\Tests\Support\Fake3xui\Fake3xuiPanel;
 use App\Tests\Support\IntegrationTestCase;
 use Symfony\Bundle\FrameworkBundle\Console\Application;
 use Symfony\Component\Console\Tester\CommandTester;
+use Symfony\Component\HttpClient\Response\MockResponse;
 
 /**
  * The scheduled retry of additional inbounds (phase M2b, docs/design/multi-inbound-plans.md 3.2): back-off and the
@@ -207,6 +208,34 @@ final class MultiInboundScheduledAttachTest extends IntegrationTestCase
         self::assertNotNull($row['attached_at']);
         self::assertSame([], $this->attachCalls());
         self::assertSame(['GET panel/api/clients/get/'.$this->service->getClientEmail()], array_values(array_filter($this->fake->requestLines(), static fn (string $l): bool => str_contains($l, '/clients/get/'))));
+    }
+
+    public function testAnAnswerWithoutThePrimaryIsTreatedAsUnreadable(): void
+    {
+        // M2c F6: a glitching panel lists the client on the trojan inbound only (not on the primary it runs on).
+        $this->fake->inbounds[2] = $this->vmessOnPanel;
+        $this->due();
+        $this->checkedLongAgo();
+        // Its first-failure alert went out already (from setUp's sale); only what this answer would cause is measured.
+        $this->em->getConnection()->executeStatement("UPDATE vpn_service_inbound SET alert_state = 'failed', alerted_at = '2000-01-01 00:00:00' WHERE status = 'failed'");
+        $rows = $this->rowsOf();
+        $before = count($this->http->telegramTexts());
+        $email = (string) $this->service->getClientEmail();
+        $this->fake->script('GET', 'panel/api/clients/get/'.$email, function () use ($email): MockResponse {
+            $client = $this->fake->clients[$email];
+            $client['inboundIds'] = [$this->trojanId];
+            unset($client['dbId']);
+
+            return Fake3xuiPanel::envelope(true, $client);
+        });
+
+        $run = $this->scheduled();
+
+        self::assertSame(1, $run->panelFailures, 'counted as a panel that could not be read');
+        self::assertSame($rows, $this->rowsOf(), 'no state change and no attempt');
+        self::assertSame([], $this->attachCalls(), 'no attach either');
+        $serviceLine = 'Service ID: '.$this->service->getId();
+        self::assertSame([], array_values(array_filter(array_slice($this->http->telegramTexts(), $before), static fn (string $t): bool => str_contains($t, $serviceLine))), 'no alert');
     }
 
     public function testAPanelThatIsDownIsStoppedAfterFiveServicesAndNeverMarkedDegraded(): void

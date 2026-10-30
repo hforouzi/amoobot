@@ -33,6 +33,8 @@ use Psr\Log\LoggerInterface;
  *    - the others: checked_at only.
  *    A client missing from the panel leaves the rows as they are, checked_at aside (usage sync reports the client; step
  *    2 records why). A panel that cannot be read ends the service here: nothing is written and no attempt is used up.
+ *    An answer that lists the client's inbounds without the service's primary inbound counts as unreadable (M2c F6):
+ *    no state change, no attempt, no alert for it.
  * 2. Retry: ServiceInboundAttacher::retry() in its scheduled mode: the due failed rows with attempts left, one attach
  *    call with the missing ids, back-off on failure. Its claim makes two runs at once (or a run and an admin's "Retry
  *    attach") safe: the second finds nothing to claim.
@@ -48,6 +50,7 @@ final class InboundAttachScheduler
     public const CHECK_EVERY_HOURS = 6;
     public const SOURCE = 'scheduled_attach';
     public const REMOVED_ON_PANEL = 'The client was no longer on this inbound on the panel (found by the scheduled check).';
+    public const WITHOUT_PRIMARY = 'The panel listed the inbounds of the client without its primary inbound: answer not trusted.';
 
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
@@ -148,6 +151,11 @@ final class InboundAttachScheduler
         $readFailed = false;
         try {
             $onPanel = $driver->clientInboundIds((string) $service->getRemoteId(), $panel, false);
+            $primary = trim((string) $service->getInbound()?->getRemoteInboundId());
+            if (null !== $onPanel && ctype_digit($primary) && !in_array((int) $primary, $onPanel, true)) {
+                // The service runs on its primary: an answer without it is not believed (M2c F6), whatever it says.
+                throw new \RuntimeException(self::WITHOUT_PRIMARY);
+            }
             if (null === $onPanel) {
                 ++$run->clientMissing;
                 $read = 'client not on the panel';
