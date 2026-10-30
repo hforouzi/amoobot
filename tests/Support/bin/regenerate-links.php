@@ -46,7 +46,12 @@ $fake->script('GET', 'panel/api/clients/subLinks/'.$oldSubId, static function ()
     }
     $other->close();
     file_put_contents($probe, $rowFree.' '.($own->isTransactionActive() ? 'tx-OPEN' : 'no-tx')."\n", FILE_APPEND);
-    for ($i = 0; $i < 400 && !is_file($go); ++$i) {
+    // Until the test says go (it may first boot another kernel, slowly on a loaded machine): never go on without it.
+    $until = microtime(true) + 120;
+    while (!is_file($go)) {
+        if (microtime(true) > $until) {
+            throw new RuntimeException('No go within 120 s.');
+        }
         usleep(25_000);
     }
 

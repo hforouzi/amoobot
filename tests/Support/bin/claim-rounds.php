@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 /*
  * Test helper: many rounds of one side of a race in one PHP process (one kernel boot): round i starts at
- * t0 + i * gap, for both processes alike. Usage: php claim-rounds.php <claim|return> <roundsJsonFile> <t0> <gapSeconds>
+ * t0 + i * gap, for both processes alike. Usage: php claim-rounds.php <claim|return> <roundsJsonFile> <t0 (bin/start-at.php)> <gapSeconds>
  * Each round of the file: {claimId, ticket, telegramId, serviceId, claimDelayMs, returnDelayMs} (the delays shift
  * each side's start within the round, so both orders and real overlaps happen). Prints a JSON list, one outcome per round: the
  * outcome, the ClaimException code, or "UNHANDLED:<class>: <message>" for anything else (the test fails on that).
@@ -21,7 +21,8 @@ use App\Security\AdminActor;
 
 $role = (string) ($argv[1] ?? '');
 $rounds = json_decode((string) file_get_contents((string) ($argv[2] ?? '')), true, 512, JSON_THROW_ON_ERROR);
-$t0 = (float) ($argv[3] ?? 0);
+require_once __DIR__.'/start-at.php';
+$t0 = waitForStartAt((string) ($argv[3] ?? '0'));
 $gap = (float) ($argv[4] ?? 0.3);
 $outcomes = [];
 foreach ($rounds as $i => $round) {

@@ -166,7 +166,8 @@ final class RegenerateResetRaceTest extends IntegrationTestCase
 
     private function waitFor(string $file, Process $process): void
     {
-        for ($i = 0; $i < 1200 && !is_file($file); ++$i) {
+        $until = microtime(true) + 120;
+        while (!is_file($file) && microtime(true) < $until) {
             if (!$process->isRunning()) {
                 self::fail(sprintf('%s ended before %s: %s %s', basename((string) $process->getCommandLine()), basename($file), $process->getOutput(), $process->getErrorOutput()));
             }
