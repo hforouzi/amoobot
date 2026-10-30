@@ -6,6 +6,7 @@ namespace App\Entity;
 
 use Doctrine\Common\Collections\ArrayCollection;
 use Doctrine\Common\Collections\Collection;
+use App\Shop\Application\Catalog\PlanInbounds;
 use Doctrine\ORM\Mapping as ORM;
 use Symfony\Component\Validator\Constraints as Assert;
 use Symfony\Component\Validator\Context\ExecutionContextInterface;
@@ -15,6 +16,7 @@ use Symfony\Component\Validator\Context\ExecutionContextInterface;
  * (PlanAdminService); prices are only warned about, never blocked (PlanPriceSanityChecker).
  */
 #[ORM\Entity]
+#[PlanInbounds]
 class Plan
 {
     #[ORM\Id]
@@ -96,6 +98,15 @@ class Plan
     #[ORM\OneToMany(targetEntity: PlanAdditionalInbound::class, mappedBy: 'plan', cascade: ['persist'], orphanRemoval: true, fetch: 'EXTRA_LAZY')]
     #[ORM\OrderBy(['sortOrder' => 'ASC', 'id' => 'ASC'])]
     private Collection $additionalInbounds;
+
+    /**
+     * Not stored: the additional inbounds this request added, and whether it changed them or the primary (PlanInbounds).
+     *
+     * @var list<VpnInbound>
+     */
+    private array $addedAdditionalInbounds = [];
+    private bool $additionalInboundsChanged = false;
+    private bool $primaryInboundChanged = false;
 
     /** The lowest wholesale price of this plan for any reseller (Toman), on top of the reseller.floor_bp rule; null = none. */
     #[ORM\Column(nullable: true)]
@@ -384,6 +395,7 @@ class Plan
 
     public function setInbound(?VpnInbound $inbound): self
     {
+        $this->primaryInboundChanged = $this->primaryInboundChanged || $inbound !== $this->inbound;
         $this->inbound = $inbound;
 
         return $this;
@@ -424,6 +436,7 @@ class Plan
                 $kept[spl_object_id($row->getInbound())] = $row;
             } else {
                 $this->additionalInbounds->removeElement($row);
+                $this->additionalInboundsChanged = true;
             }
         }
         $now = new \DateTimeImmutable();
@@ -431,13 +444,39 @@ class Plan
         foreach ($wanted as $key => $inbound) {
             ++$order;
             if (isset($kept[$key])) {
+                $this->additionalInboundsChanged = $this->additionalInboundsChanged || $kept[$key]->getSortOrder() !== $order;
                 $kept[$key]->setSortOrder($order);
             } else {
                 $this->additionalInbounds->add(new PlanAdditionalInbound($this, $inbound, $order, $now));
+                $this->addedAdditionalInbounds[] = $inbound;
+                $this->additionalInboundsChanged = true;
             }
         }
 
         return $this;
+    }
+
+    /** Whether this request changed the additional inbounds (added, removed or reordered). */
+    public function additionalInboundsChanged(): bool
+    {
+        return $this->additionalInboundsChanged;
+    }
+
+    /**
+     * The additional inbounds this request added (the rules for a newly chosen inbound are stricter than for a kept one:
+     * a kept one may have become inactive since, which is a warning).
+     *
+     * @return list<VpnInbound>
+     */
+    public function addedAdditionalInbounds(): array
+    {
+        return array_values($this->addedAdditionalInbounds);
+    }
+
+    /** Whether this request set another primary inbound. */
+    public function primaryInboundChanged(): bool
+    {
+        return $this->primaryInboundChanged;
     }
 
     /**
