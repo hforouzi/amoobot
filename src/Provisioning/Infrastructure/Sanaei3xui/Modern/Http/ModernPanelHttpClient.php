@@ -71,10 +71,12 @@ class ModernPanelHttpClient
     /**
      * @param array<string, scalar> $query
      * @param array<mixed>|null     $json
+     * @param bool                  $recordHealth false: a failure is not counted on the panel (the scheduled retry of
+     *                                            additional inbounds, M2b: a bulk run, as for the GETs)
      */
-    public function post(VpnPanel $panel, string $path, ?array $json = null, array $query = []): PanelResponse
+    public function post(VpnPanel $panel, string $path, ?array $json = null, array $query = [], bool $recordHealth = true): PanelResponse
     {
-        return $this->request($panel, 'POST', $path, $query, $json);
+        return $this->request($panel, 'POST', $path, $query, $json, null, null, $recordHealth);
     }
 
     /**

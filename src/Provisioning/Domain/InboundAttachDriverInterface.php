@@ -22,10 +22,22 @@ interface InboundAttachDriverInterface
      * the missing ids only (one by one when the panel refuses the batch), one GET again. Never creates a client.
      *
      * @param list<VpnInbound> $inbounds
+     * @param bool             $recordHealth false: a failing call is not counted towards the panel's "degraded" state
+     *                                       (the scheduled retry, a bulk run)
      *
      * @return list<InboundAttachment> one per inbound, in the given order
      *
      * @throws \RuntimeException the client could not be read (missing on the panel, panel unreachable)
      */
-    public function attachInbounds(string $remoteId, array $inbounds, ?VpnPanel $panel = null): array;
+    public function attachInbounds(string $remoteId, array $inbounds, ?VpnPanel $panel = null, bool $recordHealth = true): array;
+
+    /**
+     * The panel ids of the inbounds the client of $remoteId is on (one GET, read only): the scheduled reconcile of the
+     * vpn_service_inbound rows with the panel (M2b).
+     *
+     * @return list<int>|null null: there is no such client on the panel
+     *
+     * @throws \RuntimeException the panel could not be read, or did not list the client's inbounds
+     */
+    public function clientInboundIds(string $remoteId, ?VpnPanel $panel = null, bool $recordHealth = true): ?array;
 }

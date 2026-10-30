@@ -43,6 +43,9 @@ final class Version20261101090000 extends AbstractMigration
      */
     public function down(Schema $schema): void
     {
+        // M2b added columns to vpn_service_inbound: dropping the table first would leave M2b recorded without them.
+        $m2b = false !== $this->connection->fetchOne("SELECT 1 FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'vpn_service_inbound' AND COLUMN_NAME = 'next_attempt_at'");
+        $this->abortIf($m2b, 'Roll back Version20261102090000 (retry schedule of additional inbounds) first. Nothing was changed.');
         $plans = (int) $this->connection->fetchOne('SELECT COUNT(*) FROM plan_additional_inbound');
         $this->abortIf($plans > 0, sprintf('Irreversible: %d additional plan inbound(s) exist; dropping plan_additional_inbound would lose which inbounds those plans sell. Remove the additional inbounds from the plans first. Nothing was changed.', $plans));
         $services = (int) $this->connection->fetchOne('SELECT COUNT(*) FROM vpn_service_inbound');

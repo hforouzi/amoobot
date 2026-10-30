@@ -76,6 +76,9 @@ final class SettingsAdministration
     /** The plans form's fields (web only) and the setting each one writes. */
     public const PLANS_KEYS = [
         'plans_multi_inbound_enabled' => MultiInboundSettings::ENABLED,
+        'plans_attach_retry_enabled' => MultiInboundSettings::ATTACH_RETRY_ENABLED,
+        'plans_attach_max_attempts' => MultiInboundSettings::ATTACH_MAX_ATTEMPTS,
+        'plans_attach_retry_delay_minutes' => MultiInboundSettings::ATTACH_RETRY_DELAY_MINUTES,
     ];
 
     public function __construct(
@@ -92,22 +95,54 @@ final class SettingsAdministration
     }
 
     /**
-     * @return array<string, bool>
+     * @return array{plans_multi_inbound_enabled: bool, plans_attach_retry_enabled: bool, plans_attach_max_attempts: int, plans_attach_retry_delay_minutes: int}
      */
     public function plansValues(): array
     {
-        return ['plans_multi_inbound_enabled' => $this->multiInboundSettings->enabled()];
+        return [
+            'plans_multi_inbound_enabled' => $this->multiInboundSettings->enabled(),
+            'plans_attach_retry_enabled' => $this->multiInboundSettings->attachRetryEnabled(),
+            'plans_attach_max_attempts' => $this->multiInboundSettings->maxAttempts(),
+            'plans_attach_retry_delay_minutes' => $this->multiInboundSettings->retryDelayMinutes(),
+        ];
     }
 
     /**
-     * Saved and flushed (a checkbox: never a problem).
-     *
      * @param array<string, mixed> $form
+     *
+     * @return array{field: string, message: string}|null
      */
-    public function savePlans(array $form): void
+    public function plansProblem(array $form): ?array
     {
+        $attempts = self::text($form, 'plans_attach_max_attempts', (string) MultiInboundSettings::DEFAULT_MAX_ATTEMPTS);
+        $delay = self::text($form, 'plans_attach_retry_delay_minutes', (string) MultiInboundSettings::DEFAULT_RETRY_DELAY_MINUTES);
+
+        return match (true) {
+            1 !== preg_match('/^\d{1,3}$/D', $attempts) || (int) $attempts < 1 || (int) $attempts > MultiInboundSettings::MAX_MAX_ATTEMPTS => ['field' => 'plans_attach_max_attempts', 'message' => 'flash.settings.plans_attach_max_attempts'],
+            1 !== preg_match('/^\d{1,4}$/D', $delay) || (int) $delay < 1 || (int) $delay > MultiInboundSettings::MAX_RETRY_DELAY_MINUTES => ['field' => 'plans_attach_retry_delay_minutes', 'message' => 'flash.settings.plans_attach_retry_delay'],
+            default => null,
+        };
+    }
+
+    /**
+     * @param array<string, mixed> $form
+     *
+     * @return array{field: string, message: string}|null the first problem (nothing saved), or null: saved and flushed
+     */
+    public function savePlans(array $form): ?array
+    {
+        $problem = $this->plansProblem($form);
+        if (null !== $problem) {
+            return $problem;
+        }
+
         $this->set(MultiInboundSettings::ENABLED, self::checked($form, 'plans_multi_inbound_enabled'), 'boolean');
+        $this->set(MultiInboundSettings::ATTACH_RETRY_ENABLED, self::checked($form, 'plans_attach_retry_enabled'), 'boolean');
+        $this->set(MultiInboundSettings::ATTACH_MAX_ATTEMPTS, (string) (int) self::text($form, 'plans_attach_max_attempts', ''), 'number');
+        $this->set(MultiInboundSettings::ATTACH_RETRY_DELAY_MINUTES, (string) (int) self::text($form, 'plans_attach_retry_delay_minutes', ''), 'number');
         $this->entityManager->flush();
+
+        return null;
     }
 
     /**
