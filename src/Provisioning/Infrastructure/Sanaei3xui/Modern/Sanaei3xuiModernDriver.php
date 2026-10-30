@@ -141,7 +141,7 @@ final class Sanaei3xuiModernDriver implements VpnPanelDriverInterface, ExistingC
 
             return $this->createdService($panel, $inbound, (string) $remoteInboundId, $created, $attachments);
         }
-        if (isset($created['inboundIds']) && !in_array($remoteInboundId, $created['inboundIds'], true)) {
+        if (is_array($created['inboundIds'] ?? null) && !in_array($remoteInboundId, $created['inboundIds'], true)) {
             $this->api->attach($panel, $email, [$remoteInboundId]);
         }
 
@@ -184,7 +184,7 @@ final class Sanaei3xuiModernDriver implements VpnPanelDriverInterface, ExistingC
             [$client, $attachments] = $this->attachMissing($panel, $client, $remoteInboundId, $additional, true, $this->inlineDeadline());
         } elseif ([] !== $additional) {
             $attachments = self::attachments($client, $additional, [], 'not attached: the client was adopted by its name only (use "Retry attach")');
-        } elseif (AdoptedVpnService::MATCHED_BY_UUID === $matchedBy && isset($client['inboundIds']) && !in_array($remoteInboundId, $client['inboundIds'], true)) {
+        } elseif (AdoptedVpnService::MATCHED_BY_UUID === $matchedBy && is_array($client['inboundIds'] ?? null) && !in_array($remoteInboundId, $client['inboundIds'], true)) {
             $this->api->attach($panel, (string) $client['email'], [$remoteInboundId]);
         }
 
@@ -264,7 +264,7 @@ final class Sanaei3xuiModernDriver implements VpnPanelDriverInterface, ExistingC
         $email = (string) $client['email'];
         $wanted = [...(null === $primaryRemoteId ? [] : [$primaryRemoteId]), ...array_keys($additional)];
         // A client whose answer lists no inbounds: attach all of them (attaching an attached one is harmless).
-        $missing = isset($client['inboundIds']) ? array_values(array_diff($wanted, $client['inboundIds'])) : $wanted;
+        $missing = is_array($client['inboundIds'] ?? null) ? array_values(array_diff($wanted, $client['inboundIds'])) : $wanted;
         $errors = [];
         if ([] !== $missing) {
             $errors = $this->attachIds($panel, $email, $missing, $recordHealth, $deadline);
@@ -288,7 +288,7 @@ final class Sanaei3xuiModernDriver implements VpnPanelDriverInterface, ExistingC
             }
             $client = $read;
         }
-        if (null !== $primaryRemoteId && isset($client['inboundIds']) && !in_array($primaryRemoteId, $client['inboundIds'], true)) {
+        if (null !== $primaryRemoteId && is_array($client['inboundIds'] ?? null) && !in_array($primaryRemoteId, $client['inboundIds'], true)) {
             throw new \RuntimeException(sprintf('The panel did not attach client "%s" to the plan\'s inbound %d%s', $email, $primaryRemoteId, isset($errors[$primaryRemoteId]) ? ': '.$errors[$primaryRemoteId] : '.'));
         }
 
