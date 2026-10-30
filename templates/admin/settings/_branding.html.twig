@@ -1,0 +1,54 @@
+{# Settings page, "branding" tab: name, logo and accent colour of customer-facing pages (templates/public/layout.html.twig). #}
+{% trans_default_domain 'admin' %}
+{% set storage = 'App\\Branding\\BrandLogoStorage' %}
+    <p class="admin-page-subtitle">{{ 'branding_settings.subtitle'|trans }}</p>
+
+    <form method="post" action="{{ path('admin_settings', {tab: 'branding'}) }}" enctype="multipart/form-data" class="admin-form-card admin-settings-form">
+        <input type="hidden" name="_token" value="{{ csrf_token(csrf) }}">
+        <div class="admin-section">
+            <h2>{{ 'branding_settings.sections.identity'|trans }}</h2>
+            <div class="admin-form-grid">
+                <div class="admin-form-row">
+                    <label class="form-label" for="brand_name">{{ 'branding_settings.fields.name'|trans }}</label>
+                    <input class="form-control" type="text" id="brand_name" name="brand_name" maxlength="{{ constant('App\\Branding\\BrandingSettings::NAME_MAX') }}" dir="auto" autocomplete="off" value="{{ values.brand_name }}">
+                    <div class="form-text">{{ 'branding_settings.help.name'|trans }}</div>
+                </div>
+                <div class="admin-form-row">
+                    <label class="form-label" for="brand_accent_color">{{ 'branding_settings.fields.accent_color'|trans }}</label>
+                    <div class="admin-brand-colour">
+                        <span class="admin-brand-swatch" style="background: {{ values.brand_accent_color }}" aria-hidden="true"></span>
+                        <input class="form-control" type="text" id="brand_accent_color" name="brand_accent_color" dir="ltr" maxlength="7" pattern="#[0-9a-fA-F]{6}" placeholder="{{ constant('App\\Branding\\Branding::DEFAULT_ACCENT') }}" autocomplete="off" value="{{ values.brand_accent_color }}">
+                    </div>
+                    <div class="form-text">{{ 'branding_settings.help.accent_color'|trans }}</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="admin-section">
+            <h2>{{ 'branding_settings.sections.logo'|trans }}</h2>
+            {% if values.brand_logo %}
+                <p class="form-label">{{ 'branding_settings.fields.current_logo'|trans }}</p>
+                <div class="admin-brand-logo"><img src="{{ path('brand_logo', {name: values.brand_logo}) }}" alt="{{ 'branding_settings.fields.current_logo'|trans }}"></div>
+            {% else %}
+                <p class="form-text">{{ 'branding_settings.fields.no_logo'|trans }}</p>
+            {% endif %}
+            <div class="admin-form-row">
+                <label class="form-label" for="brand_logo">{{ 'branding_settings.fields.logo'|trans }}</label>
+                <input class="form-control" type="file" id="brand_logo" name="brand_logo" accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp">
+                <div class="form-text">{{ 'branding_settings.help.logo'|trans({'%max%': constant(storage ~ '::MAX_BYTES') // 1024, '%min%': constant(storage ~ '::MIN_SIDE'), '%side%': constant(storage ~ '::MAX_SIDE')}) }}</div>
+            </div>
+        </div>
+
+        <div class="admin-actions">
+            <button type="submit" class="btn btn-primary">{{ 'common.save'|trans }}</button>
+        </div>
+    </form>
+
+    {% if values.brand_logo %}
+        <form method="post" action="{{ path('admin_settings_branding_remove_logo') }}" class="admin-form-card admin-settings-form">
+            <input type="hidden" name="_token" value="{{ csrf_token(csrf) }}">
+            <div class="admin-actions">
+                <button type="submit" class="btn btn-danger">{{ 'branding_settings.fields.remove_logo'|trans }}</button>
+            </div>
+        </form>
+    {% endif %}

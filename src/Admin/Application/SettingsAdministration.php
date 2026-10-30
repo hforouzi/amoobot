@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace App\Admin\Application;
 
+use App\Branding\BrandingSettings;
+use App\Branding\BrandLogoRejected;
+use App\Branding\BrandLogoStorage;
 use App\Entity\Setting;
 use App\Provisioning\Application\AutomationSettingsProvider;
 use App\Provisioning\Application\RenewalSettingsProvider;
@@ -15,13 +18,14 @@ use App\Shop\Application\MultiInboundSettings;
 use App\Shop\Application\SalesSettingsProvider;
 use App\Wallet\Application\WalletSettings;
 use Doctrine\ORM\EntityManagerInterface;
+use Symfony\Component\HttpFoundation\File\UploadedFile;
 
 /**
  * The settings page's forms (SETTINGS_MANAGE), for the web settings tabs and the Mini App settings: "sales &
  * pricing" (sales switches, the sales-closed message, renewal pricing, traffic add-on), "automation" (automation
  * switches, batch limit, incomplete-order expiry), "wallet" (wallet switches, top-up range and quick amounts) and "resellers"
- * (the reseller switch, the wholesale floor and rounding). Only these keys are read or written here; nothing secret is among
- * them. Input is a form's fields by the web form's names, a checkbox being on when its field is present.
+ * (the reseller switch, the wholesale floor and rounding); on the web only, "plans" and "branding" (brand name, logo and
+ * accent colour of customer-facing pages). Only these keys are read or written here; nothing secret is among them. Input is a form's fields by the web form's names, a checkbox being on when its field is present.
  * A refused form saves nothing and names the first problem: the field and its message key (admin domain), in the
  * order the web page checks them. The caller audits.
  */
@@ -91,7 +95,103 @@ final class SettingsAdministration
         private readonly WalletSettings $walletSettings,
         private readonly ResellerSettings $resellerSettings,
         private readonly MultiInboundSettings $multiInboundSettings,
+        private readonly BrandingSettings $brandingSettings,
+        private readonly BrandLogoStorage $logoStorage,
     ) {
+    }
+
+    /**
+     * The branding form's current values: '' for a name that is not set, the default accent when none is set.
+     *
+     * @return array{brand_name: string, brand_accent_color: string, brand_logo: string|null}
+     */
+    public function brandingValues(): array
+    {
+        $branding = $this->brandingSettings->current();
+
+        return [
+            'brand_name' => $branding->name ?? '',
+            'brand_accent_color' => $branding->accentColor,
+            'brand_logo' => $branding->logo,
+        ];
+    }
+
+    /**
+     * The name and colour exactly as sent (nothing trimmed): empty unsets them; otherwise the name follows PlainText
+     * and the colour is #rrggbb.
+     *
+     * @param array<string, mixed> $form
+     *
+     * @return array{field: string, message: string}|null
+     */
+    public function brandingProblem(array $form): ?array
+    {
+        $name = $form['brand_name'] ?? '';
+        $accent = $form['brand_accent_color'] ?? '';
+        $nameProblem = !is_string($name) ? 'characters' : ('' === $name ? null : BrandingSettings::nameProblem($name));
+
+        return match (true) {
+            null !== $nameProblem => ['field' => 'brand_name', 'message' => 'flash.settings.brand_name.'.$nameProblem],
+            !is_string($accent) || ('' !== $accent && 1 !== preg_match(BrandingSettings::ACCENT_PATTERN, $accent)) => ['field' => 'brand_accent_color', 'message' => 'flash.settings.brand_accent'],
+            default => null,
+        };
+    }
+
+    /**
+     * Saves the name and colour and, when a file is sent, replaces the logo: the new file is checked and stored first
+     * (a refused file saves nothing), the old file is deleted once the new name is saved.
+     *
+     * @param array<string, mixed> $form
+     *
+     * @return array{field: string, message: string, parameters?: array<string, string>}|null the first problem (nothing saved), or null: saved and flushed
+     */
+    public function saveBranding(array $form, ?UploadedFile $logo): ?array
+    {
+        $problem = $this->brandingProblem($form);
+        if (null !== $problem) {
+            return $problem;
+        }
+        $stored = null;
+        if (null !== $logo) {
+            try {
+                $stored = $this->logoStorage->store($logo);
+            } catch (BrandLogoRejected $e) {
+                return ['field' => 'brand_logo', 'message' => $e->getMessage(), 'parameters' => $e->parameters];
+            }
+        }
+        $previous = $this->brandingSettings->current()->logo;
+
+        try {
+            $this->set(BrandingSettings::NAME, (string) ($form['brand_name'] ?? ''), 'text');
+            $this->set(BrandingSettings::ACCENT, (string) ($form['brand_accent_color'] ?? ''), 'text');
+            if (null !== $stored) {
+                $this->set(BrandingSettings::LOGO, $stored->storedName, 'text');
+            }
+            $this->entityManager->flush();
+        } catch (\Throwable $e) {
+            $this->logoStorage->delete($stored?->storedName);
+
+            throw $e;
+        } finally {
+            $this->brandingSettings->reset();
+        }
+        if (null !== $stored && $previous !== $stored->storedName) {
+            $this->logoStorage->delete($previous);
+        }
+
+        return null;
+    }
+
+    /** Removes the logo (its setting, then its file); the stored name it had, or null when there was none. */
+    public function removeLogo(): ?string
+    {
+        $previous = $this->brandingSettings->current()->logo;
+        $this->set(BrandingSettings::LOGO, '', 'text');
+        $this->entityManager->flush();
+        $this->brandingSettings->reset();
+        $this->logoStorage->delete($previous);
+
+        return $previous;
     }
 
     /**

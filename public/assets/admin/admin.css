@@ -693,6 +693,36 @@ html[dir="rtl"] .content-panel {
     margin-top: 1.25rem;
 }
 
+/* Settings, "branding" tab: the accent swatch beside its field and the current logo on a checkerboard (transparency). */
+.admin-brand-colour {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+}
+
+.admin-brand-swatch {
+    flex: 0 0 auto;
+    width: 2.25rem;
+    height: 2.25rem;
+    border-radius: 8px;
+    border: 1px solid rgba(15, 23, 42, .15);
+}
+
+.admin-brand-logo {
+    display: inline-block;
+    padding: .75rem;
+    margin-bottom: 1rem;
+    border-radius: 12px;
+    border: 1px solid rgba(15, 23, 42, .1);
+    background: repeating-conic-gradient(rgba(15, 23, 42, .06) 0% 25%, transparent 0% 50%) 0 0 / 16px 16px;
+}
+
+.admin-brand-logo img {
+    display: block;
+    max-width: 160px;
+    max-height: 96px;
+}
+
 html[dir="rtl"] .admin-actions {
     justify-content: flex-start;
 }

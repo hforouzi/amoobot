@@ -493,6 +493,7 @@ settings_page:
     wallet: Wallet
     resellers: Resellers
     plans: Plans
+    branding: Branding
     channels: Required channels
     advanced: Advanced
   channels_intro: Channels a customer must join before buying or claiming a trial.
@@ -970,6 +971,13 @@ flash:
   settings.reseller_floor: "The floor must be a percent between 0 and 100, with at most two decimals."
   settings.reseller_rounding: "The rounding must be a whole number of Toman between 1 and 1,000,000."
   settings.reseller_claim_ttl: "The claim link lifetime must be a whole number of hours between 1 and 720."
+  settings.branding_saved: "Branding saved."
+  settings.brand_logo_removed: "Logo removed."
+  settings.brand_name.too_long: "The brand name can have at most 60 characters."
+  settings.brand_name.spaces: "The brand name cannot start or end with a space or a line break."
+  settings.brand_name.control: "The brand name contains an invisible or control character (such as a direction mark or a line break). Type it again without it."
+  settings.brand_name.characters: "The brand name contains characters that are not allowed."
+  settings.brand_accent: "The accent colour must be a hex colour such as #166534, or empty for the default."
   bulk_price.invalid: "The form values are not valid."
   bulk_price.positive: "The value must be a positive number."
   bulk_price.confirm: "Tick the final confirmation to apply."
@@ -1231,6 +1239,35 @@ plan_settings:
     attach_retry_enabled: "When an additional inbound could not be attached to a service's client, the scheduled job tries again and checks the panel every 6 hours (an inbound removed by hand is attached again). Runs only with the switch above on. \"Retry attach\" on the service page works either way."
     attach_max_attempts: "In all, the attempt at the sale included (1 to 100). Then the job stops and the admins are told; \"Retry attach\" still works."
     attach_retry_delay_minutes: "Doubled after each failed attempt, at most 6 hours (1 to 1440)."
+
+branding_settings:
+  subtitle: "The name, logo and colour customers see on the payment result pages. Nothing is required: without them the pages show no header and use the default green."
+  sections:
+    identity: Brand
+    logo: Logo
+  fields:
+    name: Brand name
+    accent_color: Accent colour
+    logo: Upload a logo
+    current_logo: Current logo
+    no_logo: "No logo: the brand name is shown instead (or nothing when it is empty too)."
+    remove_logo: Remove logo
+  help:
+    name: "Shown in the page header when there is no logo, and in the browser tab. At most 60 characters, exactly as typed: no space at either end, no invisible or control characters. Leave empty for none."
+    accent_color: "The colour of the main button and the top bar, as #rrggbb (for example #166534, the default). Leave empty for the default. The button text turns dark on a light colour so it stays readable."
+    logo: "PNG, JPEG or WebP, at most %max% KB, %min% to %side% pixels per side. A square PNG of about 256×256 with a transparent background works best. The image is re-saved without its metadata; choosing a new file replaces the old one."
+
+branding:
+  logo:
+    failed: "The upload did not complete (at most %max% KB). Try again."
+    extension: "Only these file types are accepted: %allowed%. SVG is not accepted."
+    empty: "The file is empty."
+    too_large: "The logo is larger than %max% KB."
+    content_type: "The file content is not a PNG, JPEG or WebP image matching its extension (%allowed%)."
+    incomplete: "The image file is incomplete or has extra data after the image. Save it again and upload the new file."
+    decode: "The image could not be read. Save it again as PNG and upload the new file."
+    dimensions: "The logo must be between %min% and %max% pixels on each side."
+    unsupported: "This server cannot process %type% images; upload a PNG instead."
 
 claim_admin:
   title: Claim links
