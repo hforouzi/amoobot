@@ -26,6 +26,7 @@ final class SecretRedactorAccessTest extends TestCase
         yield 'masked hint stays' => ['uuid="••••5555" sub_id=raw', 'uuid="••••5555" sub_id="[redacted]"'];
         yield 'flag names untouched' => ['sub_id_present=yes', 'sub_id_present=yes'];
         yield 'query parameters' => ['failed with params ["s1", 2]: SQLSTATE', 'failed with params [[redacted]]: SQLSTATE'];
+        yield 'telegram id in a client email' => ['clients/get/tg_7712345678_order_42 and xtg_1_order_2', 'clients/get/tg_[redacted]_order_42 and xtg_1_order_2'];
         yield 'duplicate entry' => ["Duplicate entry 's1' for key 'uniq'", "Duplicate entry '[redacted]' for key 'uniq'"];
     }
 

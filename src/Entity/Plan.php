@@ -7,6 +7,7 @@ namespace App\Entity;
 use Doctrine\Common\Collections\ArrayCollection;
 use Doctrine\Common\Collections\Collection;
 use App\Shop\Application\Catalog\PlanInbounds;
+use App\Shop\Domain\MultiInboundSale;
 use Doctrine\ORM\Mapping as ORM;
 use Symfony\Component\Validator\Constraints as Assert;
 use Symfony\Component\Validator\Context\ExecutionContextInterface;
@@ -207,17 +208,15 @@ class Plan
     }
 
     /**
-     * Shown and sold to customers: active, and its inbound and panel usable (a degraded panel hides its plans).
+     * Shown and sold to customers: active, its inbound and panel usable (a degraded panel hides its plans), and for a
+     * plan with additional inbounds the multi-inbound rule (multiInboundSaleBlocker()). Callers pass
+     * plans.multi_inbound_enabled through PlanSaleRule; without it such a plan is not sold (fail closed).
      *
-     * A plan with additional inbounds is never sold yet (fail closed, phase M1): provisioning attaches the primary only,
-     * so a customer would get fewer servers than the plan promises. This holds whatever plans.multi_inbound_enabled says.
+     * @param bool|\Closure(): bool $multiInboundEnabled
      */
-    public function isAvailableForSale(): bool
+    public function isAvailableForSale(bool|\Closure $multiInboundEnabled = false): bool
     {
-        if (!$this->isActive) {
-            return false;
-        }
-        if ($this->hasAdditionalInbounds()) {
+        if (!$this->isActive || null !== $this->multiInboundSaleBlocker($multiInboundEnabled)) {
             return false;
         }
         if (null === $this->inbound) {
@@ -225,6 +224,21 @@ class Plan
         }
 
         return $this->inbound->isActive() && $this->inbound->getPanel()->isAvailableForSale();
+    }
+
+    /**
+     * Why this plan's additional inbounds keep it from being sold (MultiInboundSale::blocker()), or null; always null
+     * for a plan without additional inbounds.
+     *
+     * @param bool|\Closure(): bool $multiInboundEnabled
+     */
+    public function multiInboundSaleBlocker(bool|\Closure $multiInboundEnabled): ?string
+    {
+        if (!$this->hasAdditionalInbounds()) {
+            return null;
+        }
+
+        return MultiInboundSale::blocker($this->inbound, $this->getAdditionalInbounds(), $multiInboundEnabled);
     }
 
     public function setIsActive(bool $isActive): self

@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 /*
  * Test helper: one bot text message (e.g. "/start claim_...") in its own PHP process, as a second delivery of the same
- * Telegram update would be handled. Usage: php bot-message.php <telegramId> <updateId> <text> [startAtUnixMicrotime]
+ * Telegram update would be handled. Usage: php bot-message.php <telegramId> <updateId> <text> [startAt (bin/start-at.php)]
  */
 
 use App\Bot\Application\TelegramUpdateHandler;
@@ -12,10 +12,8 @@ use App\Bot\Application\TelegramUpdateHandler;
 [$container] = require __DIR__.'/boot-test-kernel.php';
 
 $telegramId = (int) ($argv[1] ?? 0);
-$wait = (float) ($argv[4] ?? 0) - microtime(true);
-if ($wait > 0) {
-    usleep((int) ($wait * 1_000_000));
-}
+require_once __DIR__.'/start-at.php';
+waitForStartAt((string) ($argv[4] ?? '0'));
 $container->get(TelegramUpdateHandler::class)->handle([
     'update_id' => (int) ($argv[2] ?? 1),
     'message' => [

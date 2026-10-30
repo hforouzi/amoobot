@@ -10,6 +10,7 @@ use App\Entity\VpnInbound;
 use App\Entity\VpnServiceInbound;
 use App\Shop\Application\Checkout\PlanCatalog;
 use App\Tests\Support\IntegrationTestCase;
+use App\Tests\Support\ProgrammableVpnPanelDriver;
 use App\Tests\Support\QueryCounter;
 use Doctrine\DBAL\Exception\ForeignKeyConstraintViolationException;
 use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
@@ -17,7 +18,7 @@ use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
 /**
  * The M1 tables on MariaDB (docs/design/multi-inbound-plans.md 2.1-2.2): a row never blocks deleting its plan, its
  * service or the user it goes with (CASCADE); the inbound is RESTRICT. Plan::getInbounds() is the primary first, then the
- * additional ones by their order; a plan with any additional inbound is not sold (fail closed until provisioning
+ * additional ones by their order; a plan with any additional inbound is sold only by the M2c rule (PlanSaleRule: switch on, every inbound active on the primary's modern panel; was: fail closed until provisioning
  * supports them), and the catalog list stays one query.
  */
 final class MultiInboundSchemaTest extends IntegrationTestCase
@@ -98,20 +99,27 @@ final class MultiInboundSchemaTest extends IntegrationTestCase
         self::assertSame([$primary->getId(), $b->getId(), $c->getId()], array_map(static fn (VpnInbound $i): ?int => $i->getId(), $plan->getInbounds()));
     }
 
-    public function testAPlanWithAdditionalInboundsIsNotSoldWhateverTheSwitch(): void
+    public function testAPlanWithAdditionalInboundsIsSoldOnlyWithTheSwitchOnAndAModernPanel(): void
     {
         $single = $this->createPlan(100000, $this->inbounds(1)[0]);
         [$multi] = $this->planWithAdditional();
-        foreach (['0', '1'] as $switch) {
-            $this->em->getConnection()->executeStatement('DELETE FROM setting WHERE key_name = ?', ['plans.multi_inbound_enabled']);
-            $this->em->getConnection()->insert('setting', ['key_name' => 'plans.multi_inbound_enabled', 'value' => $switch, 'type' => 'boolean', 'created_at' => '2026-01-01 00:00:00']);
+        $panelId = (int) $multi->getInbound()?->getPanel()->getId();
+        foreach ([['0', false, false], ['1', false, false], ['0', true, false], ['1', true, true]] as [$switch, $modern, $sold]) {
+            $db = $this->em->getConnection();
+            $db->executeStatement('DELETE FROM setting WHERE key_name = ?', ['plans.multi_inbound_enabled']);
+            $db->insert('setting', ['key_name' => 'plans.multi_inbound_enabled', 'value' => $switch, 'type' => 'boolean', 'created_at' => '2026-01-01 00:00:00']);
+            $modern
+                ? $db->executeStatement("UPDATE vpn_panel SET type = 'sanaei_3xui', sanaei_integration_mode = 'modern' WHERE id = ?", [$panelId])
+                : $db->executeStatement('UPDATE vpn_panel SET type = ? WHERE id = ?', [ProgrammableVpnPanelDriver::TYPE, $panelId]);
             $this->em->clear();
             $catalog = self::getContainer()->get(PlanCatalog::class);
+            $label = sprintf('switch %s, %s panel', $switch, $modern ? 'modern' : 'non-3x-ui');
 
-            self::assertSame([$single->getId()], array_map(static fn (Plan $p): ?int => $p->getId(), $catalog->forSale()), 'switch '.$switch);
-            self::assertNull($catalog->findForSale((int) $multi->getId()));
-            self::assertNotNull($catalog->findForSale((int) $single->getId()));
+            self::assertSame($sold ? [$single->getId(), $multi->getId()] : [$single->getId()], array_map(static fn (Plan $p): ?int => $p->getId(), $catalog->forSale()), $label);
+            self::assertSame($sold, null !== $catalog->findForSale((int) $multi->getId()), $label);
+            self::assertNotNull($catalog->findForSale((int) $single->getId()), $label);
         }
+        self::assertFalse($this->em->find(Plan::class, $multi->getId())?->isAvailableForSale(), 'without the switch passed (no PlanSaleRule): fail closed');
     }
 
     public function testTheCatalogListIsStillOneQuery(): void

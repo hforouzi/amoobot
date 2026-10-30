@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Entity;
 
+use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http\SecretRedactor;
 use Doctrine\ORM\Mapping as ORM;
 
 /**
@@ -77,6 +78,13 @@ class VpnServiceInbound
 
     #[ORM\Column(nullable: true)]
     private ?\DateTimeImmutable $alertedAt = null;
+
+    /** Re-attach cycles (removed on the panel, then attached again) since reattachSince, M2c F7; never reset by an attempt. */
+    #[ORM\Column(type: 'smallint', options: ['default' => 0])]
+    private int $reattachCount = 0;
+
+    #[ORM\Column(nullable: true)]
+    private ?\DateTimeImmutable $reattachSince = null;
 
     public function __construct(VpnService $service, VpnInbound $inbound, \DateTimeImmutable $now)
     {
@@ -152,6 +160,16 @@ class VpnServiceInbound
         return $this->alertedAt;
     }
 
+    public function getReattachCount(): int
+    {
+        return $this->reattachCount;
+    }
+
+    public function getReattachSince(): ?\DateTimeImmutable
+    {
+        return $this->reattachSince;
+    }
+
     /**
      * One attach attempt (at the sale): attached, or failed with a reason that is safe to show (ServiceErrorText). An
      * attached row keeps its first attachedAt. A failed one keeps its nextAttemptAt (NULL: the scheduled retry tries it
@@ -161,9 +179,26 @@ class VpnServiceInbound
     {
         ++$this->attempts;
         $this->status = $attached ? self::STATUS_ATTACHED : self::STATUS_FAILED;
-        $this->lastError = $attached || null === $error ? null : mb_substr($error, 0, 255);
+        $this->lastError = $attached || null === $error ? null : self::safeError($error);
         $this->attachedAt = $attached ? ($this->attachedAt ?? $now) : $this->attachedAt;
         $this->nextAttemptAt = $attached ? null : $this->nextAttemptAt;
+        $this->updatedAt = $now;
+
+        return $this;
+    }
+
+    /**
+     * The outcome at the sale is not known (M2c F2: the panel could not be read back after the attach; F5: the attach
+     * was not tried within the time budget): pending, with why; an attempt is counted only when the attach was sent. The
+     * scheduled run takes a pending row over once its claim is stale (ServiceInboundAttacher::STALE_CLAIM) and either
+     * finds it attached on the panel or attaches it.
+     */
+    public function recordPending(string $why, bool $tried, \DateTimeImmutable $now): self
+    {
+        $this->attempts += $tried ? 1 : 0;
+        $this->status = self::STATUS_PENDING;
+        $this->lastError = self::safeError($why);
+        $this->nextAttemptAt = null;
         $this->updatedAt = $now;
 
         return $this;
@@ -177,5 +212,14 @@ class VpnServiceInbound
         $this->updatedAt = $now;
 
         return $this;
+    }
+
+    /**
+     * What last_error may hold (M2c F9): a panel message can quote the client's email (tg_<telegram id>_order_<id>),
+     * so the customer's Telegram id and any access credential are masked before it is stored.
+     */
+    public static function safeError(string $error): string
+    {
+        return mb_substr(SecretRedactor::maskAccess($error), 0, 255);
     }
 }

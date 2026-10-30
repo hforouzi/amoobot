@@ -8,6 +8,9 @@
 #   OK        last success within the allowed age (3 x interval + timeout)
 #   STALE     last success too long ago (repeated failures, skips or a stopped timer)
 #   NEVER     no successful run recorded yet
+#   NEW       no successful run yet, but the job was installed (<job>.installed, written by deploy.sh the first time
+#             it installs the job) less than its max age ago: its first run is still due. A warning, not a problem, so
+#             a full deploy that adds a job does not fail its own post-deploy check.
 #   INACTIVE  the timer is not active (e.g. a failed deploy left the jobs paused)
 #   FAILED    the latest run failed (systemd unit in "failed" state), even if an older success is still recent
 # Plus the nightly database backup (newest *_nightly_*.sql.gz younger than 26 h) when the backup dir is readable.
@@ -54,6 +57,7 @@ row() { printf '%-9s %-16s %-13s %-9s %s\n' "$@"; }
 row STATUS JOB LAST-SUCCESS MAX-AGE NOTES
 total=0
 problems=0
+new=0
 while read -r job max_age schedule _; do
   [[ -z "${job:-}" || "$job" == \#* ]] && continue
   if [[ ! "$job" =~ ^[a-z0-9-]+$ || ! "${max_age:-}" =~ ^[0-9]+$ ]]; then
@@ -72,6 +76,12 @@ while read -r job max_age schedule _; do
   else
     last="-"
     status="NEVER"
+    if [[ -e "$STATE_DIR/$job.installed" ]]; then
+      since=$((now - $(stat -c %Y "$STATE_DIR/$job.installed")))
+      if (( since <= max_age )); then
+        status="NEW"; notes+=("installed $(human "$since") ago, first run pending")
+      fi
+    fi
   fi
   if [[ -r "$STATE_DIR/$job.last-run" ]]; then
     rc_last="$(grep -oE 'rc=[0-9]+' "$STATE_DIR/$job.last-run" | head -1)"
@@ -92,7 +102,8 @@ while read -r job max_age schedule _; do
   if [[ "$deploy_state" == running && "$status" =~ ^(STALE|NEVER|INACTIVE)$ ]]; then
     status="PAUSED"; notes+=("deploy in progress")
   fi
-  [[ "$status" == "OK" || "$status" == "PAUSED" ]] || problems=$((problems + 1))
+  [[ "$status" == "NEW" ]] && new=$((new + 1))
+  [[ "$status" =~ ^(OK|PAUSED|NEW)$ ]] || problems=$((problems + 1))
   row "$status" "$job" "$last" "$(human "$max_age")" "$(IFS=';'; echo "${notes[*]}" | sed 's/;/; /g')"
 done < "$MANIFEST"
 
@@ -141,6 +152,10 @@ echo
 if (( problems )); then
   echo "CRITICAL: ${problems} of ${total} jobs need attention."
   exit 2
+fi
+if (( new )); then
+  echo "OK: no problems; ${new} of ${total} jobs newly installed, first run pending (WARN: NEW)."
+  exit 0
 fi
 echo "OK: all ${total} jobs ran successfully within their allowed age."
 exit 0

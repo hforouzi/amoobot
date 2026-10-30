@@ -102,7 +102,7 @@ final class PlanAdminPagesTest extends IntegrationTestCase
         self::assertTrue($this->client->getResponse()->isRedirect(), $this->excerpt());
         self::assertSame([(int) $this->trojan->getId(), (int) $this->vmess->getId()], array_map('intval', $this->em->getConnection()->fetchFirstColumn('SELECT inbound_id FROM plan_additional_inbound ORDER BY sort_order')), 'in the order chosen');
         $this->client->followRedirect();
-        self::assertMatchesRegularExpression('/not sold|فروخته نمی‌شود/u', $this->flashes(), 'the admin is told the plan is not sold yet');
+        self::assertDoesNotMatchRegularExpression('/not sold|فروخته نمی‌شود/u', $this->flashes(), 'switch on, modern panel, every inbound active: sold, so no "not sold" warning');
     }
 
     /**
@@ -153,7 +153,7 @@ final class PlanAdminPagesTest extends IntegrationTestCase
 
         $this->countQueries('/admin/plan');
         $content = (string) $this->client->getResponse()->getContent();
-        self::assertStringContainsString('data-not-sold', $content);
+        self::assertStringContainsString('data-not-sold="inactive_inbound"', $content, 'the reason');
         self::assertStringContainsString('data-inactive-inbound', $content);
         $this->countQueries('/admin/vpn-inbound');
         $content = (string) $this->client->getResponse()->getContent();

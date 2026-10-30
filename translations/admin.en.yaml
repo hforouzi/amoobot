@@ -1198,16 +1198,20 @@ reseller_settings:
 
 plan_inbounds:
   count: "%count%"
-  not_sold_badge: "not sold yet"
+  not_sold_badge: "not sold"
+  not_sold:
+    switched_off: "Not sold: plans with several inbounds are switched off (Settings → Plans)."
+    no_primary: "Not sold: the plan has no primary inbound."
+    inactive_inbound: "Not sold: one of its inbounds is inactive."
+    other_panel: "Not sold: its inbounds are not all on the primary inbound's panel."
+    not_modern: "Not sold: the panel is not a 3x-ui panel in modern mode (Panels → test connection)."
   inactive_badge: "%count% inactive"
   role:
     primary: "primary"
     additional: "additional"
   none: "—"
   warning:
-    not_sold: "This plan has additional inbounds: it takes effect when provisioning support ships. Until then the plan is not sold, so no customer buys servers that are not delivered."
     inactive: "%inbound% became inactive since it was chosen."
-    not_modern: "The panel is not in modern mode: several inbounds need it (Panels → test connection)."
     mixed: "Protocols %protocols% together: run the real-panel check (design 7.3) before relying on this mix."
 
 service_inbounds:

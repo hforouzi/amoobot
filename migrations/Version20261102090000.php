@@ -33,6 +33,9 @@ final class Version20261102090000 extends AbstractMigration
 
     public function down(Schema $schema): void
     {
+        // M2c added columns to vpn_service_inbound too: M1's down() would otherwise drop the table under it.
+        $m2c = false !== $this->connection->fetchOne("SELECT 1 FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'vpn_service_inbound' AND COLUMN_NAME = 'reattach_count'");
+        $this->abortIf($m2c, 'Roll back Version20261103090000 (re-attach cycles of additional inbounds) first. Nothing was changed.');
         $this->addSql('DROP INDEX idx_vpn_service_inbound_due ON vpn_service_inbound');
         $this->addSql('ALTER TABLE vpn_service_inbound DROP next_attempt_at, DROP checked_at, DROP alert_state, DROP alerted_at');
     }

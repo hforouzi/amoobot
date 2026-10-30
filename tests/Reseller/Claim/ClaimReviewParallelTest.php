@@ -11,6 +11,7 @@ use App\Shop\Domain\OrderStatus;
 use App\Shop\Domain\OrderType;
 use App\Tests\Support\ClaimFixtures;
 use App\Tests\Support\IntegrationTestCase;
+use App\Tests\Support\ParallelStart;
 use App\Tests\Support\SubprocessAssertions;
 use App\Wallet\Application\WalletReconciler;
 use Doctrine\DBAL\DriverManager;
@@ -33,6 +34,7 @@ use Symfony\Component\Process\Process;
 final class ClaimReviewParallelTest extends IntegrationTestCase
 {
     use ClaimFixtures;
+    use ParallelStart;
     use SubprocessAssertions;
 
     private const ROUNDS = 25;
@@ -73,7 +75,7 @@ final class ClaimReviewParallelTest extends IntegrationTestCase
         }
         $file = (string) tempnam(sys_get_temp_dir(), 'claim-rounds');
         file_put_contents($file, json_encode($rounds, JSON_THROW_ON_ERROR));
-        $t0 = sprintf('%.6F', microtime(true) + 5.0);
+        $t0 = $this->startAt();
 
         try {
             [$claims, $returns] = $this->runInParallel([
@@ -148,7 +150,7 @@ final class ClaimReviewParallelTest extends IntegrationTestCase
 
         [$reset, $return] = $this->runInParallel([
             ['claim-reset.php', '8701', (string) $this->sold->getId(), $nonce, $at],
-            ['claim-return.php', (string) $this->sold->getId(), sprintf('%.6F', (float) $at + 0.5)],
+            ['claim-return.php', (string) $this->sold->getId(), $this->startAt(0.5)],
         ], ['TEST_PANEL_ROTATE_DELAY_MS' => '2000']);
 
         // The return waited for the reset (the service row): the rotation happened while the claimer owned it.
@@ -170,7 +172,7 @@ final class ClaimReviewParallelTest extends IntegrationTestCase
 
         [$return, $reset] = $this->runInParallel([
             ['claim-return.php', (string) $this->sold->getId(), $at],
-            ['claim-reset.php', '8701', (string) $this->sold->getId(), $nonce, sprintf('%.6F', (float) $at + 0.05)],
+            ['claim-reset.php', '8701', (string) $this->sold->getId(), $nonce, $this->startAt(0.05)],
         ], ['TEST_PANEL_ROTATE_DELAY_MS' => '2000']);
 
         self::assertSame('returned', $return);
@@ -204,13 +206,14 @@ final class ClaimReviewParallelTest extends IntegrationTestCase
         $settlement = DriverManager::getConnection($this->em->getConnection()->getParams());
         $settlement->beginTransaction();
         $settlement->executeStatement('UPDATE `order` SET status = ? WHERE id = ?', [OrderStatus::PAID, $renewal->getId()]);
-        $at = microtime(true) + 4.0;
-        $process = $this->start(['claim-accept.php', (string) $preview->claimId, $preview->ticket, '8701', sprintf('%.6F', $at)]);
+        $process = $this->start(['claim-accept.php', (string) $preview->claimId, $preview->ticket, '8701', $this->startAt()]);
+        $at = $this->releaseStart([$process]) ?? self::fail('no start');
         // Commit the settlement step 1.5 s after the claim started.
         usleep((int) max(0, ($at + 1.5 - microtime(true)) * 1_000_000));
         $settlement->commit();
         $settlement->close();
         $outcome = $this->finish($process, 'claim-accept.php');
+        $this->removeStart();
         $tookAtLeast = microtime(true) - $at;
 
         self::assertSame('service_busy', $outcome);
@@ -244,12 +247,6 @@ final class ClaimReviewParallelTest extends IntegrationTestCase
         return self::getContainer()->get(ServiceOwnership::class)->resetNonce($service);
     }
 
-    /** Both processes start their work at this instant (after their kernels booted). */
-    private function startAt(): string
-    {
-        return sprintf('%.6F', microtime(true) + 4.0);
-    }
-
     /**
      * @param list<list<string>>    $commands script name and arguments, each in its own process
      * @param array<string, string> $env
@@ -262,10 +259,12 @@ final class ClaimReviewParallelTest extends IntegrationTestCase
         foreach ($commands as $arguments) {
             $processes[] = [$arguments[0], $this->start($arguments, $env)];
         }
+        $this->releaseStart(array_column($processes, 1));
         $outcomes = [];
         foreach ($processes as [$script, $process]) {
             $outcomes[] = $this->finish($process, $script);
         }
+        $this->removeStart(); // only now: a process reads the start once it is set
         $this->em->clear();
 
         return $outcomes;

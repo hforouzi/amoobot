@@ -240,7 +240,12 @@ check_jobs() {
   local out rc
   [[ -r "$CHECK_JOBS" ]] || { fail scheduled-jobs "${CHECK_JOBS} not found"; return; }
   out="$(bash "$CHECK_JOBS" 2>&1)"; rc=$?
-  if (( rc == 0 )); then pass scheduled-jobs "all timers active, last runs succeeded ($(tail -1 <<< "$out"))"
+  if (( rc == 0 )); then
+    pass scheduled-jobs "all timers active, last runs succeeded ($(tail -1 <<< "$out"))"
+    # Installed by this deploy and not run yet: a warning, not a failure (NEVER after one max age).
+    if grep -q '^NEW ' <<< "$out"; then
+      info scheduled-jobs "WARNING: first run pending: $(grep -E '^NEW ' <<< "$out" | awk '{print $2}' | tr '\n' ' ')"
+    fi
   else fail scheduled-jobs "check-scheduled-jobs exit ${rc}: $(grep -E '^(STALE|NEVER|FAILED|INACTIVE|DEPLOY|PAUSED|UNKNOWN)' <<< "$out" | awk '{print $1" "$2}' | tr '\n' ' ')"; fi
 }
 

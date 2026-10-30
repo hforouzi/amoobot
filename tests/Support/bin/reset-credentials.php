@@ -5,7 +5,7 @@ declare(strict_types=1);
 /*
  * Test helper: the database step of a credential reset (ServiceOwnership::resetConnectionLinks after the panel call),
  * in its own PHP process: locks the vpn_service row by primary key, writes the new client UUID, subId, remote id and
- * the new credentials' links, creates <lockedFile>, keeps the lock for <holdMs>, commits.
+ * the new credentials' links, creates <lockedFile>, keeps the lock (holdMs > 0: at least <holdMs> and until a writer waits for it, at most 60 s), commits.
  * Usage: php reset-credentials.php <serviceId> <newUuid> <newSubId> <holdMs> <lockedFile>. Prints "reset".
  */
 
@@ -26,6 +26,13 @@ $connection->executeStatement(
     [$newUuid, $newSubId, $parser->format($ref->panelId, $ref->localInboundId, $ref->inboundId, $newUuid, $ref->email, $newSubId), json_encode($links), implode("\n", $links), (int) $serviceId],
 );
 touch($locked);
-usleep(1000 * (int) $holdMs);
+if ((int) $holdMs > 0) {
+    // Held at least $holdMs, and until another transaction is seen waiting for a lock (the writer this test is about),
+    // at most 60 s: the wait is proven, not assumed from a fixed sleep.
+    $from = microtime(true);
+    while (microtime(true) - $from < 60 && (microtime(true) - $from < (int) $holdMs / 1000 || 0 === (int) $connection->fetchOne("SELECT COUNT(*) FROM information_schema.INNODB_TRX WHERE trx_state = 'LOCK WAIT'"))) {
+        usleep(25_000);
+    }
+}
 $connection->commit();
 echo 'reset';

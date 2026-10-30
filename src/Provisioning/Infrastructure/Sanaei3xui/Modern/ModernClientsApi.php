@@ -421,7 +421,9 @@ class ModernClientsApi
     /**
      * Accepts a bare client row or {client: {...}, inboundIds: [...]}. The UUID ends up in "id" (as in the add body):
      * list rows carry the database row id in "id" and the UUID in "uuid", so a "uuid" wins and the row id is kept as
-     * the read-only "dbId". Casts the numeric fields the bot relies on.
+     * the read-only "dbId". Casts the numeric fields the bot relies on. "inboundIds" is always a list of ints or absent
+     * (M2c F11): a list keeps its numeric entries, a number or a "1,2" / "[1,2]" string becomes the ids it names, and
+     * anything else (null, an object, other text) is dropped, read as "the panel does not list them".
      *
      * @param array<mixed> $raw
      *
@@ -444,11 +446,34 @@ class ModernClientsApi
         if (isset($client['enable'])) {
             $client['enable'] = (bool) $client['enable'];
         }
-        if (isset($client['inboundIds']) && is_array($client['inboundIds'])) {
-            $client['inboundIds'] = array_values(array_map('intval', array_filter($client['inboundIds'], 'is_numeric')));
+        if (array_key_exists('inboundIds', $client)) {
+            $ids = self::inboundIdsOf($client['inboundIds']);
+            if (null === $ids) {
+                unset($client['inboundIds']);
+            } else {
+                $client['inboundIds'] = $ids;
+            }
         }
 
         return $client;
+    }
+
+    /**
+     * @return list<int>|null null: not a list of inbound ids
+     */
+    private static function inboundIdsOf(mixed $value): ?array
+    {
+        if (is_array($value)) {
+            return array_values(array_map('intval', array_filter($value, 'is_numeric')));
+        }
+        if (is_int($value)) {
+            return [$value];
+        }
+        if (is_string($value) && 1 === preg_match('/^\s*\[?\s*(\d+(?:\s*,\s*\d+)*)?\s*\]?\s*$/', $value, $m)) {
+            return array_map('intval', preg_split('/\s*,\s*/', $m[1] ?? '', -1, PREG_SPLIT_NO_EMPTY) ?: []);
+        }
+
+        return null;
     }
 
     /**

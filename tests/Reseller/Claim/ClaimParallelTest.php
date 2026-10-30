@@ -7,6 +7,7 @@ namespace App\Tests\Reseller\Claim;
 use App\Reseller\Domain\ClaimStatus;
 use App\Tests\Support\ClaimFixtures;
 use App\Tests\Support\IntegrationTestCase;
+use App\Tests\Support\ParallelStart;
 use App\Tests\Support\SubprocessAssertions;
 use App\Wallet\Application\WalletReconciler;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -26,6 +27,7 @@ use Symfony\Component\Process\Process;
 final class ClaimParallelTest extends IntegrationTestCase
 {
     use ClaimFixtures;
+    use ParallelStart;
     use SubprocessAssertions;
 
     protected function setUp(): void
@@ -98,13 +100,14 @@ final class ClaimParallelTest extends IntegrationTestCase
         $token = $this->makeLink()->token;
         $preview = $this->claims()->preview($token, $this->claimer('8701'), '8701');
         $at = $this->startAt();
-        // The link expires at the very second both start.
-        $this->em->getConnection()->executeStatement('UPDATE service_claim SET expires_at = ?', [(new \DateTimeImmutable('@'.(int) ceil((float) $at)))->setTimezone(new \DateTimeZone(date_default_timezone_get()))->format('Y-m-d H:i:s')]);
 
         [$claim, $expired] = $this->runInParallel([
             ['claim-accept.php', (string) $preview->claimId, $preview->ticket, '8701', $at],
             ['claims-expire.php', $at],
-        ]);
+        ], [], function (float $start): void {
+            // The link expires at the very second both start.
+            $this->em->getConnection()->executeStatement('UPDATE service_claim SET expires_at = ?', [(new \DateTimeImmutable('@'.(int) ceil($start)))->setTimezone(new \DateTimeZone(date_default_timezone_get()))->format('Y-m-d H:i:s')]);
+        });
 
         self::assertContains($claim, ['claimed', 'claim_unavailable']);
         self::assertContains($expired, ['0', '1']);
@@ -123,7 +126,7 @@ final class ClaimParallelTest extends IntegrationTestCase
         $token = $this->makeLink()->token;
         $preview = $this->claims()->preview($token, $this->claimer('8701'), '8701');
         $at = $this->startAt();
-        $claimAt = sprintf('%.6F', (float) $at + 0.6);
+        $claimAt = $this->startAt(0.6);
 
         [$renewal, $claim] = $this->runInParallel([
             ['reseller-renew.php', (string) $this->user->getId(), (string) $this->sold->getId(), $at],
@@ -205,19 +208,14 @@ final class ClaimParallelTest extends IntegrationTestCase
         self::assertSame(['balances' => [], 'payments' => []], self::getContainer()->get(WalletReconciler::class)->report());
     }
 
-    /** Both processes start their work at this instant (after their kernels booted). */
-    private function startAt(): string
-    {
-        return sprintf('%.6F', microtime(true) + 4.0);
-    }
-
     /**
      * @param list<list<string>>    $commands script name and arguments, each in its own process
-     * @param array<string, string> $env
+     * @param array<string, string>    $env
+     * @param (\Closure(float): void)|null $atStart runs once the start instant is set, before it
      *
      * @return list<string> what each printed, in the same order
      */
-    private function runInParallel(array $commands, array $env = []): array
+    private function runInParallel(array $commands, array $env = [], ?\Closure $atStart = null): array
     {
         $this->em->getProxyFactory()->generateProxyClasses($this->em->getMetadataFactory()->getAllMetadata());
         $php = (new PhpExecutableFinder())->find(false) ?: 'php';
@@ -229,6 +227,10 @@ final class ClaimParallelTest extends IntegrationTestCase
             $process->start();
             $processes[] = [$script, $process];
         }
+        $start = $this->releaseStart(array_column($processes, 1));
+        if (null !== $start && null !== $atStart) {
+            $atStart($start);
+        }
         $outcomes = [];
         foreach ($processes as [$script, $process]) {
             try {
@@ -239,6 +241,7 @@ final class ClaimParallelTest extends IntegrationTestCase
             }
             $outcomes[] = self::assertSubprocessClean($process, $script);
         }
+        $this->removeStart(); // only now: a process reads the start once it is set
         $this->em->clear();
 
         return $outcomes;

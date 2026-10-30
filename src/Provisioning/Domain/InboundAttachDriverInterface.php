@@ -16,6 +16,10 @@ use App\Provisioning\Domain\Dto\InboundAttachment;
 interface InboundAttachDriverInterface
 {
     public const MODERN_PANEL_REQUIRED = 'Several inbounds need the panel in modern mode (Panels → test connection).';
+    /** An additional inbound whose attach was sent but could not be read back (M2c F2): pending. */
+    public const NOT_CONFIRMED = 'not confirmed: the panel could not be read after the attach; the scheduled run checks it';
+    /** An additional inbound not tried at the sale (M2c F5: time budget or fallback limit used up): pending. */
+    public const NOT_TRIED = 'not tried at the sale (time limit); the scheduled run attaches it';
 
     /**
      * Attaches the existing client of $remoteId to those of $inbounds it is not on yet: one GET, one attach call with

@@ -169,7 +169,7 @@ class ModernPanelHttpClient
 
             throw $e;
         }
-        $this->logger->debug('sanaei_modern_request', ['panel_id' => $panel->getId(), 'method' => $method, 'path' => $path, 'status' => $status, 'latency_ms' => $latencyMs]);
+        $this->logger->debug('sanaei_modern_request', ['panel_id' => $panel->getId(), 'method' => $method, 'path' => SecretRedactor::maskAccess($path), 'status' => $status, 'latency_ms' => $latencyMs]);
 
         return $result;
     }
@@ -383,7 +383,7 @@ class ModernPanelHttpClient
         $this->logger->warning('sanaei_modern_request_failed', [
             'panel_id' => $panel->getId(),
             'method' => $method,
-            'path' => $path,
+            'path' => SecretRedactor::maskAccess($path), // a client email names the customer's Telegram id (M2c F9)
             'failure' => $failure->value,
             'status' => $status,
             'latency_ms' => self::elapsedMs($startedAt),

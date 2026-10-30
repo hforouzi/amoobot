@@ -14,6 +14,7 @@ use App\Payment\Domain\Money\AmountNormalizer;
 use App\Payment\Domain\PaymentStatus;
 use App\Shared\Infrastructure\TransactionRollback;
 use App\Shop\Application\Checkout\PaymentStarter;
+use App\Shop\Application\Checkout\PlanSaleRule;
 use App\Shop\Domain\OrderStatus;
 use App\Shop\Domain\OrderType;
 use App\Wallet\Domain\WalletException;
@@ -52,6 +53,7 @@ final class WalletPayment
         private readonly WalletService $wallets,
         private readonly PaymentStarter $paymentStarter,
         private readonly PaymentSettlementService $settlement,
+        private readonly PlanSaleRule $saleRule,
     ) {
     }
 
@@ -153,7 +155,7 @@ final class WalletPayment
             if (OrderStatus::WAITING_PAYMENT !== $order->getStatus() || $order->isResellerOrder() !== $resellerCheckout) {
                 throw new WalletException('order_not_payable');
             }
-            if (OrderType::NEW_SERVICE === $order->getType() && !$order->requirePlan()->isActive()) {
+            if (!$this->saleRule->acceptsPayment($order)) {
                 throw new WalletException('plan_unavailable');
             }
 

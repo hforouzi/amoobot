@@ -22,6 +22,7 @@ use App\Tests\Support\Fake3xui\Fake3xuiPanel;
 use App\Tests\Support\IntegrationTestCase;
 use Symfony\Bundle\FrameworkBundle\Console\Application;
 use Symfony\Component\Console\Tester\CommandTester;
+use Symfony\Component\HttpClient\Response\MockResponse;
 
 /**
  * The scheduled retry of additional inbounds (phase M2b, docs/design/multi-inbound-plans.md 3.2): back-off and the
@@ -191,6 +192,69 @@ final class MultiInboundScheduledAttachTest extends IntegrationTestCase
         self::assertCount(1, $this->alerts($before, InboundAttachAlerts::RECOVERED_TITLE));
     }
 
+    public function testARemoveReattachLoopStopsAfterThreeCyclesInADayWithOneAlert(): void
+    {
+        // M2c F7: something on the panel keeps removing the client from the trojan inbound.
+        $this->fake->inbounds[2] = $this->vmessOnPanel;
+        $this->due();
+        $this->scheduled();
+        self::assertSame(['attached', 'attached'], $this->statuses());
+        $before = count($this->http->telegramTexts());
+        $key = (string) array_key_first($this->fake->clients);
+
+        for ($cycle = 1; $cycle <= InboundAttachScheduler::MAX_REATTACH_CYCLES; ++$cycle) {
+            $this->fake->clients[$key]['inboundIds'] = [1, 2];
+            $this->checkedLongAgo();
+            $run = $this->scheduled();
+            self::assertSame([1, 1], [$run->foundRemoved, $run->attached], 'cycle '.$cycle.': found removed and attached again');
+            self::assertSame($cycle, (int) $this->rowsOf()[1]['reattach_count']);
+        }
+        self::assertCount($before, $this->http->telegramTexts(), 'found removed and attached again in the same run: no alert (admin guide, checklist step 11)');
+        $this->fake->requests = [];
+        $this->fake->clients[$key]['inboundIds'] = [1, 2];
+        $this->checkedLongAgo();
+
+        $run = $this->scheduled();
+
+        self::assertSame([1, 0], [$run->foundRemoved, $run->attached], 'the fourth removal in the window: not attached again');
+        self::assertSame([], $this->attachCalls());
+        $row = $this->rowsOf()[1];
+        self::assertSame(['failed', MultiInboundSettings::MAX_MAX_ATTEMPTS, InboundAttachScheduler::REATTACH_STOPPED], [$row['status'], (int) $row['attempts'], $row['last_error']]);
+        $alerts = $this->alerts($before, InboundAttachAlerts::EXHAUSTED_TITLE);
+        self::assertCount(1, $alerts);
+        self::assertStringContainsString('attached again 3 times within 24 hours', $alerts[0]);
+
+        $this->due();
+        $this->checkedLongAgo();
+        $this->scheduled();
+        self::assertSame([], $this->attachCalls(), 'nor at a later run, whatever its schedule');
+        self::assertCount(1, $this->alerts($before, InboundAttachAlerts::EXHAUSTED_TITLE), 'alerted once');
+
+        // "Retry attach" still works.
+        $this->em->clear();
+        $retry = self::getContainer()->get(\App\Provisioning\Application\ServiceInboundAttacher::class)->retry($this->em->find(VpnService::class, $this->service->getId()) ?? self::fail('service'), 'admin');
+        self::assertSame(1, $retry->attached);
+        self::assertSame(['attached', 'attached'], $this->statuses());
+    }
+
+    public function testRemovalsFurtherApartThanTheWindowAreAlwaysAttachedAgain(): void
+    {
+        $this->fake->inbounds[2] = $this->vmessOnPanel;
+        $this->due();
+        $this->scheduled();
+        $key = (string) array_key_first($this->fake->clients);
+
+        for ($cycle = 1; $cycle <= InboundAttachScheduler::MAX_REATTACH_CYCLES + 2; ++$cycle) {
+            // The previous cycle started more than a day ago.
+            $this->em->getConnection()->executeStatement("UPDATE vpn_service_inbound SET reattach_since = '2000-01-01 00:00:00' WHERE reattach_since IS NOT NULL");
+            $this->fake->clients[$key]['inboundIds'] = [1, 2];
+            $this->checkedLongAgo();
+            $run = $this->scheduled();
+            self::assertSame(1, $run->attached, 'cycle '.$cycle);
+            self::assertSame(1, (int) $this->rowsOf()[1]['reattach_count'], 'a new window each time');
+        }
+    }
+
     public function testAFailedInboundThePanelAlreadyHasIsMarkedAttachedWithoutAnAttachCall(): void
     {
         // Attached by hand in 3x-ui; the row's next attempt is still in the future.
@@ -207,6 +271,54 @@ final class MultiInboundScheduledAttachTest extends IntegrationTestCase
         self::assertNotNull($row['attached_at']);
         self::assertSame([], $this->attachCalls());
         self::assertSame(['GET panel/api/clients/get/'.$this->service->getClientEmail()], array_values(array_filter($this->fake->requestLines(), static fn (string $l): bool => str_contains($l, '/clients/get/'))));
+    }
+
+    public function testAnAnswerWithoutThePrimaryIsTreatedAsUnreadable(): void
+    {
+        // M2c F6: a glitching panel lists the client on the trojan inbound only (not on the primary it runs on).
+        $this->fake->inbounds[2] = $this->vmessOnPanel;
+        $this->due();
+        $this->checkedLongAgo();
+        // Its first-failure alert went out already (from setUp's sale); only what this answer would cause is measured.
+        $this->em->getConnection()->executeStatement("UPDATE vpn_service_inbound SET alert_state = 'failed', alerted_at = '2000-01-01 00:00:00' WHERE status = 'failed'");
+        $rows = $this->rowsOf();
+        $before = count($this->http->telegramTexts());
+        $email = (string) $this->service->getClientEmail();
+        $this->fake->script('GET', 'panel/api/clients/get/'.$email, function () use ($email): MockResponse {
+            $client = $this->fake->clients[$email];
+            $client['inboundIds'] = [$this->trojanId];
+            unset($client['dbId']);
+
+            return Fake3xuiPanel::envelope(true, $client);
+        });
+
+        $run = $this->scheduled();
+
+        self::assertSame(1, $run->panelFailures, 'counted as a panel that could not be read');
+        self::assertSame($rows, $this->rowsOf(), 'no state change and no attempt');
+        self::assertSame([], $this->attachCalls(), 'no attach either');
+        $serviceLine = 'Service ID: '.$this->service->getId();
+        self::assertSame([], array_values(array_filter(array_slice($this->http->telegramTexts(), $before), static fn (string $t): bool => str_contains($t, $serviceLine))), 'no alert');
+    }
+
+    public function testTheScheduledAttachStepNeverMarksThePanelDegraded(): void
+    {
+        // M2c F12: the panel answers the read (so the attach step runs) and then refuses every attach, many times over.
+        for ($n = 0; $n < 6; ++$n) {
+            $this->sell();
+        }
+        $this->fake->inbounds[2] = $this->vmessOnPanel;
+        $this->due();
+        $this->fake->script('POST', null, Fake3xuiPanel::networkError('Failed to connect to panel.example.test port 2053: Connection refused'), 100);
+
+        $run = $this->scheduled();
+
+        self::assertSame(0, $run->panelFailures, 'every read worked');
+        self::assertGreaterThanOrEqual(7, count($this->attachCalls()), 'the attach step ran for every service and failed');
+        $panel = $this->em->find(VpnPanel::class, (int) $this->service->getPanel()?->getId()) ?? self::fail('panel');
+        $this->em->refresh($panel);
+        self::assertFalse($panel->isDegraded());
+        self::assertSame(0, $panel->getConsecutiveFailures(), 'the scheduled attach does not count towards degraded');
     }
 
     public function testAPanelThatIsDownIsStoppedAfterFiveServicesAndNeverMarkedDegraded(): void

@@ -9,11 +9,20 @@ use App\Shop\Domain\OrderType;
 use Doctrine\ORM\Mapping as ORM;
 
 #[ORM\Entity]
+#[ORM\HasLifecycleCallbacks]
 #[ORM\Table(name: '`order`')]
 #[ORM\Index(name: 'idx_order_reseller', columns: ['reseller_id', 'status', 'created_at'])]
 #[ORM\UniqueConstraint(name: 'uniq_order_reseller_nonce', columns: ['reseller_id', 'reseller_nonce'])]
 class Order
 {
+    /**
+     * metadata key: the plan's inbounds when the order was created (docs/design/multi-inbound-plans.md 3.1, M2c):
+     * ['primary' => inbound id|null, 'additional' => [inbound ids, in order]]. planInboundSnapshot().
+     */
+    public const PLAN_INBOUNDS = 'planInbounds';
+    /** metadata key: additional inbounds of the snapshot that no longer existed at provisioning (their ids). */
+    public const PLAN_INBOUNDS_MISSING = 'planInboundsMissing';
+
     #[ORM\Id]
     #[ORM\GeneratedValue]
     #[ORM\Column]
@@ -186,8 +195,15 @@ class Order
         return $this->metadata;
     }
 
+    /**
+     * Replaces the metadata. The plan's inbound snapshot (PLAN_INBOUNDS) is kept when $metadata does not carry it: it
+     * describes what was sold and is never dropped by a caller that rewrites the other keys.
+     */
     public function setMetadata(?array $metadata): self
     {
+        if (isset($this->metadata[self::PLAN_INBOUNDS]) && !isset($metadata[self::PLAN_INBOUNDS])) {
+            $metadata = ($metadata ?? []) + [self::PLAN_INBOUNDS => $this->metadata[self::PLAN_INBOUNDS]];
+        }
         $this->metadata = $metadata;
 
         return $this;
@@ -204,6 +220,45 @@ class Order
         $this->trackingCode = '' === (string) $trackingCode ? null : $trackingCode;
 
         return $this;
+    }
+
+    /**
+     * A new-service order remembers its plan's inbounds when it is created, so a plan edited before the order is paid
+     * or provisioned does not change what this order gets (docs/design/multi-inbound-plans.md 3.1, M2c). Skipped when
+     * an id is not known yet (an inbound or plan persisted in the same flush), and for orders that have one already.
+     */
+    #[ORM\PrePersist]
+    public function snapshotPlanInbounds(): void
+    {
+        if (OrderType::NEW_SERVICE !== $this->type || null === $this->plan || isset($this->metadata[self::PLAN_INBOUNDS])) {
+            return;
+        }
+        $primary = $this->plan->getInbound();
+        $additional = array_map(static fn (VpnInbound $inbound): ?int => $inbound->getId(), $this->plan->getAdditionalInbounds());
+        if ((null !== $primary && null === $primary->getId()) || in_array(null, $additional, true)) {
+            return;
+        }
+        $this->metadata = ($this->metadata ?? []) + [self::PLAN_INBOUNDS => ['primary' => $primary?->getId(), 'additional' => $additional]];
+    }
+
+    /**
+     * The plan's inbounds when this order was created, or null for an order without a snapshot (created before M2c,
+     * or not a new service): the caller then uses the live plan.
+     *
+     * @return array{primary: ?int, additional: list<int>}|null
+     */
+    public function planInboundSnapshot(): ?array
+    {
+        $snapshot = $this->metadata[self::PLAN_INBOUNDS] ?? null;
+        if (!is_array($snapshot) || !is_array($snapshot['additional'] ?? null)) {
+            return null;
+        }
+        $primary = $snapshot['primary'] ?? null;
+
+        return [
+            'primary' => is_int($primary) && $primary > 0 ? $primary : null,
+            'additional' => array_values(array_unique(array_filter(array_map('intval', array_filter($snapshot['additional'], 'is_numeric')), static fn (int $id): bool => $id > 0))),
+        ];
     }
 
     public function isCustomOrder(): bool

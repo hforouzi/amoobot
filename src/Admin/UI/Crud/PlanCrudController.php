@@ -185,7 +185,7 @@ class PlanCrudController extends AbstractCrudController
             return;
         }
         $this->flashPriceWarnings($plan);
-        foreach (PlanInboundWarnings::of($plan) as $warning) {
+        foreach (PlanInboundWarnings::of($plan, $this->multiInbound->enabled()) as $warning) {
             $this->flash('warning', $warning['key'], $warning['parameters']);
         }
     }
@@ -258,7 +258,10 @@ class PlanCrudController extends AbstractCrudController
         if ([] === $additional) {
             return $cell;
         }
-        $cell .= ' <span class="badge badge-secondary" data-not-sold title="'.$t('plan_inbounds.warning.not_sold').'">'.$t('plan_inbounds.not_sold_badge').'</span>';
+        $blocker = $this->inboundUsage->saleBlockerOf((int) $plan->getId());
+        if (null !== $blocker) {
+            $cell .= ' <span class="badge badge-secondary" data-not-sold="'.$blocker.'" title="'.$t('plan_inbounds.not_sold.'.$blocker).'">'.$t('plan_inbounds.not_sold_badge').'</span>';
+        }
         $inactive = array_values(array_filter($additional, static fn (array $i): bool => !$i['active']));
         if ([] !== $inactive) {
             $cell .= ' <span class="badge badge-warning" data-inactive-inbound>⚠ '.$t('plan_inbounds.inactive_badge', ['%count%' => count($inactive)]).'</span>';

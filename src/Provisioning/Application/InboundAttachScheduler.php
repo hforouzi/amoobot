@@ -28,11 +28,14 @@ use Psr\Log\LoggerInterface;
  * 1. Reconcile: one read-only GET of the client's inbounds, no lock held. Then, in a short transaction (the service row
  *    locked by primary key, then its rows), only rows unchanged since they were read before the GET are written:
  *    - attached, but the client is not on that inbound any more (removed by hand on the panel): failed, attempts start
- *      again from 0, so step 2 attaches it again (the owner's decision: the plan promises every inbound);
+ *      again from 0, so step 2 attaches it again (the owner's decision: the plan promises every inbound); at most
+ *      MAX_REATTACH_CYCLES times in REATTACH_WINDOW_HOURS, then it stops (M2c F7);
  *    - failed or stale pending, but the panel already has it: attached, without counting an attempt;
  *    - the others: checked_at only.
  *    A client missing from the panel leaves the rows as they are, checked_at aside (usage sync reports the client; step
  *    2 records why). A panel that cannot be read ends the service here: nothing is written and no attempt is used up.
+ *    An answer that lists the client's inbounds without the service's primary inbound counts as unreadable (M2c F6):
+ *    no state change, no attempt, no alert for it.
  * 2. Retry: ServiceInboundAttacher::retry() in its scheduled mode: the due failed rows with attempts left, one attach
  *    call with the missing ids, back-off on failure. Its claim makes two runs at once (or a run and an admin's "Retry
  *    attach") safe: the second finds nothing to claim.
@@ -48,6 +51,17 @@ final class InboundAttachScheduler
     public const CHECK_EVERY_HOURS = 6;
     public const SOURCE = 'scheduled_attach';
     public const REMOVED_ON_PANEL = 'The client was no longer on this inbound on the panel (found by the scheduled check).';
+    /**
+     * M2c F7: an inbound removed on the panel is attached again at most MAX_REATTACH_CYCLES times within
+     * REATTACH_WINDOW_HOURS (counted per row from the first removal of the window, never reset by an attempt). The next
+     * removal in that window stops the automatic re-attach: the row is failed with REATTACH_STOPPED and its attempts set
+     * to MultiInboundSettings::MAX_MAX_ATTEMPTS (so no attempt setting retries it), and the admins get the one "attempts
+     * used up" alert. "Retry attach" still works; a removal after the window starts a new count.
+     */
+    public const MAX_REATTACH_CYCLES = 3;
+    public const REATTACH_WINDOW_HOURS = 24;
+    public const REATTACH_STOPPED = 'Removed from this inbound on the panel again and again: automatic re-attach stopped. Find out what removes it, then use "Retry attach".';
+    public const WITHOUT_PRIMARY = 'The panel listed the inbounds of the client without its primary inbound: answer not trusted.';
 
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
@@ -148,6 +162,11 @@ final class InboundAttachScheduler
         $readFailed = false;
         try {
             $onPanel = $driver->clientInboundIds((string) $service->getRemoteId(), $panel, false);
+            $primary = trim((string) $service->getInbound()?->getRemoteInboundId());
+            if (null !== $onPanel && ctype_digit($primary) && !in_array((int) $primary, $onPanel, true)) {
+                // The service runs on its primary: an answer without it is not believed (M2c F6), whatever it says.
+                throw new \RuntimeException(self::WITHOUT_PRIMARY);
+            }
             if (null === $onPanel) {
                 ++$run->clientMissing;
                 $read = 'client not on the panel';
@@ -192,17 +211,23 @@ final class InboundAttachScheduler
     /**
      * The service's rows with the panel id of their inbound as it is now (the attach step uses the same).
      *
-     * @return array<int, array{status: string, updated_at: string, remote: int|null}> row id => what was read
+     * @return array<int, array{status: string, updated_at: string, remote: int|null, reattach_count: int, reattach_since: string|null}> row id => what was read
      */
     private function rows(int $serviceId): array
     {
         $rows = [];
         foreach ($this->entityManager->getConnection()->fetchAllAssociative(
-            'SELECT r.id, r.status, r.updated_at, i.remote_inbound_id FROM vpn_service_inbound r JOIN vpn_inbound i ON i.id = r.inbound_id WHERE r.service_id = ? ORDER BY r.id',
+            'SELECT r.id, r.status, r.updated_at, r.reattach_count, r.reattach_since, i.remote_inbound_id FROM vpn_service_inbound r JOIN vpn_inbound i ON i.id = r.inbound_id WHERE r.service_id = ? ORDER BY r.id',
             [$serviceId],
         ) as $row) {
             $remote = trim((string) $row['remote_inbound_id']);
-            $rows[(int) $row['id']] = ['status' => (string) $row['status'], 'updated_at' => (string) $row['updated_at'], 'remote' => ctype_digit($remote) ? (int) $remote : null];
+            $rows[(int) $row['id']] = [
+                'status' => (string) $row['status'],
+                'updated_at' => (string) $row['updated_at'],
+                'remote' => ctype_digit($remote) ? (int) $remote : null,
+                'reattach_count' => (int) $row['reattach_count'],
+                'reattach_since' => null === $row['reattach_since'] ? null : (string) $row['reattach_since'],
+            ];
         }
 
         return $rows;
@@ -211,8 +236,8 @@ final class InboundAttachScheduler
     /**
      * Writes what the panel says to the rows still as they were read before the GET (see the class comment).
      *
-     * @param array<int, array{status: string, updated_at: string, remote: int|null}> $before
-     * @param list<int>                                                               $onPanel the client's inbounds on the panel
+     * @param array<int, array{status: string, updated_at: string, remote: int|null, reattach_count: int, reattach_since: string|null}> $before
+     * @param list<int>                                                                                                             $onPanel the client's inbounds on the panel
      *
      * @return array{string, bool} what happened (for the console); whether a row's state changed
      */
@@ -237,15 +262,24 @@ final class InboundAttachScheduler
             return ['checked', false];
         }
 
-        [$wasRemoved, $wasFound] = $this->transactional(function (Connection $db) use ($serviceId, $before, $removed, $found, $checked, $at): array {
+        $windowStart = $now->modify(sprintf('-%d hours', self::REATTACH_WINDOW_HOURS))->format('Y-m-d H:i:s');
+        $stopped = 0;
+        [$wasRemoved, $wasFound] = $this->transactional(function (Connection $db) use ($serviceId, $before, $removed, $found, $checked, $at, $windowStart, &$stopped): array {
             $db->fetchOne('SELECT id FROM vpn_service WHERE id = ? FOR UPDATE', [$serviceId]);
             $db->fetchFirstColumn('SELECT id FROM vpn_service_inbound WHERE service_id = ? ORDER BY id FOR UPDATE', [$serviceId]);
             $wasRemoved = $wasFound = 0;
             foreach ($removed as $rowId) {
-                $wasRemoved += (int) $db->executeStatement(
-                    'UPDATE vpn_service_inbound SET status = ?, attempts = 0, last_error = ?, next_attempt_at = NULL, alert_state = NULL, checked_at = ?, updated_at = ? WHERE id = ? AND status = ? AND updated_at = ?',
-                    [VpnServiceInbound::STATUS_FAILED, self::REMOVED_ON_PANEL, $at, $at, $rowId, $before[$rowId]['status'], $before[$rowId]['updated_at']],
+                $row = $before[$rowId];
+                $newWindow = null === $row['reattach_since'] || $row['reattach_since'] < $windowStart;
+                $cycles = $newWindow ? 1 : $row['reattach_count'] + 1;
+                $stop = $cycles > self::MAX_REATTACH_CYCLES;
+                $written = (int) $db->executeStatement(
+                    'UPDATE vpn_service_inbound SET status = ?, attempts = ?, last_error = ?, next_attempt_at = NULL, alert_state = NULL, checked_at = ?, updated_at = ?, reattach_count = ?, reattach_since = ?
+                     WHERE id = ? AND status = ? AND updated_at = ?',
+                    [VpnServiceInbound::STATUS_FAILED, $stop ? MultiInboundSettings::MAX_MAX_ATTEMPTS : 0, $stop ? self::REATTACH_STOPPED : self::REMOVED_ON_PANEL, $at, $at, $cycles, $newWindow ? $at : $row['reattach_since'], $rowId, $row['status'], $row['updated_at']],
                 );
+                $wasRemoved += $written;
+                $stopped += $stop ? $written : 0;
             }
             foreach ($found as $rowId) {
                 $wasFound += (int) $db->executeStatement(
@@ -260,7 +294,7 @@ final class InboundAttachScheduler
         $run->foundRemoved += $wasRemoved;
         $run->foundAttached += $wasFound;
         if ($wasRemoved + $wasFound > 0) {
-            $this->logger->warning('scheduled_inbound_attach_reconciled', ['service_id' => $serviceId, 'found_removed' => $wasRemoved, 'found_attached' => $wasFound]);
+            $this->logger->warning('scheduled_inbound_attach_reconciled', ['service_id' => $serviceId, 'found_removed' => $wasRemoved, 'found_attached' => $wasFound, 'reattach_stopped' => $stopped]);
         }
 
         return 0 === $wasRemoved + $wasFound

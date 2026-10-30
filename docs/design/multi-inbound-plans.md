@@ -712,7 +712,7 @@ No migration (M1's tables have every column).
   - never creates a client (a client gone from the panel fails the rows);
   - refused while the switch is off or the panel is not modern; after an attach the link snapshot is refreshed
     (`PanelLinkSnapshot`, its own lock rules).
-- **Sale rule** (`PlanSaleRule`, the one place that reads the switch; `Plan::isAvailableForSale()` /
+- **Sale rule** (**not built in M2a, see "M2c as built"**; `PlanSaleRule`, the one place that reads the switch; `Plan::isAvailableForSale()` /
   `multiInboundSaleBlocker()` hold the rule): a plan with additional inbounds is sold only with the switch on, every
   inbound (primary and additional) active and on the primary's panel, and that panel a 3x-ui panel in effective modern
   mode (plus the usual: plan active, panel usable). Used by `PlanCatalog` (bot, Mini App, resellers), the bot's
@@ -780,6 +780,95 @@ automatically; only ACTIVE services. Admin guide: [admin-guide.md, "Scheduled re
 - **Not in M2b:** a marker in the customer service lists (optional, left out: lists unchanged), the Mini App admin
   service view, "apply to existing services", the Mini App plan field, detach.
 - **Not tested against a real panel:** the fake 3x-ui only; checklist step 11 is the real-panel test of reconcile.
+
+#### M2c as built
+
+Branch `fix/multi-inbound-m2c`: the corrective phase after the independent review of M1, M2a and M2b (findings F1 to
+F14). Admin guide: [admin-guide.md, "Plans with several inbounds"](../en/admin-guide.md#plans-with-several-inbounds-preview),
+with the real-panel checklist rewritten. Migration `Version20261103090000` (additive).
+
+- **Correction to "M2a as built".** The sale rule (`PlanSaleRule`) and the checks at payment start, wallet payment,
+  draft confirmation and the catalog described above were **never committed** in M2a: the files were written in the
+  M2a session, moved aside to repair a container-compile baseline, and never restored after a context compaction; the
+  docs were committed as if they were built. Until M2c only M1's fail-closed check in `Plan::isAvailableForSale()`
+  existed (no sale of such a plan at all). Process rule since: before reporting anything as built, `git status` is
+  clean, every new file is committed, and the pushed head is checked out into a clean directory and tested there.
+- **Sale rule (F1).** `MultiInboundSale::blocker()` (domain, one decider: switched_off, no_primary, inactive_inbound,
+  other_panel, not_modern) behind `Plan::isAvailableForSale($switch)` / `multiInboundSaleBlocker()`, and
+  `PlanSaleRule` (the one service that reads the switch, memoized per request): `isSellable` / `sellable` for the
+  catalog (`PlanCatalog`: bot plan list and choice, the bot's card-payment step, Mini App, reseller offers, quotes and
+  purchases), `acceptsOrders` for draft confirmation and the bot's custom draft, `acceptsPayment(Order)` in
+  `PaymentStarter` (gateway and card) and `WalletPayment` (customers and resellers), judged on the order's snapshot (F4),
+  else the live plan. Plans without additional inbounds are unaffected. **Decided:** renewals and add-traffic are not
+  gated (they change the existing client only, so a multi-inbound service keeps renewing with the switch off); a card
+  receipt already submitted is not refused (the money may be sent; provisioning applies F3); there is no admin
+  order-creation path besides dev commands. Admin plan list: badge "not sold" with the reason (`data-not-sold`, title),
+  the save warning gives the reason.
+- **Order snapshot (F4).** `Order` (`#[PrePersist]`, new-service orders with a plan) stores
+  `metadata.planInbounds = {primary, additional[]}`; a metadata rewrite keeps it. Provisioning uses the snapshot: an
+  inbound removed from the plan after the order is still attached, one added is not. At provisioning, an additional
+  inbound of the snapshot that is inactive or on another panel is a failed row with a safe reason
+  (`ServiceInboundAttacher::OTHER_PANEL` for the latter; the retry never calls the panel for it); one **deleted** cannot
+  have a row: it is recorded in `metadata.planInboundsMissing`, logged, and the admins get one alert after the commit
+  (`InboundAttachAlerts::missingInbounds`). The primary is always delivered. Orders without a snapshot (taken before
+  M2c) use the live plan.
+- **Switch off at provisioning (F3).** With the switch off a paid order for a plan with additional inbounds gets its
+  primary on any panel type: the additional inbounds are not attempted and are recorded failed with
+  `VpnProvisioningService::SWITCHED_OFF` (no panel call, no driver check). "Retry attach" attaches them once the switch
+  is on. Switch on and a panel that cannot attach (legacy, other type): fail closed as in M2a (PROVISIONING_FAILED +
+  alert).
+- **Unconfirmed attach (F2).** When the read back after an attach fails (`GET clients/get` error), the paid order never
+  fails: if the primary was confirmed before, the additional inbounds are known-attached (on the client as read before),
+  refused (failed with the panel's reason), or **pending** (`NOT_CONFIRMED`, an attempt counted); the order is
+  provisioned. The scheduled run takes a pending row over once its claim is stale (5 min): it finds it attached on the
+  panel or attaches it. A failed read when the primary itself was among the missing ids still throws (as before).
+- **Inline budget (F5).** Under the settlement locks the driver calls the panel for the additional inbounds for at most
+  `Sanaei3xuiModernDriver::INLINE_ATTACH_BUDGET_SECONDS` = 20 s in all (checked before each call; a running call may
+  overrun by its own 10 s timeout) and at most `INLINE_MAX_SINGLE_ATTACHES` = 3 one-by-one attaches after a refused
+  batch. The rest is pending (`NOT_TRIED`, no attempt counted); out of time, the read back is skipped when the primary is
+  already confirmed. "Retry attach" and the scheduled run hold no lock and are not bounded. Constants, not settings.
+- **Reconcile (F6).** A panel answer that lists the client's inbounds **without the primary** is treated as unreadable:
+  no state change, no attempt, no alert (`InboundAttachScheduler::WITHOUT_PRIMARY`).
+- **Re-attach loops (F7).** Migration `Version20261103090000`: `vpn_service_inbound.reattach_count` (SMALLINT, 0) and
+  `reattach_since`. Each removal found by reconcile counts one cycle in a window of `REATTACH_WINDOW_HOURS` = 24 from the
+  window's first removal (a removal after the window starts a new count; attempts are reset per removal as in M2b, the
+  cycle count is not). The removal after `MAX_REATTACH_CYCLES` = 3 cycles stops it: failed, `last_error`
+  `REATTACH_STOPPED`, attempts = `MultiInboundSettings::MAX_MAX_ATTEMPTS` (no setting retries it), and one "attempts
+  used up" alert that says it kept being removed. "Retry attach" still works. M2b's `down()` refuses while this
+  migration is applied.
+- **Alerts (F8).** Unchanged mechanism. Found removed and attached again in the same run sends **nothing** (the admin
+  guide promised an alert; the guide is corrected, the code sends nothing extra); an alert goes out only when the
+  re-attach fails (failed, then recovered), on a stopped loop (one), and for snapshot inbounds deleted before
+  provisioning (one, immediate).
+- **Customer's Telegram id (F9).** `SecretRedactor::maskAccess()` masks `tg_<id>_order_<n>` as
+  `tg_[redacted]_order_<n>`; `VpnServiceInbound::safeError()` applies it to every `last_error` write (entity and the
+  attacher's SQL write), the admin service page masks again on display (rows written before M2c), the alert's error line
+  and the modern client's request log lines (`sanaei_modern_request[_failed]`, whose path holds the email) too. The
+  scheduler's read-failed log goes through `ServiceErrorText` (which ends in `redactAccess`). The service page's
+  "client email" field is left as it was (pre-existing, admin only; the user page shows the Telegram id anyway).
+- **Customer text (F10).** `ServiceInboundCounts::servers()` splits the not-connected rows into `retrying` (pending, or
+  failed with attempts left, while `plans.attach_retry_enabled` is on) and `stuck` (attempts used up, a stopped loop, or
+  the retry off). Bot (fa) and Mini App (en/fa): "N server(s) still being connected…" for the first, "N server(s) not
+  connected yet. Please contact support." for the second; never which, where or why.
+- **Malformed `inboundIds` (F11).** `ModernClientsApi::normaliseClient()` always yields a list of ints or drops the
+  field: a list keeps its numeric entries, a number or a `"1,2"` / `"[1,2]"` string becomes those ids, null / other text
+  / bool / float are "not listed". The driver checks `is_array` before every `in_array` / `array_diff`. Requests are
+  byte-identical whatever the shape (test on the single-inbound path).
+- **Tests (F12, F13).** The scheduled attach step never marks a panel degraded (test). `RegenerateResetRaceTest`:
+  the regenerate helper waits up to 120 s for "go" and fails loudly (it went on silently after 10 s, the flake), the
+  reset holds its lock until a writer is seen waiting (`INNODB_TRX`), the test polls with a deadline. The reseller claim
+  race tests start their processes at a barrier (`ParallelStart`, `bin/start-at.php`: each process says it booted, then
+  the test sets the start) instead of a fixed "now + 4 s". The multi-inbound parallel tests use order-tolerant outcomes
+  and needed no change. New real two-process tests (MariaDB): F2 (two settlements with a failing read, then the
+  scheduled run and "Retry attach" at once), F5 (the second settlement waits only for the bounded work), F4 (a plan
+  edited during provisioning), F7 (two runs count one cycle; a stop alerts once).
+- **Ops (F14).** The manifest's max age was already 3 × interval + timeout (attach-inbounds: 5700 s), so one skipped run
+  never shows STALE (now pinned by a test). New: `deploy.sh` stamps `<job>.installed` the first time it installs a job;
+  `check-scheduled-jobs.sh` reports a job with no success yet but installed within its max age as **NEW** (a warning,
+  exit 0), NEVER after that, FAILED if its first run failed; `post-deploy-check` passes with an INFO warning naming
+  them. Applies to every job.
+- **Not tested against a real panel:** all of the above runs against the fake 3x-ui; the admin guide's checklist
+  (rewritten for F1 to F4) is the real-panel test.
 
 ### 9.8 Open questions and risks (Hosts)
 
