@@ -11,6 +11,7 @@ use App\Provisioning\Application\TrafficAddonSettingsProvider;
 use App\Reseller\Application\ResellerAdministration;
 use App\Reseller\Application\ResellerSettings;
 use App\Shop\Application\IncompleteOrderSettingsProvider;
+use App\Shop\Application\MultiInboundSettings;
 use App\Shop\Application\SalesSettingsProvider;
 use App\Wallet\Application\WalletSettings;
 use Doctrine\ORM\EntityManagerInterface;
@@ -72,6 +73,11 @@ final class SettingsAdministration
         'reseller_claim_ttl_hours' => ResellerSettings::CLAIM_TTL_HOURS,
     ];
 
+    /** The plans form's fields (web only) and the setting each one writes. */
+    public const PLANS_KEYS = [
+        'plans_multi_inbound_enabled' => MultiInboundSettings::ENABLED,
+    ];
+
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
         private readonly RenewalSettingsProvider $renewalSettingsProvider,
@@ -81,7 +87,29 @@ final class SettingsAdministration
         private readonly SalesSettingsProvider $salesSettingsProvider,
         private readonly WalletSettings $walletSettings,
         private readonly ResellerSettings $resellerSettings,
+        private readonly MultiInboundSettings $multiInboundSettings,
     ) {
+    }
+
+    /**
+     * @return array<string, bool>
+     */
+    public function plansValues(): array
+    {
+        return ['plans_multi_inbound_enabled' => $this->multiInboundSettings->enabled()];
+    }
+
+    /**
+     * @param array<string, mixed> $form
+     *
+     * @return array{field: string, message: string}|null never a problem (a checkbox); saved and flushed
+     */
+    public function savePlans(array $form): ?array
+    {
+        $this->set(MultiInboundSettings::ENABLED, self::checked($form, 'plans_multi_inbound_enabled'), 'boolean');
+        $this->entityManager->flush();
+
+        return null;
     }
 
     /**

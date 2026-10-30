@@ -314,11 +314,11 @@ final class AdminConsolidationTest extends IntegrationTestCase
         $this->em->flush();
 
         $this->client->loginUser($this->admin(AdminUser::ROLE_SUPER_ADMIN), 'main');
-        foreach (['sales', 'automation', 'wallet', 'resellers', 'channels', 'advanced'] as $tab) {
+        foreach (['sales', 'automation', 'wallet', 'resellers', 'plans', 'channels', 'advanced'] as $tab) {
             $crawler = $this->client->request('GET', '/admin/settings?tab='.$tab);
             self::assertSame(200, $this->client->getResponse()->getStatusCode(), $tab);
             self::assertSame($tab, $crawler->filter('.admin-tabs a.active')->attr('data-tab'), $tab);
-            self::assertCount(6, $crawler->filter('.admin-tabs a'));
+            self::assertCount(7, $crawler->filter('.admin-tabs a'));
         }
         $crawler = $this->client->request('GET', '/admin/settings');
         self::assertSame('sales', $crawler->filter('.admin-tabs a.active')->attr('data-tab'));

@@ -290,6 +290,8 @@ final class SuperAdminGatingTest extends IntegrationTestCase
             ['POST', '/admin/settings?tab=sales', []],
             ['POST', '/admin/settings?tab=automation', []],
             ['GET', '/admin/settings?tab=advanced', []],
+            ['GET', '/admin/settings?tab=plans', []],
+            ['POST', '/admin/settings?tab=plans', []],
             ['POST', '/admin/store-payment-method/'.$this->ids[StorePaymentMethodCrudController::class].'/move/up', []],
             ['POST', '/admin/store-payment-method/'.$this->ids[StorePaymentMethodCrudController::class].'/toggle', []],
         ];
