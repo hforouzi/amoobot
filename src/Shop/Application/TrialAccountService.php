@@ -10,6 +10,7 @@ use App\Entity\TelegramAccount;
 use App\Entity\TrialClaim;
 use App\Entity\TrialPlan;
 use App\Provisioning\Application\VpnProvisioningService;
+use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http\SecretRedactor;
 use App\Shop\Domain\OrderStatus;
 use App\Shop\Domain\OrderType;
 use Doctrine\ORM\EntityManagerInterface;
@@ -73,7 +74,7 @@ final class TrialAccountService
         } catch (\Throwable $e) {
             $claim
                 ->setStatus(TrialClaim::STATUS_FAILED)
-                ->setFailureReason($e->getMessage());
+                ->setFailureReason(SecretRedactor::redactAccess($e->getMessage(), 1000));
             $order->setStatus(OrderStatus::FAILED);
             $this->entityManager->flush();
 
