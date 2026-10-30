@@ -732,6 +732,55 @@ No migration (M1's tables have every column).
 - **Not tested against a real panel:** everything above runs against the fake 3x-ui; the checklist in the admin guide
   (7.3) is the real-panel test.
 
+#### M2b as built
+
+Branch `feat/multi-inbound-m2b`. Owner's decisions: additive migration; the customer's primary server line stays as it
+was, plus "Servers: N" and a neutral line; an inbound found removed on the panel becomes failed and is retried
+automatically; only ACTIVE services. Admin guide: [admin-guide.md, "Scheduled retry and alerts"](../en/admin-guide.md#scheduled-retry-and-alerts).
+
+- **Migration `Version20261102090000`** (additive): `vpn_service_inbound.next_attempt_at`, `checked_at`, `alert_state`,
+  `alerted_at`, index (`status`, `next_attempt_at`). Nothing backfilled: a failed row with `next_attempt_at` NULL is due
+  at once. M1's `down()` now refuses while this migration is applied.
+- **Settings** (plans tab): `plans.attach_retry_enabled` (true), `plans.attach_max_attempts` (12, 1–100, the sale's
+  attempt included), `plans.attach_retry_delay_minutes` (5, 1–1440). Back-off after the n-th failure: the delay × 2^(n-1),
+  capped at max(delay, 6 h); none once the attempts are used up (computed as `attempts >= max`, so raising the limit
+  re-enables a row).
+- **`InboundAttachScheduler`** (`app:services:attach-inbounds [--limit --batch-size --pause --dry-run]`,
+  `app:automation:run --only=attach-inbounds`): nothing at all while `plans.multi_inbound_enabled` is off; with
+  `plans.attach_retry_enabled` off only the alerts are sent. ACTIVE services with a due row (failed with attempts left
+  and due, pending with a stale claim, attached/failed not compared for 6 h), in id order, in batches with a pause:
+  - **reconcile**: one `GET clients/get/{email}` with no lock held; then a short transaction (service row by primary key,
+    then its rows, `FOR UPDATE`) writes only rows unchanged since they were read: attached but not on the panel →
+    failed, attempts 0, `last_error` "no longer on this inbound", alert state cleared (**fixes the M2a limit**: removed
+    by hand in 3x-ui); failed or stale pending already on the panel → attached, no attempt counted; the rest
+    `checked_at` only. A client missing from the panel leaves the rows (checked_at aside);
+  - **retry**: `ServiceInboundAttacher::retry($service, 'scheduled_attach', scheduled: true)`: claims only the due
+    failed rows with attempts left (plus stale pending), the same claim/write rules as M2a, `next_attempt_at` from the
+    back-off; manual "Retry attach" ignores back-off and limit;
+  - a panel that cannot be read ends that service (no write, no attempt used); after 5 in a row the panel is skipped
+    for the rest of the run, other panels go on. No call of the run counts towards a panel's degraded state (as H0
+    bulk runs). Two runs at once (or a run and "Retry attach") are safe: the conditional writes and the claim leave the
+    loser nothing to do (real two-process test).
+- **Alerts** (`InboundAttachAlerts`, the stuck-payment mechanism: a conditional UPDATE of `alert_state` claims each row,
+  then `AdminAccessPolicy::telegramRecipients(SERVICES_MANAGE)` + `TelegramApiClient`): one message per service and
+  kind: failed for the first time, attempts used up, attached again (recovery). Nothing is claimed while no admin chat
+  exists. The text names ids and titles and quotes the stored safe error with the client email masked.
+- **Scheduling:** `deploy.sh` job `attach-inbounds|lifecycle|*:25/30|300|1800` (lifecycle: it attaches the client and
+  refreshes its links, which must not overlap sync/suspend of the same client; :25/:55 is free); allowlist and ops
+  tests updated (eight jobs); `scheduled-job.sh`, `amoobot-check-jobs` and `post-deploy-check` handle it from the
+  manifest like the others; logs in `/var/log/amoobot`. Installed only by a full deploy, not `--app-only`.
+- **Visibility** (`ServiceInboundCounts`, all null/empty with the switch off): bot service detail and Mini App service
+  page "Servers: N" (+ "N server(s) still being connected…") only for a service with rows, nothing else changes; admin
+  services list badge and tab "Inbounds not attached" (`?inbounds=not_connected`, one query per page); service page:
+  next automatic try, "retries used up" or "retry off"; panel detail page and `app:panel:doctor` count failed /
+  given up / pending rows of active services. Reseller views show no service links and are unchanged (D5).
+- **(a) Adopt by name:** not new in M2a. Before M2a `VpnProvisioningService` already adopted a client matched by its
+  generated name (and refused a customer-chosen name), and the driver attached inbounds only on a UUID match. M2a keeps
+  both rules; such rows are failed and now retried by the scheduled job.
+- **Not in M2b:** a marker in the customer service lists (optional, left out: lists unchanged), the Mini App admin
+  service view, "apply to existing services", the Mini App plan field, detach.
+- **Not tested against a real panel:** the fake 3x-ui only; checklist step 11 is the real-panel test of reconcile.
+
 ### 9.8 Open questions and risks (Hosts)
 
 Open questions, each with the recommended default:

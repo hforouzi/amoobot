@@ -48,9 +48,11 @@ Toggleهای پنل ادمین (`automation.*`) احترام می‌گذارد. 
 | `suspend` (تعلیق خودکار) | `app:automation:run --only=suspend` | هر ۱۵ دقیقه، بعد از expiry | `:08 :23 :38 :53` | **خاموش** (اختیاری) |
 | `notifications` (اعلان انقضا و ترافیک) | `app:automation:run --only=notifications` | هر ۳۰ دقیقه | `:10 :40` | روشن |
 | `claims` (منقضی کردن لینک‌های واگذاری، تلاش دوباره برای به‌روزرسانی پنل) | `app:automation:run --only=claims` | هر ۱۵ دقیقه | `:13 :28 :43 :58` | بدون Toggle (فقط مرتب‌سازی؛ وقتی لینکی نیست کاری نمی‌کند) |
+| `attach-inbounds` (تلاش دوباره برای اینباندهای اضافهٔ وصل‌نشده، مقایسه با پنل، هشدار به مدیران) | `app:automation:run --only=attach-inbounds` | هر ۳۰ دقیقه | `:25 :55` | `plans.multi_inbound_enabled` (پیش‌فرض خاموش) و `plans.attach_retry_enabled` (پیش‌فرض روشن) |
 
 - ترتیب sync ← expiry ← suspend عمدی است: انقضا و تعلیق روی داده‌ی تازه‌ی مصرف تصمیم می‌گیرند.
 - `claims` هم در گروه قفل `lifecycle` است: به‌روزرسانی مالک کلاینت در پنل، مثل sync/expiry/suspend، کل ردیف کلاینت را بازنویسی می‌کند و دو نوشتن هم‌زمان می‌توانند تغییر یکدیگر را برگردانند. اگر کار دیگری از این گروه هنوز در حال اجرا باشد، `claims` تا ۱۲۰ ثانیه صبر می‌کند و در غیر این صورت این نوبت را رد می‌کند (نوبت بعدی ۱۵ دقیقه بعد).
+- `attach-inbounds` هم در گروه `lifecycle` است: کلاینت را به اینباندها وصل می‌کند و لینک‌هایش را تازه می‌کند و نباید با sync یا suspend همان کلاینت هم‌زمان شود. تا کلید «چند اینباند» خاموش است هیچ چیزی نمی‌خواند و تغییر نمی‌دهد. تایمر آن را فقط اجرای **کامل** `deploy.sh` نصب می‌کند (نه `--app-only`). جزئیات: [راهنمای مدیر](admin-guide.md).
 - اعلان‌ها تکراری ارسال نمی‌شوند (کلید یکتای `service_id + type + key` در `service_notification_log`)، پس اجرای مکرر بی‌خطر است.
 - `suspend` فقط وقتی کاری انجام می‌دهد که ادمین «تعلیق خودکار» را در تنظیمات روشن کرده باشد. پیش‌فرض خاموش است و زمان‌بندی آن را روشن نمی‌کند.
 
@@ -60,6 +62,7 @@ Toggleهای پنل ادمین (`automation.*`) احترام می‌گذارد. 
 |---|---|
 | `app:payments:repair-stuck` | تعمیر پرداخت‌ها تصمیم انسانی می‌خواهد (`--apply` وضعیت پرداخت را تغییر می‌دهد) |
 | `app:claims:expire` | همان کار `--only=claims`؛ فقط برای اجرای دستی |
+| `app:services:attach-inbounds` | همان کار `--only=attach-inbounds` با گزارش هر سرویس (`--dry-run` فقط می‌شمارد)؛ برای اجرای دستی |
 | `app:service:sync-usage`، `app:service:check-expiry`، `app:service:send-notifications`، `app:orders:expire-incomplete`، `app:broadcast:run` | همان کارهای `automation:run` هستند ولی Toggleهای پنل را نادیده می‌گیرند. فقط برای اجرای دستی |
 | `app:broadcast:send` / `prepare` / `retry-failed` | برای یک broadcast مشخص (آرگومان لازم دارند). ارسال زمان‌بندی‌شده با `--only=broadcasts` انجام می‌شود |
 | `app:payment:check-nowpayments` | برای یک پرداخت مشخص. IPN درگاه وضعیت را خودکار به‌روز می‌کند |
