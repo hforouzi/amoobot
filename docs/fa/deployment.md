@@ -397,6 +397,41 @@ curl -fsS https://DOMAIN/healthz
 
 بعد از هر چرخش: `curl -fsS https://DOMAIN/healthz` و یک پیام آزمایشی به بات.
 
+### لاگ‌های قدیمی که ممکن است دسترسی مشتری را داشته باشند
+
+نسخه‌های قبل از `fix/log-redaction` لینک اشتراک، لینک‌های کانفیگ (`vless://…`)، UUID کلاینت و subId را در لاگ‌ها و در جدول
+`bot_message_log` (پیام‌های ارسالی بات) می‌نوشتند. هر کدام از این‌ها برای استفاده از سرویس مشتری کافی است. نسخه‌ی جدید فقط شناسه‌ی
+سرویس/سفارش/پنل و ۴ کاراکتر آخر را لاگ می‌کند، اما فایل‌ها و ردیف‌های قدیمی خودبه‌خود پاک نمی‌شوند. **یک‌بار بعد از deploy** با root:
+
+```bash
+# ۱) دسترسی‌ها (همان چیزی که deploy.sh می‌سازد): فقط کاربر برنامه (www-data) لاگ کارها را می‌خواند
+chown www-data:www-data /var/log/amoobot && chmod 750 /var/log/amoobot
+find /var/log/amoobot -type f -exec chown www-data:www-data {} + -exec chmod 640 {} +
+chmod 640 /var/log/nginx/amoobot_*.log*      # www-data:adm
+
+# ۲) فایل‌های قدیمی: نسخه‌های چرخیده حذف، فایل‌های فعلی خالی
+find /var/log/amoobot -type f -name '*.log.*' -delete
+truncate -s 0 /var/log/amoobot/*.log
+find /var/log/nginx -name 'amoobot_*.log.*' -delete
+truncate -s 0 /var/log/nginx/amoobot_access.log /var/log/nginx/amoobot_error.log
+find /var/log -maxdepth 1 -name 'php8.4-fpm.log.*' -delete && truncate -s 0 /var/log/php8.4-fpm.log
+truncate -s 0 /var/www/amoobot/var/log/*.log 2>/dev/null || true   # worker.*.log اگر worker نصب است
+
+# ۳) پیام‌های قدیمی بات (تاریخ deploy همین نسخه را بگذارید)
+mariadb amoobot -e "DELETE FROM bot_message_log WHERE created_at < '2026-10-30 00:00:00'"
+
+# ۴) بررسی: باید چیزی پیدا نشود
+grep -rlE 'vless://|vmess://|trojan://|/sub/' /var/log/amoobot /var/log/nginx/amoobot_error.log /var/log/php8.4-fpm.log
+journalctl -u 'amoobot-*' --since '-30d' | grep -cE 'vless://|vmess://|trojan://'
+```
+
+- اگر `journalctl` عددی بیشتر از ۰ نشان داد: `journalctl --rotate && journalctl --vacuum-time=1s` (این **همه‌ی** لاگ‌های journald
+  سرور را پاک می‌کند، نه فقط amoobot).
+- `amoobot_access.log` هنوز هم آدرس صفحه‌ی اشتراک (`/s/<token>`) را ثبت می‌کند؛ همان دسترسی `640` کافی است و این فایل را جایی کپی نکنید.
+- بکاپ‌های دیتابیس قبل از این تاریخ هم `bot_message_log` قدیمی را دارند؛ با همان دقت فایل‌های بکاپ نگهداری یا حذف شوند.
+- اگر لاگی بیرون از سرور رفته است (چت، تیکت)، برای سرویس‌های آن مشتری‌ها لینک صفحه‌ی اشتراک را در پنل ادمین عوض کنید
+  («New subscription page link» در صفحه‌ی سرویس) و در صورت نیاز لینک اشتراک/UUID را در پنل 3x-ui بازسازی کنید.
+
 ---
 
 ## ۷. چک‌لیست Go-live
