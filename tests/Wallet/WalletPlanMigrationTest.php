@@ -7,6 +7,7 @@ namespace App\Tests\Wallet;
 use App\Entity\Order;
 use App\Shop\Domain\OrderStatus;
 use App\Shop\Domain\OrderType;
+use App\Tests\Support\ConsoleOutputAssertions;
 use App\Tests\Support\IntegrationTestCase;
 use Symfony\Component\Process\PhpExecutableFinder;
 use Symfony\Component\Process\Process;
@@ -18,6 +19,8 @@ use Symfony\Component\Process\Process;
  */
 final class WalletPlanMigrationTest extends IntegrationTestCase
 {
+    use ConsoleOutputAssertions;
+
     private const VERSION = 'DoctrineMigrations\\Version20261024090100';
 
     private function planIdNullable(): bool
@@ -43,7 +46,7 @@ final class WalletPlanMigrationTest extends IntegrationTestCase
         try {
             $tester = $this->migrate('down');
 
-            self::assertStringContainsString('Irreversible: 1 order(s) have no plan', $tester->getOutput().$tester->getErrorOutput());
+            self::assertConsoleContains('Irreversible: 1 order(s) have no plan', $tester->getOutput().$tester->getErrorOutput());
             self::assertTrue($this->planIdNullable(), 'nothing was changed');
             self::assertNull($this->row('`order`', (int) $order->getId())['plan_id']);
         } finally {

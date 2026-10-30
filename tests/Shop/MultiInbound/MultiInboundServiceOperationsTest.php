@@ -15,6 +15,7 @@ use App\Provisioning\Application\ServiceAdministration;
 use App\Provisioning\Application\ServiceConfigRegenerator;
 use App\Provisioning\Application\ServiceUsageSyncService;
 use App\Provisioning\Domain\SanaeiIntegrationMode;
+use App\Tests\Support\ConsoleOutputAssertions;
 use App\Tests\Support\Fake3xui\Fake3xuiPanel;
 use App\Tests\Support\IntegrationTestCase;
 use Symfony\Bundle\FrameworkBundle\Console\Application;
@@ -29,6 +30,8 @@ use Symfony\Component\Console\Tester\CommandTester;
  */
 final class MultiInboundServiceOperationsTest extends IntegrationTestCase
 {
+    use ConsoleOutputAssertions;
+
     private Fake3xuiPanel $fake;
     /** @var array<string, mixed> the panel's inbound 2 while it is "deleted" */
     private array $vmessOnPanel;
@@ -141,14 +144,14 @@ final class MultiInboundServiceOperationsTest extends IntegrationTestCase
     {
         [$code, $out] = $this->verify();
         self::assertSame(0, $code, $out);
-        self::assertStringContainsString('INFO  client on every attached inbound: expected on inbound(s) 1, 4; inbound 2: failed after 1 attempt(s), its links are not expected', $out);
+        self::assertConsoleContains('INFO  client on every attached inbound: expected on inbound(s) 1, 4; inbound 2: failed after 1 attempt(s), its links are not expected', $out);
 
         // The panel lost inbound 4 for this client: its links are missing.
         $email = array_key_first($this->fake->clients);
         $this->fake->clients[$email]['inboundIds'] = [1];
         [$code, $out] = $this->verify();
         self::assertSame(1, $code, $out);
-        self::assertStringContainsString('inbound 4 is recorded as attached but the client is not on it on the panel', $out);
+        self::assertConsoleContains('inbound 4 is recorded as attached but the client is not on it on the panel', $out);
     }
 
     public function testRegenerateStoresThePanelsLinksOfEveryAttachedInbound(): void

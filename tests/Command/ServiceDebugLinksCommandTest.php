@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Command;
 
+use App\Tests\Support\ConsoleOutputAssertions;
 use App\Tests\Support\IntegrationTestCase;
 use Symfony\Bundle\FrameworkBundle\Console\Application;
 use Symfony\Component\Console\Command\Command;
@@ -15,6 +16,8 @@ use Symfony\Component\Console\Tester\CommandTester;
  */
 final class ServiceDebugLinksCommandTest extends IntegrationTestCase
 {
+    use ConsoleOutputAssertions;
+
     private const SUB_ID = 'k3j9x7q2m1zt5w8a';
     private const UUID = 'b831381d-6324-4d53-ad4f-8cda48b30811';
 
@@ -39,13 +42,13 @@ final class ServiceDebugLinksCommandTest extends IntegrationTestCase
         self::assertMatchesRegularExpression('/host\s+127\.0\.0\.1/', $out);
         self::assertMatchesRegularExpression('/port\s+2096/', $out);
         self::assertMatchesRegularExpression('/publicly usable\s+NO/', $out);
-        self::assertStringContainsString('the sub id appears twice', $out);
+        self::assertConsoleContains('the sub id appears twice', $out);
         self::assertMatchesRegularExpression('/#1\s+vless\s+edge\.example-shop\.com:443\s+usable yes/', $out);
         self::assertMatchesRegularExpression('/#2\s+trojan\s+10\.0\.0\.5:8443\s+usable NO/', $out);
-        self::assertStringContainsString('QR delivery', $out);
+        self::assertConsoleContains('QR delivery', $out);
 
         foreach ([self::SUB_ID, self::UUID, 's3cretpassw0rd'] as $secret) {
-            self::assertStringNotContainsString($secret, $out);
+            self::assertConsoleNotContains($secret, $out);
         }
     }
 
@@ -57,7 +60,7 @@ final class ServiceDebugLinksCommandTest extends IntegrationTestCase
 
         self::assertSame(Command::SUCCESS, $code);
         self::assertMatchesRegularExpression('/subscription URL\s+\(none\)/', $out);
-        self::assertStringContainsString('config links      0', $out);
+        self::assertConsoleContains('config links      0', $out);
     }
 
     /**

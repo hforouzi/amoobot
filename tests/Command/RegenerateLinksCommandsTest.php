@@ -9,6 +9,7 @@ use App\Entity\VpnPanel;
 use App\Entity\VpnService;
 use App\Provisioning\Domain\SanaeiIntegrationMode;
 use App\Provisioning\Infrastructure\Sanaei3xui\Sanaei3xuiRemoteIdParser;
+use App\Tests\Support\ConsoleOutputAssertions;
 use App\Tests\Support\Fake3xui\Fake3xuiPanel;
 use App\Tests\Support\IntegrationTestCase;
 use Symfony\Bundle\FrameworkBundle\Console\Application;
@@ -23,6 +24,8 @@ use Symfony\Component\Console\Tester\CommandTester;
  */
 final class RegenerateLinksCommandsTest extends IntegrationTestCase
 {
+    use ConsoleOutputAssertions;
+
     private const OLD = '@origin.example.com:443?type=tcp&security=none#old';
 
     private Fake3xuiPanel $fake;
@@ -58,11 +61,11 @@ final class RegenerateLinksCommandsTest extends IntegrationTestCase
         [$code, $out] = $this->runCommand('app:service:regenerate-config', ['serviceId' => (string) $service->getId()]);
 
         self::assertSame(Command::SUCCESS, $code, $out);
-        self::assertStringContainsString('would update: 1 -> 2 links', $out);
-        self::assertStringContainsString('+ vless cdn1.example.com:443', $out);
-        self::assertStringContainsString('+ vless cdn2.example.com:443', $out);
-        self::assertStringContainsString('- vless origin.example.com:443 #old', $out);
-        self::assertStringContainsString('Nothing was written', $out);
+        self::assertConsoleContains('would update: 1 -> 2 links', $out);
+        self::assertConsoleContains('+ vless cdn1.example.com:443', $out);
+        self::assertConsoleContains('+ vless cdn2.example.com:443', $out);
+        self::assertConsoleContains('- vless origin.example.com:443 #old', $out);
+        self::assertConsoleContains('Nothing was written', $out);
         self::assertSame($before, $this->row('vpn_service', (int) $service->getId()));
         $this->assertNoSecret($out, 1);
     }
@@ -77,7 +80,7 @@ final class RegenerateLinksCommandsTest extends IntegrationTestCase
         $links = $this->links($service);
         self::assertCount(2, $links);
         self::assertStringNotContainsString('origin.example.com', implode("\n", $links));
-        self::assertStringContainsString('2 link(s) stored (source: panel)', $out);
+        self::assertConsoleContains('2 link(s) stored (source: panel)', $out);
     }
 
     public function testApplyAndDryRunTogetherAreRefused(): void
@@ -96,8 +99,8 @@ final class RegenerateLinksCommandsTest extends IntegrationTestCase
         [$code, $out] = $this->runCommand('app:service:regenerate-config', ['serviceId' => (string) $service->getId(), '--apply' => true]);
 
         self::assertSame(Command::FAILURE, $code);
-        self::assertStringContainsString('FAILED, stored links kept', $out);
-        self::assertStringContainsString('HTTP 401', $out);
+        self::assertConsoleContains('FAILED, stored links kept', $out);
+        self::assertConsoleContains('HTTP 401', $out);
         self::assertSame($before, $this->row('vpn_service', (int) $service->getId()));
         $this->assertNoSecret($out, 1);
     }
@@ -111,7 +114,7 @@ final class RegenerateLinksCommandsTest extends IntegrationTestCase
         [$code, $out] = $this->runCommand('app:service:regenerate-config', ['serviceId' => (string) $service->getId(), '--apply' => true]);
 
         self::assertSame(Command::FAILURE, $code);
-        self::assertStringContainsString('kept (panel gave no links)', $out);
+        self::assertConsoleContains('kept (panel gave no links)', $out);
         self::assertSame($before, $this->row('vpn_service', (int) $service->getId()));
     }
 
@@ -122,10 +125,10 @@ final class RegenerateLinksCommandsTest extends IntegrationTestCase
         [$code, $out] = $this->runCommand('app:inbound:regenerate-service-configs', ['inboundId' => (string) $this->inbound->getId(), '--batch-size' => '2']);
 
         self::assertSame(Command::SUCCESS, $code, $out);
-        self::assertSame(3, substr_count($out, 'would update: 1 -> 2 links'));
-        self::assertSame(2, substr_count($out, 'batch done'), 'batches of 2: 2 + 1');
-        self::assertStringContainsString('last processed id '.$this->services[2]->getId(), $out);
-        self::assertStringContainsString('Dry run: nothing was written', $out);
+        self::assertSame(3, self::consoleCount($out, 'would update: 1 -> 2 links'));
+        self::assertSame(2, self::consoleCount($out, 'batch done'), 'batches of 2: 2 + 1');
+        self::assertConsoleContains('last processed id '.$this->services[2]->getId(), $out);
+        self::assertConsoleContains('Dry run: nothing was written', $out);
         foreach ($this->services as $i => $service) {
             self::assertSame($before[$i], $this->row('vpn_service', (int) $service->getId()));
         }
@@ -143,8 +146,8 @@ final class RegenerateLinksCommandsTest extends IntegrationTestCase
         self::assertCount(2, $this->links($this->services[0]));
         self::assertSame($failing, $this->row('vpn_service', (int) $this->services[1]->getId()), 'the failing service keeps its links');
         self::assertCount(2, $this->links($this->services[2]), 'the run went on after the failure');
-        self::assertSame(3, substr_count($out, 'batch done'));
-        self::assertStringContainsString('failed (stored links kept): 1', $out);
+        self::assertSame(3, self::consoleCount($out, 'batch done'));
+        self::assertConsoleContains('failed (stored links kept): 1', $out);
 
         // Resume after the first service: only the later ones are processed.
         [, $resumed] = $this->runCommand('app:inbound:regenerate-service-configs', ['inboundId' => (string) $this->inbound->getId(), '--after-id' => (string) $this->services[0]->getId()]);
@@ -162,7 +165,7 @@ final class RegenerateLinksCommandsTest extends IntegrationTestCase
         [$code, $out] = $this->runCommand('app:service:regenerate-config', ['serviceId' => (string) $service->getId()]);
 
         self::assertSame(Command::SUCCESS, $code, $out);
-        self::assertStringContainsString('subId recovered from remoteId (used for this dry run, not stored)', $out);
+        self::assertConsoleContains('subId recovered from remoteId (used for this dry run, not stored)', $out);
         self::assertContains('GET panel/api/clients/subLinks/'.$this->subId(1), $this->fake->requestLines(), 'the same endpoint as --apply');
         self::assertNotContains('GET panel/api/clients/links/tg_cmd_1', $this->fake->requestLines());
         self::assertSame($before, $this->row('vpn_service', (int) $service->getId()), 'nothing written');
@@ -186,7 +189,7 @@ final class RegenerateLinksCommandsTest extends IntegrationTestCase
 
         [, $out] = $this->runCommand('app:service:regenerate-config', ['serviceId' => (string) $service->getId()]);
 
-        self::assertStringContainsString('[legacy]', $out);
+        self::assertConsoleContains('[legacy]', $out);
         self::assertSame($before, $this->row('vpn_service', (int) $service->getId()));
         self::assertNotContains('GET panel/api/clients/subLinks/'.$this->subId(1), $this->fake->requestLines());
     }
@@ -223,11 +226,11 @@ final class RegenerateLinksCommandsTest extends IntegrationTestCase
 
     private function assertNoSecret(string $out, int $services): void
     {
-        self::assertStringNotContainsString(Fake3xuiPanel::TOKEN, $out);
-        self::assertStringNotContainsString('/secret/', $out);
+        self::assertConsoleNotContains(Fake3xuiPanel::TOKEN, $out);
+        self::assertConsoleNotContains('/secret/', $out);
         for ($n = 1; $n <= $services; ++$n) {
-            self::assertStringNotContainsString(sprintf('%08d-2222', $n), $out, 'no UUID');
-            self::assertStringNotContainsString($this->subId($n), $out, 'no subId');
+            self::assertConsoleNotContains(sprintf('%08d-2222', $n), $out, 'no UUID');
+            self::assertConsoleNotContains($this->subId($n), $out, 'no subId');
         }
     }
 

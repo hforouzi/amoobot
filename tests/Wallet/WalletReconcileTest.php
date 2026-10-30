@@ -16,6 +16,7 @@ use App\Payment\Domain\Dto\PaymentVerificationResult;
 use App\Payment\Domain\PaymentGatewayType;
 use App\Shop\Application\Checkout\PaymentStarter;
 use App\Shop\Domain\OrderType;
+use App\Tests\Support\ConsoleOutputAssertions;
 use App\Tests\Support\IntegrationTestCase;
 use App\Tests\Support\MiniAppShopFixtures;
 use App\Wallet\Application\WalletActor;
@@ -35,6 +36,7 @@ use Symfony\Component\Console\Tester\CommandTester;
  */
 final class WalletReconcileTest extends IntegrationTestCase
 {
+    use ConsoleOutputAssertions;
     use MiniAppShopFixtures;
 
     private const PRICE = 150000;
@@ -156,7 +158,7 @@ final class WalletReconcileTest extends IntegrationTestCase
         self::assertSame([WalletReconciler::PENDING_WALLET_PAYMENT_ORDER_NOT_WAITING => [$payment->getId()]], $this->problems());
         $tester = $this->runCommand();
         self::assertSame(1, $tester->getStatusCode());
-        self::assertStringContainsString(WalletReconciler::PENDING_WALLET_PAYMENT_ORDER_NOT_WAITING, $tester->getDisplay());
+        self::assertConsoleContains(WalletReconciler::PENDING_WALLET_PAYMENT_ORDER_NOT_WAITING, $tester->getDisplay());
     }
 
     /** Third review, minor: a held debit must be exactly its payment's amount; a given-back one is not checked. */
@@ -172,8 +174,8 @@ final class WalletReconcileTest extends IntegrationTestCase
         self::assertSame([WalletReconciler::DEBIT_AMOUNT_MISMATCH => [$payment->getId()]], $this->problems());
         $tester = $this->runCommand();
         self::assertSame(1, $tester->getStatusCode());
-        self::assertStringContainsString(WalletReconciler::DEBIT_AMOUNT_MISMATCH, $tester->getDisplay());
-        self::assertStringContainsString('held debit of '.self::PRICE.' but the payment is for '.(self::PRICE + 1), $tester->getDisplay());
+        self::assertConsoleContains(WalletReconciler::DEBIT_AMOUNT_MISMATCH, $tester->getDisplay());
+        self::assertConsoleContains('held debit of '.self::PRICE.' but the payment is for '.(self::PRICE + 1), $tester->getDisplay());
     }
 
     /**
@@ -223,8 +225,8 @@ final class WalletReconcileTest extends IntegrationTestCase
         }
         $tester = $this->runCommand();
         self::assertSame(1, $tester->getStatusCode());
-        self::assertStringContainsString(WalletReconciler::HELD_DEBIT_ORDER_CLOSED, $tester->getDisplay());
-        self::assertStringContainsString('wallet payment is provisioning_failed with its debit of '.self::PRICE.' held but order #'.$failed->getOrder()->getId().' is expired', $tester->getDisplay());
+        self::assertConsoleContains(WalletReconciler::HELD_DEBIT_ORDER_CLOSED, $tester->getDisplay());
+        self::assertConsoleContains('wallet payment is provisioning_failed with its debit of '.self::PRICE.' held but order #'.$failed->getOrder()->getId().' is expired', $tester->getDisplay());
     }
 
     /** The original B1 state: another payment of the order is confirmed while a wallet payment still holds its debit. */
@@ -242,9 +244,9 @@ final class WalletReconcileTest extends IntegrationTestCase
         $this->em->getConnection()->executeStatement("UPDATE payment SET status = 'needs_review' WHERE id = ?", [$wallet->getId()]);
         $tester = $this->runCommand();
         self::assertSame(1, $tester->getStatusCode());
-        self::assertStringContainsString(WalletReconciler::HELD_DEBIT_ORDER_PAID_OTHERWISE, $tester->getDisplay());
-        self::assertStringContainsString('wallet payment is needs_review with its debit of '.self::PRICE.' held but payment #'.$zibal->getId().' of order #'.$wallet->getOrder()->getId().' is confirmed', $tester->getDisplay());
-        self::assertStringNotContainsString(WalletReconciler::HELD_DEBIT_ORDER_CLOSED, $tester->getDisplay());
+        self::assertConsoleContains(WalletReconciler::HELD_DEBIT_ORDER_PAID_OTHERWISE, $tester->getDisplay());
+        self::assertConsoleContains('wallet payment is needs_review with its debit of '.self::PRICE.' held but payment #'.$zibal->getId().' of order #'.$wallet->getOrder()->getId().' is confirmed', $tester->getDisplay());
+        self::assertConsoleNotContains(WalletReconciler::HELD_DEBIT_ORDER_CLOSED, $tester->getDisplay());
     }
 
     public function testTheCommandReportsEveryClassWithIdsAndExitsWithOne(): void
@@ -258,11 +260,11 @@ final class WalletReconcileTest extends IntegrationTestCase
 
         self::assertSame(1, $tester->getStatusCode());
         $display = $tester->getDisplay();
-        self::assertStringContainsString(WalletReconciler::TOPUP_CREDIT_WITHOUT_CONFIRMED_PAYMENT, $display);
-        self::assertStringContainsString(WalletReconciler::REVERSAL_OF_LIVE_PAYMENT, $display);
-        self::assertStringContainsString('#'.$topUp->getId(), $display);
-        self::assertStringContainsString('#'.$live->getId(), $display);
-        self::assertStringContainsString('Nothing was changed', $display);
+        self::assertConsoleContains(WalletReconciler::TOPUP_CREDIT_WITHOUT_CONFIRMED_PAYMENT, $display);
+        self::assertConsoleContains(WalletReconciler::REVERSAL_OF_LIVE_PAYMENT, $display);
+        self::assertConsoleContains('#'.$topUp->getId(), $display);
+        self::assertConsoleContains('#'.$live->getId(), $display);
+        self::assertConsoleContains('Nothing was changed', $display);
         self::assertSame('pending', $this->row('payment', (int) $topUp->getId())['status'], 'report only');
     }
 

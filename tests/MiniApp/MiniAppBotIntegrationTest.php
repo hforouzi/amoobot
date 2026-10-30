@@ -7,6 +7,7 @@ namespace App\Tests\MiniApp;
 use App\Entity\Setting;
 use App\MiniApp\Application\MiniAppLinks;
 use App\Tests\Support\BotAdminTestTrait;
+use App\Tests\Support\ConsoleOutputAssertions;
 use App\Tests\Support\IntegrationTestCase;
 use Symfony\Bundle\FrameworkBundle\Console\Application;
 use Symfony\Component\Console\Tester\CommandTester;
@@ -19,6 +20,7 @@ use Symfony\Component\Routing\RouterInterface;
 final class MiniAppBotIntegrationTest extends IntegrationTestCase
 {
     use BotAdminTestTrait;
+    use ConsoleOutputAssertions;
 
     private const CUSTOMER = '8501';
 
@@ -90,8 +92,8 @@ final class MiniAppBotIntegrationTest extends IntegrationTestCase
 
         self::assertSame(0, $tester->execute(['--dry-run' => true]));
 
-        self::assertStringContainsString('https://shop.example.com/app', $tester->getDisplay());
-        self::assertStringContainsString('web_app', $tester->getDisplay());
+        self::assertConsoleContains('https://shop.example.com/app', $tester->getDisplay());
+        self::assertConsoleContains('web_app', $tester->getDisplay());
         self::assertSame([], $this->http->requests('/setChatMenuButton'));
     }
 
@@ -116,7 +118,7 @@ final class MiniAppBotIntegrationTest extends IntegrationTestCase
         $tester = $this->command();
 
         self::assertSame(1, $tester->execute([]));
-        self::assertStringContainsString('DEFAULT_URI', $tester->getDisplay());
+        self::assertConsoleContains('DEFAULT_URI', $tester->getDisplay());
         self::assertSame([], $this->http->requests('/setChatMenuButton'));
     }
 
