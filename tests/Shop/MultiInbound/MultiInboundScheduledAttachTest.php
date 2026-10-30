@@ -209,6 +209,7 @@ final class MultiInboundScheduledAttachTest extends IntegrationTestCase
             self::assertSame([1, 1], [$run->foundRemoved, $run->attached], 'cycle '.$cycle.': found removed and attached again');
             self::assertSame($cycle, (int) $this->rowsOf()[1]['reattach_count']);
         }
+        self::assertCount($before, $this->http->telegramTexts(), 'found removed and attached again in the same run: no alert (admin guide, checklist step 11)');
         $this->fake->requests = [];
         $this->fake->clients[$key]['inboundIds'] = [1, 2];
         $this->checkedLongAgo();
