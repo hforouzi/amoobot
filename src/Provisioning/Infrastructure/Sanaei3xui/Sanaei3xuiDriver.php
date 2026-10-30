@@ -16,6 +16,7 @@ use App\Provisioning\Domain\Dto\VpnUsage;
 use App\Provisioning\Domain\ExistingClientAwareDriverInterface;
 use App\Provisioning\Domain\TrafficLimitDriverInterface;
 use App\Provisioning\Domain\VpnPanelDriverInterface;
+use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http\SecretRedactor;
 use Symfony\Component\Uid\Uuid;
 
 /**
@@ -101,7 +102,7 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface, ExistingClientA
             'generated_sub_id panel_id=%d inbound_id=%d sub_id="%s"',
             $panel->getId() ?? 0,
             $inbound->getId() ?? 0,
-            $subId
+            SecretRedactor::mask($subId)
         ));
 
         $this->log(sprintf(
@@ -113,7 +114,7 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface, ExistingClientA
             $protocol,
             $network,
             $security,
-            $clientUuid,
+            SecretRedactor::mask($clientUuid),
             $email,
             $totalBytes,
             $expiryTime
@@ -142,8 +143,8 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface, ExistingClientA
             (($result['ok'] ?? false) === true) ? 'true' : 'false',
             (($result['success'] ?? false) === true) ? 'true' : 'false',
             (($result['empty'] ?? false) === true) ? 'true' : 'false',
-            (string) ($result['error'] ?? ''),
-            (string) ($result['bodyPreview'] ?? '')
+            SecretRedactor::redactAccess((string) ($result['error'] ?? ''), 300),
+            SecretRedactor::redactAccess((string) ($result['bodyPreview'] ?? ''), 300)
         ));
 
         $this->assertPanelResult($result, 'addClient');
@@ -249,15 +250,15 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface, ExistingClientA
         }
 
         $this->log(sprintf(
-            'create_service_generated_config source="%s" inbound_id=%d uuid="%s" sub_id="%s" generated_config_link_count=%d config_text_empty=%s subscription_url_present=%s config_text_preview="%s"',
+            'create_service_generated_config source="%s" panel_id=%d inbound_id=%d uuid="%s" sub_id="%s" generated_config_link_count=%d config_text_empty=%s subscription_url_present=%s',
             $source,
+            $panel->getId() ?? 0,
             $inbound->getId() ?? 0,
-            $clientUuid,
-            $subId,
+            SecretRedactor::mask($clientUuid),
+            SecretRedactor::mask($subId),
             count($configLinks),
             '' === $configText ? 'yes' : 'no',
-            '' !== trim((string) ($subscriptionUrl ?? '')) ? 'yes' : 'no',
-            $this->sanitizeLogPreview($configText)
+            '' !== trim((string) ($subscriptionUrl ?? '')) ? 'yes' : 'no'
         ));
 
         return new CreatedVpnService(
@@ -382,7 +383,7 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface, ExistingClientA
             $panel->getId() ?? 'null',
             $inboundIdRaw,
             $inboundIdInt,
-            $ref->clientId,
+            SecretRedactor::mask($ref->clientId),
             $ref->email,
             $serviceIdLabel,
             $orderIdLabel
@@ -584,7 +585,7 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface, ExistingClientA
             $panel->getId() ?? 0,
             $inbound->getId() ?? 0,
             $inboundIdInt,
-            $clientUuid,
+            SecretRedactor::mask($clientUuid),
             $email
         ));
 
@@ -632,7 +633,7 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface, ExistingClientA
     {
         $parsed = $this->remoteIdParser->parse($remoteId);
         if (!$parsed instanceof Sanaei3xuiRemoteClientRef) {
-            $this->log(sprintf('remote_id_parse_failure remote_id="%s"', $remoteId));
+            $this->log(sprintf('remote_id_parse_failure remote_id="%s"', SecretRedactor::mask($remoteId)));
             throw new \RuntimeException('Unable to parse service remote id for Sanaei panel.');
         }
 
@@ -760,10 +761,9 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface, ExistingClientA
         $url = preg_replace('#(?<!:)/{2,}#', '/', $url) ?? $url;
 
         $this->log(sprintf(
-            'subscription_url_generated panel_id=%s generated=%s url="%s"',
+            'subscription_url_generated panel_id=%s generated=%s',
             $panel->getId() ?? 'null',
-            '' !== trim((string) $url) ? 'yes' : 'no',
-            (string) $url
+            '' !== trim((string) $url) ? 'yes' : 'no'
         ));
 
         return '' === trim((string) $url) ? null : $url;
@@ -796,9 +796,10 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface, ExistingClientA
         return (new \DateTimeImmutable())->modify(sprintf('+%d days', $durationDays))->getTimestamp() * 1000;
     }
 
+    /** Last line of defence: a URL path, config link or UUID that reached a message is masked here too. */
     private function log(string $message): void
     {
-        error_log('[Sanaei3xuiDriver] '.$message);
+        error_log('[Sanaei3xuiDriver] '.SecretRedactor::maskAccess($message));
     }
 
     private function toNonNegativeInt(mixed $value): ?int

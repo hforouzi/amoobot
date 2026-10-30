@@ -14,6 +14,7 @@ use App\Provisioning\Domain\Dto\CreateVpnServiceRequest;
 use App\Provisioning\Domain\ExistingClientAwareDriverInterface;
 use App\Provisioning\Domain\VpnPanelDriverInterface;
 use App\Provisioning\Domain\VpnServiceStatus;
+use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http\SecretRedactor;
 use App\Provisioning\Infrastructure\VpnPanelDriverRegistry;
 use App\Shop\Domain\OrderStatus;
 use Doctrine\ORM\EntityManagerInterface;
@@ -173,13 +174,14 @@ class VpnProvisioningService
         $this->logProvisioningConfig(
             source: $source,
             serviceId: $vpnService->getId(),
+            orderId: $order->getId(),
+            panelId: $vpnService->getPanel()?->getId(),
             inboundId: $planInbound?->getId(),
             uuid: (string) ($vpnService->getClientUuid() ?? ''),
             subId: (string) ($vpnService->getSubId() ?? ''),
             generatedConfigLinkCount: count($finalLinks),
             configTextEmpty: '' === trim((string) ($finalConfigText ?? '')),
-            subscriptionUrl: (string) ($finalSubscriptionUrl ?? ''),
-            configTextPreview: (string) ($finalConfigText ?? ''),
+            subscriptionUrlPresent: '' !== trim((string) ($finalSubscriptionUrl ?? '')),
             customOrder: $isCustomOrder,
             finalUsername: $username,
             trafficLimitGb: (int) ($trafficLimitValue ?? 0),
@@ -223,46 +225,42 @@ class VpnProvisioningService
         return $adopted;
     }
 
+    /**
+     * Ids, counts and flags only: the client UUID and subscription id appear as their last 4 characters
+     * (SecretRedactor::mask), the subscription URL and config links not at all, since each one is a customer's access.
+     */
     private function logProvisioningConfig(
         string $source,
         ?int $serviceId,
+        ?int $orderId,
+        ?int $panelId,
         ?int $inboundId,
         string $uuid,
         string $subId,
         int $generatedConfigLinkCount,
         bool $configTextEmpty,
-        string $subscriptionUrl,
-        string $configTextPreview,
+        bool $subscriptionUrlPresent,
         bool $customOrder,
         string $finalUsername,
         int $trafficLimitGb,
         int $durationDays
     ): void {
         error_log(sprintf(
-            '[VpnProvisioningService] provisioning_config source="%s" service_id=%d inbound_id=%d uuid="%s" sub_id="%s" generated_config_link_count=%d config_text_empty=%s subscription_url="%s" custom_order=%s final_username="%s" traffic_limit_gb=%d duration_days=%d config_text_preview="%s"',
+            '[VpnProvisioningService] provisioning_config source="%s" service_id=%d order_id=%d panel_id=%d inbound_id=%d uuid="%s" sub_id="%s" generated_config_link_count=%d config_text_empty=%s subscription_url_present=%s custom_order=%s final_username="%s" traffic_limit_gb=%d duration_days=%d',
             $source,
             $serviceId ?? 0,
+            $orderId ?? 0,
+            $panelId ?? 0,
             $inboundId ?? 0,
-            $uuid,
-            $subId,
+            SecretRedactor::mask($uuid),
+            SecretRedactor::mask($subId),
             $generatedConfigLinkCount,
             $configTextEmpty ? 'yes' : 'no',
-            $subscriptionUrl,
+            $subscriptionUrlPresent ? 'yes' : 'no',
             $customOrder ? 'yes' : 'no',
             $finalUsername,
             $trafficLimitGb,
-            $durationDays,
-            $this->sanitizeLogPreview($configTextPreview)
+            $durationDays
         ));
-    }
-
-    private function sanitizeLogPreview(string $value, int $max = 120): string
-    {
-        $text = trim(preg_replace('/\s+/', ' ', $value) ?? '');
-        if ('' === $text) {
-            return '';
-        }
-
-        return mb_substr($text, 0, $max);
     }
 }

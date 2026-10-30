@@ -39,7 +39,7 @@ final class FinalConfigLinkProvider
                     '[FinalConfigLinkProvider] generate_failed service_id=%d source_flow="%s" message="%s"',
                     (int) ($service->getId() ?? 0),
                     $sourceFlow,
-                    $e->getMessage()
+                    ServiceErrorText::redact($service, $e->getMessage())
                 ));
             }
         }

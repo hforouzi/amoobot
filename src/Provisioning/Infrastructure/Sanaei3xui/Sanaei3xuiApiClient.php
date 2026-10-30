@@ -7,6 +7,7 @@ namespace App\Provisioning\Infrastructure\Sanaei3xui;
 use App\Entity\VpnPanel;
 use App\Provisioning\Infrastructure\PanelCredentials;
 use App\Provisioning\Infrastructure\PanelHttpClientFactory;
+use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http\SecretRedactor;
 use Symfony\Contracts\HttpClient\Exception\TransportExceptionInterface;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 
@@ -433,7 +434,7 @@ final class Sanaei3xuiApiClient
             $this->sanitizeSnippet($path),
             $this->sanitizeUrlForLog($requestUrl),
             $this->sanitizeUrlForLog($this->normalizeBaseUrl($panel)),
-            $this->sanitizeSnippet($basePath),
+            SecretRedactor::mask($basePath),
             $this->getConfiguredApiVersion($panel),
             $this->getConfiguredAuthMode($panel),
             $this->useBearerAuth($panel) ? 'bearer' : 'cookie',
@@ -524,8 +525,8 @@ final class Sanaei3xuiApiClient
             (($result['ok'] ?? false) === true) ? 'true' : 'false',
             (($result['success'] ?? false) === true) ? 'true' : 'false',
             (($result['empty'] ?? false) === true) ? 'true' : 'false',
-            (string) ($result['error'] ?? ''),
-            (string) ($result['bodyPreview'] ?? '')
+            $this->sanitizeSnippet((string) ($result['error'] ?? '')),
+            $this->sanitizeSnippet((string) ($result['bodyPreview'] ?? ''))
         ));
     }
 
@@ -719,14 +720,16 @@ final class Sanaei3xuiApiClient
                 continue;
             }
 
-            $pairs[] = sprintf('%s="%s"', $key, $this->sanitizeSnippet((string) $context[$key]));
+            $value = in_array($key, ['clientUuid', 'subId'], true) ? SecretRedactor::mask((string) $context[$key]) : $this->sanitizeSnippet((string) $context[$key]);
+            $pairs[] = sprintf('%s="%s"', $key, $value);
         }
 
         return implode(' ', $pairs);
     }
 
+    /** Last line of defence: a URL path, config link or UUID that reached a message is masked here too. */
     private function log(string $message): void
     {
-        error_log('[Sanaei3xuiApiClient] '.$message);
+        error_log('[Sanaei3xuiApiClient] '.SecretRedactor::maskAccess($message));
     }
 }
