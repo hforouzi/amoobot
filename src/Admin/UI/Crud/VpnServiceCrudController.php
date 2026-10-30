@@ -11,6 +11,7 @@ use App\Admin\UI\Support\AdminFormat;
 use App\Entity\VpnService;
 use App\Entity\VpnServiceInbound;
 use App\Provisioning\Application\FinalConfigLinkProvider;
+use App\Provisioning\Application\ServiceInboundCounts;
 use App\Security\AdminPermission;
 use App\Shop\Application\MultiInboundSettings;
 use App\Subscription\Application\SubscriptionPageUrl;
@@ -58,8 +59,15 @@ class VpnServiceCrudController extends AbstractCrudController
         private readonly CsrfTokenManagerInterface $csrfTokenManager,
         private readonly MultiInboundSettings $multiInbound,
         private readonly TranslatorInterface $translator,
+        private readonly ServiceInboundCounts $inboundCounts,
     ) {
     }
+
+    /** ?inbounds=not_connected: only services with an additional inbound not attached (switch on). */
+    public const FILTER_NOT_CONNECTED = 'not_connected';
+
+    /** @var array{int, array<int, int>}|null the current request's id and ServiceInboundCounts::notConnectedByService() */
+    private ?array $notConnected = null;
 
     public static function getEntityFqcn(): string
     {
@@ -79,8 +87,12 @@ class VpnServiceCrudController extends AbstractCrudController
             $counts = self::countByTab($this->entityManager, $this->clock->now());
             $active = $this->currentTab();
             $tabs = [];
+            $notConnected = $this->notConnectedFilter();
             foreach (self::TABS as $tab) {
-                $tabs[] = ['key' => $tab, 'label' => 'service.tabs.'.$tab, 'url' => $this->generateUrl('admin_vpn_service_index', 'all' === $tab ? [] : ['tab' => $tab]), 'active' => $tab === $active, 'count' => $counts[$tab]];
+                $tabs[] = ['key' => $tab, 'label' => 'service.tabs.'.$tab, 'url' => $this->generateUrl('admin_vpn_service_index', 'all' === $tab ? [] : ['tab' => $tab]), 'active' => !$notConnected && $tab === $active, 'count' => $counts[$tab]];
+            }
+            if ($this->multiInbound->enabled()) {
+                $tabs[] = ['key' => 'inbounds_not_connected', 'label' => 'service.tabs.inbounds_not_connected', 'url' => $this->generateUrl('admin_vpn_service_index', ['inbounds' => self::FILTER_NOT_CONNECTED]), 'active' => $notConnected, 'count' => count($this->notConnectedServices())];
             }
             $responseParameters->set('admin_tabs', $tabs);
         }
@@ -166,7 +178,7 @@ class VpnServiceCrudController extends AbstractCrudController
             AssociationField::new('panel'),
             AssociationField::new('inbound')->hideOnIndex(),
             ...$this->inboundRowsField(),
-            TextField::new('status')->setTemplatePath(AdminFormat::TEMPLATE)->formatValue(fn (mixed $v): string => $f->status($v)),
+            TextField::new('status')->setTemplatePath(AdminFormat::TEMPLATE)->formatValue(fn (mixed $v, ?VpnService $s = null): string => $f->status($v).$this->notConnectedBadge($s)),
             DateTimeField::new('expiresAt')->setTemplatePath(AdminFormat::TEMPLATE)->formatValue(fn (mixed $v): string => $f->expiry($v)),
             AdminFormat::field('traffic', static fn (mixed $v, ?VpnService $s): string => null === $s ? '' : $f->traffic($s->getTrafficUsedBytes(), $s->getTrafficLimitBytes()))->onlyOnIndex(),
             DateTimeField::new('lastUsageSyncedAt')->hideOnForm()->setTemplatePath(AdminFormat::TEMPLATE)->formatValue(fn (mixed $v): string => $f->relative($v)),
@@ -214,7 +226,13 @@ class VpnServiceCrudController extends AbstractCrudController
             ->leftJoin('listOrder.plan', 'listPlan')->addSelect('listPlan')
             ->leftJoin('entity.panel', 'listPanel')->addSelect('listPanel');
 
-        return ServiceTabs::apply($queryBuilder, 'entity', $this->currentTab(), $this->clock->now());
+        if ($this->notConnectedFilter()) {
+            $queryBuilder
+                ->andWhere(sprintf('EXISTS (SELECT listInbound.id FROM %s listInbound WHERE listInbound.service = entity AND listInbound.status IN (:listInboundStatuses))', VpnServiceInbound::class))
+                ->setParameter('listInboundStatuses', ServiceInboundCounts::NOT_CONNECTED);
+        }
+
+        return ServiceTabs::apply($queryBuilder, 'entity', $this->notConnectedFilter() ? 'all' : $this->currentTab(), $this->clock->now());
     }
 
     /**
@@ -235,18 +253,67 @@ class VpnServiceCrudController extends AbstractCrudController
             if ([] === $rows) {
                 return AdminFormat::NONE;
             }
-            $lines = array_map(static fn (VpnServiceInbound $row): string => sprintf(
-                '<li data-service-inbound="%s">#%d %s · %s · %s%s</li>',
+            $lines = array_map(fn (VpnServiceInbound $row): string => sprintf(
+                '<li data-service-inbound="%s">#%d %s · %s · %s%s%s</li>',
                 AdminFormat::e($row->getStatus()),
                 (int) $row->getInbound()->getId(),
                 AdminFormat::e($row->getInbound()->getTitle()),
                 $t('service_inbounds.status.'.$row->getStatus()),
                 $t('service_inbounds.attempts', ['%count%' => $row->getAttempts()]),
+                $this->nextAttempt($row, $t),
                 null === $row->getLastError() ? '' : ' · <span dir="ltr">'.AdminFormat::e($row->getLastError()).'</span>',
             ), $rows);
 
             return '<ul class="list-unstyled mb-0">'.implode('', $lines).'</ul>';
         }, 'field.additional_inbounds')->onlyOnDetail()];
+    }
+
+    /**
+     * A failed row: when the scheduled retry tries it again, or that it does not any more (attempts used up, retry
+     * off). Any admin may still press "Retry attach".
+     *
+     * @param \Closure(string, array<string, mixed>=): string $t
+     */
+    private function nextAttempt(VpnServiceInbound $row, \Closure $t): string
+    {
+        if (VpnServiceInbound::STATUS_FAILED !== $row->getStatus()) {
+            return '';
+        }
+        $next = $row->getNextAttemptAt();
+
+        return ' · <span data-next-attempt>'.match (true) {
+            !$this->multiInbound->attachRetryEnabled() => $t('service_inbounds.retry_off'),
+            $row->getAttempts() >= $this->multiInbound->maxAttempts() => $t('service_inbounds.given_up'),
+            null === $next || $next <= $this->clock->now() => $t('service_inbounds.next_run'),
+            default => $t('service_inbounds.next_attempt', ['%at%' => $next->format('Y-m-d H:i')]),
+        }.'</span>';
+    }
+
+    /** The list's status column: how many additional inbounds are not attached (switch on; one query per page). */
+    private function notConnectedBadge(?VpnService $service): string
+    {
+        $count = null === $service ? 0 : ($this->notConnectedServices()[(int) $service->getId()] ?? 0);
+
+        return 0 === $count ? '' : sprintf(' <span class="badge badge-warning" data-inbounds-not-connected="%d">%s</span>', $count, AdminFormat::e($this->translator->trans('service_inbounds.not_connected_badge', ['%count%' => $count], 'admin')));
+    }
+
+    /**
+     * @return array<int, int>
+     */
+    private function notConnectedServices(): array
+    {
+        // Remembered for the current request only: the controller outlives a request in long-running workers.
+        $request = spl_object_id($this->requestStack->getCurrentRequest() ?? $this);
+        if (null === $this->notConnected || $this->notConnected[0] !== $request) {
+            $this->notConnected = [$request, $this->inboundCounts->notConnectedByService()];
+        }
+
+        return $this->notConnected[1];
+    }
+
+    private function notConnectedFilter(): bool
+    {
+        return $this->multiInbound->enabled() && self::FILTER_NOT_CONNECTED === $this->requestStack->getCurrentRequest()?->query->get('inbounds');
     }
 
     /**

@@ -11,6 +11,7 @@ use App\Admin\UI\Support\PanelHealth;
 use App\Admin\UI\TranslatedFlashes;
 use App\Entity\VpnInbound;
 use App\Entity\VpnPanel;
+use App\Provisioning\Application\ServiceInboundCounts;
 use App\Provisioning\Domain\SanaeiIntegrationMode;
 use App\Shop\Application\Catalog\PlanInboundUsage;
 use Doctrine\ORM\EntityManagerInterface;
@@ -41,6 +42,7 @@ class VpnPanelCrudController extends AbstractCrudController
         private readonly AdminFormat $format,
         private readonly TranslatorInterface $translator,
         private readonly PlanInboundUsage $inboundUsage,
+        private readonly ServiceInboundCounts $inboundCounts,
     ) {
     }
 
@@ -144,6 +146,12 @@ class VpnPanelCrudController extends AbstractCrudController
 
                 return sprintf('<span class="badge badge-%s" data-health="%s">%s</span>', PanelHealth::badge($state), $state, AdminFormat::e($this->translator->trans('panel.health.'.$state, [], 'admin')));
             }),
+            // Plans with several inbounds (switch on): what the scheduled retry still has to attach on this panel.
+            AdminFormat::field('inboundAttachments', function (mixed $v, ?VpnPanel $panel): string {
+                $problems = null === $panel ? null : $this->inboundCounts->problems((int) $panel->getId());
+
+                return null === $problems ? AdminFormat::NONE : sprintf('<span data-inbound-attachments="%d/%d">%s</span>', $problems['failed'], $problems['pending'], AdminFormat::e($this->translator->trans('service_inbounds.doctor', ['%failed%' => $problems['failed'], '%given_up%' => $problems['givenUp'], '%pending%' => $problems['pending']], 'admin')));
+            }, 'field.inbound_attachments')->onlyOnDetail(),
             BooleanField::new('isActive'),
             AdminFormat::field('probedAt', static fn (mixed $v): string => $f->relative($v), 'field.last_check'),
             AdminFormat::field('host', static fn (mixed $v, ?VpnPanel $panel): string => $f->host($panel?->getBaseUrl())),

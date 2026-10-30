@@ -30,6 +30,7 @@ use App\Reseller\Application\ServiceOwnership;
 use App\Provisioning\Application\FinalConfigLinkProvider;
 use App\Provisioning\Application\ServiceAdminOutcome;
 use App\Provisioning\Application\ServiceAdministration;
+use App\Provisioning\Application\ServiceInboundCounts;
 use App\Provisioning\Application\VpnConfigLinkSetResult;
 use App\Provisioning\Domain\VpnServiceStatus;
 use App\Shared\Infrastructure\SettingValueProvider;
@@ -79,6 +80,7 @@ class ServiceManagementService
         private readonly PaymentStarter $paymentStarter,
         private readonly WalletPayment $walletPayment,
         private readonly ServiceOwnership $serviceOwnership,
+        private readonly ServiceInboundCounts $inboundCounts,
     ) {
     }
 
@@ -1454,10 +1456,11 @@ class ServiceManagementService
         $ipLimit = $service->getIpLimit();
 
         return sprintf(
-            "سرویس #%d\nوضعیت: %s\nسرور/کشور: %s\nپروتکل/شبکه/امنیت: %s / %s / %s\nتاریخ انقضا: %s\nحجم کل: %s\nمصرف: %s\nباقیمانده: %s\nآخرین بروزرسانی مصرف: %s\nمحدودیت IP: %s\nلینک اشتراک: %s",
+            "سرویس #%d\nوضعیت: %s\nسرور/کشور: %s%s\nپروتکل/شبکه/امنیت: %s / %s / %s\nتاریخ انقضا: %s\nحجم کل: %s\nمصرف: %s\nباقیمانده: %s\nآخرین بروزرسانی مصرف: %s\nمحدودیت IP: %s\nلینک اشتراک: %s",
             $service->getId(),
             $this->statusLabel($service->getStatus()),
             sprintf('%s / %s', $inbound?->getHost() ?? '-', $inbound?->getCountry() ?? '-'),
+            $this->serverCountLines($service),
             $inbound?->getProtocol() ?? '-',
             $inbound?->getNetwork() ?? '-',
             $inbound?->getSecurity() ?? '-',
@@ -1469,6 +1472,24 @@ class ServiceManagementService
             null === $ipLimit ? 'پیشفرض/نامحدود' : (string) $ipLimit,
             $this->accessGuard->subscriptionUrl($service) ?? ('' !== trim((string) $service->getSubscriptionUrl()) ? CustomerAccessGuard::SUPPORT_NOTICE : '-')
         );
+    }
+
+    /**
+     * A plan with several inbounds (switch on): how many servers the service has, and a neutral note while some are
+     * still being connected. Never which ones or where. Empty for every other service, so its text stays as it was.
+     */
+    private function serverCountLines(VpnService $service): string
+    {
+        $servers = $this->inboundCounts->servers($service);
+        if (null === $servers) {
+            return '';
+        }
+        $lines = sprintf("\nتعداد سرورها: %d", $servers['total']);
+        if ($servers['notConnected'] > 0) {
+            $lines .= sprintf("\n%d سرور هنوز در حال اتصال است و خودکار اضافه می‌شود.", $servers['notConnected']);
+        }
+
+        return $lines;
     }
 
     private function sendUserServiceDetail(string $chatId, VpnService $service, string $sourceFlow): void
