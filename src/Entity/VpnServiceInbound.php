@@ -78,6 +78,13 @@ class VpnServiceInbound
     #[ORM\Column(nullable: true)]
     private ?\DateTimeImmutable $alertedAt = null;
 
+    /** Re-attach cycles (removed on the panel, then attached again) since reattachSince, M2c F7; never reset by an attempt. */
+    #[ORM\Column(type: 'smallint', options: ['default' => 0])]
+    private int $reattachCount = 0;
+
+    #[ORM\Column(nullable: true)]
+    private ?\DateTimeImmutable $reattachSince = null;
+
     public function __construct(VpnService $service, VpnInbound $inbound, \DateTimeImmutable $now)
     {
         $this->service = $service;
@@ -150,6 +157,16 @@ class VpnServiceInbound
     public function getAlertedAt(): ?\DateTimeImmutable
     {
         return $this->alertedAt;
+    }
+
+    public function getReattachCount(): int
+    {
+        return $this->reattachCount;
+    }
+
+    public function getReattachSince(): ?\DateTimeImmutable
+    {
+        return $this->reattachSince;
     }
 
     /**

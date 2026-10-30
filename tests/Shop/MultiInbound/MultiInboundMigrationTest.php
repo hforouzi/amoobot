@@ -19,7 +19,9 @@ use Symfony\Component\Process\Process;
  * - M1 goes down and up again on a database without such rows, recreating both tables with their keys; with a plan's
  *   additional inbound or a service's inbound row, down() refuses and changes nothing; while M2b is applied it refuses
  *   too ("roll back M2b first"), so M2b is never left recorded without its columns;
- * - M2b goes down and up again with rows in place: they keep everything M1 gave them.
+ * - M2b goes down and up again with rows in place: they keep everything M1 gave them;
+ * - Version20261103090000 (M2c: re-attach cycles) likewise; while it is applied M2b's down() refuses ("roll back M2c
+ *   first"), so M1's down() can never drop the table under it.
  */
 #[Group('subprocess')]
 final class MultiInboundMigrationTest extends IntegrationTestCase
@@ -28,11 +30,14 @@ final class MultiInboundMigrationTest extends IntegrationTestCase
 
     private const M1 = 'DoctrineMigrations\\Version20261101090000';
     private const M2B = 'DoctrineMigrations\\Version20261102090000';
+    private const M2C = 'DoctrineMigrations\\Version20261103090000';
+    private const M2C_COLUMNS = ['reattach_count', 'reattach_since'];
     private const M2B_COLUMNS = ['next_attempt_at', 'checked_at', 'alert_state', 'alerted_at'];
 
     public function testWithoutRowsItGoesDownAndUpAgainWithItsKeys(): void
     {
         try {
+            $this->assertRuns(self::M2C, 'down');
             $this->assertRuns(self::M2B, 'down');
             $down = $this->migrate(self::M1, 'down');
             self::assertSame(0, $down->getExitCode(), $down->getOutput().$down->getErrorOutput());
@@ -43,7 +48,43 @@ final class MultiInboundMigrationTest extends IntegrationTestCase
             $up = $this->migrate(self::M1, 'up');
             self::assertSame(0, $up->getExitCode(), $up->getOutput().$up->getErrorOutput());
             $this->assertRuns(self::M2B, 'up');
+            $this->assertRuns(self::M2C, 'up');
             $this->assertSchemaIntact();
+        } finally {
+            $this->restore();
+        }
+    }
+
+    public function testM2bDownIsRefusedWhileM2cIsAppliedAndNothingChanges(): void
+    {
+        try {
+            $down = $this->migrate(self::M2B, 'down');
+
+            self::assertNotSame(0, $down->getExitCode());
+            self::assertConsoleContains('Roll back Version20261103090000 (re-attach cycles of additional inbounds) first. Nothing was changed.', $down->getOutput().$down->getErrorOutput());
+            $this->assertSchemaIntact();
+        } finally {
+            $this->restore();
+        }
+    }
+
+    public function testM2cGoesDownAndUpAgainWithRowsInPlace(): void
+    {
+        try {
+            [$primary, $other] = $this->twoInbounds();
+            $service = $this->createActiveService($this->createUser(), $primary);
+            $this->em->persist((new VpnServiceInbound($service, $other, new \DateTimeImmutable('2026-10-01 10:00:00')))->recordAttempt(true, null, new \DateTimeImmutable('2026-10-01 10:00:00')));
+            $this->em->flush();
+
+            $this->assertRuns(self::M2C, 'down');
+            foreach (self::M2C_COLUMNS as $column) {
+                self::assertFalse($this->columnExists('vpn_service_inbound', $column), $column);
+            }
+            $this->assertRuns(self::M2C, 'up');
+
+            $this->assertSchemaIntact();
+            self::assertSame(['status' => 'attached', 'attempts' => 1, 'reattach_count' => 0, 'reattach_since' => null],
+                array_map(static fn (mixed $v): mixed => is_numeric($v) ? (int) $v : $v, $this->em->getConnection()->fetchAssociative('SELECT status, attempts, reattach_count, reattach_since FROM vpn_service_inbound') ?: []));
         } finally {
             $this->restore();
         }
@@ -52,10 +93,12 @@ final class MultiInboundMigrationTest extends IntegrationTestCase
     public function testM1DownIsRefusedWhileM2bIsAppliedAndNothingChanges(): void
     {
         try {
+            $this->assertRuns(self::M2C, 'down');
             $down = $this->migrate(self::M1, 'down');
 
             self::assertNotSame(0, $down->getExitCode());
             self::assertConsoleContains('Roll back Version20261102090000 (retry schedule of additional inbounds) first. Nothing was changed.', $down->getOutput().$down->getErrorOutput());
+            $this->assertRuns(self::M2C, 'up');
             $this->assertSchemaIntact();
         } finally {
             $this->restore();
@@ -70,12 +113,14 @@ final class MultiInboundMigrationTest extends IntegrationTestCase
             $this->em->persist((new VpnServiceInbound($service, $other, new \DateTimeImmutable('2026-10-01 10:00:00')))->recordAttempt(false, 'not attached', new \DateTimeImmutable('2026-10-01 10:00:00')));
             $this->em->flush();
 
+            $this->assertRuns(self::M2C, 'down');
             $this->assertRuns(self::M2B, 'down');
             foreach (self::M2B_COLUMNS as $column) {
                 self::assertFalse($this->columnExists('vpn_service_inbound', $column), $column);
             }
             self::assertFalse($this->indexExists('vpn_service_inbound', 'idx_vpn_service_inbound_due'));
             $this->assertRuns(self::M2B, 'up');
+            $this->assertRuns(self::M2C, 'up');
 
             $this->assertSchemaIntact();
             self::assertSame(['status' => 'failed', 'attempts' => 1, 'last_error' => 'not attached', 'next_attempt_at' => null, 'alert_state' => null],
@@ -92,6 +137,7 @@ final class MultiInboundMigrationTest extends IntegrationTestCase
             $plan = $this->createPlan(100000, $primary);
             $this->em->persist(new PlanAdditionalInbound($plan, $other, 1, new \DateTimeImmutable()));
             $this->em->flush();
+            $this->assertRuns(self::M2C, 'down');
             $this->assertRuns(self::M2B, 'down');
 
             $down = $this->migrate(self::M1, 'down');
@@ -113,6 +159,7 @@ final class MultiInboundMigrationTest extends IntegrationTestCase
             $service = $this->createActiveService($this->createUser(), $primary);
             $this->em->persist(new VpnServiceInbound($service, $other, new \DateTimeImmutable()));
             $this->em->flush();
+            $this->assertRuns(self::M2C, 'down');
             $this->assertRuns(self::M2B, 'down');
 
             $down = $this->migrate(self::M1, 'down');
@@ -145,7 +192,7 @@ final class MultiInboundMigrationTest extends IntegrationTestCase
         self::assertTrue($this->indexExists('plan_additional_inbound', 'uniq_plan_additional_inbound'));
         self::assertTrue($this->indexExists('vpn_service_inbound', 'uniq_vpn_service_inbound'));
         self::assertTrue($this->indexExists('vpn_service_inbound', 'idx_vpn_service_inbound_due'));
-        foreach (self::M2B_COLUMNS as $column) {
+        foreach ([...self::M2B_COLUMNS, ...self::M2C_COLUMNS] as $column) {
             self::assertTrue($this->columnExists('vpn_service_inbound', $column), $column);
         }
         self::assertSame([
@@ -206,7 +253,11 @@ final class MultiInboundMigrationTest extends IntegrationTestCase
             $connection->executeStatement('DELETE FROM doctrine_migration_versions WHERE version = ?', [self::M2B]);
             $this->assertRuns(self::M2B, 'up');
         }
-        foreach ([self::M1, self::M2B] as $version) {
+        if (!$this->columnExists('vpn_service_inbound', 'reattach_count')) {
+            $connection->executeStatement('DELETE FROM doctrine_migration_versions WHERE version = ?', [self::M2C]);
+            $this->assertRuns(self::M2C, 'up');
+        }
+        foreach ([self::M1, self::M2B, self::M2C] as $version) {
             if (false === $connection->fetchOne('SELECT version FROM doctrine_migration_versions WHERE version = ?', [$version])) {
                 $connection->insert('doctrine_migration_versions', ['version' => $version, 'executed_at' => (new \DateTimeImmutable())->format('Y-m-d H:i:s'), 'execution_time' => 0]);
             }
