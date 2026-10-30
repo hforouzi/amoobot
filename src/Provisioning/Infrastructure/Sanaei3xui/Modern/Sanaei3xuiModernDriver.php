@@ -184,16 +184,30 @@ final class Sanaei3xuiModernDriver implements VpnPanelDriverInterface, ExistingC
         );
     }
 
-    public function attachInbounds(string $remoteId, array $inbounds, ?VpnPanel $panel = null): array
+    public function attachInbounds(string $remoteId, array $inbounds, ?VpnPanel $panel = null, bool $recordHealth = true): array
     {
         $panel = $this->requirePanel($panel);
         $ref = $this->ref($remoteId);
-        $client = $this->api->getClient($panel, $ref->email);
+        $client = $this->api->getClient($panel, $ref->email, $recordHealth);
         if (null === $client) {
             throw new \RuntimeException(sprintf('Client "%s" does not exist on the panel.', $ref->email));
         }
 
-        return $this->attachMissing($panel, $client, null, $this->additionalInbounds($inbounds, $panel, null))[1];
+        return $this->attachMissing($panel, $client, null, $this->additionalInbounds($inbounds, $panel, null), $recordHealth)[1];
+    }
+
+    public function clientInboundIds(string $remoteId, ?VpnPanel $panel = null, bool $recordHealth = true): ?array
+    {
+        $panel = $this->requirePanel($panel);
+        $client = $this->api->getClient($panel, $this->ref($remoteId)->email, $recordHealth);
+        if (null === $client) {
+            return null;
+        }
+        if (!isset($client['inboundIds']) || !is_array($client['inboundIds'])) {
+            throw new \RuntimeException('The panel did not list the client\'s inbounds.');
+        }
+
+        return array_values(array_map('intval', $client['inboundIds']));
     }
 
     /**
@@ -233,7 +247,7 @@ final class Sanaei3xuiModernDriver implements VpnPanelDriverInterface, ExistingC
      *
      * @return array{array<string, mixed>, list<InboundAttachment>} the client as read last, one result per additional inbound
      */
-    private function attachMissing(VpnPanel $panel, array $client, ?int $primaryRemoteId, array $additional): array
+    private function attachMissing(VpnPanel $panel, array $client, ?int $primaryRemoteId, array $additional, bool $recordHealth = true): array
     {
         $email = (string) $client['email'];
         $wanted = [...(null === $primaryRemoteId ? [] : [$primaryRemoteId]), ...array_keys($additional)];
@@ -241,8 +255,8 @@ final class Sanaei3xuiModernDriver implements VpnPanelDriverInterface, ExistingC
         $missing = isset($client['inboundIds']) ? array_values(array_diff($wanted, $client['inboundIds'])) : $wanted;
         $errors = [];
         if ([] !== $missing) {
-            $errors = $this->attachIds($panel, $email, $missing);
-            $client = $this->api->getClient($panel, $email) ?? throw new \RuntimeException(sprintf('Client "%s" is missing after attaching inbounds.', $email));
+            $errors = $this->attachIds($panel, $email, $missing, $recordHealth);
+            $client = $this->api->getClient($panel, $email, $recordHealth) ?? throw new \RuntimeException(sprintf('Client "%s" is missing after attaching inbounds.', $email));
         }
         if (null !== $primaryRemoteId && isset($client['inboundIds']) && !in_array($primaryRemoteId, $client['inboundIds'], true)) {
             throw new \RuntimeException(sprintf('The panel did not attach client "%s" to the plan\'s inbound %d%s', $email, $primaryRemoteId, isset($errors[$primaryRemoteId]) ? ': '.$errors[$primaryRemoteId] : '.'));
@@ -256,10 +270,10 @@ final class Sanaei3xuiModernDriver implements VpnPanelDriverInterface, ExistingC
      *
      * @return array<int, string> remote inbound id => why its attach failed (a safe text)
      */
-    private function attachIds(VpnPanel $panel, string $email, array $ids): array
+    private function attachIds(VpnPanel $panel, string $email, array $ids, bool $recordHealth = true): array
     {
         try {
-            $this->api->attach($panel, $email, $ids);
+            $this->api->attach($panel, $email, $ids, $recordHealth);
 
             return [];
         } catch (PanelApiException $e) {
@@ -271,7 +285,7 @@ final class Sanaei3xuiModernDriver implements VpnPanelDriverInterface, ExistingC
         $errors = [];
         foreach ($ids as $id) {
             try {
-                $this->api->attach($panel, $email, [$id]);
+                $this->api->attach($panel, $email, [$id], $recordHealth);
             } catch (PanelApiException $e) {
                 $errors[$id] = self::attachError($e);
             }

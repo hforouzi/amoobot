@@ -65,9 +65,9 @@ web root under a random name; its SHA-256 is shown on the detail page and on the
 
 A plan can name **additional inbounds** of the same panel: a buyer's one client (one email, one UUID, one subscription)
 is put on the primary inbound and on all of them. Design: [multi-inbound-plans.md](../design/multi-inbound-plans.md).
-Phase M1 stores them; phase **M2a** provisions them (modern 3x-ui panels only). Display in the bot and Mini App, the
-scheduled retry and admin alerts come later: until then the customer gets the subscription link, which carries every
-attached inbound.
+Phase M1 stores them; phase **M2a** provisions them (modern 3x-ui panels only); phase **M2b** retries the ones that
+failed on a schedule, alerts the admins and shows the state (below). The customer gets the subscription link, which
+carries every attached inbound.
 
 - **Switch:** `Settings → Plans → Allow additional inbounds on plans` (`plans.multi_inbound_enabled`, SETTINGS_MANAGE),
   off by default. With it off the plan form, the plan list, the inbound page and the service page look exactly as
@@ -112,6 +112,37 @@ attached inbound.
   plans are named. Deleting a plan's primary inbound works as before (the plan then has no inbound).
 - Trial plans keep one inbound.
 
+### Scheduled retry and alerts
+
+- **What the job does** (`app:automation:run --only=attach-inbounds`, a systemd timer every 30 minutes at :25/:55, in
+  the `lifecycle` lock group; by hand: `php bin/console app:services:attach-inbounds [--dry-run]`). Only for **active**
+  services (suspended, expired and deleted ones are never touched):
+  - it retries each "not attached" inbound with back-off: the first retry at the next run after the sale, then after a
+    delay that doubles after each failure (5 minutes × 2ⁿ by default, at most 6 hours), until the attempts are used up (12 in all, the one at the sale
+    included). It never creates a second client;
+  - every 6 hours it compares the attached inbounds with the panel (one read per service): an inbound the client was
+    **removed from by hand in 3x-ui** becomes "not attached", the admins are alerted and it is attached again; an inbound
+    the panel already has (e.g. attached by hand) becomes "attached" without an attempt;
+  - a panel that cannot be read for 5 services in a row is left alone for that run (the others go on); a run never
+    marks a panel "degraded" and uses up no attempt while the panel is down. Two runs at once are safe.
+- **Settings** (`Settings → Plans → Retrying inbounds that were not attached`, SETTINGS_MANAGE):
+  `plans.attach_retry_enabled` (on), `plans.attach_max_attempts` (12, 1–100), `plans.attach_retry_delay_minutes` (5,
+  1–1440). Raising the attempts lets a given-up inbound be retried again.
+- **Alerts** (Telegram, to the admins who may retry: `TELEGRAM_ADMIN_CHAT_ID` and linked admins with SERVICES_MANAGE):
+  one message per service when an inbound fails for the first time, one when its attempts are used up, and one when it
+  is attached again. They name the service, user, plan and inbound by id and title and quote the error, never a link,
+  UUID, client email, token or panel address.
+- **Where to see failures:** the services list has a badge "N inbounds not attached" and a tab **"Inbounds not
+  attached"**; the service page lists each inbound with its state, attempts, last error and when the next automatic try
+  is (or that the attempts are used up); the panel page and `app:panel:doctor <panel id>` count the not attached ones.
+- **How to retry by hand:** "Retry attach" on the service page (SERVICES_MANAGE), at any time; it ignores the back-off
+  and the attempt limit.
+- **Customers** (bot service detail, Mini App service page): "Servers: N" and, while some are not attached, "1 server is
+  still being connected and will be added automatically", never which one or where. Services without additional inbounds
+  look as before.
+- **How to disable:** untick `plans.attach_retry_enabled` (no retry, no check; the alerts still go out), or turn the
+  switch `plans.multi_inbound_enabled` off (the job then reads and changes nothing, and nothing is shown).
+
 ### Before turning the switch on (real-panel checklist, 3x-ui v3.11.0)
 
 Run this once on your own panel with test inbounds, not customers' inbounds. Turn the switch on, but keep **every
@@ -151,14 +182,19 @@ turn the switch off and report what you saw. The optional ones are needed only i
    VLESS-WS). Both connect, the flow applied only where valid; or note that it fails and do not sell that combination.
 10. Optional: **two Shadowsocks inbounds** with the same method; record what works (two different 2022 methods are
     refused by the plan form).
-11. Optional: remove the client from one inbound by hand in 3x-ui. `verify-links` reports a DIFF for that inbound;
-    "Retry attach" is not offered, because the row still says attached. This is a known M2a limit.
+11. Optional: remove the client from one inbound by hand in 3x-ui. `verify-links` reports a DIFF for that inbound. Run
+    `php bin/console app:services:attach-inbounds` (the comparison runs every 6 hours; set the row's `checked_at` to
+    NULL to force it): the row is reported "found removed", you get an alert, and the client is attached again (M2b).
 
 When 1 to 8 pass, activate the plans you want to sell.
 
 **Upgrading.** Run the migrations: `Version20261101090000` (M1) adds the `plan_additional_inbound` and
-`vpn_service_inbound` tables; M2a needs no new migration. Nothing existing is changed and nothing is backfilled. Its
-`down()` refuses and changes nothing while either table has a row: remove the additional inbounds from every plan first.
+`vpn_service_inbound` tables; M2a needs no new migration; `Version20261102090000` (M2b) adds the retry columns
+(`next_attempt_at`, `checked_at`, `alert_state`, `alerted_at`) and an index to `vpn_service_inbound`. Nothing existing is
+changed and nothing is backfilled. M1's `down()` refuses and changes nothing while either table has a row (remove the
+additional inbounds from every plan first) or while M2b's migration is applied (roll that back first). The M2b timer
+(`amoobot-job-attach-inbounds`) is installed by a **full** `deploy.sh` run, not `--app-only`; until then run the command
+by hand.
 
 ## Sales Controls
 

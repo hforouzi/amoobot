@@ -9,11 +9,13 @@ declare(strict_types=1);
  *
  * Usage: php multi-inbound.php settle <paymentId> <stateFile> <delayMs>        prints the settlement outcome
  *        php multi-inbound.php retry-attach <serviceId> <stateFile> <delayMs>  prints the retry outcome
+ *        php multi-inbound.php attach-scheduled - <stateFile> <delayMs>        prints "attached=N" of a scheduled run
  */
 
 use App\Entity\Payment;
 use App\Entity\VpnService;
 use App\Payment\Application\Settlement\PaymentSettlementService;
+use App\Provisioning\Application\InboundAttachScheduler;
 use App\Provisioning\Application\ServiceInboundAttacher;
 use App\Tests\Support\Fake3xui\Fake3xuiPanel;
 use App\Tests\Support\MockHttpResponder;
@@ -30,6 +32,12 @@ $container->get(MockHttpResponder::class)->on('panel.example.test', $fake);
 if ('settle' === $mode) {
     $payment = $entityManager->find(Payment::class, (int) $id) ?? throw new RuntimeException('no such payment');
     echo $container->get(PaymentSettlementService::class)->approveByAdmin($payment, 1, null, 'concurrency_test')->outcome->value;
+
+    return;
+}
+
+if ('attach-scheduled' === $mode) {
+    echo 'attached='.$container->get(InboundAttachScheduler::class)->run(500, false, 50, 0)->attached;
 
     return;
 }

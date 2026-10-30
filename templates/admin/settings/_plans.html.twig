@@ -12,6 +12,27 @@
             <div class="form-text">{{ 'plan_settings.help.multi_inbound_enabled'|trans }}</div>
         </div>
 
+        <div class="admin-section">
+            <h2>{{ 'plan_settings.sections.attach_retry'|trans }}</h2>
+            <div class="admin-checkbox-row">
+                <input type="checkbox" id="plans_attach_retry_enabled" name="plans_attach_retry_enabled" {% if values.plans_attach_retry_enabled %}checked{% endif %}>
+                <label for="plans_attach_retry_enabled">{{ 'plan_settings.fields.attach_retry_enabled'|trans }}</label>
+            </div>
+            <div class="form-text">{{ 'plan_settings.help.attach_retry_enabled'|trans }}</div>
+            <div class="admin-form-grid">
+                <div class="admin-form-row">
+                    <label class="form-label" for="plans_attach_max_attempts">{{ 'plan_settings.fields.attach_max_attempts'|trans }}</label>
+                    <input class="form-control" type="number" min="1" max="{{ constant('App\\Shop\\Application\\MultiInboundSettings::MAX_MAX_ATTEMPTS') }}" step="1" dir="ltr" id="plans_attach_max_attempts" name="plans_attach_max_attempts" value="{{ values.plans_attach_max_attempts }}">
+                    <div class="form-text">{{ 'plan_settings.help.attach_max_attempts'|trans }}</div>
+                </div>
+                <div class="admin-form-row">
+                    <label class="form-label" for="plans_attach_retry_delay_minutes">{{ 'plan_settings.fields.attach_retry_delay_minutes'|trans }}</label>
+                    <input class="form-control" type="number" min="1" max="{{ constant('App\\Shop\\Application\\MultiInboundSettings::MAX_RETRY_DELAY_MINUTES') }}" step="1" dir="ltr" id="plans_attach_retry_delay_minutes" name="plans_attach_retry_delay_minutes" value="{{ values.plans_attach_retry_delay_minutes }}">
+                    <div class="form-text">{{ 'plan_settings.help.attach_retry_delay_minutes'|trans }}</div>
+                </div>
+            </div>
+        </div>
+
         <div class="admin-actions">
             <button type="submit" class="btn btn-primary">{{ 'common.save'|trans }}</button>
         </div>

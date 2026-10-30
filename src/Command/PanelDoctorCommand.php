@@ -9,6 +9,7 @@ use App\Entity\VpnPanel;
 use App\Provisioning\Application\PanelConnectionReport;
 use App\Provisioning\Application\PanelConnectionTester;
 use App\Provisioning\Application\PanelSubscriptionUrlCheck;
+use App\Provisioning\Application\ServiceInboundCounts;
 use App\Provisioning\Domain\Dto\CreateVpnServiceRequest;
 use App\Provisioning\Domain\Dto\RenewVpnServiceRequest;
 use App\Provisioning\Infrastructure\PanelCredentials;
@@ -47,6 +48,7 @@ final class PanelDoctorCommand extends Command
         private readonly ModernClientsApi $clientsApi,
         private readonly PanelCredentials $credentials,
         private readonly TranslatorInterface $translator,
+        private readonly ServiceInboundCounts $inboundCounts,
     ) {
         parent::__construct();
     }
@@ -116,6 +118,11 @@ final class PanelDoctorCommand extends Command
         $output->writeln(sprintf('  detected mode   %s (integration mode %s, effective %s)', $report->detectedMode->value ?? '-', $panel->getIntegrationMode()->value, $panel->getEffectiveIntegrationMode()->value));
         $output->writeln(sprintf('  latency         %s', null === $report->latencyMs ? '-' : $report->latencyMs.' ms'));
         $output->writeln(sprintf('  inbounds        %s', $report->inboundCount ?? '-'));
+        // Plans with several inbounds (switch on): read from the database, the panel is not asked.
+        $problems = $this->inboundCounts->problems((int) $panel->getId());
+        if (null !== $problems) {
+            $output->writeln(sprintf('  attachments     %d failed (%d with retries used up), %d being attached (additional inbounds of active services)', $problems['failed'], $problems['givenUp'], $problems['pending']));
+        }
         if (null !== $report->failure) {
             $key = 'panel_connection.failure.'.$report->failure->value;
             $output->writeln(sprintf('FAIL  %s: %s', $report->failure->value, $this->translator->trans($key.'.title', [], 'admin', $locale)));

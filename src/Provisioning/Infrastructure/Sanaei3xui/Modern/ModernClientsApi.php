@@ -56,10 +56,10 @@ class ModernClientsApi
      *
      * @throws PanelApiException when the panel cannot answer (unknown is never reported as "absent")
      */
-    public function getClient(VpnPanel $panel, string $email): ?array
+    public function getClient(VpnPanel $panel, string $email, bool $recordHealth = true): ?array
     {
         try {
-            $response = $this->http->get($panel, 'panel/api/clients/get/'.rawurlencode($email));
+            $response = $this->http->get($panel, 'panel/api/clients/get/'.rawurlencode($email), [], null, null, $recordHealth);
         } catch (PanelApiException $e) {
             if (self::isNotFound($e)) {
                 return null;
@@ -180,9 +180,9 @@ class ModernClientsApi
     /**
      * @param list<int> $inboundIds
      */
-    public function attach(VpnPanel $panel, string $email, array $inboundIds): void
+    public function attach(VpnPanel $panel, string $email, array $inboundIds, bool $recordHealth = true): void
     {
-        $this->http->post($panel, 'panel/api/clients/'.rawurlencode($email).'/attach', ['inboundIds' => $inboundIds]);
+        $this->http->post($panel, 'panel/api/clients/'.rawurlencode($email).'/attach', ['inboundIds' => $inboundIds], [], $recordHealth);
     }
 
     /**

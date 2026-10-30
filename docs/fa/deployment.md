@@ -520,7 +520,7 @@ client حذف نمی‌شود و تمدید دوباره آن را فعال می
 | خروجی کامل | `/var/log/amoobot/<job>.log` (چرخش روزانه، ۱۴ روز: `/etc/logrotate.d/amoobot-jobs`) |
 | خلاصه‌ی هر اجرا | `journalctl -u amoobot-job-<job>` |
 | آخرین اجرا / آخرین موفقیت | `/var/lib/amoobot/jobs/<job>.last-run` و `<job>.last-success` |
-| قفل‌ها | `/run/amoobot/<گروه>.lock` (`sync`، `expiry`، `suspend`، `notifications` و `claims` در گروه `lifecycle` هستند و هم‌زمان اجرا نمی‌شوند) |
+| قفل‌ها | `/run/amoobot/<گروه>.lock` (`sync`، `expiry`، `suspend`، `notifications`، `claims` و `attach-inbounds` در گروه `lifecycle` هستند و هم‌زمان اجرا نمی‌شوند) |
 
 ### دیدن وضعیت آخرین اجرا
 

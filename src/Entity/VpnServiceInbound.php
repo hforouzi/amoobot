@@ -13,10 +13,16 @@ use Doctrine\ORM\Mapping as ORM;
  *
  * Removed with its service (ON DELETE CASCADE: it never blocks deleting a service or the user it goes with). The inbound
  * is RESTRICT: an inbound a service is attached to cannot be deleted.
+ *
+ * M2b: the scheduled retry (InboundAttachScheduler) tries a failed row again at nextAttemptAt (NULL: due now) until its
+ * attempts reach the limit, and compares the rows with the panel every few hours (checkedAt). alertState is the last
+ * admin alert sent for the row (InboundAttachAlerts): ALERT_FAILED, ALERT_EXHAUSTED, or NULL (none, or it recovered).
+ * These columns are written with SQL by those classes and ServiceInboundAttacher only.
  */
 #[ORM\Entity]
 #[ORM\Table(name: 'vpn_service_inbound')]
 #[ORM\UniqueConstraint(name: 'uniq_vpn_service_inbound', columns: ['service_id', 'inbound_id'])]
+#[ORM\Index(name: 'idx_vpn_service_inbound_due', columns: ['status', 'next_attempt_at'])]
 class VpnServiceInbound
 {
     public const STATUS_ATTACHED = 'attached';
@@ -24,6 +30,9 @@ class VpnServiceInbound
     public const STATUS_FAILED = 'failed';
     public const STATUS_DETACHED = 'detached';
     public const STATUSES = [self::STATUS_ATTACHED, self::STATUS_PENDING, self::STATUS_FAILED, self::STATUS_DETACHED];
+
+    public const ALERT_FAILED = 'failed';
+    public const ALERT_EXHAUSTED = 'exhausted';
 
     #[ORM\Id]
     #[ORM\GeneratedValue]
@@ -56,6 +65,18 @@ class VpnServiceInbound
 
     #[ORM\Column]
     private \DateTimeImmutable $updatedAt;
+
+    #[ORM\Column(nullable: true)]
+    private ?\DateTimeImmutable $nextAttemptAt = null;
+
+    #[ORM\Column(nullable: true)]
+    private ?\DateTimeImmutable $checkedAt = null;
+
+    #[ORM\Column(length: 16, nullable: true)]
+    private ?string $alertState = null;
+
+    #[ORM\Column(nullable: true)]
+    private ?\DateTimeImmutable $alertedAt = null;
 
     public function __construct(VpnService $service, VpnInbound $inbound, \DateTimeImmutable $now)
     {
@@ -110,9 +131,31 @@ class VpnServiceInbound
         return $this->updatedAt;
     }
 
+    /** When the scheduled retry may try a failed row again; NULL: at the next run (or not failed). */
+    public function getNextAttemptAt(): ?\DateTimeImmutable
+    {
+        return $this->nextAttemptAt;
+    }
+
+    public function getCheckedAt(): ?\DateTimeImmutable
+    {
+        return $this->checkedAt;
+    }
+
+    public function getAlertState(): ?string
+    {
+        return $this->alertState;
+    }
+
+    public function getAlertedAt(): ?\DateTimeImmutable
+    {
+        return $this->alertedAt;
+    }
+
     /**
-     * One attach attempt: attached, or failed with a reason that is safe to show (ServiceErrorText). An attached row
-     * keeps its first attachedAt.
+     * One attach attempt (at the sale): attached, or failed with a reason that is safe to show (ServiceErrorText). An
+     * attached row keeps its first attachedAt. A failed one keeps its nextAttemptAt (NULL: the scheduled retry tries it
+     * at its next run).
      */
     public function recordAttempt(bool $attached, ?string $error, \DateTimeImmutable $now): self
     {
@@ -120,6 +163,7 @@ class VpnServiceInbound
         $this->status = $attached ? self::STATUS_ATTACHED : self::STATUS_FAILED;
         $this->lastError = $attached || null === $error ? null : mb_substr($error, 0, 255);
         $this->attachedAt = $attached ? ($this->attachedAt ?? $now) : $this->attachedAt;
+        $this->nextAttemptAt = $attached ? null : $this->nextAttemptAt;
         $this->updatedAt = $now;
 
         return $this;
@@ -129,6 +173,7 @@ class VpnServiceInbound
     public function markDetached(\DateTimeImmutable $now): self
     {
         $this->status = self::STATUS_DETACHED;
+        $this->nextAttemptAt = null;
         $this->updatedAt = $now;
 
         return $this;

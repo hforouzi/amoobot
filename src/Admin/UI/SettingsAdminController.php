@@ -126,7 +126,12 @@ final class SettingsAdminController extends AbstractController
     /** Turning the switch off while plans keep additional inbounds: they stay unsold, and the admin is told which. */
     private function savePlans(Request $request, AdminAuditLogger $auditLogger): void
     {
-        $this->settings->savePlans($request->request->all());
+        $problem = $this->settings->savePlans($request->request->all());
+        if (null !== $problem) {
+            $this->flash('danger', $problem['message']);
+
+            return;
+        }
         $auditLogger->record('settings.update', 'Setting', null, ['page' => 'plans'] + $this->settings->plansValues());
         $this->flash('success', 'flash.settings.plans_saved');
         if (!$this->settings->plansValues()['plans_multi_inbound_enabled']) {

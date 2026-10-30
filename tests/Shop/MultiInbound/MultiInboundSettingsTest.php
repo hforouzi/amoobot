@@ -74,6 +74,52 @@ final class MultiInboundSettingsTest extends IntegrationTestCase
         self::assertNotContains(MultiInboundSettings::ENABLED, SettingsAdministration::SALES_KEYS + SettingsAdministration::AUTOMATION_KEYS);
     }
 
+    public function testTheScheduledRetrySettingsHaveDefaultsAndAreSavedOnThePlansTab(): void
+    {
+        $settings = self::getContainer()->get(MultiInboundSettings::class);
+        self::assertTrue($settings->attachRetryEnabled());
+        self::assertFalse($settings->scheduledRetryOn(), 'never without the switch');
+        self::assertSame([12, 5], [$settings->maxAttempts(), $settings->retryDelayMinutes()]);
+        $client = $this->admin(AdminUser::ROLE_SUPER_ADMIN);
+
+        $crawler = $client->request('GET', '/admin/settings?tab=plans');
+        self::assertNotNull($crawler->filter('input[name="plans_attach_retry_enabled"]')->attr('checked'));
+        self::assertSame('12', $crawler->filter('input[name="plans_attach_max_attempts"]')->attr('value'));
+        self::assertSame('5', $crawler->filter('input[name="plans_attach_retry_delay_minutes"]')->attr('value'));
+
+        $client->request('POST', '/admin/settings?tab=plans', ['plans_multi_inbound_enabled' => 'on', 'plans_attach_max_attempts' => '3', 'plans_attach_retry_delay_minutes' => '30']);
+
+        self::assertFalse($settings->attachRetryEnabled(), 'an unticked checkbox turns it off');
+        self::assertFalse($settings->scheduledRetryOn());
+        self::assertSame([3, 30], [$settings->maxAttempts(), $settings->retryDelayMinutes()]);
+    }
+
+    public function testOutOfRangeRetrySettingsAreRefusedAndNothingIsSaved(): void
+    {
+        $settings = self::getContainer()->get(SettingsAdministration::class);
+        foreach ([['plans_attach_max_attempts' => '0'], ['plans_attach_max_attempts' => '101'], ['plans_attach_max_attempts' => '2.5'],
+            ['plans_attach_retry_delay_minutes' => '0'], ['plans_attach_retry_delay_minutes' => '1441'], ['plans_attach_retry_delay_minutes' => 'x']] as $bad) {
+            $problem = $settings->savePlans(['plans_multi_inbound_enabled' => 'on'] + $bad);
+
+            self::assertSame(array_key_first($bad), $problem['field'] ?? null, (string) json_encode($bad));
+        }
+        self::assertNull($this->setting(), 'nothing was saved, the switch included');
+    }
+
+    public function testTheBackOffDoublesUpToSixHoursAndStopsAtTheLimit(): void
+    {
+        $now = new \DateTimeImmutable('2026-11-01 12:00:00');
+        $delays = [];
+        for ($attempts = 1; $attempts <= 12; ++$attempts) {
+            $next = MultiInboundSettings::backoff($attempts, 12, 5, $now);
+            $delays[] = null === $next ? null : intdiv($next->getTimestamp() - $now->getTimestamp(), 60);
+        }
+
+        self::assertSame([5, 10, 20, 40, 80, 160, 320, 360, 360, 360, 360, null], $delays, 'minutes after the n-th failure; given up after 12');
+        self::assertSame(600, intdiv((int) MultiInboundSettings::backoff(3, 12, 600, $now)?->getTimestamp() - $now->getTimestamp(), 60), 'a first delay above 6 h is not shortened');
+        self::assertNull(MultiInboundSettings::backoff(1, 1, 5, $now), 'one attempt in all: the one at the sale');
+    }
+
     public function testAnAdminWithoutSettingsManageCannotChangeIt(): void
     {
         $client = $this->admin(AdminUser::ROLE_SUPPORT);

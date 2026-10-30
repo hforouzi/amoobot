@@ -49,7 +49,7 @@ human() {
   fi
 }
 
-row() { printf '%-9s %-14s %-13s %-9s %s\n' "$@"; }
+row() { printf '%-9s %-16s %-13s %-9s %s\n' "$@"; }
 
 row STATUS JOB LAST-SUCCESS MAX-AGE NOTES
 total=0

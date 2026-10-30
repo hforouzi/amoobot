@@ -8,6 +8,7 @@ use App\Bot\Application\BotTextResolver;
 use App\Entity\VpnService;
 use App\MiniApp\Security\MiniAppUser;
 use App\Provisioning\Application\CustomerServiceFinder;
+use App\Provisioning\Application\ServiceInboundCounts;
 use App\Provisioning\Application\TrafficAddonSettingsProvider;
 use App\Shop\Application\Checkout\ServiceOrderCheckout;
 use App\Shop\Application\SalesSettingsProvider;
@@ -48,6 +49,7 @@ final class MiniAppCustomerController extends AbstractController
         private readonly TrafficAddonSettingsProvider $trafficAddonSettings,
         private readonly WalletSettings $walletSettings,
         private readonly WalletService $wallets,
+        private readonly ServiceInboundCounts $inboundCounts,
         private readonly string $serviceNotifyTrafficThresholds = '80',
     ) {
     }
@@ -93,6 +95,8 @@ final class MiniAppCustomerController extends AbstractController
             'service' => $service,
             'view' => $view,
             'pageUrl' => $this->pageUrl->forService($service),
+            // A plan with several inbounds (switch on): "Servers: N", never which ones; null for every other service.
+            'servers' => $this->inboundCounts->servers($service),
             // The same switches the bot's service view uses; the pages check them again.
             'canRenew' => $this->salesSettings->renewalsEnabled() && null !== $this->serviceOrderCheckout->renewalQuote($service),
             'canAddTraffic' => $this->salesSettings->addTrafficEnabled() && $this->trafficAddonSettings->canPurchase() && null !== $this->serviceOrderCheckout->addTrafficPlan($service),

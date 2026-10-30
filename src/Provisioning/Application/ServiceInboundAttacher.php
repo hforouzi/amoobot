@@ -27,7 +27,14 @@ use Psr\Log\LoggerInterface;
  * nothing to claim ("in progress") and calls nothing. A claim left by a process that died is taken over after
  * STALE_CLAIM.
  *
- * A future scheduled retry (not built in M2a) calls retry() the same way.
+ * Two callers:
+ * - the admin's "Retry attach" (manual): every failed row, whatever its attempts and schedule;
+ * - the scheduled retry (InboundAttachScheduler, $scheduled): only the failed rows that are due (next_attempt_at NULL
+ *   or past) and have had fewer than MultiInboundSettings::maxAttempts() attempts; the panel's failures are not
+ *   counted towards its "degraded" state (a bulk run, as in H0).
+ *
+ * Either way a failed attempt sets next_attempt_at by the back-off (MultiInboundSettings::nextAttemptAt(): NULL once
+ * the attempts are used up), and an attached row clears it.
  */
 final class ServiceInboundAttacher
 {
@@ -42,7 +49,7 @@ final class ServiceInboundAttacher
     ) {
     }
 
-    public function retry(VpnService $service, string $source): InboundAttachRetry
+    public function retry(VpnService $service, string $source, bool $scheduled = false): InboundAttachRetry
     {
         $serviceId = (int) $service->getId();
         if (!$this->settings->enabled()) {
@@ -58,21 +65,21 @@ final class ServiceInboundAttacher
         }
 
         $claim = new \DateTimeImmutable();
-        [$claimed, $busy] = $this->claim($serviceId, $claim);
+        [$claimed, $busy] = $this->claim($serviceId, $claim, $scheduled ? $this->settings->maxAttempts() : null);
         if ([] === $claimed) {
             return new InboundAttachRetry($busy ? InboundAttachRetry::IN_PROGRESS : InboundAttachRetry::NOTHING_TO_DO);
         }
         $inbounds = [];
-        foreach ($claimed as $rowId => $inboundId) {
+        foreach ($claimed as $rowId => [$inboundId]) {
             $inbounds[$rowId] = $this->entityManager->find(VpnInbound::class, $inboundId) ?? throw new \LogicException('inbound missing');
         }
 
         // No lock and no transaction from here to the write: the panel may take seconds.
         try {
-            $results = $driver->attachInbounds((string) $service->getRemoteId(), array_values($inbounds), $panel);
+            $results = $driver->attachInbounds((string) $service->getRemoteId(), array_values($inbounds), $panel, !$scheduled);
         } catch (\Throwable $e) {
             $error = ServiceErrorText::redact($service, $e->getMessage(), 255);
-            $this->write($serviceId, $claim, array_map(static fn (): array => [false, $error], $claimed));
+            $this->write($serviceId, $claim, array_map(static fn (array $row): array => [false, $error, $row[1]], $claimed));
             $this->logger->warning('service_inbound_attach_failed', ['service_id' => $serviceId, 'source' => $source, 'inbounds' => count($claimed)]);
 
             return new InboundAttachRetry(InboundAttachRetry::FAILED, 0, count($claimed), $error);
@@ -83,11 +90,11 @@ final class ServiceInboundAttacher
             $byInbound[(int) $result->inbound->getId()] = $result;
         }
         $outcomes = [];
-        foreach ($claimed as $rowId => $inboundId) {
+        foreach ($claimed as $rowId => [$inboundId, $attempts]) {
             $result = $byInbound[$inboundId] ?? null;
             $outcomes[$rowId] = $result instanceof InboundAttachment && $result->attached
-                ? [true, null]
-                : [false, ServiceErrorText::redact($service, $result->error ?? 'the panel did not attach it', 255)];
+                ? [true, null, $attempts]
+                : [false, ServiceErrorText::redact($service, $result->error ?? 'the panel did not attach it', 255), $attempts];
         }
         $this->write($serviceId, $claim, $outcomes);
         $attached = count(array_filter($outcomes, static fn (array $o): bool => $o[0]));
@@ -95,29 +102,34 @@ final class ServiceInboundAttacher
 
         if ($attached > 0) {
             // The new inbounds' links (design 9.5); its own lock rules, after ours are released.
-            $this->panelLinkSnapshot->refresh($service, $source);
+            $this->panelLinkSnapshot->refresh($service, $source, true, !$scheduled);
         }
 
         return new InboundAttachRetry(InboundAttachRetry::DONE, $attached, count($outcomes) - $attached);
     }
 
     /**
-     * failed (or pending with a stale claim) -> pending, under the service row lock then the rows' locks.
+     * failed (or pending with a stale claim) -> pending, under the service row lock then the rows' locks. With
+     * $maxAttempts (the scheduled retry) a failed row is claimed only when it is due and has attempts left.
      *
-     * @return array{array<int, int>, bool} claimed row id => inbound id; whether a fresh claim of someone else is open
+     * @return array{array<int, array{int, int}>, bool} claimed row id => [inbound id, attempts so far]; whether a fresh
+     *                                                  claim of someone else is open
      */
-    private function claim(int $serviceId, \DateTimeImmutable $claim): array
+    private function claim(int $serviceId, \DateTimeImmutable $claim, ?int $maxAttempts): array
     {
-        return $this->transactional(function (Connection $db) use ($serviceId, $claim): array {
+        return $this->transactional(function (Connection $db) use ($serviceId, $claim, $maxAttempts): array {
             $db->fetchOne('SELECT id FROM vpn_service WHERE id = ? FOR UPDATE', [$serviceId]);
-            $rows = $db->fetchAllAssociative('SELECT id, inbound_id, status, updated_at FROM vpn_service_inbound WHERE service_id = ? ORDER BY id FOR UPDATE', [$serviceId]);
+            $rows = $db->fetchAllAssociative('SELECT id, inbound_id, status, attempts, next_attempt_at, updated_at FROM vpn_service_inbound WHERE service_id = ? ORDER BY id FOR UPDATE', [$serviceId]);
+            $now = $claim->format('Y-m-d H:i:s');
             $stale = $claim->modify(self::STALE_CLAIM)->format('Y-m-d H:i:s');
             $claimed = [];
             $busy = false;
             foreach ($rows as $row) {
                 $pending = VpnServiceInbound::STATUS_PENDING === $row['status'];
-                if (VpnServiceInbound::STATUS_FAILED === $row['status'] || ($pending && (string) $row['updated_at'] < $stale)) {
-                    $claimed[(int) $row['id']] = (int) $row['inbound_id'];
+                $failed = VpnServiceInbound::STATUS_FAILED === $row['status']
+                    && (null === $maxAttempts || ((int) $row['attempts'] < $maxAttempts && (null === $row['next_attempt_at'] || (string) $row['next_attempt_at'] <= $now)));
+                if ($failed || ($pending && (string) $row['updated_at'] < $stale)) {
+                    $claimed[(int) $row['id']] = [(int) $row['inbound_id'], (int) $row['attempts']];
                 } elseif ($pending) {
                     $busy = true;
                 }
@@ -135,20 +147,23 @@ final class ServiceInboundAttacher
     }
 
     /**
-     * Writes the outcome to the rows that still hold this claim (pending, claimed at $claim).
+     * Writes the outcome to the rows that still hold this claim (pending, claimed at $claim): attempts + 1, and the next
+     * attempt by the back-off (a failure) or none (attached).
      *
-     * @param array<int, array{bool, ?string}> $outcomes row id => [attached, error]
+     * @param array<int, array{bool, ?string, int}> $outcomes row id => [attached, error, attempts before this one]
      */
     private function write(int $serviceId, \DateTimeImmutable $claim, array $outcomes): void
     {
         $this->transactional(function (Connection $db) use ($serviceId, $claim, $outcomes): void {
             $db->fetchOne('SELECT id FROM vpn_service WHERE id = ? FOR UPDATE', [$serviceId]);
-            $now = (new \DateTimeImmutable())->format('Y-m-d H:i:s');
-            foreach ($outcomes as $rowId => [$attached, $error]) {
+            $at = new \DateTimeImmutable();
+            $now = $at->format('Y-m-d H:i:s');
+            foreach ($outcomes as $rowId => [$attached, $error, $attempts]) {
+                $next = $attached ? null : $this->settings->nextAttemptAt($attempts + 1, $at)?->format('Y-m-d H:i:s');
                 $db->executeStatement(
-                    'UPDATE vpn_service_inbound SET status = ?, attempts = attempts + 1, last_error = ?, attached_at = CASE WHEN ? = 1 THEN COALESCE(attached_at, ?) ELSE attached_at END, updated_at = ?
+                    'UPDATE vpn_service_inbound SET status = ?, attempts = attempts + 1, last_error = ?, attached_at = CASE WHEN ? = 1 THEN COALESCE(attached_at, ?) ELSE attached_at END, next_attempt_at = ?, updated_at = ?
                      WHERE id = ? AND service_id = ? AND status = ? AND updated_at = ?',
-                    [$attached ? VpnServiceInbound::STATUS_ATTACHED : VpnServiceInbound::STATUS_FAILED, $error, $attached ? 1 : 0, $now, $now, $rowId, $serviceId, VpnServiceInbound::STATUS_PENDING, $claim->format('Y-m-d H:i:s')],
+                    [$attached ? VpnServiceInbound::STATUS_ATTACHED : VpnServiceInbound::STATUS_FAILED, $error, $attached ? 1 : 0, $now, $next, $now, $rowId, $serviceId, VpnServiceInbound::STATUS_PENDING, $claim->format('Y-m-d H:i:s')],
                 );
             }
         });
