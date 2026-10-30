@@ -261,7 +261,8 @@ class VpnServiceCrudController extends AbstractCrudController
                 $t('service_inbounds.status.'.$row->getStatus()),
                 $t('service_inbounds.attempts', ['%count%' => $row->getAttempts()]),
                 $this->nextAttempt($row, $t),
-                null === $row->getLastError() ? '' : ' · <span dir="ltr">'.AdminFormat::e($row->getLastError()).'</span>',
+                // Masked again on display: rows written before M2c may hold the client's email (F9).
+                null === $row->getLastError() ? '' : ' · <span dir="ltr">'.AdminFormat::e(VpnServiceInbound::safeError($row->getLastError())).'</span>',
             ), $rows);
 
             return '<ul class="list-unstyled mb-0">'.implode('', $lines).'</ul>';

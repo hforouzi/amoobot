@@ -177,7 +177,7 @@ class InboundAttachAlerts
             return implode("\n", $lines);
         }
         $lines[] = 'Not attached: '.$inbounds;
-        $lines[] = 'Last error: '.mb_substr(self::withoutClient((string) ($first['last_error'] ?? '-'), (string) ($first['client_email'] ?? '')), 0, 200);
+        $lines[] = 'Last error: '.mb_substr(self::withoutClient(VpnServiceInbound::safeError((string) ($first['last_error'] ?? '-')), (string) ($first['client_email'] ?? '')), 0, 200);
         $looping = [] !== array_filter($rows, static fn (array $r): bool => InboundAttachScheduler::REATTACH_STOPPED === $r['last_error']);
         $lines[] = match (true) {
             self::KIND_EXHAUSTED === $kind && $looping => sprintf('Removed on the panel and attached again %d times within %d hours: the automatic re-attach stopped. Find out what removes it (another tool, a panel script), then use "Retry attach" on the service page (Services → #%d).', InboundAttachScheduler::MAX_REATTACH_CYCLES, InboundAttachScheduler::REATTACH_WINDOW_HOURS, $serviceId),

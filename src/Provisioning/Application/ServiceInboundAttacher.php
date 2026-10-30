@@ -179,7 +179,7 @@ final class ServiceInboundAttacher
                 $db->executeStatement(
                     'UPDATE vpn_service_inbound SET status = ?, attempts = attempts + 1, last_error = ?, attached_at = CASE WHEN ? = 1 THEN COALESCE(attached_at, ?) ELSE attached_at END, next_attempt_at = ?, updated_at = ?
                      WHERE id = ? AND service_id = ? AND status = ? AND updated_at = ?',
-                    [$attached ? VpnServiceInbound::STATUS_ATTACHED : VpnServiceInbound::STATUS_FAILED, $error, $attached ? 1 : 0, $now, $next, $now, $rowId, $serviceId, VpnServiceInbound::STATUS_PENDING, $claim->format('Y-m-d H:i:s')],
+                    [$attached ? VpnServiceInbound::STATUS_ATTACHED : VpnServiceInbound::STATUS_FAILED, null === $error ? null : VpnServiceInbound::safeError($error), $attached ? 1 : 0, $now, $next, $now, $rowId, $serviceId, VpnServiceInbound::STATUS_PENDING, $claim->format('Y-m-d H:i:s')],
                 );
             }
         });

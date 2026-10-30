@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Entity;
 
+use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http\SecretRedactor;
 use Doctrine\ORM\Mapping as ORM;
 
 /**
@@ -178,7 +179,7 @@ class VpnServiceInbound
     {
         ++$this->attempts;
         $this->status = $attached ? self::STATUS_ATTACHED : self::STATUS_FAILED;
-        $this->lastError = $attached || null === $error ? null : mb_substr($error, 0, 255);
+        $this->lastError = $attached || null === $error ? null : self::safeError($error);
         $this->attachedAt = $attached ? ($this->attachedAt ?? $now) : $this->attachedAt;
         $this->nextAttemptAt = $attached ? null : $this->nextAttemptAt;
         $this->updatedAt = $now;
@@ -196,7 +197,7 @@ class VpnServiceInbound
     {
         $this->attempts += $tried ? 1 : 0;
         $this->status = self::STATUS_PENDING;
-        $this->lastError = mb_substr($why, 0, 255);
+        $this->lastError = self::safeError($why);
         $this->nextAttemptAt = null;
         $this->updatedAt = $now;
 
@@ -211,5 +212,14 @@ class VpnServiceInbound
         $this->updatedAt = $now;
 
         return $this;
+    }
+
+    /**
+     * What last_error may hold (M2c F9): a panel message can quote the client's email (tg_<telegram id>_order_<id>),
+     * so the customer's Telegram id and any access credential are masked before it is stored.
+     */
+    public static function safeError(string $error): string
+    {
+        return mb_substr(SecretRedactor::maskAccess($error), 0, 255);
     }
 }

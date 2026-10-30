@@ -39,7 +39,8 @@ final class SecretRedactor
      * Removes a customer's access credentials from free text whose service is unknown (a stored message, an exception
      * from a failed provisioning, a panel response): config links (vless://…) entirely, the path and query of every
      * URL (subscription URLs, /s/ page tokens, panel base paths; scheme and host stay for support), user:password@,
-     * UUIDs, subId/uuid/password key-value pairs (a trojan or shadowsocks client's password is its access) and the
+     * UUIDs, subId/uuid/password key-value pairs (a trojan or shadowsocks client's password is its access), the
+     * customer's Telegram id in a panel client email (tg_<id>_order_<order> becomes tg_[redacted]_order_<order>) and the
      * values a failed query quotes (Doctrine's parameter list, MySQL's duplicate entry). Then redact().
      */
     public static function redactAccess(string $text, int $maxLength = 500): string
@@ -61,6 +62,7 @@ final class SecretRedactor
         ) ?? $text;
         $text = preg_replace('#/s/[A-Za-z0-9_-]{43}#', '/s/'.self::MASK, $text) ?? $text;
         $text = preg_replace('/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i', self::MASK, $text) ?? $text;
+        $text = preg_replace('/(?<![A-Za-z0-9])tg_\d+(?=_order_\d)/i', 'tg_'.self::MASK, $text) ?? $text;
 
         // A value mask() already shortened ("••••wxyz") stays: it is the correlation hint a log line keeps on purpose.
         return preg_replace('/("?\b(?:sub_?id|client_?uuid|uuid|password|passwd)"?\s*[:=]\s*)(?!"?(?:••••|\[redacted\]))("[^"]*"|\'[^\']*\'|[^\s"\',;&}]+)/i', '$1"'.self::MASK.'"', $text) ?? $text;
