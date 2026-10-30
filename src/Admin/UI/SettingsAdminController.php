@@ -14,12 +14,15 @@ use App\Shop\Application\SalesSettingsProvider;
 use Doctrine\ORM\EntityManagerInterface;
 use EasyCorp\Bundle\EasyAdminBundle\Attribute\AdminRoute;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
+use Symfony\Component\HttpFoundation\File\UploadedFile;
+use Symfony\Component\HttpFoundation\RedirectResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
  * One settings page (SETTINGS_MANAGE) with tabs, ?tab=...: sales & renewal pricing, automation, wallet, resellers, plans (the
- * multi-inbound switch, web only), required channels
+ * multi-inbound switch, web only), branding (name, logo and accent colour of customer-facing pages, web only; its form
+ * and the logo removal carry a CSRF token), required channels
  * (the RequiredChannel list; create/edit stay on its CRUD pages) and advanced (the raw Setting keys, behind a
  * warning). Each form tab saves only its own keys and validates as the separate pages did; the old pages redirect
  * here (LegacyAdminRoutes, and the RequiredChannel / Setting CRUD index()). The two forms are SettingsAdministration's
@@ -28,6 +31,8 @@ use Symfony\Component\HttpFoundation\Response;
 final class SettingsAdminController extends AbstractController
 {
     use TranslatedFlashes;
+
+    private const BRANDING_CSRF = 'settings_branding';
 
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
@@ -52,6 +57,7 @@ final class SettingsAdminController extends AbstractController
                 'wallet' => $this->saveWallet($request, $auditLogger),
                 'resellers' => $this->saveReseller($request, $auditLogger),
                 'plans' => $this->savePlans($request, $auditLogger),
+                'branding' => $this->saveBranding($request, $auditLogger),
                 // The lists have no form of their own (their rows are edited on the CRUD pages).
                 default => null,
             };
@@ -66,9 +72,49 @@ final class SettingsAdminController extends AbstractController
             'wallet' => ['values' => $this->settings->walletValues()],
             'resellers' => ['values' => $this->settings->resellerValues()],
             'plans' => ['values' => $this->settings->plansValues()],
+            'branding' => ['values' => $this->settings->brandingValues(), 'csrf' => self::BRANDING_CSRF],
             'channels' => ['channels' => $this->entityManager->getRepository(RequiredChannel::class)->findBy([], ['sortOrder' => 'ASC', 'id' => 'ASC'])],
             'advanced' => ['settings' => $this->entityManager->getRepository(Setting::class)->findBy([], ['keyName' => 'ASC'])],
         });
+    }
+
+    #[AdminRoute(path: '/settings/branding/remove-logo', name: 'settings_branding_remove_logo', options: ['methods' => ['POST']])]
+    public function removeLogo(Request $request, AdminAuditLogger $auditLogger): RedirectResponse
+    {
+        if (!$this->isCsrfTokenValid(self::BRANDING_CSRF, (string) $request->request->get('_token'))) {
+            $this->flash('danger', 'flash.csrf_expired');
+        } elseif (null !== $this->settings->removeLogo()) {
+            $auditLogger->record('settings.update', 'Setting', null, ['page' => 'branding', 'logo' => 'removed']);
+            $this->flash('success', 'flash.settings.brand_logo_removed');
+        }
+
+        return $this->redirectToRoute('admin_settings', ['tab' => 'branding']);
+    }
+
+    /** The name and colour, and the logo when a file is chosen (it replaces the old one). */
+    private function saveBranding(Request $request, AdminAuditLogger $auditLogger): void
+    {
+        if (!$this->isCsrfTokenValid(self::BRANDING_CSRF, (string) $request->request->get('_token'))) {
+            $this->flash('danger', 'flash.csrf_expired');
+
+            return;
+        }
+        $logo = $request->files->get('brand_logo');
+        $before = $this->settings->brandingValues()['brand_logo'];
+        $problem = $this->settings->saveBranding($request->request->all(), $logo instanceof UploadedFile ? $logo : null);
+        if (null !== $problem) {
+            $this->flash('danger', $problem['message'], $problem['parameters'] ?? []);
+
+            return;
+        }
+        $values = $this->settings->brandingValues();
+        $auditLogger->record('settings.update', 'Setting', null, [
+            'page' => 'branding',
+            'brand_name' => $values['brand_name'],
+            'brand_accent_color' => $values['brand_accent_color'],
+            'logo' => $values['brand_logo'] === $before ? 'unchanged' : 'replaced',
+        ]);
+        $this->flash('success', 'flash.settings.branding_saved');
     }
 
     private function saveSales(Request $request, AdminAuditLogger $auditLogger): void

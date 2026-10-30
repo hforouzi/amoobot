@@ -1,0 +1,230 @@
+{#
+    Shared layout of customer-facing standalone pages (the payment return and cancel pages; /s and the other public
+    pages can adopt it later). Persian, right to left, mobile first, light and dark (prefers-color-scheme).
+
+    Brand (brand(): BrandingSettings): the logo in the header, else the brand name, else no header; the accent colour on
+    the top bar and the primary button (its text colour picked for contrast). Every value is escaped; nothing is |raw.
+
+    Self-contained for a strict CSP: no script, no inline event handler, no style attribute, no external request
+    (images and the font from this site only: the Vazirmatn font the Mini App ships). Needs at most
+    img-src 'self'; font-src 'self'; style-src 'unsafe-inline'.
+
+    A page sets `tone` (success, pending, danger, neutral) and `icon` (public/_icons.html.twig), and fills the blocks
+    title, head (meta tags) and content. Building blocks for content: .summary (a card of dt/dd rows), .button (the
+    one primary action), .help (secondary text), .progress (indeterminate, for a waiting state).
+#}
+{% import 'public/_icons.html.twig' as icons %}
+{% set brand = brand() %}
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
+    <title>{% block title %}{% endblock %}{% if brand.name %} · {{ brand.name }}{% endif %}</title>
+    {% block head %}{% endblock %}
+    <style>
+        @font-face {
+            font-family: Vazirmatn; font-style: normal; font-weight: 100 900; font-display: swap;
+            src: url("{{ asset('miniapp/fonts/Vazirmatn-wght.woff2') }}?v=33.003") format("woff2-variations"), url("{{ asset('miniapp/fonts/Vazirmatn-wght.woff2') }}?v=33.003") format("woff2");
+            unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0600-06FF, U+0750-077F,
+                           U+08A0-08FF, U+200C-200F, U+2010-2027, U+2030-205E, U+20AC, U+2122, U+2212, U+FB50-FDFF, U+FE70-FEFF, U+FEFF, U+FFFD;
+        }
+        :root {
+            --accent: {{ brand.accentColor }};
+            --on-accent: {{ brand.accentText }};
+            --bg: #f3f5f9;
+            --card: #ffffff;
+            --fg: #0f172a;
+            --muted: #475569;
+            --line: #e2e8f0;
+            --soft: #f8fafc;
+            --focus: #1d4ed8;
+            --success: #15803d; --success-bg: #dcfce7;
+            --pending: #b45309; --pending-bg: #fef3c7;
+            --danger: #b91c1c; --danger-bg: #fee2e2;
+            --neutral: #475569; --neutral-bg: #e2e8f0;
+            color-scheme: light dark;
+        }
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg: #0b1120;
+                --card: #111827;
+                --fg: #f1f5f9;
+                --muted: #a3b1c6;
+                --line: #263244;
+                --soft: #0f172a;
+                --focus: #93c5fd;
+                --success: #4ade80; --success-bg: #0d2c1a;
+                --pending: #fbbf24; --pending-bg: #33240a;
+                --danger: #f87171; --danger-bg: #3a1212;
+                --neutral: #cbd5e1; --neutral-bg: #1e293b;
+            }
+        }
+        * { box-sizing: border-box; }
+        html { -webkit-text-size-adjust: 100%; }
+        body {
+            margin: 0;
+            min-height: 100vh;
+            min-height: 100dvh;
+            font-family: Vazirmatn, Tahoma, "Segoe UI", system-ui, -apple-system, sans-serif;
+            font-size: 16px;
+            line-height: 1.8;
+            background: var(--bg);
+            color: var(--fg);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 24px 16px 40px;
+        }
+        .shell { width: 100%; max-width: 560px; }
+        .brand {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 56px;
+            margin: 8px 0 20px;
+        }
+        .brand img { display: block; height: 56px; width: auto; max-width: 220px; object-fit: contain; }
+        .brand-name { font-size: 20px; font-weight: 700; letter-spacing: 0; overflow-wrap: anywhere; text-align: center; }
+        main {
+            position: relative;
+            background: var(--card);
+            border: 1px solid var(--line);
+            border-radius: 20px;
+            padding: 32px 24px 28px;
+            box-shadow: 0 1px 2px rgba(15, 23, 42, .04), 0 12px 32px rgba(15, 23, 42, .06);
+            overflow: hidden;
+            text-align: center;
+        }
+        main::before {
+            content: "";
+            position: absolute;
+            inset: 0 0 auto 0;
+            height: 4px;
+            background: var(--accent);
+        }
+        .status {
+            width: 64px;
+            height: 64px;
+            margin: 0 auto 16px;
+            border-radius: 50%;
+            display: grid;
+            place-items: center;
+            color: var(--tone);
+            background: var(--tone-bg);
+        }
+        .tone-success { --tone: var(--success); --tone-bg: var(--success-bg); }
+        .tone-pending { --tone: var(--pending); --tone-bg: var(--pending-bg); }
+        .tone-danger { --tone: var(--danger); --tone-bg: var(--danger-bg); }
+        .tone-neutral { --tone: var(--neutral); --tone-bg: var(--neutral-bg); }
+        h1 { margin: 0 0 8px; font-size: 22px; line-height: 1.6; font-weight: 800; }
+        p { margin: 0 0 12px; }
+        .lead { color: var(--fg); }
+        .help, .muted { color: var(--muted); font-size: 14px; }
+        .danger { color: var(--danger); font-weight: 600; }
+        .summary {
+            margin: 20px 0 16px;
+            padding: 4px 16px;
+            border: 1px solid var(--line);
+            border-radius: 14px;
+            background: var(--soft);
+            text-align: start;
+        }
+        .summary div { display: flex; justify-content: space-between; gap: 16px; padding: 10px 0; }
+        .summary div + div { border-top: 1px solid var(--line); }
+        .summary dt { color: var(--muted); font-size: 14px; flex: 0 0 auto; }
+        .summary dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; text-align: end; }
+        .summary .ltr { direction: ltr; unicode-bidi: isolate; }
+        .actions { margin: 24px 0 8px; }
+        .button {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            min-height: 48px;
+            padding: 12px 20px;
+            border-radius: 12px;
+            border: 1px solid transparent;
+            background: var(--accent);
+            color: var(--on-accent);
+            font-weight: 700;
+            text-decoration: none;
+        }
+        .button:hover { filter: brightness(1.08); }
+        a:focus-visible, pre:focus-visible {
+            outline: 3px solid var(--focus);
+            outline-offset: 3px;
+        }
+        @media (prefers-color-scheme: dark) {
+            .button { border-color: rgba(255, 255, 255, .28); }
+        }
+        pre {
+            direction: ltr;
+            text-align: left;
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+            margin: 12px 0;
+            padding: 14px;
+            border-radius: 12px;
+            border: 1px solid var(--line);
+            background: var(--soft);
+            color: var(--fg);
+            font-size: 13px;
+            line-height: 1.6;
+            max-height: 320px;
+            overflow: auto;
+        }
+        .progress {
+            position: relative;
+            height: 6px;
+            margin: 16px auto 20px;
+            max-width: 240px;
+            border-radius: 999px;
+            background: var(--line);
+            overflow: hidden;
+        }
+        .progress span {
+            position: absolute;
+            inset: 0 auto 0 0;
+            width: 40%;
+            border-radius: 999px;
+            background: var(--tone);
+            animation: progress 1.6s ease-in-out infinite;
+        }
+        @keyframes progress {
+            from { transform: translateX(-100%); }
+            to { transform: translateX(250%); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .progress span { animation: none; width: 100%; opacity: .5; }
+            .button:hover { filter: none; }
+        }
+        footer { margin-top: 20px; text-align: center; }
+        @media (min-width: 600px) {
+            body { padding-top: 56px; }
+            main { padding: 40px 40px 32px; }
+            h1 { font-size: 24px; }
+            .actions .button { width: auto; min-width: 240px; display: inline-flex; }
+        }
+    </style>
+</head>
+<body>
+<div class="shell">
+    {% if brand.hasHeader %}
+        <header class="brand">
+            {% if brand.logo %}
+                <img src="{{ path('brand_logo', {name: brand.logo}) }}" alt="{{ brand.name ?? 'لوگو' }}" height="56">
+            {% else %}
+                <span class="brand-name">{{ brand.name }}</span>
+            {% endif %}
+        </header>
+    {% endif %}
+    <main class="tone-{{ tone|default('neutral') }}">
+        <div class="status">{{ icons.status(icon|default('question')) }}</div>
+        {% block content %}{% endblock %}
+    </main>
+    {% block footer %}{% endblock %}
+</div>
+</body>
+</html>

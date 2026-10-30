@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Admin\UI\Crud;
 
+use App\Admin\Form\ConfigFieldLabel;
 use App\Admin\Security\AdminCrudPermissions;
 use App\Admin\UI\DashboardController;
 use App\Admin\UI\Support\AdminJsonFormatter;
@@ -430,7 +431,7 @@ final class PaymentGatewayCrudController extends AbstractCrudController
             $fieldType = (string) ($field['type'] ?? 'text');
             $required = true === ($field['required'] ?? false);
             $options = [
-                'label' => $this->configFieldLabel($name),
+                'label' => new ConfigFieldLabel($name, $field['label'] ?? null),
                 'required' => $required,
                 'constraints' => $required ? [new NotBlank()] : [],
             ];
@@ -442,7 +443,7 @@ final class PaymentGatewayCrudController extends AbstractCrudController
 
             if ('boolean' === $fieldType) {
                 $builder->add($name, CheckboxType::class, [
-                    'label' => $this->configFieldLabel($name),
+                    'label' => new ConfigFieldLabel($name, $field['label'] ?? null),
                     'required' => false,
                 ]);
                 continue;
@@ -457,7 +458,7 @@ final class PaymentGatewayCrudController extends AbstractCrudController
 
             if ('integer' === $fieldType) {
                 $builder->add($name, IntegerType::class, [
-                    'label' => $this->configFieldLabel($name),
+                    'label' => new ConfigFieldLabel($name, $field['label'] ?? null),
                     'required' => $required,
                     'constraints' => $required ? [new NotBlank(), new Positive()] : [new Positive()],
                 ]);
@@ -466,7 +467,7 @@ final class PaymentGatewayCrudController extends AbstractCrudController
 
             if ('number' === $fieldType) {
                 $builder->add($name, NumberType::class, [
-                    'label' => $this->configFieldLabel($name),
+                    'label' => new ConfigFieldLabel($name, $field['label'] ?? null),
                     'required' => $required,
                     'constraints' => $required ? [new NotBlank()] : [],
                 ]);
@@ -579,11 +580,6 @@ final class PaymentGatewayCrudController extends AbstractCrudController
     private static function hasValue(mixed $value): bool
     {
         return null !== $value && '' !== (is_string($value) ? trim($value) : $value);
-    }
-
-    private function configFieldLabel(string $field): string
-    {
-        return 'payment_gateway.config.'.$field;
     }
 
     private function gatewayListUrl(): string

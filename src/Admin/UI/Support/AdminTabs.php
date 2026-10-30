@@ -43,6 +43,7 @@ final class AdminTabs
         'wallet' => 'settings_page.tabs.wallet',
         'resellers' => 'settings_page.tabs.resellers',
         'plans' => 'settings_page.tabs.plans',
+        'branding' => 'settings_page.tabs.branding',
         'channels' => 'settings_page.tabs.channels',
         'advanced' => 'settings_page.tabs.advanced',
     ];

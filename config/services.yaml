@@ -30,6 +30,9 @@ parameters:
     app.downloads_dir: '%env(default:app.downloads_dir_default:APP_DOWNLOADS_DIR)%'
     app.downloads_max_mb_default: '200'
     app.downloads_max_mb: '%env(int:default:app.downloads_max_mb_default:APP_DOWNLOADS_MAX_MB)%'
+    # The brand logo (BrandLogoStorage): kept outside public/, served by /brand/logo/{name}.
+    app.branding_dir_default: '%kernel.project_dir%/var/branding'
+    app.branding_dir: '%env(default:app.branding_dir_default:APP_BRANDING_DIR)%'
     miniapp_auth_max_age_default: '3600'
     # Mini App admin rights end this long after sign-in (MINIAPP_ADMIN_SESSION_TTL, seconds).
     miniapp_admin_session_ttl_default: '7200'
@@ -129,3 +132,4 @@ services:
 when@test:
     parameters:
         app.downloads_dir_default: '%kernel.project_dir%/var/test-downloads'
+        app.branding_dir_default: '%kernel.project_dir%/var/test-branding'

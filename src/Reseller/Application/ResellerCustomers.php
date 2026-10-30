@@ -9,6 +9,7 @@ use App\Entity\ResellerCustomer;
 use App\Entity\VpnService;
 use App\Provisioning\Domain\VpnServiceStatus;
 use App\Reseller\Domain\ResellerCustomerInvalid;
+use App\Shared\Domain\PlainText;
 use Doctrine\DBAL\ArrayParameterType;
 use Doctrine\DBAL\Exception\ForeignKeyConstraintViolationException;
 use Doctrine\ORM\EntityManagerInterface;
@@ -24,7 +25,8 @@ use Psr\Clock\ClockInterface;
  * answer as an id that does not exist (no oracle).
  *
  * Values are checked exactly and stored as typed, nothing trimmed or rewritten: a space or an empty line at either end
- * is refused, as are control and invisible direction characters (the Persian zero-width non-joiner is allowed).
+ * is refused, as are control and invisible direction characters (the Persian zero-width non-joiner is allowed):
+ * PlainText.
  *
  * Lists are one query each (aggregates joined), whatever the number of labels and services.
  */
@@ -34,16 +36,6 @@ class ResellerCustomers
     /** Labels per reseller: a soft cap against filling the table from one account. */
     public const MAX_PER_RESELLER = 5000;
 
-    /**
-     * Invisible and control characters: Unicode categories Cc (control), Cf (format: bidi marks and overrides, zero-width
-     * space, BOM, ...), Zl and Zp (line / paragraph separator). Two exceptions, both visible in what they do: the
-     * zero-width non-joiner (U+200C, needed to write Persian correctly) and the zero-width joiner (U+200D, emoji
-     * sequences). A note may also have line breaks (CONTROL_IN_NOTE).
-     */
-    private const CONTROL = '/(?![\x{200C}\x{200D}])[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u';
-    private const CONTROL_IN_NOTE = '/(?![\x{200C}\x{200D}\n\r])[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u';
-    /** Private use, surrogates, unassigned. */
-    private const FORBIDDEN = '/[\p{Co}\p{Cs}\p{Cn}]/u';
     private const PHONE = '/^\+?[0-9\x{06F0}-\x{06F9}\x{0660}-\x{0669}]{4,15}$/uD';
 
     public function __construct(
@@ -314,28 +306,9 @@ class ResellerCustomers
         if (null === $value || '' === $value) {
             return null;
         }
-        if (!is_string($value) || !mb_check_encoding($value, 'UTF-8')) {
-            $errors[$field] = ['characters'];
-
-            return null;
-        }
-        if (mb_strlen($value) > $max) {
-            $errors[$field] = ['too_long'];
-
-            return null;
-        }
-        if (0 !== preg_match($multiline ? self::CONTROL_IN_NOTE : self::CONTROL, $value)) {
-            $errors[$field] = ['control'];
-
-            return null;
-        }
-        if (0 !== preg_match(self::FORBIDDEN, $value)) {
-            $errors[$field] = ['characters'];
-
-            return null;
-        }
-        if (1 !== preg_match('/^\S(?:.*\S)?$/suD', $value)) {
-            $errors[$field] = ['spaces'];
+        $problem = is_string($value) ? PlainText::problem($value, $max, $multiline) : 'characters';
+        if (null !== $problem) {
+            $errors[$field] = [$problem];
 
             return null;
         }

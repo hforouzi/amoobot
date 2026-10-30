@@ -1,125 +1,96 @@
-<!DOCTYPE html>
-<html lang="fa" dir="rtl">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>نتیجه پرداخت</title>
+{# The payment return page (PaymentReturnController): one state per page, on the shared customer layout. #}
+{% extends 'public/layout.html.twig' %}
+
+{% set tone = {paid: 'success', pending: 'pending', failed: 'danger', provision_failed: 'pending', review: 'pending', cancelled: 'neutral'}[state] ?? 'neutral' %}
+{% set icon = {paid: 'check', pending: 'clock', failed: 'cross', provision_failed: 'alert', review: 'search', cancelled: 'ban'}[state] ?? 'question' %}
+
+{% block title %}نتیجه پرداخت{% endblock %}
+
+{% block head %}
     {% if redirectEnabled and subscriptionUrl %}
         <meta http-equiv="refresh" content="5;url={{ subscriptionUrl }}">
     {% endif %}
     {% if refreshSeconds %}
         <meta http-equiv="refresh" content="{{ refreshSeconds }}">
     {% endif %}
-    <style>
-        body {
-            margin: 0;
-            min-height: 100vh;
-            font-family: Tahoma, Arial, sans-serif;
-            background: #f5f7fb;
-            color: #1f2937;
-            display: grid;
-            place-items: center;
-        }
-        main {
-            width: min(680px, calc(100% - 32px));
-            background: #fff;
-            border: 1px solid #e5e7eb;
-            border-radius: 8px;
-            padding: 28px;
-            box-shadow: 0 10px 28px rgba(15, 23, 42, .08);
-        }
-        h1 { margin: 0 0 16px; font-size: 24px; }
-        p { line-height: 1.9; }
-        dl { display: grid; grid-template-columns: 140px 1fr; gap: 10px 16px; }
-        dt { color: #6b7280; }
-        dd { margin: 0; overflow-wrap: anywhere; }
-        a.button {
-            display: inline-block;
-            margin-top: 16px;
-            padding: 12px 18px;
-            border-radius: 6px;
-            background: #166534;
-            color: #fff;
-            text-decoration: none;
-        }
-        pre {
-            direction: ltr;
-            text-align: left;
-            white-space: pre-wrap;
-            overflow-wrap: anywhere;
-            background: #f3f4f6;
-            padding: 14px;
-            border-radius: 6px;
-        }
-        .muted { color: #6b7280; }
-        .danger { color: #b91c1c; }
-        .pending { color: #92400e; }
-    </style>
-</head>
-<body>
-<main>
+{% endblock %}
+
+{% block content %}
     {% if state == 'paid' %}
-        <h1>✅ پرداخت با موفقیت تایید شد</h1>
+        <h1>پرداخت با موفقیت تایید شد</h1>
         {% if order %}
-            <dl>
-                <dt>کد پیگیری سفارش</dt>
-                <dd>{{ order.trackingCode ?: order.id }}</dd>
-                <dt>وضعیت سفارش</dt>
-                <dd>{{ order.status }}</dd>
+            <dl class="summary">
+                <div>
+                    <dt>کد پیگیری سفارش</dt>
+                    <dd class="ltr">{{ order.trackingCode ?: order.id }}</dd>
+                </div>
+                <div>
+                    <dt>وضعیت سفارش</dt>
+                    <dd>{{ order.status }}</dd>
+                </div>
                 {% if service %}
-                    <dt>نام کاربری سرویس</dt>
-                    <dd>{{ service.clientEmail ?: service.username ?: '-' }}</dd>
+                    <div>
+                        <dt>نام کاربری سرویس</dt>
+                        <dd class="ltr">{{ service.clientEmail ?: service.username ?: '-' }}</dd>
+                    </div>
                 {% endif %}
             </dl>
         {% endif %}
 
         {% if ownedElsewhere|default(false) %}
             {# The service changed owner after this order (a transfer): the payment is done; nothing of the service is shown. #}
-            <p>پرداخت انجام شد و سفارش تکمیل شده است.</p>
+            <p class="lead">پرداخت انجام شد و سفارش تکمیل شده است.</p>
         {% else %}
         {% if accessWithheld|default(false) %}
             <p class="danger">لینک اشتراک این سرویس فعلاً قابل استفاده نیست. لطفاً با پشتیبانی تماس بگیرید.</p>
         {% endif %}
         {% if subscriptionUrl %}
-            <p>لینک اشتراک شما آماده است.</p>
-            <a class="button" href="{{ subscriptionUrl }}">مشاهده لینک اشتراک</a>
+            <p class="lead">لینک اشتراک شما آماده است.</p>
+            <div class="actions">
+                <a class="button" href="{{ subscriptionUrl }}">مشاهده لینک اشتراک</a>
+            </div>
             {% if redirectEnabled %}
-                <p class="muted">تا چند ثانیه دیگر به لینک اشتراک منتقل می‌شوید.</p>
+                <p class="help">تا چند ثانیه دیگر به لینک اشتراک منتقل می‌شوید.</p>
             {% endif %}
         {% elseif configText %}
-            <p>لینک اشتراک برای این سرویس ثبت نشده است. کانفیگ سرویس:</p>
-            <pre>{{ configText }}</pre>
-            <p class="muted">اطلاعات سرویس در تلگرام نیز ارسال می‌شود.</p>
+            <p class="lead">لینک اشتراک برای این سرویس ثبت نشده است. کانفیگ سرویس:</p>
+            <pre tabindex="0">{{ configText }}</pre>
+            <p class="help">اطلاعات سرویس در تلگرام نیز ارسال می‌شود.</p>
         {% elseif not accessWithheld|default(false) %}
-            <p>پرداخت تایید شد و سرویس در حال آماده‌سازی است. اطلاعات سرویس در تلگرام ارسال می‌شود.</p>
+            <p class="lead">پرداخت تایید شد و سرویس در حال آماده‌سازی است. اطلاعات سرویس در تلگرام ارسال می‌شود.</p>
         {% endif %}
         {% endif %}
     {% elseif state == 'pending' %}
-        <h1 class="pending">در انتظار تایید پرداخت</h1>
-        <p>پرداخت شما هنوز توسط درگاه تایید نشده است. این صفحه هر {{ refreshSeconds }} ثانیه خودکار به‌روزرسانی می‌شود؛ نیازی به پرداخت مجدد نیست.</p>
-        <p class="muted">پس از تایید، اطلاعات سرویس در تلگرام هم ارسال می‌شود.</p>
-        {% if statusText %}<p class="muted">وضعیت فعلی: {{ statusText }}</p>{% endif %}
+        <h1>در انتظار تایید پرداخت</h1>
+        <div role="status" aria-live="polite">
+            <div class="progress" aria-hidden="true"><span></span></div>
+            <p class="lead">پرداخت شما هنوز توسط درگاه تایید نشده است. این صفحه هر {{ refreshSeconds }} ثانیه خودکار به‌روزرسانی می‌شود؛ نیازی به پرداخت مجدد نیست.</p>
+            {% if statusText %}<p class="help">وضعیت فعلی: <span dir="auto">{{ statusText }}</span></p>{% endif %}
+        </div>
+        <div class="actions">
+            {# The same address again (a GET): the page asks the gateway once more; nothing is submitted. #}
+            <a class="button" href="{{ app.request.requestUri }}">همین حالا دوباره بررسی کن</a>
+        </div>
+        <p class="help">پس از تایید، اطلاعات سرویس در تلگرام هم ارسال می‌شود.</p>
     {% elseif state == 'failed' %}
-        <h1 class="danger">پرداخت ناموفق یا منقضی شد</h1>
-        <p>این پرداخت تایید نشد. برای ادامه می‌توانید از داخل ربات دوباره اقدام کنید.</p>
-        {% if statusText %}<p class="muted">وضعیت: {{ statusText }}</p>{% endif %}
+        <h1>پرداخت ناموفق یا منقضی شد</h1>
+        <p class="lead">این پرداخت تایید نشد. برای ادامه می‌توانید از داخل ربات دوباره اقدام کنید.</p>
+        {% if statusText %}<p class="help">وضعیت: <span dir="auto">{{ statusText }}</span></p>{% endif %}
     {% elseif state == 'provision_failed' %}
-        <h1 class="pending">پرداخت تایید شد</h1>
-        <p>پرداخت تایید شد اما آماده‌سازی سرویس کامل نشد. پشتیبانی مطلع شده است؛ نیازی به پرداخت مجدد نیست.</p>
+        <h1>پرداخت تایید شد</h1>
+        <p class="lead">پرداخت تایید شد اما آماده‌سازی سرویس کامل نشد. پشتیبانی مطلع شده است؛ نیازی به پرداخت مجدد نیست.</p>
     {% elseif state == 'review' %}
-        <h1 class="pending">پرداخت در حال بررسی توسط پشتیبانی است</h1>
+        <h1>پرداخت در حال بررسی توسط پشتیبانی است</h1>
         {% if payment and payment.latePaymentInReview %}
-            <p>پرداخت شما پس از لغو یا پایان مهلت سفارش دریافت شد. پرداخت از بین نرفته؛ پشتیبانی آن را بررسی می‌کند و نتیجه در تلگرام اطلاع داده می‌شود.</p>
+            <p class="lead">پرداخت شما پس از لغو یا پایان مهلت سفارش دریافت شد. پرداخت از بین نرفته؛ پشتیبانی آن را بررسی می‌کند و نتیجه در تلگرام اطلاع داده می‌شود.</p>
         {% else %}
-            <p>مبلغ یا ارز دریافت‌شده با سفارش مطابقت نداشت. پرداخت شما ثبت شده و نتیجهٔ بررسی در تلگرام اطلاع داده می‌شود.</p>
+            <p class="lead">مبلغ یا ارز دریافت‌شده با سفارش مطابقت نداشت. پرداخت شما ثبت شده و نتیجهٔ بررسی در تلگرام اطلاع داده می‌شود.</p>
         {% endif %}
     {% elseif state == 'cancelled' %}
-        <h1 class="pending">این سفارش لغو شده یا مهلت آن تمام شده است</h1>
-        <p>پرداختی برای این سفارش تایید نشده است. اگر مبلغ را پرداخت کرده‌اید، پس از تایید درگاه برای بررسی به پشتیبانی ارسال می‌شود و از بین نمی‌رود. برای خرید جدید از داخل ربات اقدام کنید.</p>
+        <h1>این سفارش لغو شده یا مهلت آن تمام شده است</h1>
+        <p class="lead">پرداختی برای این سفارش تایید نشده است. اگر مبلغ را پرداخت کرده‌اید، پس از تایید درگاه برای بررسی به پشتیبانی ارسال می‌شود و از بین نمی‌رود. برای خرید جدید از داخل ربات اقدام کنید.</p>
     {% else %}
-        <h1 class="pending">لینک پرداخت معتبر نیست</h1>
-        <p>این لینک به هیچ پرداختی تعلق ندارد یا قدیمی است. وضعیت پرداخت را از داخل ربات بررسی کنید؛ پرداخت‌های تاییدشده در تلگرام اطلاع داده می‌شوند.</p>
+        <h1>لینک پرداخت معتبر نیست</h1>
+        <p class="lead">این لینک به هیچ پرداختی تعلق ندارد یا قدیمی است. وضعیت پرداخت را از داخل ربات بررسی کنید؛ پرداخت‌های تاییدشده در تلگرام اطلاع داده می‌شوند.</p>
     {% endif %}
-</main>
-</body>
-</html>
+{% endblock %}
