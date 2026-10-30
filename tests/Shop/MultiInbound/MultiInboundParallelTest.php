@@ -19,7 +19,7 @@ use Symfony\Component\Process\Process;
 /**
  * Real parallel PHP processes on MariaDB against one fake 3x-ui (shared state file), for a plan with additional
  * inbounds (phase M2a): two settlements of the same payment make exactly one client and one consistent set of rows;
- * two "Retry attach" at once send one attach and count one attempt.
+ * two "Retry attach" at once send one attach and count one attempt; so do two scheduled runs at once (phase M2b).
  */
 #[Group('subprocess')]
 final class MultiInboundParallelTest extends IntegrationTestCase
@@ -87,6 +87,29 @@ final class MultiInboundParallelTest extends IntegrationTestCase
 
     public function testTwoRetryAttachAtOnceSendOneAttachAndCountOneAttempt(): void
     {
+        $serviceId = $this->soldWithBothMissing();
+
+        $outcomes = $this->race('retry-attach', $serviceId);
+
+        sort($outcomes);
+        self::assertSame(['done', 'in_progress'], $outcomes);
+        $this->assertAttachedOnce($serviceId);
+    }
+
+    public function testTwoScheduledRunsAtOnceSendOneAttachAndCountOneAttempt(): void
+    {
+        $serviceId = $this->soldWithBothMissing();
+        $this->em->getConnection()->executeStatement("UPDATE vpn_service_inbound SET next_attempt_at = '2000-01-01 00:00:00'");
+
+        $outcomes = $this->race('attach-scheduled', 0);
+
+        sort($outcomes);
+        self::assertSame(['attached=0', 'attached=2'], $outcomes);
+        $this->assertAttachedOnce($serviceId);
+    }
+
+    private function soldWithBothMissing(): int
+    {
         // Sold while inbounds 2 and 4 were missing on the panel; both are back now.
         $plan = $this->createPlan(150000, $this->primary)->setAdditionalInbounds([$this->vmess, $this->trojan]);
         $this->em->flush();
@@ -106,10 +129,11 @@ final class MultiInboundParallelTest extends IntegrationTestCase
         $this->fake->requests = [];
         $this->fake->saveState();
 
-        $outcomes = $this->race('retry-attach', $serviceId);
+        return $serviceId;
+    }
 
-        sort($outcomes);
-        self::assertSame(['done', 'in_progress'], $outcomes);
+    private function assertAttachedOnce(int $serviceId): void
+    {
         $this->fake->loadState();
         self::assertCount(1, $this->fake->clients);
         self::assertSame([1, 2, 4], array_values($this->fake->clients)[0]['inboundIds']);
