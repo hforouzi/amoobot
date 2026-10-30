@@ -61,7 +61,7 @@ class VpnProvisioningService
      */
     public function provisionOrder(Order $order, array $meta = [], bool $adoptExisting = false): VpnService
     {
-        $planInbound = $order->requirePlan()->getInbound();
+        [$planInbound, $additionalInbounds] = $this->orderInbounds($order);
         if ($planInbound instanceof VpnInbound && !$planInbound->isActive()) {
             throw new \RuntimeException('Selected VPN inbound is inactive.');
         }
@@ -92,7 +92,7 @@ class VpnProvisioningService
 
         $driver = $this->driverRegistry->resolve($panel);
         $driverType = $panel?->getType() ?? 'dummy';
-        [$attachable, $notAttached] = $this->additionalInbounds($order, $driver);
+        [$attachable, $notAttached] = $this->additionalInbounds($additionalInbounds, $driver, $panel);
         $request = new CreateVpnServiceRequest(
             username: $username,
             durationDays: $durationDays,
@@ -208,19 +208,65 @@ class VpnProvisioningService
     }
 
     /**
-     * The plan's additional inbounds: the ones to attach now, and the ones recorded as not attached without asking the
+     * The order's primary and additional inbounds: from the snapshot taken when the order was created
+     * (Order::planInboundSnapshot(), M2c), so a plan edited since does not change what was sold; an order without one
+     * (created before M2c) uses the live plan.
+     *
+     * - A single-inbound order keeps using the plan's current primary, as before.
+     * - A multi-inbound order uses the snapshot's primary while it exists (the additional inbounds were chosen on its
+     *   panel), else the plan's current one.
+     * - An additional inbound of the snapshot that was deleted since cannot have a row: its id is recorded in the
+     *   order's metadata (Order::PLAN_INBOUNDS_MISSING) and the admins are alerted after the settlement
+     *   (InboundAttachAlerts::missingInbounds()). The primary is still delivered.
+     *
+     * @return array{?VpnInbound, list<VpnInbound>}
+     */
+    private function orderInbounds(Order $order): array
+    {
+        $plan = $order->requirePlan();
+        $snapshot = $order->planInboundSnapshot();
+        if (null === $snapshot) {
+            return [$plan->getInbound(), $plan->getAdditionalInbounds()];
+        }
+        if ([] === $snapshot['additional']) {
+            return [$plan->getInbound(), []];
+        }
+        $repository = $this->entityManager->getRepository(VpnInbound::class);
+        $additional = [];
+        $missing = [];
+        foreach ($snapshot['additional'] as $id) {
+            $inbound = $repository->find($id);
+            if ($inbound instanceof VpnInbound) {
+                $additional[] = $inbound;
+            } else {
+                $missing[] = $id;
+            }
+        }
+        if ([] !== $missing) {
+            $order->setMetadata([Order::PLAN_INBOUNDS_MISSING => $missing] + ($order->getMetadata() ?? []));
+            $this->logger->warning('provisioning_snapshot_inbounds_missing', ['order_id' => $order->getId(), 'missing' => count($missing)]);
+        }
+        $primary = null === $snapshot['primary'] ? null : $repository->find($snapshot['primary']);
+
+        return [$primary instanceof VpnInbound ? $primary : $plan->getInbound(), $additional];
+    }
+
+    /**
+     * The order's additional inbounds: the ones to attach now, and the ones recorded as not attached without asking the
      * panel (docs/design/multi-inbound-plans.md 3, D2/D3: the order is paid, so the primary is delivered and these wait
-     * for "Retry attach"):
+     * for the scheduled retry or "Retry attach"):
      * - plans.multi_inbound_enabled was switched off after the order was taken;
-     * - the inbound became inactive since.
+     * - the inbound became inactive since;
+     * - the inbound is on another panel than the service (the plan's primary was moved since).
      *
      * A panel whose driver cannot attach (legacy mode, another type) fails closed instead: never the primary alone.
      *
+     * @param list<VpnInbound> $inbounds
+     *
      * @return array{list<VpnInbound>, list<array{VpnInbound, string}>}
      */
-    private function additionalInbounds(Order $order, VpnPanelDriverInterface $driver): array
+    private function additionalInbounds(array $inbounds, VpnPanelDriverInterface $driver, ?VpnPanel $panel): array
     {
-        $inbounds = $order->requirePlan()->getAdditionalInbounds();
         if ([] === $inbounds) {
             return [[], []];
         }
@@ -235,6 +281,8 @@ class VpnProvisioningService
                 $notAttached[] = [$inbound, 'not attached: plans with several inbounds are switched off (Settings, Plans tab)'];
             } elseif (!$inbound->isActive()) {
                 $notAttached[] = [$inbound, 'not attached: the inbound is inactive'];
+            } elseif (null === $panel || $inbound->getPanel()->getId() !== $panel->getId()) {
+                $notAttached[] = [$inbound, ServiceInboundAttacher::OTHER_PANEL];
             } else {
                 $attachable[] = $inbound;
             }

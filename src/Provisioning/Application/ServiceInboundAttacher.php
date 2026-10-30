@@ -39,6 +39,7 @@ use Psr\Log\LoggerInterface;
 final class ServiceInboundAttacher
 {
     public const STALE_CLAIM = '-5 minutes';
+    public const OTHER_PANEL = 'not attached: the inbound is on another panel than the service';
 
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
@@ -70,8 +71,20 @@ final class ServiceInboundAttacher
             return new InboundAttachRetry($busy ? InboundAttachRetry::IN_PROGRESS : InboundAttachRetry::NOTHING_TO_DO);
         }
         $inbounds = [];
-        foreach ($claimed as $rowId => [$inboundId]) {
-            $inbounds[$rowId] = $this->entityManager->find(VpnInbound::class, $inboundId) ?? throw new \LogicException('inbound missing');
+        $outcomes = [];
+        foreach ($claimed as $rowId => [$inboundId, $attempts]) {
+            $inbound = $this->entityManager->find(VpnInbound::class, $inboundId) ?? throw new \LogicException('inbound missing');
+            if ($inbound->getPanel()->getId() !== $panel->getId()) {
+                // Never sent to the panel: one foreign inbound would make the driver refuse the whole call.
+                $outcomes[$rowId] = [false, self::OTHER_PANEL, $attempts];
+            } else {
+                $inbounds[$rowId] = $inbound;
+            }
+        }
+        if ([] === $inbounds) {
+            $this->write($serviceId, $claim, $outcomes);
+
+            return new InboundAttachRetry(InboundAttachRetry::FAILED, 0, count($outcomes), self::OTHER_PANEL);
         }
 
         // No lock and no transaction from here to the write: the panel may take seconds.
@@ -79,7 +92,10 @@ final class ServiceInboundAttacher
             $results = $driver->attachInbounds((string) $service->getRemoteId(), array_values($inbounds), $panel, !$scheduled);
         } catch (\Throwable $e) {
             $error = ServiceErrorText::redact($service, $e->getMessage(), 255);
-            $this->write($serviceId, $claim, array_map(static fn (array $row): array => [false, $error, $row[1]], $claimed));
+            foreach (array_keys($inbounds) as $rowId) {
+                $outcomes[$rowId] = [false, $error, $claimed[$rowId][1]];
+            }
+            $this->write($serviceId, $claim, $outcomes);
             $this->logger->warning('service_inbound_attach_failed', ['service_id' => $serviceId, 'source' => $source, 'inbounds' => count($claimed)]);
 
             return new InboundAttachRetry(InboundAttachRetry::FAILED, 0, count($claimed), $error);
@@ -89,9 +105,9 @@ final class ServiceInboundAttacher
         foreach ($results as $result) {
             $byInbound[(int) $result->inbound->getId()] = $result;
         }
-        $outcomes = [];
-        foreach ($claimed as $rowId => [$inboundId, $attempts]) {
-            $result = $byInbound[$inboundId] ?? null;
+        foreach ($inbounds as $rowId => $inbound) {
+            $attempts = $claimed[$rowId][1];
+            $result = $byInbound[(int) $inbound->getId()] ?? null;
             $outcomes[$rowId] = $result instanceof InboundAttachment && $result->attached
                 ? [true, null, $attempts]
                 : [false, ServiceErrorText::redact($service, $result->error ?? 'the panel did not attach it', 255), $attempts];

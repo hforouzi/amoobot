@@ -14,6 +14,7 @@ use App\Payment\Domain\Money\AmountMatch;
 use App\Payment\Domain\Money\AmountMatcher;
 use App\Payment\Domain\Money\AmountMatchStatus;
 use App\Payment\Domain\PaymentStatus;
+use App\Provisioning\Application\InboundAttachAlerts;
 use App\Provisioning\Application\ServiceRenewalService;
 use App\Provisioning\Application\ServiceTrafficAddonService;
 use App\Provisioning\Application\VpnProvisioningService;
@@ -82,6 +83,7 @@ class PaymentSettlementService
         private readonly AdminPaymentAlerter $adminAlerter,
         private readonly LoggerInterface $logger,
         private readonly WalletService $walletService,
+        private readonly InboundAttachAlerts $inboundAlerts,
     ) {
     }
 
@@ -425,6 +427,9 @@ class PaymentSettlementService
         $this->logger->info('Payment settled.', ['payment_id' => $paymentId, 'source' => $source, 'flag' => $payment->getAmountFlag()]);
         $this->notifyReleased($released);
         $this->customerNotifier->confirmed($payment, $service);
+        if (null !== $service) {
+            $this->inboundAlerts->missingInbounds($order, $service);
+        }
         if (self::FLAG_OVERPAID === $payment->getAmountFlag()) {
             $this->adminAlerter->overpaid($payment);
         }

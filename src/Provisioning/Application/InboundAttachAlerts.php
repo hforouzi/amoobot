@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Provisioning\Application;
 
 use App\Bot\Infrastructure\TelegramApiClient;
+use App\Entity\Order;
+use App\Entity\VpnService;
 use App\Entity\VpnServiceInbound;
 use App\Provisioning\Domain\VpnServiceStatus;
 use App\Security\AdminAccessPolicy;
@@ -32,6 +34,7 @@ class InboundAttachAlerts
     public const FAILED_TITLE = '⚠️ اینباند اضافهٔ سرویس وصل نشد';
     public const EXHAUSTED_TITLE = '🚨 تلاش‌های اتصال اینباند اضافهٔ سرویس تمام شد';
     public const RECOVERED_TITLE = '✅ اینباند اضافهٔ سرویس دوباره وصل شد';
+    public const MISSING_TITLE = '⚠️ اینباند اضافهٔ پلن پیش از ساخت سرویس حذف شده بود';
 
     private const KIND_FAILED = 'failed';
     private const KIND_EXHAUSTED = 'exhausted';
@@ -98,6 +101,35 @@ class InboundAttachAlerts
         $this->logger->info('Inbound attach alerts sent.', ['alerts' => $sent]);
 
         return $sent;
+    }
+
+    /**
+     * After a settlement (never inside its transaction): additional inbounds of the order's snapshot that were deleted
+     * before it was provisioned (Order::PLAN_INBOUNDS_MISSING). They can never be attached and have no row, so this is
+     * their only alert. Sent at once, whatever the switch.
+     */
+    public function missingInbounds(Order $order, VpnService $service): void
+    {
+        $missing = $order->getMetadata()[Order::PLAN_INBOUNDS_MISSING] ?? [];
+        if (!is_array($missing) || [] === $missing) {
+            return;
+        }
+        $chats = $this->accessPolicy->telegramRecipients(AdminPermission::SERVICES_MANAGE);
+        if ([] === $chats) {
+            $this->logger->warning('Missing inbound alert not sent: no admin chat.', ['service_id' => $service->getId()]);
+
+            return;
+        }
+        $this->deliver($chats, implode("
+", [
+            self::MISSING_TITLE,
+            sprintf('Service ID: %d', (int) $service->getId()),
+            sprintf('Order ID: %d', (int) $order->getId()),
+            sprintf('User ID: %d', (int) $service->getUser()->getId()),
+            sprintf('Plan: %s', mb_substr($order->requirePlan()->getTitle(), 0, 80)),
+            'Deleted inbound id(s): '.implode(', ', array_map(static fn (mixed $id): string => '#'.(int) $id, $missing)),
+            'The service was delivered without them; they cannot be attached. Add the servers to the customer by hand if needed.',
+        ]));
     }
 
     /** One row, only if it is still in the state this alert is about: two runs never both get it. */
