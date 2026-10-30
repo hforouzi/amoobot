@@ -12,6 +12,9 @@ final class SecretRedactor
 {
     public const MASK = '[redacted]';
 
+    /** Share-link schemes of the proxy protocols a panel hands out: the whole link is the credential. */
+    private const CONFIG_SCHEMES = 'vless|vmess|trojan|ssr?|hysteria2?|hy2|tuic|wireguard|wg|socks5?|naive\+https|juicity';
+
     /**
      * @param list<string|null> $secrets exact values to remove (the panel's token, password)
      */
@@ -30,6 +33,37 @@ final class SecretRedactor
         $text = preg_replace('/\s+/', ' ', $text) ?? $text;
 
         return mb_substr(trim($text), 0, $maxLength);
+    }
+
+    /**
+     * Removes a customer's access credentials from free text whose service is unknown (a stored message, an exception
+     * from a failed provisioning, a panel response): config links (vless://…) entirely, the path and query of every
+     * URL (subscription URLs, /s/ page tokens, panel base paths; scheme and host stay for support), user:password@,
+     * UUIDs, subId/uuid/password key-value pairs (a trojan or shadowsocks client's password is its access) and the
+     * values a failed query quotes (Doctrine's parameter list, MySQL's duplicate entry). Then redact().
+     */
+    public static function redactAccess(string $text, int $maxLength = 500): string
+    {
+        return self::redact(self::maskAccess($text), [], $maxLength);
+    }
+
+    /** redactAccess() without redact()'s whitespace folding and length limit: for text that is stored as it was sent. */
+    public static function maskAccess(string $text): string
+    {
+        $text = preg_replace('/(\bwith params )\[.*?\](?=:|\s*$)/s', '$1['.self::MASK.']', $text) ?? $text;
+        $text = preg_replace('/(\bDuplicate entry )\'.*?\'(?= for key)/s', '$1\''.self::MASK.'\'', $text) ?? $text;
+        $text = preg_replace('#\b('.self::CONFIG_SCHEMES.')://[^\s"\'<>]+#i', '$1://'.self::MASK, $text) ?? $text;
+        $text = preg_replace_callback(
+            '#\b(https?://)(?:[^@/\s"\'<>]*@)?([^/\s"\'<>?\#]+)([^\s"\'<>]*)#i',
+            // Telegram deep links name a bot or channel; their claim tokens are ClaimToken::redact()'s job.
+            static fn (array $m): string => $m[1].$m[2].('' === $m[3] || '/' === $m[3] || 1 === preg_match('/^(t|telegram)\.me$/i', $m[2]) ? $m[3] : '/'.self::MASK),
+            $text
+        ) ?? $text;
+        $text = preg_replace('#/s/[A-Za-z0-9_-]{43}#', '/s/'.self::MASK, $text) ?? $text;
+        $text = preg_replace('/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i', self::MASK, $text) ?? $text;
+
+        // A value mask() already shortened ("••••wxyz") stays: it is the correlation hint a log line keeps on purpose.
+        return preg_replace('/("?\b(?:sub_?id|client_?uuid|uuid|password|passwd)"?\s*[:=]\s*)(?!"?(?:••••|\[redacted\]))("[^"]*"|\'[^\']*\'|[^\s"\',;&}]+)/i', '$1"'.self::MASK.'"', $text) ?? $text;
     }
 
     /** "••••wxyz" (last 4 characters of a long value), "••••" for short ones, "" when empty. */
