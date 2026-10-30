@@ -61,6 +61,38 @@ link the download to a client app so that app's "Install app" button leads to it
 web root under a random name; its SHA-256 is shown on the detail page and on the customer page. Customers download through
 `/d/<id>`, which counts downloads and supports resuming. The bot shows a "Download apps" button whenever at least one download is active.
 
+## Plans with several inbounds (preview)
+
+A plan can name **additional inbounds** of the same panel: a buyer's one client is meant to be attached to all of them.
+Design: [multi-inbound-plans.md](../design/multi-inbound-plans.md). This release (phase M1) only stores them. **They take
+effect when provisioning support ships (M2): until then a plan with additional inbounds is not sold at all**, so no
+customer buys servers that are not delivered.
+
+- **Switch:** `Settings → Plans → Allow additional inbounds on plans` (`plans.multi_inbound_enabled`, SETTINGS_MANAGE),
+  off by default. With it off the plan form, the plan list and the inbound page look exactly as before, and a request
+  that sends additional inbounds anyway is refused. Turning it off while plans keep additional inbounds names those
+  plans; they stay unsold until you remove the additional inbounds (switch on, edit the plan).
+- **Plan form** (web panel, PLANS_MANAGE): "Additional inbounds" lists the active inbounds of the primary inbound's panel,
+  without the primary. A save is refused when an inbound is on another panel, is the primary, is newly chosen but
+  inactive, the panel is not in modern mode (forced, or auto with modern detected), the plan has custom traffic or
+  duration (those stay single-inbound), there are more than 20, or the protocols break the rules below. The Mini App and
+  the bot have no field yet (M3); a change they make (e.g. moving the primary to another panel) is checked the same way.
+- **Protocol rules (D1):** VLESS, VMess and Trojan together; Shadowsocks only when every Shadowsocks inbound of the plan
+  uses the same method; a VLESS primary with the vision flow only with flow-capable VLESS inbounds (TCP with
+  TLS/REALITY). The method and flow capability are read from the panel when these rules apply: a panel that does not
+  answer refuses the save.
+- **Warnings** after saving: not sold yet; an inbound that became inactive since it was chosen; the panel not in modern
+  mode; several protocols together (run the real-panel checklist of the design, 7.3, first).
+- **Plan list:** an "Inbounds" column (count, "not sold yet", inactive ones). **Panel inbounds page:** "Used by plans",
+  primary or additional.
+- **Deleting** an inbound that a plan uses as an additional inbound, or a panel with such an inbound, is refused and the
+  plans are named. Deleting a plan's primary inbound works as before (the plan then has no inbound).
+- Trial plans keep one inbound.
+
+**Upgrading.** Run the migrations: `Version20261101090000` adds the `plan_additional_inbound` and `vpn_service_inbound`
+tables (the second stays empty until M2). Nothing existing is changed and nothing is backfilled. Its `down()` refuses
+and changes nothing while either table has a row: remove the additional inbounds from every plan first.
+
 ## Sales Controls
 
 Use `Settings -> Sales` to enable or disable new service sales, renewals, and extra traffic purchases independently. Closing sales does not block existing waiting-payment orders, service viewing, config delivery, or approval of already-submitted payments.

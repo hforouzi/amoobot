@@ -177,6 +177,7 @@ help:
   plan.ip_limit: "Maximum simultaneous IPs/devices. Empty means panel default / unlimited."
   plan.is_unlimited_duration: "If on, the service never expires and buying does not ask for a duration."
   plan.reseller_floor_amount: "The lowest wholesale price of this plan for any reseller (Toman), on top of the reseller floor percent in Settings. Fixed plans only; empty means none."
+  plan.additional_inbounds: "Other inbounds of the same panel a buyer's one client gets too (modern panels only; VLESS, VMess, Trojan, Shadowsocks with one method). Takes effect when provisioning support ships: until then a plan with additional inbounds is not sold."
   plan.toman: "In Toman. Not Rial, not thousands of Toman."
   required_channel.chat_id: "Numeric chat id like -1001234567890 or a public username like @my_channel."
   required_channel.invite_url: "Used for the \"Join channel\" button. Leave empty if there is none."
@@ -491,6 +492,7 @@ settings_page:
     automation: Automation
     wallet: Wallet
     resellers: Resellers
+    plans: Plans
     channels: Required channels
     advanced: Advanced
   channels_intro: Channels a customer must join before buying or claiming a trial.
@@ -777,6 +779,9 @@ field:
   host_header: "Host header"
   id: "ID"
   inbound: "Inbound"
+  additional_inbounds: "Additional inbounds"
+  inbounds: "Inbounds"
+  used_by_plans: "Used by plans"
   invite_url: "Invite link"
   ip_limit: "IP limit"
   is_active: "Active"
@@ -948,6 +953,8 @@ flash:
   settings.wallet_range: "The top-up minimum must be at least 1 and the maximum at least the minimum."
   settings.wallet_quick_amounts: "Quick amounts must be whole numbers within the top-up range, separated by commas."
   settings.reseller_saved: "Reseller settings saved."
+  settings.plans_saved: "Plan settings saved."
+  settings.plans_still_multi_inbound: "These plans keep their additional inbounds and stay unsold until provisioning supports several inbounds: %plans%. Remove the additional inbounds (switch on, edit the plan) to sell them again."
   settings.reseller_floor: "The floor must be a percent between 0 and 100, with at most two decimals."
   settings.reseller_rounding: "The rounding must be a whole number of Toman between 1 and 1,000,000."
   settings.reseller_claim_ttl: "The claim link lifetime must be a whole number of hours between 1 and 720."
@@ -992,6 +999,10 @@ flash:
   broadcast.format_invalid: "Not sent: %problem%"
   plan.price_warning: "Plan \"%plan%\": %warning%"
   plan.in_use: "Plan \"%plan%\" has %count% order(s) and cannot be deleted. Deactivate it instead."
+  plan.additional_inbounds_off: "Additional inbounds are switched off (Settings, Plans tab): the plan was not saved."
+  inbound.used_by_plans: "This inbound is an additional inbound of plans %plans%: remove it from them first. Nothing was deleted."
+  inbound.held_by_services: "%count% service(s) are attached to this inbound: it cannot be deleted. Nothing was deleted."
+  panel.used_by_plans: "Inbounds of this panel are additional inbounds of plans %plans%: remove them from those plans first. Nothing was deleted."
   plugin.installed: "Plugin installed."
   plugin.install_failed: "Plugin installation failed. %error%"
   plugin.enabled: "Plugin enabled."
@@ -1163,6 +1174,29 @@ reseller_settings:
     rounding: "Wholesale prices are rounded up to a multiple of this, before the floor is checked. Default 1000."
     claims_enabled: "A reseller (or an admin) can hand one service over to a Telegram user with a single-use link that expires. Needs resellers on too. With it off, no link can be made or used, open links stop working, and /start behaves as before."
     claim_ttl_hours: "1 to 720 hours (30 days). Default 168 (7 days). Changing it does not change links already made."
+
+plan_inbounds:
+  count: "%count%"
+  not_sold_badge: "not sold yet"
+  inactive_badge: "%count% inactive"
+  role:
+    primary: "primary"
+    additional: "additional"
+  none: "—"
+  warning:
+    not_sold: "This plan has additional inbounds: it takes effect when provisioning support ships. Until then the plan is not sold, so no customer buys servers that are not delivered."
+    inactive: "%inbound% became inactive since it was chosen."
+    not_modern: "The panel is not in modern mode: several inbounds need it (Panels → test connection)."
+    mixed: "Protocols %protocols% together: run the real-panel check (design 7.3) before relying on this mix."
+
+plan_settings:
+  subtitle: "Plans with several inbounds of one panel: a buyer gets one client on all of them. Off by default: with it off, nothing changes for anybody."
+  sections:
+    multi_inbound: Several inbounds per plan
+  fields:
+    multi_inbound_enabled: Allow additional inbounds on plans
+  help:
+    multi_inbound_enabled: "Shows the \"Additional inbounds\" field on the plan form (modern panels only). It takes effect when provisioning support ships: until then a plan with additional inbounds is not sold at all, so no customer buys more servers than are delivered."
 
 claim_admin:
   title: Claim links

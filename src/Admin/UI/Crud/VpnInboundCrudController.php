@@ -6,8 +6,13 @@ namespace App\Admin\UI\Crud;
 
 use App\Admin\Security\AdminCrudPermissions;
 use App\Admin\UI\Field\JsonField;
+use App\Admin\UI\Support\AdminFormat;
+use App\Admin\UI\TranslatedFlashes;
 use App\Admin\UI\VpnPanelInboundActionsController;
 use App\Entity\VpnInbound;
+use App\Shop\Application\Catalog\PlanInboundUsage;
+use App\Shop\Application\MultiInboundSettings;
+use Doctrine\ORM\EntityManagerInterface;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Action;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Actions;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Crud;
@@ -20,10 +25,35 @@ use EasyCorp\Bundle\EasyAdminBundle\Field\IdField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\IntegerField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\TextField;
 use Symfony\Component\Security\Csrf\CsrfTokenManagerInterface;
+use Symfony\Contracts\Translation\TranslatorInterface;
+
 class VpnInboundCrudController extends AbstractCrudController
 {
-    public function __construct(private readonly CsrfTokenManagerInterface $csrfTokenManager)
+    use TranslatedFlashes;
+
+    public function __construct(
+        private readonly CsrfTokenManagerInterface $csrfTokenManager,
+        private readonly MultiInboundSettings $multiInbound,
+        private readonly PlanInboundUsage $inboundUsage,
+        private readonly TranslatorInterface $translator,
+    ) {
+    }
+
+    /**
+     * An inbound that is an additional inbound of a plan (or that a service is attached to) is not deleted: the admin
+     * is told which plans use it, instead of the database's refusal (plan_additional_inbound.inbound_id is RESTRICT).
+     */
+    public function deleteEntity(EntityManagerInterface $entityManager, object $entityInstance): void
     {
+        if ($entityInstance instanceof VpnInbound && null !== $entityInstance->getId()) {
+            $problem = $this->inboundUsage->deletionProblem([(int) $entityInstance->getId()], 'flash.inbound.used_by_plans');
+            if (null !== $problem) {
+                $this->flash('danger', $problem['key'], $problem['parameters']);
+
+                return;
+            }
+        }
+        parent::deleteEntity($entityManager, $entityInstance);
     }
 
     public static function getEntityFqcn(): string
@@ -86,6 +116,7 @@ class VpnInboundCrudController extends AbstractCrudController
             AssociationField::new('panel'),
             TextField::new('remoteInboundId'),
             TextField::new('title'),
+            ...$this->usedByPlansField(),
             TextField::new('remark')->hideOnIndex(),
             TextField::new('country'),
             TextField::new('location')->hideOnIndex(),
@@ -111,5 +142,27 @@ class VpnInboundCrudController extends AbstractCrudController
             DateTimeField::new('createdAt')->setLabel('common.created_at')->hideOnForm(),
             DateTimeField::new('updatedAt')->setLabel('common.updated_at')->hideOnForm(),
         ];
+    }
+
+    /**
+     * "Used by plans" (primary / additional), only while plans.multi_inbound_enabled is on; one query for the whole page
+     * (PlanInboundUsage). Bound to title: EasyAdmin formats readable properties only.
+     *
+     * @return list<TextField>
+     */
+    private function usedByPlansField(): array
+    {
+        if (!$this->multiInbound->enabled()) {
+            return [];
+        }
+
+        return [TextField::new('title', 'field.used_by_plans')->hideOnForm()->setTemplatePath(AdminFormat::TEMPLATE)->formatValue(function (mixed $v, ?VpnInbound $inbound): string {
+            $plans = null === $inbound?->getId() ? [] : $this->inboundUsage->plansUsing((int) $inbound->getId());
+            if ([] === $plans) {
+                return AdminFormat::e($this->translator->trans('plan_inbounds.none', [], 'admin'));
+            }
+
+            return implode('<br>', array_map(fn (array $p): string => sprintf('<span data-used-by="%s">#%d %s <small class="text-muted">(%s)</small></span>', $p['role'], $p['planId'], AdminFormat::e($p['planTitle']), AdminFormat::e($this->translator->trans('plan_inbounds.role.'.$p['role'], [], 'admin'))), $plans));
+        })];
     }
 }

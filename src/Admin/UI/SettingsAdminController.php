@@ -9,6 +9,7 @@ use App\Admin\UI\Support\AdminTabs;
 use App\Entity\RequiredChannel;
 use App\Entity\Setting;
 use App\Security\AdminAuditLogger;
+use App\Shop\Application\Catalog\PlanInboundUsage;
 use App\Shop\Application\SalesSettingsProvider;
 use Doctrine\ORM\EntityManagerInterface;
 use EasyCorp\Bundle\EasyAdminBundle\Attribute\AdminRoute;
@@ -17,7 +18,8 @@ use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
- * One settings page (SETTINGS_MANAGE) with tabs, ?tab=...: sales & renewal pricing, automation, wallet, resellers, required channels
+ * One settings page (SETTINGS_MANAGE) with tabs, ?tab=...: sales & renewal pricing, automation, wallet, resellers, plans (the
+ * multi-inbound switch, web only), required channels
  * (the RequiredChannel list; create/edit stay on its CRUD pages) and advanced (the raw Setting keys, behind a
  * warning). Each form tab saves only its own keys and validates as the separate pages did; the old pages redirect
  * here (LegacyAdminRoutes, and the RequiredChannel / Setting CRUD index()). The two forms are SettingsAdministration's
@@ -31,6 +33,7 @@ final class SettingsAdminController extends AbstractController
         private readonly EntityManagerInterface $entityManager,
         private readonly SettingsAdministration $settings,
         private readonly AdminTabs $tabs,
+        private readonly PlanInboundUsage $planInboundUsage,
     ) {
     }
 
@@ -48,6 +51,7 @@ final class SettingsAdminController extends AbstractController
                 'automation' => $this->saveAutomation($request, $auditLogger),
                 'wallet' => $this->saveWallet($request, $auditLogger),
                 'resellers' => $this->saveReseller($request, $auditLogger),
+                'plans' => $this->savePlans($request, $auditLogger),
                 // The lists have no form of their own (their rows are edited on the CRUD pages).
                 default => null,
             };
@@ -61,6 +65,7 @@ final class SettingsAdminController extends AbstractController
             'automation' => ['values' => $this->settings->automationValues()],
             'wallet' => ['values' => $this->settings->walletValues()],
             'resellers' => ['values' => $this->settings->resellerValues()],
+            'plans' => ['values' => $this->settings->plansValues()],
             'channels' => ['channels' => $this->entityManager->getRepository(RequiredChannel::class)->findBy([], ['sortOrder' => 'ASC', 'id' => 'ASC'])],
             'advanced' => ['settings' => $this->entityManager->getRepository(Setting::class)->findBy([], ['keyName' => 'ASC'])],
         });
@@ -116,6 +121,20 @@ final class SettingsAdminController extends AbstractController
         }
         $auditLogger->record('settings.update', 'Setting', null, ['page' => 'resellers'] + $this->settings->resellerValues());
         $this->flash('success', 'flash.settings.reseller_saved');
+    }
+
+    /** Turning the switch off while plans keep additional inbounds: they stay unsold, and the admin is told which. */
+    private function savePlans(Request $request, AdminAuditLogger $auditLogger): void
+    {
+        $this->settings->savePlans($request->request->all());
+        $auditLogger->record('settings.update', 'Setting', null, ['page' => 'plans'] + $this->settings->plansValues());
+        $this->flash('success', 'flash.settings.plans_saved');
+        if (!$this->settings->plansValues()['plans_multi_inbound_enabled']) {
+            $plans = $this->planInboundUsage->plansWithAnyAdditional();
+            if ([] !== $plans) {
+                $this->flash('warning', 'flash.settings.plans_still_multi_inbound', ['%plans%' => PlanInboundUsage::names($plans)]);
+            }
+        }
     }
 
     private function saveAutomation(Request $request, AdminAuditLogger $auditLogger): void

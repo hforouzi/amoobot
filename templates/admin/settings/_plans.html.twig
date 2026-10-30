@@ -1,0 +1,18 @@
+{# Settings page, "plans" tab: the switch for plans with several inbounds (docs/design/multi-inbound-plans.md 6). #}
+{% trans_default_domain 'admin' %}
+    <p class="admin-page-subtitle">{{ 'plan_settings.subtitle'|trans }}</p>
+
+    <form method="post" action="{{ path('admin_settings', {tab: 'plans'}) }}" class="admin-form-card admin-settings-form">
+        <div class="admin-section">
+            <h2>{{ 'plan_settings.sections.multi_inbound'|trans }}</h2>
+            <div class="admin-checkbox-row">
+                <input type="checkbox" id="plans_multi_inbound_enabled" name="plans_multi_inbound_enabled" {% if values.plans_multi_inbound_enabled %}checked{% endif %}>
+                <label for="plans_multi_inbound_enabled">{{ 'plan_settings.fields.multi_inbound_enabled'|trans }}</label>
+            </div>
+            <div class="form-text">{{ 'plan_settings.help.multi_inbound_enabled'|trans }}</div>
+        </div>
+
+        <div class="admin-actions">
+            <button type="submit" class="btn btn-primary">{{ 'common.save'|trans }}</button>
+        </div>
+    </form>
