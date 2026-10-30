@@ -87,11 +87,37 @@ final class PlanInboundUsage implements ResetInterface
         }
         $rows = $this->entityManager->getConnection()->executeQuery(
             'SELECT DISTINCT p.id, p.title FROM plan_additional_inbound a JOIN plan p ON p.id = a.plan_id WHERE a.inbound_id IN (?) ORDER BY p.id',
-            [array_values($inboundIds)],
+            [$inboundIds],
             [ArrayParameterType::INTEGER],
         )->fetchAllAssociative();
 
         return array_map(static fn (array $r): array => ['id' => (int) $r['id'], 'title' => (string) $r['title']], $rows);
+    }
+
+    /**
+     * Why these inbounds (one, or all of a panel) cannot be deleted, as an admin flash (key and parameters), or null.
+     * Only the additional-inbound rows refuse: deleting a plan's primary inbound stays as before (the plan loses it).
+     *
+     * @param list<int> $inboundIds
+     *
+     * @return array{key: string, parameters: array<string, string|int>}|null
+     */
+    public function deletionProblem(array $inboundIds, string $plansKey): ?array
+    {
+        $plans = $this->plansWithAdditional($inboundIds);
+        if ([] !== $plans) {
+            return ['key' => $plansKey, 'parameters' => ['%plans%' => self::names($plans)]];
+        }
+        if ([] === $inboundIds) {
+            return null;
+        }
+        $services = (int) $this->entityManager->getConnection()->executeQuery(
+            'SELECT COUNT(DISTINCT service_id) FROM vpn_service_inbound WHERE inbound_id IN (?)',
+            [$inboundIds],
+            [ArrayParameterType::INTEGER],
+        )->fetchOne();
+
+        return $services > 0 ? ['key' => 'flash.inbound.held_by_services', 'parameters' => ['%count%' => $services]] : null;
     }
 
     /**

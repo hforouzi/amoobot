@@ -72,7 +72,7 @@ final class PlanInboundRulesTest extends IntegrationTestCase
         $plan = $this->plan($this->in['reality']);
         $plan->setAdditionalInbounds([$this->in['vmess']]);
 
-        self::assertSame(['additionalInbounds' => ['Additional inbounds are switched off (Settings, Plans tab): they cannot be changed.']], $this->violations($plan));
+        self::assertSame(['additionalInboundList' => ['Additional inbounds are switched off (Settings, Plans tab): they cannot be changed.']], $this->violations($plan));
 
         // A plan without additional inbounds saves exactly as before.
         $single = $this->plan($this->in['vmess']);
@@ -97,7 +97,7 @@ final class PlanInboundRulesTest extends IntegrationTestCase
         $plan = $this->plan($this->in[$primary]);
         $plan->setAdditionalInbounds(array_map(fn (string $k): VpnInbound => $this->in[$k], $additional));
 
-        self::assertStringContainsString($message, implode(' ', $this->violations($plan)['additionalInbounds'] ?? []));
+        self::assertStringContainsString($message, implode(' ', $this->violations($plan)['additionalInboundList'] ?? []));
     }
 
     public function testAllowedD1Combinations(): void
@@ -117,14 +117,14 @@ final class PlanInboundRulesTest extends IntegrationTestCase
 
         $plan = $this->plan($this->in['vmess']);
         $plan->setAdditionalInbounds([$other, $inactive]);
-        $messages = implode(' ', $this->violations($plan)['additionalInbounds']);
+        $messages = implode(' ', $this->violations($plan)['additionalInboundList']);
         self::assertStringContainsString('is on another panel', $messages);
         self::assertStringContainsString('is not active', $messages);
 
         $this->panel->setIntegrationMode(SanaeiIntegrationMode::LEGACY);
         $plan = $this->plan($this->in['vmess']);
         $plan->setAdditionalInbounds([$this->in['trojan']]);
-        self::assertStringContainsString('need the panel in modern mode', implode(' ', $this->violations($plan)['additionalInbounds']));
+        self::assertStringContainsString('need the panel in modern mode', implode(' ', $this->violations($plan)['additionalInboundList']));
 
         // auto + detected modern is modern; auto never probed is not.
         $this->panel->setIntegrationMode(SanaeiIntegrationMode::AUTO)->recordProbe(SanaeiIntegrationMode::MODERN, 'ok', new \DateTimeImmutable());
@@ -136,14 +136,14 @@ final class PlanInboundRulesTest extends IntegrationTestCase
         $this->em->flush();
         $plan = $this->plan($a);
         $plan->setAdditionalInbounds([$b]);
-        self::assertStringContainsString('need the panel in modern mode', implode(' ', $this->violations($plan)['additionalInbounds']));
+        self::assertStringContainsString('need the panel in modern mode', implode(' ', $this->violations($plan)['additionalInboundList']));
     }
 
     public function testCustomizableTooManyAndNoPrimary(): void
     {
         $plan = $this->plan($this->in['vmess'])->setIsCustomizable(true);
         $plan->setAdditionalInbounds([$this->in['trojan']]);
-        self::assertStringContainsString('keeps one inbound', implode(' ', $this->violations($plan)['additionalInbounds']));
+        self::assertStringContainsString('keeps one inbound', implode(' ', $this->violations($plan)['additionalInboundList']));
 
         $many = [];
         for ($n = 0; $n < 21; ++$n) {
@@ -152,11 +152,11 @@ final class PlanInboundRulesTest extends IntegrationTestCase
         $this->em->flush();
         $plan = $this->plan($this->in['vmess']);
         $plan->setAdditionalInbounds($many);
-        self::assertStringContainsString('At most 20', implode(' ', $this->violations($plan)['additionalInbounds']));
+        self::assertStringContainsString('At most 20', implode(' ', $this->violations($plan)['additionalInboundList']));
 
         $plan = $this->plan(null);
         $plan->setAdditionalInbounds([$this->in['trojan']]);
-        self::assertStringContainsString('Choose the plan\'s inbound first', implode(' ', $this->violations($plan)['additionalInbounds']));
+        self::assertStringContainsString('Choose the plan\'s inbound first', implode(' ', $this->violations($plan)['additionalInboundList']));
     }
 
     public function testAPanelThatCannotBeAskedRefusesTheChecksThatNeedIt(): void
@@ -165,7 +165,7 @@ final class PlanInboundRulesTest extends IntegrationTestCase
         $plan = $this->plan($this->in['vmess']);
         $plan->setAdditionalInbounds([$this->in['ssA'], $this->in['ssB']]);
 
-        self::assertStringContainsString('could not be asked', implode(' ', $this->violations($plan)['additionalInbounds']));
+        self::assertStringContainsString('could not be asked', implode(' ', $this->violations($plan)['additionalInboundList']));
     }
 
     public function testAKeptInboundThatBecameInactiveIsAWarningNotARefusal(): void
@@ -196,7 +196,7 @@ final class PlanInboundRulesTest extends IntegrationTestCase
         $this->em->clear();
         $plan = $this->em->find(Plan::class, $plan->getId()) ?? self::fail('plan gone');
         $plan->setInbound($this->em->find(VpnInbound::class, $elsewhere->getId()));
-        self::assertStringContainsString('is on another panel', implode(' ', $this->violations($plan)['additionalInbounds']));
+        self::assertStringContainsString('is on another panel', implode(' ', $this->violations($plan)['additionalInboundList']));
     }
 
     /**

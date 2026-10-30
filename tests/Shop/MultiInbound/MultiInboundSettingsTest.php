@@ -12,6 +12,8 @@ use App\Shop\Application\MultiInboundSettings;
 use App\Tests\Support\IntegrationTestCase;
 use App\Tests\Support\SettingsFormCases;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
+use Symfony\Component\DomCrawler\Field\ChoiceFormField;
+use Symfony\Component\DomCrawler\Form;
 
 /**
  * plans.multi_inbound_enabled (docs/design/multi-inbound-plans.md 6): off by default, on the web settings page's "plans"
@@ -33,14 +35,14 @@ final class MultiInboundSettingsTest extends IntegrationTestCase
 
         $audits = $this->planAudits();
         $form = $crawler->filter('form.admin-settings-form')->form();
-        $form['plans_multi_inbound_enabled']->tick();
+        $this->checkbox($form, 'plans_multi_inbound_enabled')->tick();
         $client->submit($form);
         self::assertSame('true', $this->setting());
         self::assertSame($audits + 1, $this->planAudits(), 'the change is audited');
 
         $crawler = $client->request('GET', '/admin/settings?tab=plans');
         $form = $crawler->filter('form.admin-settings-form')->form();
-        $form['plans_multi_inbound_enabled']->untick();
+        $this->checkbox($form, 'plans_multi_inbound_enabled')->untick();
         $client->submit($form);
         self::assertSame('false', $this->setting());
     }
@@ -80,6 +82,14 @@ final class MultiInboundSettingsTest extends IntegrationTestCase
 
         self::assertContains($client->getResponse()->getStatusCode(), [302, 403]);
         self::assertNull($this->setting());
+    }
+
+    private function checkbox(Form $form, string $name): ChoiceFormField
+    {
+        $field = $form[$name];
+        self::assertInstanceOf(ChoiceFormField::class, $field);
+
+        return $field;
     }
 
     private function planAudits(): int

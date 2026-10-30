@@ -32,7 +32,8 @@ final class PlanInboundsValidator extends ConstraintValidator
 {
     public const MAX_ADDITIONAL = 20;
     public const PROTOCOLS = ['vless', 'vmess', 'trojan', 'shadowsocks'];
-    private const PATH = 'additionalInbounds';
+    /** The web form's field (Plan::getAdditionalInboundList()), so errors show next to it. */
+    public const PATH = 'additionalInboundList';
 
     public function __construct(
         private readonly MultiInboundSettings $settings,

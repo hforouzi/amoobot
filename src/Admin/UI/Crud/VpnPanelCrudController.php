@@ -8,9 +8,11 @@ use App\Admin\Security\AdminCrudPermissions;
 use App\Admin\UI\Field\JsonField;
 use App\Admin\UI\Support\AdminFormat;
 use App\Admin\UI\Support\PanelHealth;
+use App\Admin\UI\TranslatedFlashes;
 use App\Entity\VpnInbound;
 use App\Entity\VpnPanel;
 use App\Provisioning\Domain\SanaeiIntegrationMode;
+use App\Shop\Application\Catalog\PlanInboundUsage;
 use Doctrine\ORM\EntityManagerInterface;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Action;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Actions;
@@ -32,10 +34,13 @@ use Symfony\Contracts\Translation\TranslatorInterface;
  */
 class VpnPanelCrudController extends AbstractCrudController
 {
+    use TranslatedFlashes;
+
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
         private readonly AdminFormat $format,
         private readonly TranslatorInterface $translator,
+        private readonly PlanInboundUsage $inboundUsage,
     ) {
     }
 
@@ -64,6 +69,24 @@ class VpnPanelCrudController extends AbstractCrudController
     /**
      * @return list<VpnInbound>
      */
+    /**
+     * Deleting a panel deletes its inbounds (ON DELETE CASCADE): refused, naming the plans, while one of them is an
+     * additional inbound of a plan (that key is RESTRICT), instead of the database's error.
+     */
+    public function deleteEntity(EntityManagerInterface $entityManager, object $entityInstance): void
+    {
+        if ($entityInstance instanceof VpnPanel) {
+            $ids = array_map(static fn (VpnInbound $i): int => (int) $i->getId(), self::inbounds($entityManager, $entityInstance));
+            $problem = $this->inboundUsage->deletionProblem($ids, 'flash.panel.used_by_plans');
+            if (null !== $problem) {
+                $this->flash('danger', $problem['key'], $problem['parameters']);
+
+                return;
+            }
+        }
+        parent::deleteEntity($entityManager, $entityInstance);
+    }
+
     public static function inbounds(EntityManagerInterface $entityManager, VpnPanel $panel): array
     {
         return $entityManager->getRepository(VpnInbound::class)->findBy(['panel' => $panel], ['id' => 'ASC']);

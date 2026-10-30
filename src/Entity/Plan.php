@@ -414,7 +414,7 @@ class Plan
      */
     public function getAdditionalInbounds(): array
     {
-        return array_values(array_map(static fn (PlanAdditionalInbound $row): VpnInbound => $row->getInbound(), $this->additionalInbounds->toArray()));
+        return array_map(static fn (PlanAdditionalInbound $row): VpnInbound => $row->getInbound(), $this->additionalInbounds->getValues());
     }
 
     /**
@@ -456,6 +456,25 @@ class Plan
         return $this;
     }
 
+    /**
+     * The web form's "additional inbounds" field (not the Doctrine association: EasyAdmin would treat that as a collection
+     * of rows).
+     *
+     * @return list<VpnInbound>
+     */
+    public function getAdditionalInboundList(): array
+    {
+        return $this->getAdditionalInbounds();
+    }
+
+    /**
+     * @param iterable<VpnInbound> $inbounds
+     */
+    public function setAdditionalInboundList(iterable $inbounds): self
+    {
+        return $this->setAdditionalInbounds($inbounds);
+    }
+
     /** Whether this request changed the additional inbounds (added, removed or reordered). */
     public function additionalInboundsChanged(): bool
     {
@@ -470,7 +489,7 @@ class Plan
      */
     public function addedAdditionalInbounds(): array
     {
-        return array_values($this->addedAdditionalInbounds);
+        return $this->addedAdditionalInbounds;
     }
 
     /** Whether this request set another primary inbound. */

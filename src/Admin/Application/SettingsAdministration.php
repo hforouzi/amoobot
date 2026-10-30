@@ -100,16 +100,14 @@ final class SettingsAdministration
     }
 
     /**
-     * @param array<string, mixed> $form
+     * Saved and flushed (a checkbox: never a problem).
      *
-     * @return array{field: string, message: string}|null never a problem (a checkbox); saved and flushed
+     * @param array<string, mixed> $form
      */
-    public function savePlans(array $form): ?array
+    public function savePlans(array $form): void
     {
         $this->set(MultiInboundSettings::ENABLED, self::checked($form, 'plans_multi_inbound_enabled'), 'boolean');
         $this->entityManager->flush();
-
-        return null;
     }
 
     /**
