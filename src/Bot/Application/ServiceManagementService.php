@@ -1476,7 +1476,8 @@ class ServiceManagementService
 
     /**
      * A plan with several inbounds (switch on): how many servers the service has, and a neutral note while some are
-     * still being connected. Never which ones or where. Empty for every other service, so its text stays as it was.
+     * not connected: still being connected (retried automatically), or "contact support" once the retry will not try
+     * them any more (M2c F10). Never which ones, where or why. Empty for every other service, so its text stays as it was.
      */
     private function serverCountLines(VpnService $service): string
     {
@@ -1485,8 +1486,11 @@ class ServiceManagementService
             return '';
         }
         $lines = sprintf("\nتعداد سرورها: %d", $servers['total']);
-        if ($servers['notConnected'] > 0) {
-            $lines .= sprintf("\n%d سرور هنوز در حال اتصال است و خودکار اضافه می‌شود.", $servers['notConnected']);
+        if ($servers['retrying'] > 0) {
+            $lines .= sprintf("\n%d سرور هنوز در حال اتصال است و خودکار اضافه می‌شود.", $servers['retrying']);
+        }
+        if ($servers['stuck'] > 0) {
+            $lines .= sprintf("\n%d سرور هنوز وصل نشده است؛ لطفاً با پشتیبانی تماس بگیرید.", $servers['stuck']);
         }
 
         return $lines;

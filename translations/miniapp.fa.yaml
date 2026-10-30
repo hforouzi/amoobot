@@ -179,6 +179,7 @@ checkout.message.receipt_sent: "رسید ارسال شد و در انتظار ب
 service.buy_more: "تمدید و افزایش حجم"
 service.servers: "تعداد سرورها: %count%"
 service.servers_connecting: "%count% سرور هنوز در حال اتصال است و خودکار اضافه می‌شود."
+service.servers_not_connected: "%count% سرور هنوز وصل نشده است؛ لطفاً با پشتیبانی تماس بگیرید."
 renew.title: "تمدید سرویس"
 renew.keeps_traffic: "حجم باقی‌مانده حفظ می‌شود."
 renew.resets_traffic: "حجم از نو شروع می‌شود."

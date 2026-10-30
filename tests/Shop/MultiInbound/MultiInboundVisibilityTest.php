@@ -96,6 +96,39 @@ final class MultiInboundVisibilityTest extends IntegrationTestCase
         self::assertCount(0, $page->filter('[data-servers-connecting]'));
     }
 
+    public function testTheNoteSaysContactSupportOnceTheRetryWillNotConnectIt(): void
+    {
+        $db = $this->em->getConnection();
+        $connecting = '1 سرور هنوز در حال اتصال است و خودکار اضافه می‌شود.';
+        $support = '1 سرور هنوز وصل نشده است؛ لطفاً با پشتیبانی تماس بگیرید.';
+
+        // Attempts used up (or a re-attach loop stopped, which sets them to the maximum).
+        $db->executeStatement('UPDATE vpn_service_inbound SET attempts = ? WHERE service_id = ? AND status = ?', [MultiInboundSettings::DEFAULT_MAX_ATTEMPTS, $this->service->getId(), 'failed']);
+        $bot = $this->botDetail();
+        self::assertStringContainsString("\nتعداد سرورها: 3\n".$support."\n", $bot);
+        self::assertStringNotContainsString($connecting, $bot);
+        $page = new Crawler($this->appGet('/app/view/services/'.$this->service->getId(), $this->authenticate(self::BUYER)));
+        self::assertCount(0, $page->filter('[data-servers-connecting]'));
+        self::assertCount(1, $page->filter('[data-servers-not-connected]'));
+
+        // Attempts left, but the scheduled retry is turned off.
+        $db->executeStatement('UPDATE vpn_service_inbound SET attempts = 1 WHERE service_id = ?', [$this->service->getId()]);
+        $this->setting(MultiInboundSettings::ATTACH_RETRY_ENABLED, 'false');
+        self::assertStringContainsString("\n".$support."\n", $this->botDetail());
+
+        // Retry on again, one retrying and one used up: both notes.
+        $this->setting(MultiInboundSettings::ATTACH_RETRY_ENABLED, 'true');
+        $db->executeStatement('UPDATE vpn_service_inbound SET status = ?, attempts = ? WHERE service_id = ? AND status = ?', ['failed', MultiInboundSettings::DEFAULT_MAX_ATTEMPTS, $this->service->getId(), 'attached']);
+        $db->executeStatement('UPDATE vpn_service_inbound SET status = ? WHERE service_id = ? AND attempts = 1', ['pending', $this->service->getId()]);
+        self::assertStringContainsString("\nتعداد سرورها: 3\n".$connecting."\n".$support."\n", $this->botDetail());
+        $page = new Crawler($this->appGet('/app/view/services/'.$this->service->getId(), $this->authenticate(self::BUYER)));
+        self::assertCount(1, $page->filter('[data-servers-connecting]'));
+        self::assertCount(1, $page->filter('[data-servers-not-connected]'));
+        foreach (['ws-hidden', 'trojan-hidden', 'panel.example.test'] as $detail) {
+            self::assertStringNotContainsString($detail, $page->html());
+        }
+    }
+
     public function testNothingChangesForTheCustomerWithTheSwitchOffOrWithoutAdditionalInbounds(): void
     {
         $single = $this->sell($this->createPlan(90000, $this->em->find(VpnInbound::class, $this->primary->getId()) ?? self::fail('inbound')), '8762');

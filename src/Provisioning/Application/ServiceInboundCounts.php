@@ -30,9 +30,12 @@ final class ServiceInboundCounts
 
     /**
      * The service's servers: the primary inbound plus each additional one it keeps (detached ones are gone), and how
-     * many of the additional ones are not connected yet. Null for a service without additional inbounds (one query).
+     * many of the additional ones are not connected yet, split for the customer's note (M2c F10): "retrying" ones the
+     * scheduled retry will still try (pending, or failed with attempts left, while the retry is on), "stuck" ones it will
+     * not (attempts used up, a re-attach loop stopped, or the scheduled retry turned off): those need support. Null for
+     * a service without additional inbounds (one query).
      *
-     * @return array{total: int, notConnected: int}|null
+     * @return array{total: int, notConnected: int, retrying: int, stuck: int}|null
      */
     public function servers(VpnService $service): ?array
     {
@@ -40,19 +43,19 @@ final class ServiceInboundCounts
         if (0 === $id || !$this->settings->enabled()) {
             return null;
         }
-        $counts = $this->entityManager->getConnection()->fetchAllKeyValue(
-            'SELECT status, COUNT(*) FROM vpn_service_inbound WHERE service_id = ? AND status <> ? GROUP BY status',
-            [$id, VpnServiceInbound::STATUS_DETACHED],
-        );
-        if ([] === $counts) {
+        $row = $this->entityManager->getConnection()->fetchAssociative(
+            'SELECT COUNT(*) AS total, SUM(status = :pending) AS pending, SUM(status = :failed AND attempts < :max) AS failed_left, SUM(status = :failed AND attempts >= :max) AS failed_used_up
+             FROM vpn_service_inbound WHERE service_id = :id AND status <> :detached',
+            ['pending' => VpnServiceInbound::STATUS_PENDING, 'failed' => VpnServiceInbound::STATUS_FAILED, 'max' => $this->settings->maxAttempts(), 'id' => $id, 'detached' => VpnServiceInbound::STATUS_DETACHED],
+        ) ?: [];
+        if (0 === (int) ($row['total'] ?? 0)) {
             return null;
         }
-        $notConnected = 0;
-        foreach (self::NOT_CONNECTED as $status) {
-            $notConnected += (int) ($counts[$status] ?? 0);
-        }
+        $left = (int) $row['pending'] + (int) $row['failed_left'];
+        $retrying = $this->settings->attachRetryEnabled() ? $left : 0;
+        $stuck = (int) $row['failed_used_up'] + $left - $retrying;
 
-        return ['total' => 1 + (int) array_sum($counts), 'notConnected' => $notConnected];
+        return ['total' => 1 + (int) $row['total'], 'notConnected' => $retrying + $stuck, 'retrying' => $retrying, 'stuck' => $stuck];
     }
 
     /**

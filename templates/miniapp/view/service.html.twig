@@ -10,7 +10,8 @@
     {% if servers %}
         <section class="card" data-servers="{{ servers.total }}">
             <p>{{ 'service.servers'|trans({'%count%': servers.total}) }}</p>
-            {% if servers.notConnected > 0 %}<p class="muted" data-servers-connecting>{{ 'service.servers_connecting'|trans({'%count%': servers.notConnected}) }}</p>{% endif %}
+            {% if servers.retrying > 0 %}<p class="muted" data-servers-connecting>{{ 'service.servers_connecting'|trans({'%count%': servers.retrying}) }}</p>{% endif %}
+            {% if servers.stuck > 0 %}<p class="muted" data-servers-not-connected>{{ 'service.servers_not_connected'|trans({'%count%': servers.stuck}) }}</p>{% endif %}
         </section>
     {% endif %}
     {% if canRenew or canAddTraffic %}
