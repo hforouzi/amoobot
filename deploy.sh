@@ -86,6 +86,9 @@ HSTS_STATE_FILE="${STATE_DIR}/hsts-enabled"
 # Never add app:payments:repair-stuck or other destructive commands here.
 # claims is in the lifecycle group: its panel owner updates replace the whole client row, as sync/expiry/suspend do, so
 # they never overlap; :13/:28/:43/:58 keeps clear of sync's start (a busy group is waited for 120 s, then skipped once).
+# attach-inbounds (multi-inbound plans, phase M2b) is in the lifecycle group too: it attaches the client to inbounds and
+# refreshes its links, which must not overlap a sync/suspend writing the same client; :25/:55 is a free slot. It does
+# nothing while plans.multi_inbound_enabled is off.
 SCHEDULED_JOBS=(
   "broadcasts|broadcasts|*:0/2|600|120|app:automation:run --only=broadcasts"
   "orders|orders|*:0/10|300|600|app:automation:run --only=orders"
@@ -94,6 +97,7 @@ SCHEDULED_JOBS=(
   "suspend|lifecycle|*:8/15|600|900|app:automation:run --only=suspend"
   "notifications|lifecycle|*:10/30|900|1800|app:automation:run --only=notifications"
   "claims|lifecycle|*:13/15|300|900|app:automation:run --only=claims"
+  "attach-inbounds|lifecycle|*:25/30|300|1800|app:automation:run --only=attach-inbounds"
 )
 JOBS_LOG_DIR="/var/log/amoobot"
 JOBS_STATE_DIR="${STATE_DIR}/jobs"
@@ -1536,8 +1540,8 @@ for entry in "${SCHEDULED_JOBS[@]}"; do
     'app:automation:run --only=broadcasts'|'app:automation:run --only=orders'|\
     'app:automation:run --only=sync'|'app:automation:run --only=expiry'|\
     'app:automation:run --only=suspend'|'app:automation:run --only=notifications'|\
-    'app:automation:run --only=claims') ;;
-    *) die "SCHEDULED_JOBS: only the seven reviewed automation tasks may be scheduled." ;;
+    'app:automation:run --only=claims'|'app:automation:run --only=attach-inbounds') ;;
+    *) die "SCHEDULED_JOBS: only the eight reviewed automation tasks may be scheduled." ;;
   esac
   job_names+="$JOB_NAME "
 done
@@ -2294,10 +2298,10 @@ fi
 
 step "16/18" "Installing scheduled jobs (systemd timers, run as ${WEB_USER})..."
 
-printf '  %-14s %-12s %-10s %-8s %s\n' "JOB" "SCHEDULE" "LOCK" "TIMEOUT" "COMMAND"
+printf '  %-16s %-12s %-10s %-8s %s\n' "JOB" "SCHEDULE" "LOCK" "TIMEOUT" "COMMAND"
 for entry in "${SCHEDULED_JOBS[@]}"; do
   parse_job "$entry"
-  printf '  %-14s %-12s %-10s %-8s %s\n' "$JOB_NAME" "$JOB_CALENDAR" "$JOB_GROUP" "${JOB_TIMEOUT}s" "$JOB_COMMAND"
+  printf '  %-16s %-12s %-10s %-8s %s\n' "$JOB_NAME" "$JOB_CALENDAR" "$JOB_GROUP" "${JOB_TIMEOUT}s" "$JOB_COMMAND"
 done
 
 run install -d -m 750 -o "$WEB_USER" -g "$WEB_USER" "$JOBS_LOG_DIR"
