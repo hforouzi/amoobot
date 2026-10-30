@@ -43,6 +43,9 @@ abstract class IntegrationTestCase extends KernelTestCase
         // A reseller's customer labels (S3) point at reseller and vpn_service.
         'reseller_customer_service',
         'reseller_customer',
+        // Plans with several inbounds (M1) point at plan, vpn_service and vpn_inbound (keys are off: nothing cascades).
+        'plan_additional_inbound',
+        'vpn_service_inbound',
         // Claim links (S2) point at vpn_service and user.
         'service_ownership_event',
         'service_claim',
@@ -77,9 +80,9 @@ abstract class IntegrationTestCase extends KernelTestCase
 
     protected function tearDown(): void
     {
-        // Never leave the wallet switched on for a test that does not purge.
+        // Never leave the wallet (or another switch) on for a test that does not purge.
         if (isset($this->em) && $this->em->isOpen()) {
-            $this->em->getConnection()->executeStatement("DELETE FROM setting WHERE key_name LIKE 'wallet.%' OR key_name LIKE 'reseller.%'");
+            $this->em->getConnection()->executeStatement("DELETE FROM setting WHERE key_name LIKE 'wallet.%' OR key_name LIKE 'reseller.%' OR key_name LIKE 'plans.%'");
         }
         parent::tearDown();
     }
@@ -91,8 +94,8 @@ abstract class IntegrationTestCase extends KernelTestCase
         foreach (self::PURGED_TABLES as $table) {
             $connection->executeStatement('DELETE FROM '.$table);
         }
-        // The wallet and resellers are off unless a test switches them on (settings are not purged otherwise).
-        $connection->executeStatement("DELETE FROM setting WHERE key_name LIKE 'wallet.%' OR key_name LIKE 'reseller.%'");
+        // The wallet, resellers and multi-inbound plans are off unless a test switches them on (settings are not purged otherwise).
+        $connection->executeStatement("DELETE FROM setting WHERE key_name LIKE 'wallet.%' OR key_name LIKE 'reseller.%' OR key_name LIKE 'plans.%'");
         $connection->executeStatement('SET FOREIGN_KEY_CHECKS = 1');
         $this->em->clear();
     }

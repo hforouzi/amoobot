@@ -17,14 +17,22 @@ final class PlanCatalog
     }
 
     /**
+     * One query: the active plans with their inbound, its panel and their additional inbounds (a plan with any is not
+     * sold yet, Plan::isAvailableForSale(); fetched here so that check costs no query per plan).
+     *
      * @return list<Plan>
      */
     public function forSale(): array
     {
-        return array_values(array_filter(
-            $this->entityManager->getRepository(Plan::class)->findBy(['isActive' => true], ['id' => 'ASC']),
-            static fn (Plan $plan): bool => $plan->isAvailableForSale(),
-        ));
+        /** @var list<Plan> $plans */
+        $plans = $this->entityManager->createQueryBuilder()
+            ->select('p', 'i', 'pn', 'a')->from(Plan::class, 'p')
+            ->leftJoin('p.inbound', 'i')->leftJoin('i.panel', 'pn')->leftJoin('p.additionalInbounds', 'a')
+            ->where('p.isActive = true')
+            ->orderBy('p.id', 'ASC')
+            ->getQuery()->getResult();
+
+        return array_values(array_filter($plans, static fn (Plan $plan): bool => $plan->isAvailableForSale()));
     }
 
     public function findForSale(int $planId): ?Plan

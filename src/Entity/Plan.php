@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Entity;
 
+use Doctrine\Common\Collections\ArrayCollection;
+use Doctrine\Common\Collections\Collection;
 use Doctrine\ORM\Mapping as ORM;
 use Symfony\Component\Validator\Constraints as Assert;
 use Symfony\Component\Validator\Context\ExecutionContextInterface;
@@ -80,9 +82,20 @@ class Plan
     #[ORM\Column]
     private bool $isUnlimitedDuration = false;
 
+    /** The primary inbound (docs/design/multi-inbound-plans.md 2.1): every single-inbound reader keeps using it. */
     #[ORM\ManyToOne]
     #[ORM\JoinColumn(nullable: true, onDelete: 'SET NULL')]
     private ?VpnInbound $inbound = null;
+
+    /**
+     * The additional inbounds (plans.multi_inbound_enabled), in their order. EXTRA_LAZY: isAvailableForSale() asks
+     * whether there are any with a COUNT, without loading them.
+     *
+     * @var Collection<int, PlanAdditionalInbound>
+     */
+    #[ORM\OneToMany(targetEntity: PlanAdditionalInbound::class, mappedBy: 'plan', cascade: ['persist'], orphanRemoval: true, fetch: 'EXTRA_LAZY')]
+    #[ORM\OrderBy(['sortOrder' => 'ASC', 'id' => 'ASC'])]
+    private Collection $additionalInbounds;
 
     /** The lowest wholesale price of this plan for any reseller (Toman), on top of the reseller.floor_bp rule; null = none. */
     #[ORM\Column(nullable: true)]
@@ -97,6 +110,7 @@ class Plan
     public function __construct()
     {
         $this->createdAt = new \DateTimeImmutable();
+        $this->additionalInbounds = new ArrayCollection();
     }
 
     public function getId(): ?int
@@ -183,10 +197,16 @@ class Plan
 
     /**
      * Shown and sold to customers: active, and its inbound and panel usable (a degraded panel hides its plans).
+     *
+     * A plan with additional inbounds is never sold yet (fail closed, phase M1): provisioning attaches the primary only,
+     * so a customer would get fewer servers than the plan promises. This holds whatever plans.multi_inbound_enabled says.
      */
     public function isAvailableForSale(): bool
     {
         if (!$this->isActive) {
+            return false;
+        }
+        if ($this->hasAdditionalInbounds()) {
             return false;
         }
         if (null === $this->inbound) {
@@ -367,6 +387,68 @@ class Plan
         $this->inbound = $inbound;
 
         return $this;
+    }
+
+    /** Whether the plan has additional inbounds (a COUNT when they are not loaded). */
+    public function hasAdditionalInbounds(): bool
+    {
+        return !$this->additionalInbounds->isEmpty();
+    }
+
+    /**
+     * The additional inbounds, in their order (never the primary).
+     *
+     * @return list<VpnInbound>
+     */
+    public function getAdditionalInbounds(): array
+    {
+        return array_values(array_map(static fn (PlanAdditionalInbound $row): VpnInbound => $row->getInbound(), $this->additionalInbounds->toArray()));
+    }
+
+    /**
+     * Replaces the additional inbounds with $inbounds, in that order: rows of inbounds that stay are kept (only their
+     * order changes), the others are removed, new ones added. Repeats are kept once. Whether the list is allowed is
+     * PlanInboundRules' business (PlanAdminService::save()).
+     *
+     * @param iterable<VpnInbound> $inbounds
+     */
+    public function setAdditionalInbounds(iterable $inbounds): self
+    {
+        $wanted = [];
+        foreach ($inbounds as $inbound) {
+            $wanted[spl_object_id($inbound)] ??= $inbound;
+        }
+        $kept = [];
+        foreach ($this->additionalInbounds->toArray() as $row) {
+            if (isset($wanted[spl_object_id($row->getInbound())])) {
+                $kept[spl_object_id($row->getInbound())] = $row;
+            } else {
+                $this->additionalInbounds->removeElement($row);
+            }
+        }
+        $now = new \DateTimeImmutable();
+        $order = 0;
+        foreach ($wanted as $key => $inbound) {
+            ++$order;
+            if (isset($kept[$key])) {
+                $kept[$key]->setSortOrder($order);
+            } else {
+                $this->additionalInbounds->add(new PlanAdditionalInbound($this, $inbound, $order, $now));
+            }
+        }
+
+        return $this;
+    }
+
+    /**
+     * Every inbound of the plan: the primary first, then the additional ones by their order (docs/design/
+     * multi-inbound-plans.md 2.1).
+     *
+     * @return list<VpnInbound>
+     */
+    public function getInbounds(): array
+    {
+        return [...(null === $this->inbound ? [] : [$this->inbound]), ...$this->getAdditionalInbounds()];
     }
 
     public function getCreatedAt(): \DateTimeImmutable
