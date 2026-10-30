@@ -1,0 +1,20 @@
+{# Status icons of customer-facing pages (public/layout.html.twig): inline SVG, no external files; decorative (the heading says the state). #}
+{% macro status(name) %}
+<svg class="status-icon" viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+{% if name == 'check' %}
+    <path d="M20 6 9 17l-5-5"/>
+{% elseif name == 'clock' %}
+    <circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>
+{% elseif name == 'cross' %}
+    <path d="M18 6 6 18M6 6l12 12"/>
+{% elseif name == 'alert' %}
+    <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/>
+{% elseif name == 'search' %}
+    <circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>
+{% elseif name == 'ban' %}
+    <circle cx="12" cy="12" r="9"/><path d="m5.7 5.7 12.6 12.6"/>
+{% else %}
+    <circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3M12 17h.01"/>
+{% endif %}
+</svg>
+{% endmacro %}

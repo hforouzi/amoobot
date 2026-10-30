@@ -191,7 +191,7 @@ final class TranslationCompletenessTest extends IntegrationTestCase
      */
     private function pages(): array
     {
-        $pages = ['/admin', '/admin/settings?tab=sales', '/admin/settings?tab=automation', '/admin/settings?tab=channels', '/admin/settings?tab=advanced', '/admin/panel-setup/new', '/admin/payment-gateways/install', '/admin/plans/bulk-adjust-prices'];
+        $pages = ['/admin', '/admin/settings?tab=sales', '/admin/settings?tab=automation', '/admin/settings?tab=channels', '/admin/settings?tab=branding', '/admin/settings?tab=advanced', '/admin/panel-setup/new', '/admin/payment-gateways/install', '/admin/plans/bulk-adjust-prices'];
         foreach (['pending', 'needs_review', 'provisioning_failed', 'confirmed', 'rejected'] as $tab) {
             $pages[] = '/admin/payment?tab='.$tab;
         }
