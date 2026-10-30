@@ -5,11 +5,14 @@ declare(strict_types=1);
 namespace App\Admin\UI\Crud;
 
 use App\Admin\Application\ServiceTabs;
+use App\Admin\UI\ServiceInboundsController;
 use App\Admin\UI\SubscriptionPageLinkController;
 use App\Admin\UI\Support\AdminFormat;
 use App\Entity\VpnService;
+use App\Entity\VpnServiceInbound;
 use App\Provisioning\Application\FinalConfigLinkProvider;
 use App\Security\AdminPermission;
+use App\Shop\Application\MultiInboundSettings;
 use App\Subscription\Application\SubscriptionPageUrl;
 use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\ORM\QueryBuilder;
@@ -24,6 +27,7 @@ use EasyCorp\Bundle\EasyAdminBundle\Dto\SearchDto;
 use EasyCorp\Bundle\EasyAdminBundle\Field\AssociationField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\ChoiceField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\DateTimeField;
+use EasyCorp\Bundle\EasyAdminBundle\Field\Field;
 use EasyCorp\Bundle\EasyAdminBundle\Collection\FieldCollection;
 use EasyCorp\Bundle\EasyAdminBundle\Collection\FilterCollection;
 use EasyCorp\Bundle\EasyAdminBundle\Field\IdField;
@@ -34,6 +38,7 @@ use EasyCorp\Bundle\EasyAdminBundle\Filter\EntityFilter;
 use Psr\Clock\ClockInterface;
 use Symfony\Component\HttpFoundation\RequestStack;
 use Symfony\Component\Security\Csrf\CsrfTokenManagerInterface;
+use Symfony\Contracts\Translation\TranslatorInterface;
 
 /**
  * VPN services, with tabs (?tab=): all, active, expiring within 3 days, expired, suspended (the dashboard links here).
@@ -51,6 +56,8 @@ class VpnServiceCrudController extends AbstractCrudController
         private readonly ClockInterface $clock,
         private readonly SubscriptionPageUrl $pageUrl,
         private readonly CsrfTokenManagerInterface $csrfTokenManager,
+        private readonly MultiInboundSettings $multiInbound,
+        private readonly TranslatorInterface $translator,
     ) {
     }
 
@@ -112,11 +119,24 @@ class VpnServiceCrudController extends AbstractCrudController
             ->linkToRoute('admin_claims_service', fn (VpnService $service): array => ['id' => $service->getId()])
             ->setCssClass('btn btn-secondary');
 
+        // Plans with several inbounds (switch on): attach the failed additional inbounds to the existing client.
+        $retryAttach = Action::new('retryAttach', 'action.retry_attach', 'fa fa-link')
+            ->linkToUrl(fn (VpnService $service): string => $this->generateUrl('admin_vpn_service_retry_attach', [
+                'id' => $service->getId(),
+                'token' => $this->csrfTokenManager->getToken(ServiceInboundsController::CSRF_ID.'-'.$service->getId())->getValue(),
+            ]))
+            ->renderAsForm()
+            ->displayIf(fn (VpnService $service): bool => [] !== array_filter($this->inboundRowsOf($service), static fn (VpnServiceInbound $r): bool => VpnServiceInbound::STATUS_ATTACHED !== $r->getStatus() && VpnServiceInbound::STATUS_DETACHED !== $r->getStatus()))
+            ->setCssClass('btn btn-warning');
+
         return $actions
             ->add(Action::INDEX, $regenerateConfig)
             ->add(Action::DETAIL, $regenerateConfig)
             ->add(Action::DETAIL, $rotatePageLink)
+            ->add(Action::DETAIL, $retryAttach)
             ->add(Action::DETAIL, $claims)
+            // ServiceInboundsController (SERVICES_MANAGE).
+            ->setPermission('retryAttach', AdminPermission::SERVICES_MANAGE->value)
             // Its route lives in VpnPanelInboundActionsController (PANELS_MANAGE).
             ->setPermission('regenerateConfig', AdminPermission::PANELS_MANAGE->value)
             // SubscriptionPageLinkController (SERVICES_MANAGE).
@@ -145,6 +165,7 @@ class VpnServiceCrudController extends AbstractCrudController
             AssociationField::new('order')->hideOnIndex(),
             AssociationField::new('panel'),
             AssociationField::new('inbound')->hideOnIndex(),
+            ...$this->inboundRowsField(),
             TextField::new('status')->setTemplatePath(AdminFormat::TEMPLATE)->formatValue(fn (mixed $v): string => $f->status($v)),
             DateTimeField::new('expiresAt')->setTemplatePath(AdminFormat::TEMPLATE)->formatValue(fn (mixed $v): string => $f->expiry($v)),
             AdminFormat::field('traffic', static fn (mixed $v, ?VpnService $s): string => null === $s ? '' : $f->traffic($s->getTrafficUsedBytes(), $s->getTrafficLimitBytes()))->onlyOnIndex(),
@@ -194,6 +215,52 @@ class VpnServiceCrudController extends AbstractCrudController
             ->leftJoin('entity.panel', 'listPanel')->addSelect('listPanel');
 
         return ServiceTabs::apply($queryBuilder, 'entity', $this->currentTab(), $this->clock->now());
+    }
+
+    /**
+     * "Additional inbounds" on the detail page: each row's inbound, state, attempts and last error. Only while
+     * plans.multi_inbound_enabled is on (with it off the page is exactly as before).
+     *
+     * @return list<Field>
+     */
+    private function inboundRowsField(): array
+    {
+        if (!$this->multiInbound->enabled()) {
+            return [];
+        }
+        $t = fn (string $key, array $parameters = []): string => AdminFormat::e($this->translator->trans($key, $parameters, 'admin'));
+
+        return [AdminFormat::field('additionalInbounds', function (mixed $v, ?VpnService $service) use ($t): string {
+            $rows = null === $service ? [] : $this->inboundRowsOf($service);
+            if ([] === $rows) {
+                return AdminFormat::NONE;
+            }
+            $lines = array_map(static fn (VpnServiceInbound $row): string => sprintf(
+                '<li data-service-inbound="%s">#%d %s · %s · %s%s</li>',
+                AdminFormat::e($row->getStatus()),
+                (int) $row->getInbound()->getId(),
+                AdminFormat::e($row->getInbound()->getTitle()),
+                $t('service_inbounds.status.'.$row->getStatus()),
+                $t('service_inbounds.attempts', ['%count%' => $row->getAttempts()]),
+                null === $row->getLastError() ? '' : ' · <span dir="ltr">'.AdminFormat::e($row->getLastError()).'</span>',
+            ), $rows);
+
+            return '<ul class="list-unstyled mb-0">'.implode('', $lines).'</ul>';
+        }, 'field.additional_inbounds')->onlyOnDetail()];
+    }
+
+    /**
+     * @return list<VpnServiceInbound>
+     */
+    private function inboundRowsOf(VpnService $service): array
+    {
+        $id = (int) $service->getId();
+        if (!$this->multiInbound->enabled() || 0 === $id) {
+            return [];
+        }
+
+        // Not remembered: the controller outlives a request in long-running workers (two small queries per detail page).
+        return $this->entityManager->getRepository(VpnServiceInbound::class)->findBy(['service' => $service], ['id' => 'ASC']);
     }
 
     private function currentTab(): string

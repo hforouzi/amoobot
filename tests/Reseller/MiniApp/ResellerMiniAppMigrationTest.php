@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Reseller\MiniApp;
 
 use App\Entity\ResellerCustomer;
+use App\Tests\Support\ConsoleOutputAssertions;
 use App\Tests\Support\IntegrationTestCase;
 use App\Tests\Support\ResellerFixtures;
 use PHPUnit\Framework\Attributes\Group;
@@ -18,6 +19,7 @@ use Symfony\Component\Process\Process;
 #[Group('subprocess')]
 final class ResellerMiniAppMigrationTest extends IntegrationTestCase
 {
+    use ConsoleOutputAssertions;
     use ResellerFixtures;
 
     private const VERSION = 'DoctrineMigrations\\Version20261031090000';
@@ -34,7 +36,7 @@ final class ResellerMiniAppMigrationTest extends IntegrationTestCase
 
             $down = $this->migrate('down');
             self::assertNotSame(0, $down->getExitCode());
-            self::assertStringContainsString('Irreversible', $down->getOutput().$down->getErrorOutput());
+            self::assertConsoleContains('Irreversible', $down->getOutput().$down->getErrorOutput());
             self::assertTrue($this->tableExists('reseller_customer'));
             self::assertTrue($this->tableExists('reseller_customer_service'));
             self::assertSame(1, $this->sqlInt('SELECT COUNT(*) FROM reseller_customer'));

@@ -12,6 +12,7 @@ use App\Payment\Domain\PaymentStatus;
 use App\Provisioning\Domain\Dto\VpnUsage;
 use App\Shop\Domain\OrderStatus;
 use App\Shop\Domain\OrderType;
+use App\Tests\Support\ConsoleOutputAssertions;
 use App\Tests\Support\IntegrationTestCase;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Bundle\FrameworkBundle\Console\Application;
@@ -19,6 +20,8 @@ use Symfony\Component\Console\Tester\CommandTester;
 
 final class RepairStuckPaymentsCommandTest extends IntegrationTestCase
 {
+    use ConsoleOutputAssertions;
+
     private const GB = 1073741824;
 
     /**
@@ -79,8 +82,8 @@ final class RepairStuckPaymentsCommandTest extends IntegrationTestCase
 
         $tester = $this->runCommand();
 
-        self::assertStringContainsString('would mark', $tester->getDisplay());
-        self::assertStringContainsString('new_service_not_provisioned', $tester->getDisplay());
+        self::assertConsoleContains('would mark', $tester->getDisplay());
+        self::assertConsoleContains('new_service_not_provisioned', $tester->getDisplay());
         self::assertSame(PaymentStatus::CONFIRMED, $this->row('payment', (int) $payment->getId())['status']);
     }
 
@@ -116,7 +119,7 @@ final class RepairStuckPaymentsCommandTest extends IntegrationTestCase
 
         $tester = $this->runCommand(['--apply' => true]);
 
-        self::assertStringContainsString('No stuck confirmed payments found', $tester->getDisplay());
+        self::assertConsoleContains('No stuck confirmed payments found', $tester->getDisplay());
         self::assertSame(PaymentStatus::CONFIRMED, $this->row('payment', (int) $fulfilled->getId())['status']);
         self::assertSame(PaymentStatus::CONFIRMED, $this->row('payment', (int) $recent->getId())['status']);
     }
@@ -142,7 +145,7 @@ final class RepairStuckPaymentsCommandTest extends IntegrationTestCase
 
         $tester = $this->runCommand(['--apply' => true]);
 
-        self::assertStringContainsString('renewal_not_applied', $tester->getDisplay());
+        self::assertConsoleContains('renewal_not_applied', $tester->getDisplay());
         $row = $this->row('payment', (int) $payment->getId());
         self::assertSame(PaymentStatus::PROVISIONING_FAILED, $row['status']);
         self::assertStringContainsString('panel: expires', (string) $row['provisioning_error'], 'panel snapshot recorded');
@@ -170,7 +173,7 @@ final class RepairStuckPaymentsCommandTest extends IntegrationTestCase
 
         $tester = $this->runCommand(['--apply' => true]);
 
-        self::assertStringContainsString('skip (manual)', $tester->getDisplay());
+        self::assertConsoleContains('skip (manual)', $tester->getDisplay());
         self::assertSame(PaymentStatus::CONFIRMED, $this->row('payment', (int) $payment->getId())['status']);
         self::assertSame(0, $this->driver()->renewCalls);
     }

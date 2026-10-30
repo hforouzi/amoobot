@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Wallet;
 
+use App\Tests\Support\ConsoleOutputAssertions;
 use App\Tests\Support\IntegrationTestCase;
 use App\Wallet\Application\WalletActor;
 use App\Wallet\Application\WalletService;
@@ -19,6 +20,8 @@ use Symfony\Component\Process\Process;
  */
 final class WalletLedgerMigrationTest extends IntegrationTestCase
 {
+    use ConsoleOutputAssertions;
+
     private const VERSION = 'DoctrineMigrations\\Version20261024090000';
     private const FOREIGN_KEYS = 'DoctrineMigrations\\Version20261025090100';
 
@@ -44,7 +47,7 @@ final class WalletLedgerMigrationTest extends IntegrationTestCase
         try {
             $down = $this->migrate(self::VERSION, 'down');
 
-            self::assertStringContainsString('Irreversible: the wallet ledger has 1 movement(s)', $down->getOutput().$down->getErrorOutput());
+            self::assertConsoleContains('Irreversible: the wallet ledger has 1 movement(s)', $down->getOutput().$down->getErrorOutput());
             self::assertSame(2, $this->ledgerTables(), 'nothing was dropped');
             self::assertSame(5000, (int) $this->em->getConnection()->fetchOne('SELECT balance FROM wallet WHERE user_id = ?', [$user->getId()]));
             self::assertSame(1, $this->rows('wallet_transaction'));
@@ -77,7 +80,7 @@ final class WalletLedgerMigrationTest extends IntegrationTestCase
             $down = $this->migrate(self::FOREIGN_KEYS, 'down');
 
             self::assertNotSame(0, $down->getExitCode());
-            self::assertStringContainsString('Irreversible: the wallet ledger has 1 movement(s)', $down->getOutput().$down->getErrorOutput());
+            self::assertConsoleContains('Irreversible: the wallet ledger has 1 movement(s)', $down->getOutput().$down->getErrorOutput());
             self::assertSame(self::RESTRICT, $this->deleteRules(), 'no foreign key was touched');
             self::assertNotFalse($this->em->getConnection()->fetchOne('SELECT version FROM doctrine_migration_versions WHERE version = ?', [self::FOREIGN_KEYS]));
 
@@ -104,11 +107,11 @@ final class WalletLedgerMigrationTest extends IntegrationTestCase
 
         try {
             $keys = $this->migrate(self::FOREIGN_KEYS, 'down');
-            self::assertStringContainsString('Irreversible: 2 wallet(s) have a balance, a credit limit or are frozen', $keys->getOutput().$keys->getErrorOutput());
+            self::assertConsoleContains('Irreversible: 2 wallet(s) have a balance, a credit limit or are frozen', $keys->getOutput().$keys->getErrorOutput());
             self::assertSame(self::RESTRICT, $this->deleteRules());
 
             $tables = $this->migrate(self::VERSION, 'down');
-            self::assertStringContainsString('Irreversible: 2 wallet(s) have a balance, a credit limit or are frozen', $tables->getOutput().$tables->getErrorOutput());
+            self::assertConsoleContains('Irreversible: 2 wallet(s) have a balance, a credit limit or are frozen', $tables->getOutput().$tables->getErrorOutput());
             self::assertSame(2, $this->ledgerTables(), 'nothing was dropped');
             self::assertSame(2, $this->rows('wallet'));
         } finally {

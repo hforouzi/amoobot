@@ -7,6 +7,7 @@ namespace App\Tests\Shop\MultiInbound;
 use App\Entity\PlanAdditionalInbound;
 use App\Entity\VpnInbound;
 use App\Entity\VpnServiceInbound;
+use App\Tests\Support\ConsoleOutputAssertions;
 use App\Tests\Support\IntegrationTestCase;
 use PHPUnit\Framework\Attributes\Group;
 use Symfony\Component\Process\PhpExecutableFinder;
@@ -20,6 +21,8 @@ use Symfony\Component\Process\Process;
 #[Group('subprocess')]
 final class MultiInboundMigrationTest extends IntegrationTestCase
 {
+    use ConsoleOutputAssertions;
+
     private const M1 = 'DoctrineMigrations\\Version20261101090000';
 
     public function testWithoutRowsItGoesDownAndUpAgainWithItsKeys(): void
@@ -50,8 +53,8 @@ final class MultiInboundMigrationTest extends IntegrationTestCase
             $down = $this->migrate('down');
 
             self::assertNotSame(0, $down->getExitCode());
-            self::assertStringContainsString('Irreversible: 1 additional plan inbound(s) exist', $down->getOutput().$down->getErrorOutput());
-            self::assertStringContainsString('Nothing was changed', $down->getOutput().$down->getErrorOutput());
+            self::assertConsoleContains('Irreversible: 1 additional plan inbound(s) exist', $down->getOutput().$down->getErrorOutput());
+            self::assertConsoleContains('Nothing was changed', $down->getOutput().$down->getErrorOutput());
             $this->assertSchemaIntact();
             self::assertSame(1, (int) $this->em->getConnection()->fetchOne('SELECT COUNT(*) FROM plan_additional_inbound'));
         } finally {
@@ -70,7 +73,7 @@ final class MultiInboundMigrationTest extends IntegrationTestCase
             $down = $this->migrate('down');
 
             self::assertNotSame(0, $down->getExitCode());
-            self::assertStringContainsString('Irreversible: 1 service inbound attachment(s) exist', $down->getOutput().$down->getErrorOutput());
+            self::assertConsoleContains('Irreversible: 1 service inbound attachment(s) exist', $down->getOutput().$down->getErrorOutput());
             $this->assertSchemaIntact();
         } finally {
             $this->restore();

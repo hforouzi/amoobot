@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Provisioning\Application;
 
 use App\Entity\VpnService;
+use App\Entity\VpnServiceInbound;
 use App\Provisioning\Domain\Dto\RenewVpnServiceRequest;
 use App\Provisioning\Domain\ServiceActivationDriverInterface;
 use App\Provisioning\Domain\VpnServiceStatus;
@@ -77,6 +78,11 @@ final class ServiceAdministration
         }
         if (!$this->onPanel($service, 'delete', static fn ($driver) => $driver->deleteService((string) $service->getRemoteId(), $service->getPanel()))) {
             return ServiceAdminOutcome::PANEL_FAILED;
+        }
+        // del/{email} removed the client from every inbound: its additional inbound rows (plans with several inbounds).
+        $now = new \DateTimeImmutable();
+        foreach ($this->entityManager->getRepository(VpnServiceInbound::class)->findBy(['service' => $service]) as $row) {
+            $row->markDetached($now);
         }
 
         return $this->save($service->setStatus(VpnServiceStatus::DELETED));

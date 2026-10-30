@@ -48,6 +48,15 @@ final class Fake3xuiPanel
     /** @var list<array{method: string, path: string, query: array<string, string>, headers: array<string, list<string>>, body: mixed}> */
     public array $requests = [];
 
+    /**
+     * One panel shared by several PHP processes: inbounds, clients, traffic, hosts and the request log live in this
+     * JSON file, read and written under an exclusive file lock around each request (like a panel's database). Scripts
+     * stay per process.
+     */
+    public ?string $stateFile = null;
+    /** @var array<string, int> "METHOD path" (regex, without delimiters) => milliseconds to wait before answering (outside the lock) */
+    public array $delays = [];
+
     /** @var list<array{method: ?string, path: ?string, response: MockResponse|\Closure, times: int, afterHandling: bool}> */
     private array $scripts = [];
 
@@ -93,6 +102,16 @@ final class Fake3xuiPanel
         return $this;
     }
 
+    /**
+     * Drops the scripted answers not used yet (e.g. a "panel down" script that outlived the attempt it was meant for).
+     */
+    public function clearScripts(): self
+    {
+        $this->scripts = [];
+
+        return $this;
+    }
+
     public static function networkError(string $curlMessage): MockResponse
     {
         return new MockResponse('', ['error' => $curlMessage]);
@@ -133,6 +152,71 @@ final class Fake3xuiPanel
         $body = $this->decodeBody($options);
 
         $path = str_starts_with($fullPath, $this->basePath.'/') ? substr($fullPath, strlen($this->basePath) + 1) : null;
+        foreach ($this->delays as $pattern => $ms) {
+            if (1 === preg_match('#^'.$pattern.'$#', $method.' '.($path ?? $fullPath))) {
+                usleep($ms * 1000);
+            }
+        }
+        if (null !== $this->stateFile) {
+            return $this->shared(fn (): ResponseInterface => $this->answer($method, $url, $options, $origin, $path, $fullPath, $query, $headers, $body));
+        }
+
+        return $this->answer($method, $url, $options, $origin, $path, $fullPath, $query, $headers, $body);
+    }
+
+    /**
+     * @param \Closure(): ResponseInterface $work
+     */
+    private function shared(\Closure $work): ResponseInterface
+    {
+        $lock = fopen($this->stateFile.'.lock', 'c') ?: throw new \RuntimeException('Cannot open the fake panel lock.');
+        flock($lock, LOCK_EX);
+        try {
+            $this->loadState();
+            $response = $work();
+            $this->saveState();
+
+            return $response;
+        } finally {
+            flock($lock, LOCK_UN);
+            fclose($lock);
+        }
+    }
+
+    /** Writes the state now (a test that set $stateFile after setting up inbounds or clients). */
+    public function saveState(): void
+    {
+        if (null !== $this->stateFile) {
+            file_put_contents($this->stateFile, (string) json_encode(['inbounds' => $this->inbounds, 'clients' => $this->clients, 'traffic' => $this->traffic, 'hosts' => $this->hosts, 'requests' => $this->requests, 'nextInboundId' => $this->nextInboundId]));
+        }
+    }
+
+    /** Reads the state another process wrote (no-op without a state file or before the first save). */
+    public function loadState(): void
+    {
+        if (null === $this->stateFile || !is_file($this->stateFile)) {
+            return;
+        }
+        $state = json_decode((string) file_get_contents($this->stateFile), true);
+        if (!is_array($state)) {
+            return;
+        }
+        $this->inbounds = (array) $state['inbounds'];
+        $this->clients = (array) $state['clients'];
+        $this->traffic = (array) $state['traffic'];
+        $this->hosts = (array) $state['hosts'];
+        $this->requests = (array) $state['requests'];
+        $this->nextInboundId = (int) $state['nextInboundId'];
+    }
+
+    /**
+     * @param array<string, mixed>        $options
+     * @param array<string, string>       $query
+     * @param array<string, list<string>> $headers
+     */
+    private function answer(string $method, string $url, array $options, string $origin, ?string $path, string $fullPath, array $query, array $headers, mixed $body): ResponseInterface
+    {
+        $parts = parse_url($url);
         $this->requests[] = ['method' => $method, 'path' => $path ?? $fullPath, 'query' => $query, 'headers' => $headers, 'body' => $body];
 
         foreach ($this->scripts as $i => $script) {
@@ -422,6 +506,11 @@ final class Fake3xuiPanel
     private function attach(string $key, array $ids, bool $attach): MockResponse
     {
         $ids = array_map('intval', $ids);
+        foreach ($ids as $id) {
+            if ($attach && !isset($this->inbounds[$id])) {
+                return self::envelope(false, null, 'inbound '.$id.' not found');
+            }
+        }
         $current = $this->clients[$key]['inboundIds'];
         $this->clients[$key]['inboundIds'] = array_values($attach ? array_unique([...$current, ...$ids]) : array_diff($current, $ids));
 

@@ -9,6 +9,7 @@ use App\Entity\VpnPanel;
 use App\Entity\VpnService;
 use App\Provisioning\Domain\SanaeiIntegrationMode;
 use App\Provisioning\Infrastructure\Sanaei3xui\Sanaei3xuiRemoteIdParser;
+use App\Tests\Support\ConsoleOutputAssertions;
 use App\Tests\Support\Fake3xui\Fake3xuiPanel;
 use App\Tests\Support\IntegrationTestCase;
 use App\Tests\Support\SubprocessAssertions;
@@ -26,6 +27,7 @@ use Symfony\Component\Process\Process;
  */
 final class RegenerateResetRaceTest extends IntegrationTestCase
 {
+    use ConsoleOutputAssertions;
     use SubprocessAssertions;
 
     private const OLD_UUID = '11111111-2222-4333-8444-555555555555';
@@ -142,7 +144,7 @@ final class RegenerateResetRaceTest extends IntegrationTestCase
             self::assertSame('refreshed_from_panel', $out);
         } else {
             self::assertStringStartsWith('exit=0', $out);
-            self::assertStringContainsString('credentials changed meanwhile', $out);
+            self::assertConsoleContains('credentials changed meanwhile', $out);
         }
     }
 

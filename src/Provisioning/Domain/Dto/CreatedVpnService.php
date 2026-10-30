@@ -16,6 +16,13 @@ class CreatedVpnService
         public readonly ?string $subId = null,
         public readonly ?int $ipLimit = null,
         public readonly ?array $configLinks = null,
+        /**
+         * One per additional inbound of the request, attached or not (the primary is not listed: without it there is
+         * no service).
+         *
+         * @var list<InboundAttachment>
+         */
+        public readonly array $attachments = [],
     ) {
     }
 }

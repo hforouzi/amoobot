@@ -5,12 +5,14 @@ declare(strict_types=1);
 namespace App\Provisioning\Infrastructure\Sanaei3xui\Modern;
 
 use App\Entity\VpnService;
+use App\Entity\VpnServiceInbound;
 use App\Provisioning\Application\PanelLinkSnapshot;
 use App\Provisioning\Application\ServiceErrorText;
 use App\Provisioning\Domain\PublicUrlPolicy;
 use App\Provisioning\Domain\ShareLinkTuple;
 use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http\PanelApiException;
 use App\Provisioning\Infrastructure\Sanaei3xui\Sanaei3xuiRemoteIdParser;
+use Doctrine\ORM\EntityManagerInterface;
 
 /**
  * The read-only check behind app:service:verify-links (docs/design/multi-inbound-plans.md 9.6): it compares a modern
@@ -20,6 +22,11 @@ use App\Provisioning\Infrastructure\Sanaei3xui\Sanaei3xuiRemoteIdParser;
  *
  * The report's checks have a status: pass, diff (a difference, listed), skip (not applicable here, with the reason) or
  * info. Exit code: 0 = no diff, 1 = at least one diff, 2 = the check could not run.
+ *
+ * A service with additional inbounds (vpn_service_inbound rows, plans with several inbounds) gets one more check: the
+ * client is on the primary and on every inbound recorded as attached, so their links are expected in subLinks (the
+ * Hosts prediction covers every inbound the client is on). A failed or pending attachment is reported, not a
+ * difference: its links are simply not expected yet.
  */
 final class ServiceLinkVerifier
 {
@@ -31,6 +38,7 @@ final class ServiceLinkVerifier
     public function __construct(
         private readonly ModernClientsApi $api,
         private readonly Sanaei3xuiRemoteIdParser $remoteIdParser,
+        private readonly EntityManagerInterface $entityManager,
     ) {
     }
 
@@ -87,6 +95,10 @@ final class ServiceLinkVerifier
         $checks[] = ['name' => 'panel', 'status' => self::INFO, 'detail' => sprintf('hosts=%s; client on inbound(s) %s; %d link(s) in subLinks; per-client host binding: %s; link order is not compared',
             $hosts['state'], [] === $inboundIds ? '-' : implode(', ', $inboundIds), count($sub['links']), [] === $bindings ? 'none' : implode(', ', $bindings)), 'differences' => []];
         $checks[] = self::storedSubId($service, $subId);
+        $rows = null === $service->getId() ? [] : $this->entityManager->getRepository(VpnServiceInbound::class)->findBy(['service' => $service], ['id' => 'ASC']);
+        if ([] !== $rows) {
+            $checks[] = self::attachedInbounds($service, (string) $ref->inboundId, $rows, $inboundIds);
+        }
         $checks[] = $this->storedVsPanel($service, $panelLinks, $tolerance);
         $checks[] = $this->prediction($hosts['state'], $groups, $options, $inboundIds, $bindings, $panelLinks);
         $checks[] = self::publicAddresses($panelLinks);
@@ -120,6 +132,44 @@ final class ServiceLinkVerifier
         }
 
         return ['name' => 'stored subId = panel subId', 'status' => [] === $differences ? self::PASS : self::DIFF, 'detail' => 'compared, not shown', 'differences' => $differences];
+    }
+
+    /**
+     * Several inbounds: the primary and every row recorded as attached must be on the client's inboundIds (their links
+     * are expected); failed and pending rows are listed for information only.
+     *
+     * @param list<VpnServiceInbound> $rows
+     * @param list<int>               $inboundIds the client's, as the panel reports them
+     *
+     * @return array{name: string, status: string, detail: string, differences: list<string>}
+     */
+    private static function attachedInbounds(VpnService $service, string $remotePrimary, array $rows, array $inboundIds): array
+    {
+        $primary = (int) ($service->getInbound()?->getRemoteInboundId() ?? $remotePrimary);
+        $expected = [$primary];
+        $differences = [];
+        $notes = [];
+        foreach ($rows as $row) {
+            $remote = (int) $row->getRemoteInboundId();
+            $onPanel = in_array($remote, $inboundIds, true);
+            if (VpnServiceInbound::STATUS_ATTACHED === $row->getStatus()) {
+                $expected[] = $remote;
+            } elseif (VpnServiceInbound::STATUS_DETACHED !== $row->getStatus()) {
+                $notes[] = sprintf('inbound %d: %s after %d attempt(s)%s, its links are not expected', $remote, $row->getStatus(), $row->getAttempts(), $onPanel ? ' (the client is on it on the panel; "Retry attach" records it)' : '');
+            }
+        }
+        foreach ($expected as $remote) {
+            if (!in_array($remote, $inboundIds, true)) {
+                $differences[] = sprintf('inbound %d is recorded as attached but the client is not on it on the panel: its links are missing', $remote);
+            }
+        }
+
+        return [
+            'name' => 'client on every attached inbound',
+            'status' => [] !== $differences ? self::DIFF : ([] !== $notes ? self::INFO : self::PASS),
+            'detail' => sprintf('expected on inbound(s) %s%s', implode(', ', $expected), [] === $notes ? '' : '; '.implode('; ', $notes)),
+            'differences' => $differences,
+        ];
     }
 
     /**

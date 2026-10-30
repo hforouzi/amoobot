@@ -16,6 +16,7 @@ use App\Payment\Domain\Dto\PaymentVerificationResult;
 use App\Payment\Domain\PaymentGatewayType;
 use App\Shop\Application\Checkout\PaymentStarter;
 use App\Shop\Domain\OrderType;
+use App\Tests\Support\ConsoleOutputAssertions;
 use App\Tests\Support\IntegrationTestCase;
 use App\Tests\Support\MiniAppShopFixtures;
 use App\Wallet\Application\WalletActor;
@@ -35,6 +36,7 @@ use Symfony\Component\Console\Tester\CommandTester;
  */
 final class StuckPaymentReminderTest extends IntegrationTestCase
 {
+    use ConsoleOutputAssertions;
     use MiniAppShopFixtures;
 
     private const PRICE = 150000;
@@ -162,7 +164,7 @@ final class StuckPaymentReminderTest extends IntegrationTestCase
         $sent = $this->reminders($before);
         self::assertCount(1, $sent);
         self::assertStringContainsString('Payment ID: '.$stuck->getId(), $sent[0]);
-        self::assertStringContainsString('notified: 1', $tester->getDisplay());
+        self::assertConsoleContains('notified: 1', $tester->getDisplay());
 
         $tester->execute(['--only' => 'orders']);
         self::assertCount(1, $this->reminders($before), 'not again the same day');

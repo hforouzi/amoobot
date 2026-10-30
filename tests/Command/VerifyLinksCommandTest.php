@@ -9,6 +9,7 @@ use App\Entity\VpnPanel;
 use App\Entity\VpnService;
 use App\Provisioning\Domain\SanaeiIntegrationMode;
 use App\Provisioning\Infrastructure\Sanaei3xui\Sanaei3xuiRemoteIdParser;
+use App\Tests\Support\ConsoleOutputAssertions;
 use App\Tests\Support\Fake3xui\Fake3xuiPanel;
 use App\Tests\Support\IntegrationTestCase;
 use Symfony\Bundle\FrameworkBundle\Console\Application;
@@ -21,6 +22,8 @@ use Symfony\Component\Console\Tester\CommandTester;
  */
 final class VerifyLinksCommandTest extends IntegrationTestCase
 {
+    use ConsoleOutputAssertions;
+
     private const UUID = '7f3c9a10-5b2e-4c8d-9e1f-0a1b2c3d4e5f';
     private const EMAIL = 'tg_verify_1';
     private const SUB_ID = 'verifysub0123456';
@@ -60,12 +63,12 @@ final class VerifyLinksCommandTest extends IntegrationTestCase
         [$code, $out] = $this->verify();
 
         self::assertSame(0, $code, $out);
-        self::assertStringContainsString('Service #'.$this->service->getId().': PASS', $out);
-        self::assertStringContainsString('PASS  stored snapshot = panel subLinks: 2 stored, 2 on the panel', $out);
-        self::assertStringContainsString('PASS  panel subLinks = Hosts prediction: 2 link(s) predicted, 2 given', $out);
-        self::assertStringContainsString('PASS  U2', $out);
-        self::assertStringContainsString('PASS  U6', $out);
-        self::assertStringContainsString('U1: shuffleHost', $out, 'the manual checks are listed');
+        self::assertConsoleContains('Service #'.$this->service->getId().': PASS', $out);
+        self::assertConsoleContains('PASS  stored snapshot = panel subLinks: 2 stored, 2 on the panel', $out);
+        self::assertConsoleContains('PASS  panel subLinks = Hosts prediction: 2 link(s) predicted, 2 given', $out);
+        self::assertConsoleContains('PASS  U2', $out);
+        self::assertConsoleContains('PASS  U6', $out);
+        self::assertConsoleContains('U1: shuffleHost', $out, 'the manual checks are listed');
         self::assertSame($before, $this->row('vpn_service', (int) $this->service->getId()), 'nothing written');
         self::assertSame([], array_filter($this->fake->requestLines(), static fn (string $l): bool => str_starts_with($l, 'POST')), 'only GETs');
         $this->assertNoSecret($out);
@@ -79,10 +82,10 @@ final class VerifyLinksCommandTest extends IntegrationTestCase
         [$code, $out] = $this->verify();
 
         self::assertSame(1, $code);
-        self::assertStringContainsString('DIFF  stored snapshot = panel subLinks', $out);
-        self::assertStringContainsString('only in the stored snapshot: vless origin.example.com:443', $out);
-        self::assertStringContainsString('only in the panel\'s subLinks: vless cdn1.example.com:443 security=tls sni=front.example.com', $out);
-        self::assertStringContainsString('regenerate-config <id> --apply', $out);
+        self::assertConsoleContains('DIFF  stored snapshot = panel subLinks', $out);
+        self::assertConsoleContains('only in the stored snapshot: vless origin.example.com:443', $out);
+        self::assertConsoleContains('only in the panel\'s subLinks: vless cdn1.example.com:443 security=tls sni=front.example.com', $out);
+        self::assertConsoleContains('regenerate-config <id> --apply', $out);
         $this->assertNoSecret($out);
     }
 
@@ -95,9 +98,9 @@ final class VerifyLinksCommandTest extends IntegrationTestCase
         [$code, $out] = $this->verify();
 
         self::assertSame(1, $code);
-        self::assertStringContainsString('no link for host "CDN" at cdn2.example.com:8443', $out);
-        self::assertStringContainsString('security none, the host says tls', $out);
-        self::assertStringContainsString('subLinks has 1 link(s), the hosts predict 2', $out);
+        self::assertConsoleContains('no link for host "CDN" at cdn2.example.com:8443', $out);
+        self::assertConsoleContains('security none, the host says tls', $out);
+        self::assertConsoleContains('subLinks has 1 link(s), the hosts predict 2', $out);
     }
 
     public function testAPrivateAddressAndAForeignCredentialAreDifferences(): void
@@ -110,9 +113,9 @@ final class VerifyLinksCommandTest extends IntegrationTestCase
         [$code, $out] = $this->verify();
 
         self::assertSame(1, $code);
-        self::assertStringContainsString('not reachable from the internet: vless 127.0.0.1:443', $out);
-        self::assertStringContainsString('credential of another client: vless cdn2.example.com:8443', $out);
-        self::assertStringNotContainsString('00000000-0000-4000', $out);
+        self::assertConsoleContains('not reachable from the internet: vless 127.0.0.1:443', $out);
+        self::assertConsoleContains('credential of another client: vless cdn2.example.com:8443', $out);
+        self::assertConsoleNotContains('00000000-0000-4000', $out);
     }
 
     public function testAVlessRouteInTheUuidStillBelongsToTheClient(): void
@@ -125,7 +128,7 @@ final class VerifyLinksCommandTest extends IntegrationTestCase
 
         [, $out] = $this->verify();
 
-        self::assertStringContainsString('PASS  every link carries this client\'s credential', $out);
+        self::assertConsoleContains('PASS  every link carries this client\'s credential', $out);
     }
 
     public function testU2AnInfoNodeOrUnusableItemIsADifference(): void
@@ -137,8 +140,8 @@ final class VerifyLinksCommandTest extends IntegrationTestCase
         [$code, $out] = $this->verify();
 
         self::assertSame(1, $code);
-        self::assertStringContainsString('DIFF  U2', $out);
-        self::assertStringContainsString('1 item(s) of subLinks are not usable share links', $out);
+        self::assertConsoleContains('DIFF  U2', $out);
+        self::assertConsoleContains('1 item(s) of subLinks are not usable share links', $out);
     }
 
     public function testU6ClientLinksThatDifferFromSubLinksAreADifference(): void
@@ -149,8 +152,8 @@ final class VerifyLinksCommandTest extends IntegrationTestCase
         [$code, $out] = $this->verify();
 
         self::assertSame(1, $code);
-        self::assertStringContainsString('DIFF  U6: links/{email} = subLinks', $out);
-        self::assertStringContainsString('only in links/{email}: vless other.example.com:443', $out);
+        self::assertConsoleContains('DIFF  U6: links/{email} = subLinks', $out);
+        self::assertConsoleContains('only in links/{email}: vless other.example.com:443', $out);
     }
 
     public function testWithoutTheHostsApiThePredictionIsSkipped(): void
@@ -162,20 +165,20 @@ final class VerifyLinksCommandTest extends IntegrationTestCase
         [$code, $out] = $this->verify();
 
         self::assertSame(0, $code, $out);
-        self::assertStringContainsString('hosts=no', $out);
-        self::assertStringContainsString('SKIP  panel subLinks = Hosts prediction: hosts=no', $out);
+        self::assertConsoleContains('hosts=no', $out);
+        self::assertConsoleContains('SKIP  panel subLinks = Hosts prediction: hosts=no', $out);
     }
 
     public function testItCannotCheckALegacyPanelAFailingPanelOrAMissingService(): void
     {
         [$code, $out] = $this->verify(999999999);
         self::assertSame(2, $code);
-        self::assertStringContainsString('CANNOT CHECK (service not found)', $out);
+        self::assertConsoleContains('CANNOT CHECK (service not found)', $out);
 
         $this->fake->script('GET', 'panel/api/clients/subLinks/'.self::SUB_ID, Fake3xuiPanel::envelope(false, null, 'unauthorized', 401), 3);
         [$code, $out] = $this->verify();
         self::assertSame(2, $code);
-        self::assertStringContainsString('CANNOT CHECK (the panel could not be read: GET panel/api/clients/subLinks/{subId}: HTTP 401', $out);
+        self::assertConsoleContains('CANNOT CHECK (the panel could not be read: GET panel/api/clients/subLinks/{subId}: HTTP 401', $out);
         $this->assertNoSecret($out);
 
         $panel = $this->em->find(VpnPanel::class, $this->panel->getId()) ?? self::fail('panel gone');
@@ -183,7 +186,7 @@ final class VerifyLinksCommandTest extends IntegrationTestCase
         $this->em->flush();
         [$code, $out] = $this->verify();
         self::assertSame(2, $code);
-        self::assertStringContainsString('legacy: Hosts not applicable', $out);
+        self::assertConsoleContains('legacy: Hosts not applicable', $out);
     }
 
     public function testAnUnexpectedErrorIsCannotCheckNeverADifference(): void
@@ -196,7 +199,7 @@ final class VerifyLinksCommandTest extends IntegrationTestCase
         [$code, $out] = $this->verify();
 
         self::assertSame(2, $code, $out);
-        self::assertStringContainsString('CANNOT CHECK (could not run: LogicException', $out);
+        self::assertConsoleContains('CANNOT CHECK (could not run: LogicException', $out);
         $this->assertNoSecret($out);
     }
 
@@ -208,15 +211,15 @@ final class VerifyLinksCommandTest extends IntegrationTestCase
         [$code, $out] = $this->verify();
 
         self::assertSame(1, $code, $out);
-        self::assertStringContainsString('DIFF  stored subId = panel subId', $out);
-        self::assertStringContainsString('differs from the panel\'s', $out);
-        self::assertStringNotContainsString('othersub00000000', $out);
+        self::assertConsoleContains('DIFF  stored subId = panel subId', $out);
+        self::assertConsoleContains('differs from the panel\'s', $out);
+        self::assertConsoleNotContains('othersub00000000', $out);
         $this->assertNoSecret($out);
 
         $this->em->getConnection()->update('vpn_service', ['sub_id' => null], ['id' => $this->service->getId()]);
         [$code, $out] = $this->verify();
         self::assertSame(1, $code, $out);
-        self::assertStringContainsString('no subId is stored (the remote id\'s is used)', $out);
+        self::assertConsoleContains('no subId is stored (the remote id\'s is used)', $out);
         $this->assertNoSecret($out);
     }
 
@@ -256,10 +259,10 @@ final class VerifyLinksCommandTest extends IntegrationTestCase
 
     private function assertNoSecret(string $out): void
     {
-        self::assertStringNotContainsString(self::UUID, $out);
-        self::assertStringNotContainsString(self::SUB_ID, $out);
-        self::assertStringNotContainsString(Fake3xuiPanel::TOKEN, $out);
-        self::assertStringNotContainsString('/secret/', $out);
+        self::assertConsoleNotContains(self::UUID, $out);
+        self::assertConsoleNotContains(self::SUB_ID, $out);
+        self::assertConsoleNotContains(Fake3xuiPanel::TOKEN, $out);
+        self::assertConsoleNotContains('/secret/', $out);
     }
 
     /**

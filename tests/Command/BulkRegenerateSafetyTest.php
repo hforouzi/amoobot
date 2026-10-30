@@ -11,6 +11,7 @@ use App\Entity\VpnService;
 use App\Provisioning\Application\ServiceConfigRegenerator;
 use App\Provisioning\Domain\SanaeiIntegrationMode;
 use App\Provisioning\Infrastructure\Sanaei3xui\Sanaei3xuiRemoteIdParser;
+use App\Tests\Support\ConsoleOutputAssertions;
 use App\Tests\Support\Fake3xui\Fake3xuiPanel;
 use App\Tests\Support\IntegrationTestCase;
 use Symfony\Bundle\FrameworkBundle\Console\Application;
@@ -24,6 +25,8 @@ use Symfony\Component\Console\Tester\CommandTester;
  */
 final class BulkRegenerateSafetyTest extends IntegrationTestCase
 {
+    use ConsoleOutputAssertions;
+
     private const OLD = '@origin.example.com:443?type=tcp&security=none#old';
 
     private Fake3xuiPanel $fake;
@@ -59,8 +62,8 @@ final class BulkRegenerateSafetyTest extends IntegrationTestCase
         [$code, $out] = $this->runCommand('app:inbound:regenerate-service-configs', ['inboundId' => (string) $this->inbound->getId(), '--apply' => true, '--pause' => '0']);
 
         self::assertSame(Command::FAILURE, $code);
-        self::assertStringContainsString('Stopped: 5 services in a row failed', $out);
-        self::assertStringContainsString('resume with --after-id='.$this->services[4]->getId(), $out);
+        self::assertConsoleContains('Stopped: 5 services in a row failed', $out);
+        self::assertConsoleContains('resume with --after-id='.$this->services[4]->getId(), $out);
         self::assertCount(5, $this->subLinksCalls(), 'the 6th and 7th service were not asked');
         $this->assertPanelHealthy();
         foreach ($this->services as $i => $service) {
@@ -87,9 +90,9 @@ final class BulkRegenerateSafetyTest extends IntegrationTestCase
 
         [, $out] = $this->runCommand('app:inbound:regenerate-service-configs', ['inboundId' => (string) $this->inbound->getId(), '--pause' => '0']);
 
-        self::assertStringNotContainsString('Stopped', $out);
-        self::assertStringContainsString('services: 7', $out);
-        self::assertStringContainsString('failed (stored links kept): 6', $out);
+        self::assertConsoleNotContains('Stopped', $out);
+        self::assertConsoleContains('services: 7', $out);
+        self::assertConsoleContains('failed (stored links kept): 6', $out);
     }
 
     public function testThePauseSeparatesBatches(): void
@@ -99,7 +102,7 @@ final class BulkRegenerateSafetyTest extends IntegrationTestCase
         $elapsed = microtime(true) - $started;
 
         self::assertSame(Command::SUCCESS, $code, $out);
-        self::assertSame(4, substr_count($out, 'batch done'), '7 services in batches of 2');
+        self::assertSame(4, self::consoleCount($out, 'batch done'), '7 services in batches of 2');
         self::assertGreaterThanOrEqual(0.75, $elapsed, 'three full batches are each followed by a 0.25 s pause');
     }
 
@@ -110,8 +113,8 @@ final class BulkRegenerateSafetyTest extends IntegrationTestCase
         [$code, $out] = $this->runCommand('app:panel:sync-inbounds', ['panelId' => (string) $this->panel->getId(), '--regenerate-configs' => true, '--batch-size' => '3', '--pause' => '0']);
 
         self::assertSame(Command::SUCCESS, $code, $out);
-        self::assertSame(7, substr_count($out, 'would update: 1 -> 2 links'));
-        self::assertStringContainsString('Dry run: no service was written', $out);
+        self::assertSame(7, self::consoleCount($out, 'would update: 1 -> 2 links'));
+        self::assertConsoleContains('Dry run: no service was written', $out);
         foreach ($this->services as $i => $service) {
             $row = $this->row('vpn_service', (int) $service->getId());
             self::assertSame($before[$i]['config_links'], $row['config_links']);
@@ -137,7 +140,7 @@ final class BulkRegenerateSafetyTest extends IntegrationTestCase
         [$code, $out] = $this->runCommand('app:panel:sync-inbounds', ['panelId' => (string) $this->panel->getId(), '--regenerate-configs' => true, '--apply' => true, '--pause' => '0']);
 
         self::assertSame(Command::FAILURE, $code);
-        self::assertStringContainsString('Stopped: 5 services in a row failed', $out);
+        self::assertConsoleContains('Stopped: 5 services in a row failed', $out);
         self::assertCount(5, $this->subLinksCalls());
         $this->assertPanelHealthy();
     }

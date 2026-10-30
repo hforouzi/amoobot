@@ -7,6 +7,7 @@ namespace App\Tests\Wallet;
 use App\Entity\User;
 use App\Entity\Wallet;
 use App\Entity\WalletTransaction;
+use App\Tests\Support\ConsoleOutputAssertions;
 use App\Tests\Support\SubprocessAssertions;
 use App\Wallet\Application\WalletActor;
 use App\Wallet\Application\WalletService;
@@ -31,6 +32,7 @@ use Symfony\Component\Process\Process;
  */
 final class WalletLedgerTest extends IntegrationTestCase
 {
+    use ConsoleOutputAssertions;
     use SubprocessAssertions;
 
     private function wallets(): WalletService
@@ -321,9 +323,9 @@ final class WalletLedgerTest extends IntegrationTestCase
 
         self::assertSame(Command::FAILURE, $tester->getStatusCode());
         $display = $tester->getDisplay();
-        self::assertStringContainsString('#'.$tamperedWalletId, $display);
-        self::assertStringContainsString('1500', $display);
-        self::assertStringContainsString('1000', $display);
+        self::assertConsoleContains('#'.$tamperedWalletId, $display);
+        self::assertConsoleContains('1500', $display);
+        self::assertConsoleContains('1000', $display);
         self::assertSame(1500, $this->balanceOf($tampered), 'reported, never auto-fixed');
         self::assertSame(1000, $this->balanceOf($honest));
     }
@@ -339,7 +341,7 @@ final class WalletLedgerTest extends IntegrationTestCase
         $tester = $this->reconcile();
 
         self::assertSame(Command::FAILURE, $tester->getStatusCode());
-        self::assertStringContainsString('balance_after', $tester->getDisplay());
+        self::assertConsoleContains('balance_after', $tester->getDisplay());
     }
 
     #[Group('subprocess')]

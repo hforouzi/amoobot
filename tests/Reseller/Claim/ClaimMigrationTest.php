@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Reseller\Claim;
 
 use App\Tests\Support\ClaimFixtures;
+use App\Tests\Support\ConsoleOutputAssertions;
 use App\Tests\Support\IntegrationTestCase;
 use PHPUnit\Framework\Attributes\Group;
 use Symfony\Component\Process\PhpExecutableFinder;
@@ -18,6 +19,7 @@ use Symfony\Component\Process\Process;
 final class ClaimMigrationTest extends IntegrationTestCase
 {
     use ClaimFixtures;
+    use ConsoleOutputAssertions;
 
     private const CLAIMS = 'DoctrineMigrations\\Version20261030090000';
 
@@ -28,7 +30,7 @@ final class ClaimMigrationTest extends IntegrationTestCase
             $this->claimWith($this->makeLink()->token, '8701');
             $down = $this->migrate('down');
             self::assertNotSame(0, $down->getExitCode());
-            self::assertStringContainsString('Irreversible', $down->getOutput().$down->getErrorOutput());
+            self::assertConsoleContains('Irreversible', $down->getOutput().$down->getErrorOutput());
             self::assertTrue($this->tableExists('service_claim'));
             self::assertTrue($this->tableExists('service_ownership_event'));
             self::assertSame(1, $this->sqlInt('SELECT COUNT(*) FROM service_claim'));
@@ -37,7 +39,7 @@ final class ClaimMigrationTest extends IntegrationTestCase
             $this->em->getConnection()->executeStatement('UPDATE service_ownership_event SET claim_id = NULL');
             $this->em->getConnection()->executeStatement('DELETE FROM service_claim');
             $down = $this->migrate('down');
-            self::assertStringContainsString('Irreversible', $down->getOutput().$down->getErrorOutput());
+            self::assertConsoleContains('Irreversible', $down->getOutput().$down->getErrorOutput());
             self::assertTrue($this->tableExists('service_claim'));
         } finally {
             $this->restore();

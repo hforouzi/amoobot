@@ -1,6 +1,6 @@
 # Plans with several inbounds of one panel — design
 
-Status: **design for review**; phases **H0** and **M1** (section 9.7) are implemented, see "H0 as built" and "M1 as built". Persian summary: [docs/fa/design/multi-inbound-plans.md](../fa/design/multi-inbound-plans.md).
+Status: **design for review**; phases **H0**, **M1** and **M2a** (section 9.7) are implemented, see "H0 as built", "M1 as built" and "M2a as built". Persian summary: [docs/fa/design/multi-inbound-plans.md](../fa/design/multi-inbound-plans.md).
 
 **Updated 2026-10-29: 3x-ui Hosts.** New section 9 covers Hosts. Lines changed elsewhere are marked **[Hosts]**. Where they
 disagree, section 9 overrides the phase plan (7.4) and adds to the open questions (8).
@@ -239,6 +239,9 @@ whole provisioning, would block a paid customer over one secondary inbound.
 - **Inbound sync:** a disabled additional inbound stops sales; no row deleted.
 
 ### 7.3 Real-panel manual checklist (owner's 3x-ui version, before enabling)
+
+The exact steps for 3x-ui v3.11.0, and which of them must pass before `plans.multi_inbound_enabled` is turned on, are
+in the admin guide: [admin-guide.md, "Before turning the switch on"](../en/admin-guide.md#before-turning-the-switch-on-real-panel-checklist-3x-ui-v3110).
 
 1. Create a plan: VLESS-REALITY primary + VMess-WS + Trojan; buy it; one client in the panel's client list with three
    inbounds, one email, one UUID, one subId.
@@ -557,7 +560,7 @@ and if possible one host with 2 addresses):
 | **H0** (first; fixes existing single-inbound services) — **built**, see below | Modern 3x-ui: regenerate / reset-links / both regenerate commands re-read the snapshot from the panel (`fetchLinks`) instead of `VpnAccessLinkGenerator`; `fetchLinks` = `subLinks` only (fallback `links/{email}` without subId); never store an empty list over a non-empty one; `app:service:verify-links` (9.6); capability probe `hosts=yes/no/forbidden` | Fake3xui `subLinks` with hosts fixture: regenerate stores panel links only; generator not called for modern; empty answer keeps old; reset-links stores new-UUID panel links; verifier parsing (vless/vmess/trojan/ss, VLESS route mask, CIDR/SNI-pool tolerance); real panel: 9.6 steps 1–7 | Revert PR (no schema) | Nothing to switch: a bug fix. The commands print "source=panel" |
 | **H1** | Admin read-only links preview (9.4) + Hosts cache + warnings; panel page shows Hosts capability | Preview count per 9.2 against fixtures (disabled, excluded, CIDR, no hosts, bindings); API 404/403 → "unknown" not "0"; real panel: preview count = verifier count for the test plan | Revert | Preview only; no customer effect |
 | **H2** | Scheduled snapshot refresh (TTL 6 h, batches), triggers after attach/renew/resume, admin "Refresh links" per service / inbound / panel, doctor counters, display cap 30 with "N more" | Job batches and pause; failure keeps snapshot; alert once on empty; display cap text; real panel: 9.6 step 3 | Disable the schedule entry; revert | `provisioning.links_refresh_enabled` default **off** (manual buttons work regardless) |
-| M1–M3 | As 7.4; M2 uses `subLinks` (no generator loop). **M1 built**, see below | As 7.2 | As 7.4 | `plans.multi_inbound_enabled` off |
+| M1–M3 | As 7.4; M2 uses `subLinks` (no generator loop). **M1 and M2a built**, see below | As 7.2 | As 7.4 | `plans.multi_inbound_enabled` off |
 | **H4** (optional) | Per-plan host allow-list via `clientHostRuleIds` | Binding written at create/attach; deleted row → verifier warns | Clear bindings (empty list) | `plans.host_selection_enabled` off |
 
 #### H0 as built
@@ -666,6 +669,68 @@ Branch `feat/multi-inbound-m1`. Owner's decisions: D1 to D4 and Q5 as recommende
   the owner's decision.
 - **Not in M1** (as 7.4): provisioning / attach / retries, display, the Mini App plan field, "apply to existing
   services", trials (single-inbound). The Mini App's "copy plan" copies no additional inbounds.
+
+#### M2a as built
+
+Branch `feat/multi-inbound-m2a`. Owner's decisions: D2 (deliver the primary, retry the rest), D3 (an inactive inbound
+stops the plan selling), modern panels only, links from the panel's `subLinks` (9.1; the generator loop of 3.3 is not
+built). Admin guide: [admin-guide.md, "Plans with several inbounds"](../en/admin-guide.md#plans-with-several-inbounds-preview).
+No migration (M1's tables have every column).
+
+- **Create (modern driver):**
+  - one `clients/add` with `inboundIds: [primary, ...additional]`; `GET clients/get/{email}`; the inbounds the client is
+    not on are attached in one call with only those ids; `GET` again;
+  - an additional inbound still missing is returned as **failed** with a safe error text (no URL, token or base path),
+    never thrown; the primary missing is an error, as before;
+  - when the panel refuses the whole add (e.g. one additional inbound was deleted on the panel), the primary alone is
+    added; when it refuses the batch attach, the ids are attached one by one, so one bad inbound does not keep the
+    others off (D2);
+  - without additional inbounds the requests are exactly the single-inbound ones.
+- **Adopt** (`findExistingService`, after a lost answer or on a settlement retry): the same attach-missing step, only
+  for a client matched by UUID. A client matched by its generated name only is adopted unchanged and its additional
+  inbounds are recorded as failed ("use Retry attach").
+- **Fail closed.** A plan with additional inbounds on a panel whose driver cannot attach (legacy mode, another panel
+  type) fails provisioning with "Several inbounds need the panel in modern mode (Panels → test connection)."
+  (PROVISIONING_FAILED, admin alert); nothing is sent to the panel. The legacy driver refuses such a request too.
+- **`VpnProvisioningService`:**
+  - one `vpn_service_inbound` row per additional inbound: `attached`, or `failed` with `last_error` and `attempts`,
+    upserted by (service, inbound);
+  - the service is ACTIVE and the order provisioned as soon as the primary works; a failed attachment never changes
+    the payment, order or wallet outcome. Lock order and settlement rules are unchanged;
+  - recorded as failed without asking the panel: an additional inbound inactive since the sale, and every additional
+    inbound when the switch was turned off after the order was taken (**decided here**: the paid customer gets the
+    primary, the rest waits visibly for "Retry attach");
+  - links: the panel's `subLinks` snapshot (every attached inbound). A multi-inbound service is never given links
+    built from the primary alone: without the panel's links it has its subscription URL only (9.1).
+- **"Retry attach"** (`ServiceInboundAttacher`; admin service page, SERVICES_MANAGE, POST + CSRF, rate limiter
+  `admin_service_attach` 5 per service per 10 min, audited `service.retry_attach` with counts only):
+  - the failed rows are claimed in a short transaction (service row locked by primary key, then its rows; failed →
+    pending); the panel is called with no lock or transaction held (GET, attach of the missing ids only, GET); the
+    result is written in a second short transaction to the rows still holding this claim; `attempts` + 1;
+  - a second retry meanwhile finds nothing to claim ("in progress") and calls nothing; a claim left by a dead process
+    is taken over after 5 minutes;
+  - never creates a client (a client gone from the panel fails the rows);
+  - refused while the switch is off or the panel is not modern; after an attach the link snapshot is refreshed
+    (`PanelLinkSnapshot`, its own lock rules).
+- **Sale rule** (`PlanSaleRule`, the one place that reads the switch; `Plan::isAvailableForSale()` /
+  `multiInboundSaleBlocker()` hold the rule): a plan with additional inbounds is sold only with the switch on, every
+  inbound (primary and additional) active and on the primary's panel, and that panel a 3x-ui panel in effective modern
+  mode (plus the usual: plan active, panel usable). Used by `PlanCatalog` (bot, Mini App, resellers), the bot's
+  payment-method step, draft confirmation, payment start and wallet payment. The last three checked "plan active" only
+  and still do for single-inbound plans. With the switch off, a plan with additional inbounds is not sold (as in M1).
+- **Admin:** plan list badge "not sold" and the save warning now give the reason; service detail page (switch on)
+  lists each additional inbound with its state, attempts and last error.
+- **Other operations** (3.3) unchanged and verified by tests: renew, add traffic, suspend, resume, reset usage, usage
+  sync are one record by email; delete is `del/{email}` (the client leaves every inbound) and the rows become
+  `detached`; claim (tgId/comment) and "reset my links" keep every inbound; regenerate (H0) stores the `subLinks` of
+  every attached inbound; the reseller wholesale price is the plan's.
+- **`app:service:verify-links`:** for a service with rows, one more check: the client must be on the primary and
+  every row recorded as attached (DIFF otherwise); failed or pending rows are reported (INFO), not a difference.
+- **Not in M2a (seams left):** the scheduled retry (`ServiceInboundAttacher::retry()` is what it would call), the
+  admin alert once per service, display in the bot / Mini App / service lists, panel doctor counts, "apply to existing
+  services", the Mini App plan field, detach.
+- **Not tested against a real panel:** everything above runs against the fake 3x-ui; the checklist in the admin guide
+  (7.3) is the real-panel test.
 
 ### 9.8 Open questions and risks (Hosts)
 

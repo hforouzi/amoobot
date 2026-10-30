@@ -18,6 +18,13 @@ class CreateVpnServiceRequest
         public readonly array $meta = [],
         /** Client UUID to use (derived from the order, so a retry can find the client again); null = driver picks. */
         public readonly ?string $clientUuid = null,
+        /**
+         * The plan's additional inbounds (docs/design/multi-inbound-plans.md 3.2): the client is attached to them too.
+         * Only drivers implementing InboundAttachDriverInterface accept any.
+         *
+         * @var list<VpnInbound>
+         */
+        public readonly array $additionalInbounds = [],
     ) {
     }
 }

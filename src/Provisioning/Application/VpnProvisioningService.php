@@ -9,13 +9,16 @@ use App\Entity\TelegramAccount;
 use App\Entity\VpnInbound;
 use App\Entity\VpnPanel;
 use App\Entity\VpnService;
+use App\Entity\VpnServiceInbound;
 use App\Provisioning\Domain\Dto\AdoptedVpnService;
 use App\Provisioning\Domain\Dto\CreateVpnServiceRequest;
 use App\Provisioning\Domain\ExistingClientAwareDriverInterface;
+use App\Provisioning\Domain\InboundAttachDriverInterface;
 use App\Provisioning\Domain\VpnPanelDriverInterface;
 use App\Provisioning\Domain\VpnServiceStatus;
 use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http\SecretRedactor;
 use App\Provisioning\Infrastructure\VpnPanelDriverRegistry;
+use App\Shop\Application\MultiInboundSettings;
 use App\Shop\Domain\OrderStatus;
 use Doctrine\ORM\EntityManagerInterface;
 use Psr\Log\LoggerInterface;
@@ -33,6 +36,7 @@ class VpnProvisioningService
         #[Autowire('%kernel.secret%')]
         private readonly string $appSecret,
         private readonly LoggerInterface $logger,
+        private readonly MultiInboundSettings $multiInbound,
     ) {
     }
 
@@ -88,6 +92,7 @@ class VpnProvisioningService
 
         $driver = $this->driverRegistry->resolve($panel);
         $driverType = $panel?->getType() ?? 'dummy';
+        [$attachable, $notAttached] = $this->additionalInbounds($order, $driver);
         $request = new CreateVpnServiceRequest(
             username: $username,
             durationDays: $durationDays,
@@ -105,6 +110,7 @@ class VpnProvisioningService
                 'customOrder' => $isCustomOrder ? 1 : 0,
             ], $meta),
             clientUuid: $this->orderClientUuid($order),
+            additionalInbounds: $attachable,
         );
         $adopted = $adoptExisting ? $this->findAdoptableClient($driver, $request, $panel, $order, '' === $customFinalUsername) : null;
         $created = $adopted->service ?? $driver->createService($request, $panel);
@@ -142,7 +148,10 @@ class VpnProvisioningService
         $missing = [];
         $subscriptionUrl = $vpnService->getSubscriptionUrl();
 
-        if ('sanaei_3xui' !== $panelType || ([] === $configLinks && '' === $createdConfigText)) {
+        // A service on several inbounds is never given links built from the primary alone: without the panel's links
+        // it has its subscription URL only (docs/design/multi-inbound-plans.md 9.1).
+        $multiInbound = [] !== $attachable || [] !== $notAttached;
+        if ('sanaei_3xui' !== $panelType || ([] === $configLinks && '' === $createdConfigText && !$multiInbound)) {
             $links = $this->vpnAccessLinkGenerator->generate($vpnService);
             $configLinks = array_values(array_filter((array) ($links['configLinks'] ?? []), static fn (mixed $link): bool => '' !== trim((string) $link)));
             $missing = array_values(array_filter((array) ($links['missing'] ?? []), static fn (mixed $item): bool => '' !== trim((string) $item)));
@@ -193,8 +202,72 @@ class VpnProvisioningService
             ->setProvisionedAt(new \DateTimeImmutable());
 
         $this->entityManager->persist($vpnService);
+        $this->recordAttachments($vpnService, $created->attachments, $notAttached);
 
         return $vpnService;
+    }
+
+    /**
+     * The plan's additional inbounds: the ones to attach now, and the ones recorded as not attached without asking the
+     * panel (docs/design/multi-inbound-plans.md 3, D2/D3: the order is paid, so the primary is delivered and these wait
+     * for "Retry attach"):
+     * - plans.multi_inbound_enabled was switched off after the order was taken;
+     * - the inbound became inactive since.
+     *
+     * A panel whose driver cannot attach (legacy mode, another type) fails closed instead: never the primary alone.
+     *
+     * @return array{list<VpnInbound>, list<array{VpnInbound, string}>}
+     */
+    private function additionalInbounds(Order $order, VpnPanelDriverInterface $driver): array
+    {
+        $inbounds = $order->requirePlan()->getAdditionalInbounds();
+        if ([] === $inbounds) {
+            return [[], []];
+        }
+        if (!$driver instanceof InboundAttachDriverInterface) {
+            throw new \RuntimeException(InboundAttachDriverInterface::MODERN_PANEL_REQUIRED);
+        }
+        $enabled = $this->multiInbound->enabled();
+        $attachable = [];
+        $notAttached = [];
+        foreach ($inbounds as $inbound) {
+            if (!$enabled) {
+                $notAttached[] = [$inbound, 'not attached: plans with several inbounds are switched off (Settings, Plans tab)'];
+            } elseif (!$inbound->isActive()) {
+                $notAttached[] = [$inbound, 'not attached: the inbound is inactive'];
+            } else {
+                $attachable[] = $inbound;
+            }
+        }
+
+        return [$attachable, $notAttached];
+    }
+
+    /**
+     * One vpn_service_inbound row per additional inbound, upserted by (service, inbound).
+     *
+     * @param list<\App\Provisioning\Domain\Dto\InboundAttachment> $attachments
+     * @param list<array{VpnInbound, string}>                         $notAttached
+     */
+    private function recordAttachments(VpnService $service, array $attachments, array $notAttached): void
+    {
+        $now = new \DateTimeImmutable();
+        $results = array_map(static fn ($a): array => [$a->inbound, $a->attached, $a->error], $attachments);
+        foreach ($notAttached as [$inbound, $reason]) {
+            $results[] = [$inbound, false, $reason];
+        }
+        foreach ($results as [$inbound, $attached, $error]) {
+            $row = null === $service->getId() ? null : $this->entityManager->getRepository(VpnServiceInbound::class)->findOneBy(['service' => $service, 'inbound' => $inbound]);
+            if (!$row instanceof VpnServiceInbound) {
+                $row = new VpnServiceInbound($service, $inbound, $now);
+                $this->entityManager->persist($row);
+            }
+            $row->recordAttempt($attached, null === $error ? null : ServiceErrorText::redact($service, $error, 255), $now);
+        }
+        $failed = count(array_filter($results, static fn (array $r): bool => !$r[1]));
+        if ($failed > 0) {
+            $this->logger->warning('provisioning_inbounds_not_attached', ['order_id' => $service->getOrder()?->getId(), 'failed' => $failed, 'of' => count($results)]);
+        }
     }
 
     /**

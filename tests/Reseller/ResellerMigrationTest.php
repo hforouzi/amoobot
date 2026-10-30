@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Reseller;
 
 use App\Entity\Reseller;
+use App\Tests\Support\ConsoleOutputAssertions;
 use App\Tests\Support\IntegrationTestCase;
 use PHPUnit\Framework\Attributes\Group;
 use Symfony\Component\Process\PhpExecutableFinder;
@@ -21,6 +22,8 @@ use Symfony\Component\Process\Process;
 #[Group('subprocess')]
 final class ResellerMigrationTest extends IntegrationTestCase
 {
+    use ConsoleOutputAssertions;
+
     private const S1 = 'DoctrineMigrations\\Version20261027090000';
     private const NONCE = 'DoctrineMigrations\\Version20261029090000';
     private const CLAIMS = 'DoctrineMigrations\\Version20261030090000';
@@ -30,7 +33,7 @@ final class ResellerMigrationTest extends IntegrationTestCase
     {
         try {
             $refused = $this->migrate(self::S1, 'down');
-            self::assertStringContainsString('Roll back Version20261029090000', $refused->getOutput().$refused->getErrorOutput(), 'not before the newer migration');
+            self::assertConsoleContains('Roll back Version20261029090000', $refused->getOutput().$refused->getErrorOutput(), 'not before the newer migration');
             $this->assertSchemaIntact();
 
             $reseller = new Reseller($this->createUser());
@@ -40,13 +43,13 @@ final class ResellerMigrationTest extends IntegrationTestCase
                 $reseller->getUser()->getId(), $this->createPlan()->getId(), 'new_service', 'cancelled', $reseller->getId(), 'nonce-of-a-tap',
             ]);
             $down = $this->migrate(self::NONCE, 'down');
-            self::assertStringContainsString('Irreversible', $down->getOutput().$down->getErrorOutput(), 'an order carries a nonce');
+            self::assertConsoleContains('Irreversible', $down->getOutput().$down->getErrorOutput(), 'an order carries a nonce');
             $this->assertSchemaIntact();
 
             $this->em->getConnection()->executeStatement('UPDATE `order` SET reseller_nonce = NULL');
             self::assertSame(0, $this->migrate(self::NONCE, 'down')->getExitCode());
             $down = $this->migrate(self::S1, 'down');
-            self::assertStringContainsString('Irreversible', $down->getOutput().$down->getErrorOutput(), 'a reseller profile exists');
+            self::assertConsoleContains('Irreversible', $down->getOutput().$down->getErrorOutput(), 'a reseller profile exists');
             self::assertTrue($this->tableExists('reseller'));
             self::assertTrue($this->columnExists('order', 'reseller_id'));
 
@@ -56,7 +59,7 @@ final class ResellerMigrationTest extends IntegrationTestCase
             $this->em->getConnection()->executeStatement('DELETE FROM reseller');
             $this->em->getConnection()->executeStatement('SET FOREIGN_KEY_CHECKS = 1');
             $down = $this->migrate(self::S1, 'down');
-            self::assertStringContainsString('Roll back Version20261030090000', $down->getOutput().$down->getErrorOutput(), 'not before the claim links');
+            self::assertConsoleContains('Roll back Version20261030090000', $down->getOutput().$down->getErrorOutput(), 'not before the claim links');
             self::assertTrue($this->tableExists('reseller'));
             self::assertTrue($this->tableExists('service_claim'));
         } finally {

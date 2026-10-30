@@ -63,35 +63,102 @@ web root under a random name; its SHA-256 is shown on the detail page and on the
 
 ## Plans with several inbounds (preview)
 
-A plan can name **additional inbounds** of the same panel: a buyer's one client is meant to be attached to all of them.
-Design: [multi-inbound-plans.md](../design/multi-inbound-plans.md). This release (phase M1) only stores them. **They take
-effect when provisioning support ships (M2): until then a plan with additional inbounds is not sold at all**, so no
-customer buys servers that are not delivered.
+A plan can name **additional inbounds** of the same panel: a buyer's one client (one email, one UUID, one subscription)
+is put on the primary inbound and on all of them. Design: [multi-inbound-plans.md](../design/multi-inbound-plans.md).
+Phase M1 stores them; phase **M2a** provisions them (modern 3x-ui panels only). Display in the bot and Mini App, the
+scheduled retry and admin alerts come later: until then the customer gets the subscription link, which carries every
+attached inbound.
 
 - **Switch:** `Settings → Plans → Allow additional inbounds on plans` (`plans.multi_inbound_enabled`, SETTINGS_MANAGE),
-  off by default. With it off the plan form, the plan list and the inbound page look exactly as before, and a request
-  that sends additional inbounds anyway is refused. Turning it off while plans keep additional inbounds names those
-  plans; they stay unsold until you remove the additional inbounds (switch on, edit the plan).
+  off by default. With it off the plan form, the plan list, the inbound page and the service page look exactly as
+  before, a request that sends additional inbounds anyway is refused, and **a plan with additional inbounds is not
+  sold**. Turning it off while plans keep additional inbounds names those plans. **Run the checklist below on your
+  panel before turning it on.**
+- **When such a plan is sold:** all of: the switch on; the plan active; the primary and every additional inbound
+  active and on the same panel; that panel usable and a 3x-ui panel in modern mode (forced, or auto with modern
+  detected: Panels → test connection). Otherwise it is hidden from the bot, the Mini App and resellers, and an order
+  already in a cart is refused at confirmation, payment start and wallet payment. The plan list shows "not sold" and the
+  save warning says why. An inactive additional inbound stops the plan selling (D3).
 - **Plan form** (web panel, PLANS_MANAGE): "Additional inbounds" lists the active inbounds of the primary inbound's panel,
   without the primary. A save is refused when an inbound is on another panel, is the primary, is newly chosen but
-  inactive, the panel is not in modern mode (forced, or auto with modern detected), the plan has custom traffic or
-  duration (those stay single-inbound), there are more than 20, or the protocols break the rules below. The Mini App and
-  the bot have no field yet (M3); a change they make (e.g. moving the primary to another panel) is checked the same way.
+  inactive, the panel is not in modern mode, the plan has custom traffic or duration (those stay single-inbound), there
+  are more than 20, or the protocols break the rules below. The Mini App and the bot have no field yet (M3); a change
+  they make (e.g. moving the primary to another panel) is checked the same way.
 - **Protocol rules (D1):** VLESS, VMess and Trojan together; Shadowsocks only when every Shadowsocks inbound of the plan
   uses the same method; a VLESS primary with the vision flow only with flow-capable VLESS inbounds (TCP with
   TLS/REALITY). The method and flow capability are read from the panel when these rules apply: a panel that does not
   answer refuses the save.
-- **Warnings** after saving: not sold yet; an inbound that became inactive since it was chosen; the panel not in modern
-  mode; several protocols together (run the real-panel checklist of the design, 7.3, first).
-- **Plan list:** an "Inbounds" column (count, "not sold yet", inactive ones). **Panel inbounds page:** "Used by plans",
+- **What a purchase does:** one client is added on the primary and every additional inbound in one request; inbounds
+  the panel did not attach are attached once more. **The service is delivered as soon as the primary works** (D2): an
+  additional inbound that still fails is recorded as "not attached" with the reason, and never fails the payment, the
+  order or the wallet. A plan with additional inbounds on a panel in **legacy** mode is never provisioned on the primary
+  alone: the order becomes "provisioning failed" with "Several inbounds need the panel in modern mode (Panels → test
+  connection)" and you get the usual admin alert (fix the panel mode, then retry the order as for any provisioning
+  failure). An inbound made inactive, or the switch turned off, after the order was taken: the customer gets the
+  primary and those inbounds are recorded as not attached.
+- **Service page** (switch on): "Additional inbounds" lists each one with its state (attached, attaching…, not
+  attached, detached), the number of attempts and the last error. **"Retry attach"** (SERVICES_MANAGE) appears while one
+  is not attached: it attaches the missing inbounds to the existing client (it never creates a second client), refreshes
+  the stored links, and is limited to 5 per service per 10 minutes. A second click while one runs says "in progress".
+  It is refused while the switch is off or the panel is in legacy mode. Deleting the service removes the client from
+  every inbound and marks the rows detached.
+- **Other operations** (renew, add traffic, suspend, resume, reset usage, usage sync, claim links, "reset my links")
+  work on the one client and so on every inbound, as for any service. Resellers pay the plan's price.
+- **`app:service:verify-links <id>`** also checks that the client is on every inbound recorded as attached; the not
+  attached ones are listed for information.
+- **Plan list:** an "Inbounds" column (count, "not sold", inactive ones). **Panel inbounds page:** "Used by plans",
   primary or additional.
 - **Deleting** an inbound that a plan uses as an additional inbound, or a panel with such an inbound, is refused and the
   plans are named. Deleting a plan's primary inbound works as before (the plan then has no inbound).
 - Trial plans keep one inbound.
 
-**Upgrading.** Run the migrations: `Version20261101090000` adds the `plan_additional_inbound` and `vpn_service_inbound`
-tables (the second stays empty until M2). Nothing existing is changed and nothing is backfilled. Its `down()` refuses
-and changes nothing while either table has a row: remove the additional inbounds from every plan first.
+### Before turning the switch on (real-panel checklist, 3x-ui v3.11.0)
+
+Run this once on your own panel with test inbounds, not customers' inbounds. Turn the switch on, but keep **every
+multi-inbound plan inactive except one test plan** that only you buy (from your own Telegram account, paying from your
+wallet or with a card payment you approve yourself). Steps marked **required** must pass before you sell; if one fails,
+turn the switch off and report what you saw. The optional ones are needed only if you will sell that combination.
+
+1. **Required: panel mode.** Panels → your panel → "Test connection" reports **modern**. Prefer setting the mode to
+   "modern" rather than "auto", so a panel change cannot silently switch it (with legacy every sale of such a plan
+   fails closed).
+2. **Required: one client, three inbounds.** In 3x-ui create three test inbounds: VLESS-REALITY (TCP), VMess-WS,
+   Trojan (TLS). In the admin panel: Panels → "Sync inbounds". Create the test plan: primary VLESS-REALITY, additional
+   VMess-WS and Trojan; save (warnings about several protocols are expected). Activate it and buy it. In 3x-ui →
+   Clients: exactly **one** client with the service's email, on the three inbounds, one UUID, one subscription ID.
+   Admin service page: service active; "Additional inbounds" both "attached", 1 attempt, no error.
+3. **Required: links.** Import the subscription link from the delivery message in a client app (v2rayNG, Hiddify or
+   Streisand): **three** configs. On the server run `php bin/console app:service:verify-links <service id>`: no DIFF
+   (INFO lines are fine). Admin service page → "Regenerate config": still three links stored.
+4. **Required: connect.** Connect through each of the three configs; each works, and in 3x-ui the one client's usage
+   grows whichever config you use.
+5. **Required: limits on the one client.** Give the test service little traffic and use it up through the VMess config:
+   all three configs stop. Add traffic or renew from the bot: all three work again. Suspend from the admin service page:
+   all three stop; resume: all three work. Reset usage: 3x-ui shows 0 for the client.
+6. **Required: failure path (D2).** In 3x-ui only (do not sync), delete the Trojan inbound, then buy the test plan
+   once more. Expected: the service is delivered (VLESS and VMess work), the payment is approved, the Trojan row is "not
+   attached" with an error, and 3x-ui has one client for it. Click "Retry attach": the row stays "not attached",
+   attempts 2, and there is still one client (it never creates a second one). For a successful retry, use a service
+   whose inbound you only **disabled** in 3x-ui (if 3x-ui v3.11.0 refuses to attach to a disabled inbound) and enable it
+   again before clicking: the row becomes "attached".
+7. **Required: delete.** Delete the test services from the admin panel: in 3x-ui the client is gone from every
+   inbound, and the rows show "detached". Then remove the deleted Trojan inbound from the test plan before syncing
+   inbounds.
+8. **Required: reset links and claim.** On a new test service use "Reset links" in the bot, then a claim link to move
+   the service to a second Telegram account: the client keeps its three inbounds, and the subscription imports three
+   configs with the new UUID.
+9. Optional: **VLESS vision + VLESS-WS** on one client (primary VLESS-REALITY with `xtls-rprx-vision`, additional
+   VLESS-WS). Both connect, the flow applied only where valid; or note that it fails and do not sell that combination.
+10. Optional: **two Shadowsocks inbounds** with the same method; record what works (two different 2022 methods are
+    refused by the plan form).
+11. Optional: remove the client from one inbound by hand in 3x-ui. `verify-links` reports a DIFF for that inbound;
+    "Retry attach" is not offered, because the row still says attached. This is a known M2a limit.
+
+When 1 to 8 pass, activate the plans you want to sell.
+
+**Upgrading.** Run the migrations: `Version20261101090000` (M1) adds the `plan_additional_inbound` and
+`vpn_service_inbound` tables; M2a needs no new migration. Nothing existing is changed and nothing is backfilled. Its
+`down()` refuses and changes nothing while either table has a row: remove the additional inbounds from every plan first.
 
 ## Sales Controls
 

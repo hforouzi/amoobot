@@ -6,6 +6,7 @@ namespace App\Tests\Command;
 
 use App\Entity\VpnPanel;
 use App\Provisioning\Domain\SanaeiIntegrationMode;
+use App\Tests\Support\ConsoleOutputAssertions;
 use App\Tests\Support\Fake3xui\Fake3xuiPanel;
 use App\Tests\Support\IntegrationTestCase;
 use Symfony\Bundle\FrameworkBundle\Console\Application;
@@ -18,6 +19,8 @@ use Symfony\Component\Console\Tester\CommandTester;
  */
 final class PanelDoctorCommandTest extends IntegrationTestCase
 {
+    use ConsoleOutputAssertions;
+
     private Fake3xuiPanel $fake;
     private VpnPanel $panel;
 
@@ -41,12 +44,12 @@ final class PanelDoctorCommandTest extends IntegrationTestCase
         [$code, $out] = $this->doctor([]);
 
         self::assertSame(Command::SUCCESS, $code, $out);
-        self::assertStringContainsString('PASS  connection (modern API)', $out);
+        self::assertConsoleContains('PASS  connection (modern API)', $out);
         self::assertMatchesRegularExpression('/reachable\s+yes/', $out);
         self::assertMatchesRegularExpression('/tls\s+verified/', $out);
         self::assertMatchesRegularExpression('/inbounds\s+3/', $out);
         self::assertMatchesRegularExpression('/latency\s+\d+ ms/', $out);
-        self::assertStringContainsString('••••FAKE', $out);
+        self::assertConsoleContains('••••FAKE', $out);
         $this->em->clear();
         self::assertSame(SanaeiIntegrationMode::MODERN, $this->em->find(VpnPanel::class, $this->panel->getId())?->getDetectedIntegrationMode(), 'the probe is stored');
     }
@@ -57,16 +60,16 @@ final class PanelDoctorCommandTest extends IntegrationTestCase
         $this->em->flush();
         $this->fake->addHostGroup('cdn', [1, 2], ['cdn.example.com']);
         [, $out] = $this->doctor([]);
-        self::assertStringContainsString('INFO  hosts=yes (1 host group(s)', $out);
+        self::assertConsoleContains('INFO  hosts=yes (1 host group(s)', $out);
 
         $this->fake->hostsApi = false;
         [, $out] = $this->doctor([]);
-        self::assertStringContainsString('INFO  hosts=no', $out);
+        self::assertConsoleContains('INFO  hosts=no', $out);
 
         $this->fake->hostsApi = true;
         $this->fake->script('GET', 'panel/api/hosts/list', Fake3xuiPanel::envelope(false, null, 'forbidden', 403));
         [$code, $out] = $this->doctor([]);
-        self::assertStringContainsString('WARN  hosts=forbidden', $out);
+        self::assertConsoleContains('WARN  hosts=forbidden', $out);
         self::assertSame(Command::SUCCESS, $code, 'reported, not a failure');
     }
 
@@ -74,23 +77,23 @@ final class PanelDoctorCommandTest extends IntegrationTestCase
     {
         [$code, $out] = $this->doctor([]);
         self::assertSame(Command::SUCCESS, $code, 'a warning: the connection itself works');
-        self::assertStringContainsString('WARN  subscription URL is not publicly usable', $out);
-        self::assertStringContainsString('"Subscription base URL"', $out);
-        self::assertStringContainsString('Advanced settings', $out);
+        self::assertConsoleContains('WARN  subscription URL is not publicly usable', $out);
+        self::assertConsoleContains('"Subscription base URL"', $out);
+        self::assertConsoleContains('Advanced settings', $out);
 
         // The address the bot uses to reach the panel is no subscription address for customers.
         $this->panel->setSubscriptionBaseUrl('http://127.0.0.1:2096');
         $this->em->flush();
         [, $out] = $this->doctor([]);
-        self::assertStringContainsString('WARN  subscription URL is not publicly usable', $out);
-        self::assertStringContainsString('127.0.0.1', $out);
+        self::assertConsoleContains('WARN  subscription URL is not publicly usable', $out);
+        self::assertConsoleContains('127.0.0.1', $out);
 
         $this->panel->setSubscriptionBaseUrl('https://sub.example.com:2096');
         $this->em->flush();
         [$code, $out] = $this->doctor([]);
         self::assertSame(Command::SUCCESS, $code);
-        self::assertStringContainsString('PASS  subscription URL is publicly usable (https://sub.example.com:2096/sub/<subId>)', $out);
-        self::assertStringNotContainsString('WARN', $out);
+        self::assertConsoleContains('PASS  subscription URL is publicly usable (https://sub.example.com:2096/sub/<subId>)', $out);
+        self::assertConsoleNotContains('WARN', $out);
     }
 
     public function testReportOfAFailure(): void
@@ -99,8 +102,8 @@ final class PanelDoctorCommandTest extends IntegrationTestCase
         [$code, $out] = $this->doctor(['--locale' => 'fa']);
 
         self::assertSame(Command::FAILURE, $code);
-        self::assertStringContainsString('FAIL  auth_rejected', $out);
-        self::assertStringContainsString('Settings → Security → API Token', $out, 'the fix');
+        self::assertConsoleContains('FAIL  auth_rejected', $out);
+        self::assertConsoleContains('Settings → Security → API Token', $out, 'the fix');
     }
 
     public function testTheSelfTestNeedsYes(): void
@@ -108,7 +111,7 @@ final class PanelDoctorCommandTest extends IntegrationTestCase
         [$code, $out] = $this->doctor(['--self-test' => true]);
 
         self::assertSame(Command::INVALID, $code);
-        self::assertStringContainsString('--yes', $out);
+        self::assertConsoleContains('--yes', $out);
         self::assertSame([], $this->fake->requests, 'nothing was sent to the panel');
     }
 
@@ -121,7 +124,7 @@ final class PanelDoctorCommandTest extends IntegrationTestCase
         foreach (['name is free', 'create', 'read', 'update quota/expiry', 'disable', 'enable', 'batch usage', 'delete'] as $step) {
             self::assertMatchesRegularExpression('/^PASS  '.preg_quote($step, '/').'/m', $out, $step);
         }
-        self::assertStringContainsString('RESULT: OK', $out);
+        self::assertConsoleContains('RESULT: OK', $out);
         self::assertSame(['customer@shop'], array_keys($this->fake->clients), 'only the temporary client was created and removed');
         self::assertSame($customer, $this->fake->clients['customer@shop'], 'the customer client is untouched');
         $this->assertOnlySelfTestClientWritten();
@@ -137,7 +140,7 @@ final class PanelDoctorCommandTest extends IntegrationTestCase
         self::assertMatchesRegularExpression('/^FAIL  update quota\/expiry/m', $out);
         // \r?: the console output ends lines with PHP_EOL (\r\n on Windows).
         self::assertMatchesRegularExpression('/^CLEANUP  removed amoobot_selftest_[0-9a-f]{8}\r?$/m', $out);
-        self::assertStringContainsString('RESULT: FAILED', $out);
+        self::assertConsoleContains('RESULT: FAILED', $out);
         self::assertSame(['customer@shop'], array_keys($this->fake->clients));
         $this->assertOnlySelfTestClientWritten();
         $this->assertNoSecret($out);
@@ -173,7 +176,7 @@ final class PanelDoctorCommandTest extends IntegrationTestCase
 
     private function assertNoSecret(string $out): void
     {
-        self::assertStringNotContainsString(Fake3xuiPanel::TOKEN, $out);
+        self::assertConsoleNotContains(Fake3xuiPanel::TOKEN, $out);
     }
 
     /**

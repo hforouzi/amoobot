@@ -11,6 +11,7 @@ use App\Reseller\Application\ClaimMaintenance;
 use App\Reseller\Application\ClaimPanelSync;
 use App\Security\AdminActor;
 use App\Tests\Support\ClaimFixtures;
+use App\Tests\Support\ConsoleOutputAssertions;
 use App\Tests\Support\IntegrationTestCase;
 use Symfony\Bundle\FrameworkBundle\Console\Application;
 use Symfony\Component\Clock\Clock;
@@ -25,6 +26,7 @@ use Symfony\Component\Console\Tester\CommandTester;
 final class ClaimPanelSyncTest extends IntegrationTestCase
 {
     use ClaimFixtures;
+    use ConsoleOutputAssertions;
 
     protected function setUp(): void
     {
@@ -61,7 +63,7 @@ final class ClaimPanelSyncTest extends IntegrationTestCase
         Clock::set(new MockClock($now->modify('+301 seconds')));
         $tester = new CommandTester((new Application(self::$kernel))->find('app:claims:expire'));
         self::assertSame(0, $tester->execute([]));
-        self::assertStringContainsString('synced 1', $tester->getDisplay());
+        self::assertConsoleContains('synced 1', $tester->getDisplay());
         $claim = $this->row('service_claim', (int) $claim['id']);
         self::assertSame(ServiceClaim::SYNC_SYNCED, $claim['panel_sync_status']);
         self::assertNotNull($claim['panel_synced_at']);
