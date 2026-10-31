@@ -34,6 +34,7 @@ broadcast.format.html.span: "خط {{ line }}: تلگرام <span> را فقط ب
 plan.additional_inbounds.feature_off: "اینباندهای اضافه خاموش‌اند (تنظیمات، زبانهٔ پلن‌ها) و قابل تغییر نیستند."
 plan.additional_inbounds.no_primary: "اول اینباند پلن را انتخاب کنید؛ اینباندهای اضافه همراه آن‌اند."
 plan.additional_inbounds.customizable: "پلن با حجم یا مدت دلخواه تک‌اینباندی می‌ماند: اینباندهای اضافه را بردارید یا قیمت‌گذاری دلخواه را خاموش کنید."
+plan.additional_inbounds.trial: "این پلنِ پنهانِ یک اکانت تست است و پلن تست تک‌اینباندی می‌ماند: اینباندهای اضافه را بردارید."
 plan.additional_inbounds.too_many: "حداکثر %max% اینباند اضافه."
 plan.additional_inbounds.primary_repeated: "%inbound% همین حالا اینباند پلن است و نمی‌تواند اینباند اضافه هم باشد."
 plan.additional_inbounds.other_panel: "%inbound% روی پنل دیگری است: همهٔ اینباندهای پلن باید روی پنل اینباند پلن باشند."

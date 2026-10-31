@@ -19,6 +19,7 @@ use Doctrine\ORM\EntityManagerInterface;
  *
  * - isSellable() / sellable(): listed and chosen (PlanCatalog: bot, Mini App, resellers);
  * - acceptsOrders(): a chosen plan becomes an order (draft confirmation, the bot's custom-draft payment);
+ * - acceptsTrial(): a trial is claimed (TrialAccountService): its backing plan keeps one inbound (M2d B5);
  * - acceptsPayment(): an order is paid (PaymentStarter, WalletPayment): by its snapshot (Order::planInboundSnapshot()),
  *   or the live plan for an order without one. Renewals and add-traffic orders are not decided here: they only change
  *   the existing client (one email, all its inbounds), whatever the switch.
@@ -54,6 +55,15 @@ final class PlanSaleRule
     public function acceptsOrders(Plan $plan): bool
     {
         return $plan->isActive() && null === $plan->multiInboundSaleBlocker($this->switch());
+    }
+
+    /**
+     * A trial may be claimed on this backing plan (TrialPlan::getBackingPlan()): trial plans keep one inbound, so one with
+     * additional inbounds (written before M2d, around the save rule) is never provisioned, whatever the switch.
+     */
+    public function acceptsTrial(Plan $backingPlan): bool
+    {
+        return !$backingPlan->hasAdditionalInbounds();
     }
 
     /**

@@ -5,10 +5,12 @@ declare(strict_types=1);
 namespace App\Shop\Application\Catalog;
 
 use App\Entity\Plan;
+use App\Entity\TrialPlan;
 use App\Entity\VpnInbound;
 use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http\PanelApiException;
 use App\Provisioning\Infrastructure\Sanaei3xui\Modern\ModernClientsApi;
 use App\Shop\Application\MultiInboundSettings;
+use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\Validator\Constraint;
 use Symfony\Component\Validator\ConstraintValidator;
 
@@ -17,8 +19,9 @@ use Symfony\Component\Validator\ConstraintValidator;
  *
  * - while plans.multi_inbound_enabled is off they cannot be changed at all (the web form has no field; anything else
  *   that tries is refused here);
- * - a primary inbound is required; the plan is not customizable (custom traffic/duration plans stay single-inbound);
- *   at most MAX_ADDITIONAL;
+ * - a primary inbound is required; the plan is not customizable (custom traffic/duration plans stay single-inbound)
+ *   and not a trial's backing plan (TrialPlan::getBackingPlan(): trial plans keep one inbound, M2d B5); at most
+ *   MAX_ADDITIONAL;
  * - every additional inbound is on the primary's panel and is not the primary; a newly chosen one is active (a kept one
  *   that became inactive since is a warning, PlanInboundWarnings);
  * - the panel is a 3x-ui panel in modern mode (the effective mode: forced, or auto with the detected one) when the
@@ -38,6 +41,7 @@ final class PlanInboundsValidator extends ConstraintValidator
     public function __construct(
         private readonly MultiInboundSettings $settings,
         private readonly ModernClientsApi $api,
+        private readonly EntityManagerInterface $entityManager,
     ) {
     }
 
@@ -66,6 +70,9 @@ final class PlanInboundsValidator extends ConstraintValidator
 
         if ($value->isCustomizable()) {
             $this->violation('plan.additional_inbounds.customizable');
+        }
+        if (null !== $value->getId() && $this->entityManager->getRepository(TrialPlan::class)->count(['backingPlan' => $value]) > 0) {
+            $this->violation('plan.additional_inbounds.trial');
         }
         if (count($additional) > self::MAX_ADDITIONAL) {
             $this->violation('plan.additional_inbounds.too_many', ['%max%' => self::MAX_ADDITIONAL]);
