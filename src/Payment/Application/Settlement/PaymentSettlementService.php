@@ -15,6 +15,7 @@ use App\Payment\Domain\Money\AmountMatcher;
 use App\Payment\Domain\Money\AmountMatchStatus;
 use App\Payment\Domain\PaymentStatus;
 use App\Provisioning\Application\InboundAttachAlerts;
+use App\Provisioning\Application\ServiceInboundAttacher;
 use App\Provisioning\Application\ServiceRenewalService;
 use App\Provisioning\Application\ServiceTrafficAddonService;
 use App\Provisioning\Application\VpnProvisioningService;
@@ -51,7 +52,8 @@ use Psr\Log\LoggerInterface;
  *      payment fulfilled the order between the rollback and the new locks (closeDuplicateAfterFailure()); a wallet top-up
  *      has nothing to provision, so its failure is rolled back and reported like one before fulfilment (ERROR,
  *      nothing changed, the next verification settles it)
- *   6. after commit: customer messages and admin alerts (never inside the transaction)
+ *   6. after commit: the attach pass of a new service's additional inbounds (ServiceInboundAttacher::afterSale(), bounded,
+ *      no lock held), then customer messages and admin alerts (never inside the transaction)
  *
  * A payment of method "wallet" (WalletPayment) is settled like a gateway payment; its debit was written before. Every
  * path that rejects such a payment (admin reject, customer cancel, gateway failure; the expiry job too) gives the
@@ -84,6 +86,7 @@ class PaymentSettlementService
         private readonly LoggerInterface $logger,
         private readonly WalletService $walletService,
         private readonly InboundAttachAlerts $inboundAlerts,
+        private readonly ServiceInboundAttacher $inboundAttacher,
     ) {
     }
 
@@ -426,6 +429,11 @@ class PaymentSettlementService
 
         $this->logger->info('Payment settled.', ['payment_id' => $paymentId, 'source' => $source, 'flag' => $payment->getAmountFlag()]);
         $this->notifyReleased($released);
+        if (null !== $service && self::soldWithAdditionalInbounds($order)) {
+            // The additional inbounds the sale left pending (M2d B1), after the commit and before the delivery message so
+            // that it carries their links; bounded, holds no lock, and cannot change this outcome (it never throws).
+            $this->inboundAttacher->afterSale($service);
+        }
         $this->customerNotifier->confirmed($payment, $service);
         if (null !== $service) {
             $this->inboundAlerts->missingInbounds($order, $service);
@@ -435,6 +443,17 @@ class PaymentSettlementService
         }
 
         return new SettlementResult(SettlementOutcome::CONFIRMED, 'Payment confirmed and order fulfilled.', $payment, $service, $match);
+    }
+
+    /** A new service sold with additional inbounds (its snapshot, or the live plan for an order taken before M2c). */
+    private static function soldWithAdditionalInbounds(Order $order): bool
+    {
+        if (OrderType::NEW_SERVICE !== $order->getType()) {
+            return false;
+        }
+        $snapshot = $order->planInboundSnapshot();
+
+        return null === $snapshot ? (bool) $order->getPlan()?->hasAdditionalInbounds() : [] !== $snapshot['additional'];
     }
 
     /**

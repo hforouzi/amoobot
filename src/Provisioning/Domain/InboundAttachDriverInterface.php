@@ -18,8 +18,13 @@ interface InboundAttachDriverInterface
     public const MODERN_PANEL_REQUIRED = 'Several inbounds need the panel in modern mode (Panels → test connection).';
     /** An additional inbound whose attach was sent but could not be read back (M2c F2): pending. */
     public const NOT_CONFIRMED = 'not confirmed: the panel could not be read after the attach; the scheduled run checks it';
-    /** An additional inbound not tried at the sale (M2c F5: time budget or fallback limit used up): pending. */
-    public const NOT_TRIED = 'not tried at the sale (time limit); the scheduled run attaches it';
+    /** An additional inbound not tried within a time-limited pass (time or one-by-one limit used up): pending. */
+    public const NOT_TRIED = 'not tried (time limit of the pass); the scheduled run attaches it';
+    /**
+     * An additional inbound the client was not on after the sale's add (M2d B1): pending, not tried. Attached right after
+     * the commit (ServiceInboundAttacher::afterSale(), no lock held), else by the scheduled run.
+     */
+    public const AFTER_SALE = 'being attached after the payment (then by the scheduled run)';
 
     /**
      * Attaches the existing client of $remoteId to those of $inbounds it is not on yet: one GET, one attach call with
@@ -28,12 +33,14 @@ interface InboundAttachDriverInterface
      * @param list<VpnInbound> $inbounds
      * @param bool             $recordHealth false: a failing call is not counted towards the panel's "degraded" state
      *                                       (the scheduled retry, a bulk run)
+     * @param float|null       $deadline     the end of a time-limited pass (PanelCallBudget seconds): no new call after it,
+     *                                       at most a few one-by-one attaches; what is left is pending (NOT_TRIED)
      *
      * @return list<InboundAttachment> one per inbound, in the given order
      *
      * @throws \RuntimeException the client could not be read (missing on the panel, panel unreachable)
      */
-    public function attachInbounds(string $remoteId, array $inbounds, ?VpnPanel $panel = null, bool $recordHealth = true): array;
+    public function attachInbounds(string $remoteId, array $inbounds, ?VpnPanel $panel = null, bool $recordHealth = true, ?float $deadline = null): array;
 
     /**
      * The panel ids of the inbounds the client of $remoteId is on (one GET, read only): the scheduled reconcile of the

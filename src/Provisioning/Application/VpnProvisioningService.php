@@ -318,7 +318,7 @@ class VpnProvisioningService
                 $this->entityManager->persist($row);
             }
             if ($pending) {
-                $row->recordPending((string) $error, InboundAttachDriverInterface::NOT_TRIED !== $error, $now);
+                $row->recordPending((string) $error, !in_array($error, [InboundAttachDriverInterface::NOT_TRIED, InboundAttachDriverInterface::AFTER_SALE], true), $now);
             } else {
                 $row->recordAttempt($attached, null === $error ? null : ServiceErrorText::redact($service, $error, 255), $now);
             }

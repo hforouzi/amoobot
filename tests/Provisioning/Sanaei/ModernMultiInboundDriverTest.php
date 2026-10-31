@@ -10,6 +10,7 @@ use App\Provisioning\Domain\Dto\AdoptedVpnService;
 use App\Provisioning\Domain\Dto\CreateVpnServiceRequest;
 use App\Provisioning\Domain\Dto\InboundAttachment;
 use App\Provisioning\Domain\Dto\RenewVpnServiceRequest;
+use App\Provisioning\Domain\InboundAttachDriverInterface;
 use App\Provisioning\Infrastructure\PanelHttpClientFactory;
 use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Sanaei3xuiModernDriver;
 use App\Provisioning\Infrastructure\Sanaei3xui\Sanaei3xuiApiClient;
@@ -21,10 +22,11 @@ use App\Tests\Support\Fake3xui\Fake3xuiWiring;
 use PHPUnit\Framework\TestCase;
 
 /**
- * The modern driver with a plan's additional inbounds (docs/design/multi-inbound-plans.md 3.2, phase M2a): one add with
- * every id, attach-missing with only the missing ids (one call; one by one when the panel refuses the batch), a GET
- * again, failures reported per inbound (D2) and the primary still required. Adoption attaches only for a UUID match.
- * Every other operation stays one request by email.
+ * The modern driver with a plan's additional inbounds (docs/design/multi-inbound-plans.md 3.2, phases M2a and M2d): at
+ * the sale one add with every id and the read back (what delivers the primary), nothing more; an inbound the client is
+ * not on is reported pending (AFTER_SALE) and attached afterwards by attachInbounds() (the pass after the commit, M2d
+ * B1): only the missing ids (one call; one by one when the panel refuses the batch), a GET again, failures reported
+ * per inbound (D2). Adoption attaches only for a UUID match. Every other operation stays one request by email.
  */
 final class ModernMultiInboundDriverTest extends TestCase
 {
@@ -84,29 +86,39 @@ final class ModernMultiInboundDriverTest extends TestCase
 
         $created = $this->driver->createService($this->request([$this->vmess, $this->trojan]), $this->panel);
 
-        $attach = array_values(array_filter($this->fake->requests, static fn (array $r): bool => str_ends_with($r['path'], '/attach')));
-        self::assertCount(1, $attach);
-        self::assertSame(['inboundIds' => [4]], $attach[0]['body'], 'only the missing id');
+        self::assertSame([], $this->attachCalls(), 'nothing is attached at the sale');
+        self::assertSame([[true, null], [false, InboundAttachDriverInterface::AFTER_SALE]], self::states($created->attachments));
+        self::assertTrue($created->attachments[1]->pending);
+        $this->fake->requests = [];
+
+        $results = $this->driver->attachInbounds($created->remoteId, [$this->vmess, $this->trojan], $this->panel);
+
+        self::assertSame([[4]], $this->attachCalls(), 'only the missing id');
         self::assertSame([1, 2, 4], $this->fake->clients[self::EMAIL]['inboundIds']);
-        self::assertSame([[true, null], [true, null]], self::states($created->attachments));
+        self::assertSame([[true, null], [true, null]], self::states($results));
         self::assertSame(2, count(array_keys($this->fake->requestLines(), 'GET panel/api/clients/get/'.self::EMAIL)), 'GET, attach, GET again');
     }
 
     public function testOneInboundThePanelRefusesFailsAloneAndTheServiceIsStillCreated(): void
     {
-        // Inbound 9 was deleted on the panel: the add with every id is refused, the primary alone is added, the others
-        // one by one after the batch attach is refused.
+        // Inbound 9 was deleted on the panel: the add with every id is refused and the primary alone is added at the sale;
+        // after it the others are attached one by one once the batch attach is refused.
         $gone = $this->fakeInbound($this->panel, 9)->setProtocol('vmess');
         $created = $this->driver->createService($this->request([$this->vmess, $gone, $this->trojan]), $this->panel);
 
-        self::assertSame([1, 2, 4], $this->fake->clients[self::EMAIL]['inboundIds']);
-        self::assertSame([true, false, true], array_map(static fn (InboundAttachment $a): bool => $a->attached, $created->attachments));
-        self::assertStringContainsString('inbound 9 not found', (string) $created->attachments[1]->error);
-        self::assertSame(1, count($this->fake->clients), 'one client');
         $adds = array_values(array_filter($this->fake->requests, static fn (array $r): bool => 'panel/api/clients/add' === $r['path']));
         self::assertSame([[1, 2, 9, 4], [1]], array_map(static fn (array $r): array => $r['body']['inboundIds'], $adds));
-        $attaches = array_values(array_map(static fn (array $r): array => $r['body']['inboundIds'], array_filter($this->fake->requests, static fn (array $r): bool => str_ends_with($r['path'], '/attach'))));
-        self::assertSame([[2, 9, 4], [2], [9], [4]], $attaches);
+        self::assertSame([], $this->attachCalls());
+        self::assertSame([1], $this->fake->clients[self::EMAIL]['inboundIds']);
+        self::assertSame([true, true, true], array_map(static fn (InboundAttachment $a): bool => $a->pending, $created->attachments));
+
+        $results = $this->driver->attachInbounds($created->remoteId, [$this->vmess, $gone, $this->trojan], $this->panel);
+
+        self::assertSame([1, 2, 4], $this->fake->clients[self::EMAIL]['inboundIds']);
+        self::assertSame([true, false, true], array_map(static fn (InboundAttachment $a): bool => $a->attached, $results));
+        self::assertStringContainsString('inbound 9 not found', (string) $results[1]->error);
+        self::assertSame(1, count($this->fake->clients), 'one client');
+        self::assertSame([[2, 9, 4], [2], [9], [4]], $this->attachCalls());
     }
 
     public function testEverySecondaryFailingStillDeliversThePrimary(): void
@@ -120,14 +132,15 @@ final class ModernMultiInboundDriverTest extends TestCase
         });
 
         $created = $this->driver->createService($this->request([$this->vmess, $this->trojan]), $this->panel);
+        $results = $this->driver->attachInbounds($created->remoteId, [$this->vmess, $this->trojan], $this->panel);
 
         self::assertSame([1], $this->fake->clients[self::EMAIL]['inboundIds']);
-        self::assertSame([false, false], array_map(static fn (InboundAttachment $a): bool => $a->attached, $created->attachments));
-        self::assertStringContainsString('database is locked', (string) $created->attachments[0]->error);
-        self::assertSame(self::UUID, $created->clientUuid);
+        self::assertSame(self::UUID, $created->clientUuid, 'the service exists on its primary');
+        self::assertSame([false, false], array_map(static fn (InboundAttachment $a): bool => $a->attached, $results));
+        self::assertStringContainsString('database is locked', (string) $results[0]->error);
     }
 
-    public function testThePrimaryMissingAfterTheAttachIsAnError(): void
+    public function testThePrimaryThePanelWillNotAttachIsAnError(): void
     {
         $this->fake->script('POST', 'panel/api/clients/add', function (string $method, string $url, array $options): \Symfony\Component\HttpClient\Response\MockResponse {
             $body = json_decode((string) $options['body'], true);
@@ -141,8 +154,9 @@ final class ModernMultiInboundDriverTest extends TestCase
             $this->driver->createService($this->request([$this->vmess]), $this->panel);
             self::fail('a client without the primary was accepted');
         } catch (\RuntimeException $e) {
-            self::assertStringContainsString("plan's inbound 1", $e->getMessage());
+            self::assertStringContainsString('inbound locked', $e->getMessage());
         }
+        self::assertSame([[1]], $this->attachCalls(), 'only the primary is attached at the sale, as for one inbound');
     }
 
     public function testALostAddIsAdoptedByUuidAndTheMissingInboundsAttached(): void
@@ -158,9 +172,10 @@ final class ModernMultiInboundDriverTest extends TestCase
         $created = $this->driver->createService($this->request([$this->vmess, $this->trojan]), $this->panel);
 
         self::assertSame(self::UUID, $created->clientUuid);
-        self::assertSame([1, 2, 4], $this->fake->clients[self::EMAIL]['inboundIds']);
         self::assertSame(1, count(array_keys($this->fake->requestLines(), 'POST panel/api/clients/add')), 'the add is never sent twice');
-        self::assertSame([[true, null], [true, null]], self::states($created->attachments));
+        self::assertSame([[false, InboundAttachDriverInterface::AFTER_SALE], [false, InboundAttachDriverInterface::AFTER_SALE]], self::states($created->attachments));
+        self::assertSame([[true, null], [true, null]], self::states($this->driver->attachInbounds($created->remoteId, [$this->vmess, $this->trojan], $this->panel)));
+        self::assertSame([1, 2, 4], $this->fake->clients[self::EMAIL]['inboundIds']);
     }
 
     public function testARetriedCreateAttachesOnlyWhatIsMissing(): void
@@ -170,12 +185,12 @@ final class ModernMultiInboundDriverTest extends TestCase
         $created = $this->driver->createService($this->request([$this->vmess, $this->trojan]), $this->panel);
 
         self::assertCount(1, $this->fake->clients);
-        $attaches = array_values(array_map(static fn (array $r): array => $r['body']['inboundIds'], array_filter($this->fake->requests, static fn (array $r): bool => str_ends_with($r['path'], '/attach'))));
-        self::assertSame([[4]], $attaches);
-        self::assertSame([[true, null], [true, null]], self::states($created->attachments));
+        self::assertSame([[true, null], [false, InboundAttachDriverInterface::AFTER_SALE]], self::states($created->attachments));
+        self::assertSame([[true, null], [true, null]], self::states($this->driver->attachInbounds($created->remoteId, [$this->vmess, $this->trojan], $this->panel)));
+        self::assertSame([[4]], $this->attachCalls());
     }
 
-    public function testAdoptionByUuidAttachesTheMissingInbounds(): void
+    public function testAdoptionByUuidLeavesTheMissingInboundsForAfterTheSale(): void
     {
         $this->seed([1]);
 
@@ -183,9 +198,24 @@ final class ModernMultiInboundDriverTest extends TestCase
 
         self::assertNotNull($adopted);
         self::assertSame(AdoptedVpnService::MATCHED_BY_UUID, $adopted->matchedBy);
-        self::assertSame([1, 2, 4], $this->fake->clients[self::EMAIL]['inboundIds']);
-        self::assertSame([[true, null], [true, null]], self::states($adopted->service->attachments));
+        self::assertSame([1], $this->fake->clients[self::EMAIL]['inboundIds']);
+        self::assertSame([[false, InboundAttachDriverInterface::AFTER_SALE], [false, InboundAttachDriverInterface::AFTER_SALE]], self::states($adopted->service->attachments));
+        self::assertSame([], $this->attachCalls());
         self::assertNotContains('POST panel/api/clients/add', $this->fake->requestLines());
+    }
+
+    public function testAPassWithItsTimeUsedUpSendsNothingAndLeavesEveryInboundPending(): void
+    {
+        $created = $this->driver->createService($this->request([]), $this->panel);
+        $this->fake->requests = [];
+        $this->fake->script('POST', 'panel/api/clients/'.self::EMAIL.'/attach', Fake3xuiPanel::envelope(false, null, 'refused'));
+
+        // The batch is refused; the deadline is already past, so no one-by-one attach and no read back follow.
+        $results = $this->driver->attachInbounds($created->remoteId, [$this->vmess, $this->trojan], $this->panel, false, microtime(true) - 1);
+
+        self::assertSame([[2, 4]], $this->attachCalls());
+        self::assertSame([true, true], array_map(static fn (InboundAttachment $a): bool => $a->pending, $results));
+        self::assertSame([InboundAttachDriverInterface::NOT_TRIED, InboundAttachDriverInterface::NOT_TRIED], array_map(static fn (InboundAttachment $a): ?string => $a->error, $results));
     }
 
     public function testAdoptionByEmailOnlyAttachesNothing(): void
@@ -293,6 +323,14 @@ final class ModernMultiInboundDriverTest extends TestCase
             self::assertSame('Several inbounds need the panel in modern mode (Panels → test connection).', $e->getMessage());
         }
         self::assertSame([], $this->fake->requests);
+    }
+
+    /**
+     * @return list<list<int>> the inbound ids of each attach call, in order
+     */
+    private function attachCalls(): array
+    {
+        return array_values(array_map(static fn (array $r): array => $r['body']['inboundIds'], array_filter($this->fake->requests, static fn (array $r): bool => str_ends_with($r['path'], '/attach'))));
     }
 
     /**

@@ -56,14 +56,13 @@ final class Sanaei3xuiModernDriver implements VpnPanelDriverInterface, ExistingC
 {
     public const BYTES_PER_GB = 1073741824;
     /**
-     * The additional inbounds at the sale run under the settlement's locks (order and payment rows), so their panel calls
-     * are bounded (M2c F5): at most INLINE_ATTACH_BUDGET_SECONDS for all of them (the batch attach, the one-by-one
-     * fallback and the read back; checked before each call, so one call that is already running may end up to its own
-     * 10 s limit later) and at most INLINE_MAX_SINGLE_ATTACHES one-by-one calls. What is left is recorded pending
-     * (NOT_TRIED) and attached by the scheduled run. "Retry attach" and the scheduled run hold no lock and are not bounded.
+     * The additional inbounds are never attached at the sale (M2d B1): the sale runs under the settlement's row locks, so
+     * there the client is added once with every inbound id and read back (what delivers the primary, as before); the
+     * inbounds that read lists are attached, the others are reported pending (AFTER_SALE) and attached right after the
+     * commit (ServiceInboundAttacher::afterSale(), no lock held) or by the scheduled run. Within a time-limited pass
+     * (attachInbounds() with a deadline) at most MAX_SINGLE_ATTACHES_IN_A_PASS one-by-one calls follow a refused batch.
      */
-    public const INLINE_ATTACH_BUDGET_SECONDS = 20;
-    public const INLINE_MAX_SINGLE_ATTACHES = 3;
+    public const MAX_SINGLE_ATTACHES_IN_A_PASS = 3;
     private const MS_PER_DAY = 86400000;
 
     public function __construct(
@@ -136,16 +135,12 @@ final class Sanaei3xuiModernDriver implements VpnPanelDriverInterface, ExistingC
         if (null === $created || 0 !== strcasecmp((string) ($created['id'] ?? ''), $uuid)) {
             throw new \RuntimeException(sprintf('The panel did not confirm client "%s" after adding it.', $email));
         }
-        if ([] !== $additional) {
-            [$created, $attachments] = $this->attachMissing($panel, $created, $remoteInboundId, $additional, true, $this->inlineDeadline());
-
-            return $this->createdService($panel, $inbound, (string) $remoteInboundId, $created, $attachments);
-        }
         if (is_array($created['inboundIds'] ?? null) && !in_array($remoteInboundId, $created['inboundIds'], true)) {
             $this->api->attach($panel, $email, [$remoteInboundId]);
         }
 
-        return $this->createdService($panel, $inbound, (string) $remoteInboundId, $created);
+        // Additional inbounds: what the read lists is attached, the rest waits for the pass after the commit (B1).
+        return $this->createdService($panel, $inbound, (string) $remoteInboundId, $created, [] === $additional ? [] : self::afterSale($created, $additional));
     }
 
     public function findExistingService(CreateVpnServiceRequest $request, ?VpnPanel $panel = null): ?AdoptedVpnService
@@ -180,12 +175,14 @@ final class Sanaei3xuiModernDriver implements VpnPanelDriverInterface, ExistingC
         // Only a client that belongs to this order may be attached to the plan's inbounds here; an email match on a
         // customer-chosen name is refused by the caller (VpnProvisioningService) before anything is changed.
         $attachments = [];
+        if (AdoptedVpnService::MATCHED_BY_UUID === $matchedBy && is_array($client['inboundIds'] ?? null) && !in_array($remoteInboundId, $client['inboundIds'], true)) {
+            $this->api->attach($panel, (string) $client['email'], [$remoteInboundId]);
+        }
         if ([] !== $additional && AdoptedVpnService::MATCHED_BY_UUID === $matchedBy) {
-            [$client, $attachments] = $this->attachMissing($panel, $client, $remoteInboundId, $additional, true, $this->inlineDeadline());
+            // As at creation (B1): nothing more under the settlement's locks, the rest is attached after the commit.
+            $attachments = self::afterSale($client, $additional);
         } elseif ([] !== $additional) {
             $attachments = self::attachments($client, $additional, [], 'not attached: the client was adopted by its name only (use "Retry attach")');
-        } elseif (AdoptedVpnService::MATCHED_BY_UUID === $matchedBy && is_array($client['inboundIds'] ?? null) && !in_array($remoteInboundId, $client['inboundIds'], true)) {
-            $this->api->attach($panel, (string) $client['email'], [$remoteInboundId]);
         }
 
         return new AdoptedVpnService(
@@ -196,7 +193,7 @@ final class Sanaei3xuiModernDriver implements VpnPanelDriverInterface, ExistingC
         );
     }
 
-    public function attachInbounds(string $remoteId, array $inbounds, ?VpnPanel $panel = null, bool $recordHealth = true): array
+    public function attachInbounds(string $remoteId, array $inbounds, ?VpnPanel $panel = null, bool $recordHealth = true, ?float $deadline = null): array
     {
         $panel = $this->requirePanel($panel);
         $ref = $this->ref($remoteId);
@@ -205,7 +202,7 @@ final class Sanaei3xuiModernDriver implements VpnPanelDriverInterface, ExistingC
             throw new \RuntimeException(sprintf('Client "%s" does not exist on the panel.', $ref->email));
         }
 
-        return $this->attachMissing($panel, $client, null, $this->additionalInbounds($inbounds, $panel, null), $recordHealth)[1];
+        return $this->attachMissing($panel, $client, null, $this->additionalInbounds($inbounds, $panel, null), $recordHealth, $deadline)[1];
     }
 
     public function clientInboundIds(string $remoteId, ?VpnPanel $panel = null, bool $recordHealth = true): ?array
@@ -315,7 +312,7 @@ final class Sanaei3xuiModernDriver implements VpnPanelDriverInterface, ExistingC
         $errors = [];
         $singles = 0;
         foreach ($ids as $id) {
-            if (null !== $deadline && ($singles >= self::INLINE_MAX_SINGLE_ATTACHES || $this->pastDeadline($deadline))) {
+            if (null !== $deadline && ($singles >= self::MAX_SINGLE_ATTACHES_IN_A_PASS || $this->pastDeadline($deadline))) {
                 $errors[$id] = InboundAttachDriverInterface::NOT_TRIED;
                 continue;
             }
@@ -328,12 +325,6 @@ final class Sanaei3xuiModernDriver implements VpnPanelDriverInterface, ExistingC
         }
 
         return $errors;
-    }
-
-    /** The end of the inline budget, as seconds (F5). */
-    private function inlineDeadline(): float
-    {
-        return (float) $this->clock->now()->format('U.u') + self::INLINE_ATTACH_BUDGET_SECONDS;
     }
 
     private function pastDeadline(?float $deadline): bool
@@ -367,6 +358,26 @@ final class Sanaei3xuiModernDriver implements VpnPanelDriverInterface, ExistingC
                 isset($errors[$remoteId]) && InboundAttachDriverInterface::NOT_TRIED !== $errors[$remoteId] => new InboundAttachment($inbound, false, $errors[$remoteId]),
                 default => InboundAttachment::pending($inbound, $errors[$remoteId] ?? InboundAttachDriverInterface::NOT_CONFIRMED),
             };
+        }
+
+        return $result;
+    }
+
+    /**
+     * At the sale (B1): an additional inbound the client as read is on = attached; any other = pending (AFTER_SALE, not
+     * tried), for the pass after the commit. A read that does not list the inbounds says nothing about them: pending too.
+     *
+     * @param array<string, mixed>   $client
+     * @param array<int, VpnInbound> $additional
+     *
+     * @return list<InboundAttachment>
+     */
+    private static function afterSale(array $client, array $additional): array
+    {
+        $on = is_array($client['inboundIds'] ?? null) ? $client['inboundIds'] : [];
+        $result = [];
+        foreach ($additional as $remoteId => $inbound) {
+            $result[] = in_array($remoteId, $on, true) ? new InboundAttachment($inbound, true) : InboundAttachment::pending($inbound, InboundAttachDriverInterface::AFTER_SALE);
         }
 
         return $result;

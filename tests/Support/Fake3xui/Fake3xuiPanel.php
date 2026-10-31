@@ -154,6 +154,14 @@ final class Fake3xuiPanel
         $path = str_starts_with($fullPath, $this->basePath.'/') ? substr($fullPath, strlen($this->basePath) + 1) : null;
         foreach ($this->delays as $pattern => $ms) {
             if (1 === preg_match('#^'.$pattern.'$#', $method.' '.($path ?? $fullPath))) {
+                // As curl does: a request whose max_duration ends before the answer times out then, unanswered.
+                $capMs = (int) round(1000 * (float) ($options['max_duration'] ?? 0));
+                if ($capMs > 0 && $ms > $capMs) {
+                    usleep($capMs * 1000);
+                    $this->requests[] = ['method' => $method, 'path' => $path ?? $fullPath, 'query' => $query, 'headers' => $headers, 'body' => $body, 'timedOut' => true];
+
+                    return self::networkError(sprintf('Operation timed out after %d milliseconds with 0 bytes received', $capMs));
+                }
                 usleep($ms * 1000);
             }
         }
