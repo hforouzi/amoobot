@@ -35,8 +35,11 @@ final class SecretRedactor
      * - a key=value / key: value / "key":value of TELEGRAM_ID_KEYS, also URL-encoded (chat_id%3D<id>,
      *   %22chat_id%22%3A<id>);
      * - a Telegram update's "chat" / "from" / "user" / "sender_chat" object: its "id";
-     * - in a trace frame (#<n> ...(...)), a quoted all-digit argument of 5+ digits (a chat id is passed as a string;
-     *   order, payment and service ids are ints and stay).
+     * - a stack trace (getTraceAsString(), (string) $exception with its "Next" chain, one frame per line or joined on
+     *   one line): every frame keeps its number, file, line, class and function, and its whole argument list becomes
+     *   "(...)" (M2e, CI): argument values never reach a log, whatever their form (strings, ints, Object(...), Array)
+     *   and whatever zend.exception_ignore_args / zend.exception_string_param_max_len say, so a trace reads the same
+     *   in every php.ini.
      * Nothing else changes: other ids, amounts and ports keep their values. A text PCRE cannot process is replaced by
      * WITHHELD (fail closed).
      */
@@ -61,10 +64,27 @@ final class SecretRedactor
         if (null === $text) {
             return self::WITHHELD;
         }
-        // Trace frames only: the quoted all-digit arguments (a chat id), never the ints.
-        $text = preg_replace_callback('/^#\d+ .*$/m', static fn (array $m): string => (string) preg_replace("/'-?\\d{5,}(\\.\\.\\.)?'/", "'".self::MASK."'", $m[0]), $text);
 
-        return $text ?? self::WITHHELD;
+        return self::withoutTraceArguments($text) ?? self::WITHHELD;
+    }
+
+    /**
+     * Every stack trace frame "#<n> <file>(<line>): <function>(<arguments>)" (or "#<n> [internal function]: ...") with
+     * its argument list replaced by "(...)". A frame ends at the end of its line or where the next frame starts on the
+     * same line; the function may be a closure named with braces ({closure}, {closure:App\X::m():12}). Null on a PCRE
+     * failure.
+     */
+    private static function withoutTraceArguments(string $text): ?string
+    {
+        if (!str_contains($text, '#')) {
+            return $text;
+        }
+
+        return preg_replace(
+            '/(#\d+ (?:\[internal function\]|[^\n]*?\(\d+\)): (?:[^\s({]|\{[^}\n]*\})+)\((?:[^\n]*?)\)(?=[ \t]+#\d+ |[ \t]*$)/m',
+            '$1(...)',
+            $text,
+        );
     }
 
     /** tg_<telegram id>_order_<n> (a generated panel client email) without the Telegram id. */

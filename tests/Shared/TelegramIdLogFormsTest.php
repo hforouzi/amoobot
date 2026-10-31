@@ -33,7 +33,14 @@ final class TelegramIdLogFormsTest extends TestCase
         yield 'form spaces' => ['chat_id+%3D+512345678', 'chat_id+%3D+[redacted]'];
         yield 'email' => ['client tg_512345678_order_42 added', 'client tg_[redacted]_order_42 added'];
         yield 'email cut short' => ["provision('tg_512345678_or...')", "provision('tg_[redacted]_or...')"];
-        yield 'trace frame string argument' => ["#0 /app/src/Bot/Infrastructure/TelegramApiClient.php(70): App\\Bot\\Infrastructure\\TelegramApiClient->sendMessageStrict('512345678', 'hi', NULL)", "#0 /app/src/Bot/Infrastructure/TelegramApiClient.php(70): App\\Bot\\Infrastructure\\TelegramApiClient->sendMessageStrict('[redacted]', 'hi', NULL)"];
+        // A trace frame keeps its number, file, line, class and function; its arguments, whatever they are, go.
+        yield 'trace frame, string argument' => ["#0 /app/src/Bot/Infrastructure/TelegramApiClient.php(70): App\\Bot\\Infrastructure\\TelegramApiClient->sendMessageStrict('512345678', 'hi', NULL)", '#0 /app/src/Bot/Infrastructure/TelegramApiClient.php(70): App\\Bot\\Infrastructure\\TelegramApiClient->sendMessageStrict(...)'];
+        yield 'trace frame, int argument' => ["#1 /app/src/X.php(9): App\\Repo->find(512345678, 'abc')", '#1 /app/src/X.php(9): App\\Repo->find(...)'];
+        yield 'trace frame, Object and Array' => ['#2 /app/src/Y.php(12): App\\Y::go(Object(stdClass), Array, 512345678)', '#2 /app/src/Y.php(12): App\\Y::go(...)'];
+        yield 'trace frame, internal function and closure' => ["#3 [internal function]: App\\Z->{closure}('512345678')\n#4 /app/src/Z.php(5): App\\Z->{closure:App\\Z::run():4}(512345678)", "#3 [internal function]: App\\Z->{closure}(...)\n#4 /app/src/Z.php(5): App\\Z->{closure:App\\Z::run():4}(...)"];
+        // Every frame alike, so a trace reads the same whether the runner prints arguments or not.
+        yield 'a frame with no arguments' => ['#5 /app/vendor/phpunit/phpunit/src/Framework/TestCase.php(1234): PHPUnit\\Framework\\TestCase->runTest()', '#5 /app/vendor/phpunit/phpunit/src/Framework/TestCase.php(1234): PHPUnit\\Framework\\TestCase->runTest(...)'];
+        yield 'trace frames joined on one line' => ["Stack trace: #0 /a.php(3): f('512345678') #1 /b.php(4): g(512345678) #2 {main}", 'Stack trace: #0 /a.php(3): f(...) #1 /b.php(4): g(...) #2 {main}'];
         yield 'M2d forms still' => ['chat_id="512345678" actor_id=512345678 {"telegram_id":512345678}', 'chat_id="[redacted]" actor_id=[redacted] {"telegram_id":[redacted]}'];
     }
 
@@ -51,7 +58,8 @@ final class TelegramIdLogFormsTest extends TestCase
         yield 'generic id, inbound id' => ['{"id":512345678,"inbound_id":45678,"order":{"id":512345678}}'];
         yield 'encoded order id' => ['%22order_id%22%3A512345678 payment_id%3D512345678'];
         yield 'other words' => ['mychat_id=512345678 chatter=12345 tg_name tg_1234_order'];
-        yield 'trace frame int arguments' => ["#1 /app/src/X.php(9): App\\Repo->find(512345678, 'abc')"];
+        yield 'the last frame' => ['#6 {main}'];
+        yield 'text that only looks like a frame' => ['order #12 shipped; see #3 in issue(7): fix(this) please'];
         yield 'quoted digits outside a trace' => ["code '512345678' accepted"];
         yield 'a short chat id' => ['chat_id=123'];
     }
@@ -62,22 +70,70 @@ final class TelegramIdLogFormsTest extends TestCase
         self::assertSame($text, SecretRedactor::forLog($text));
     }
 
-    public function testATraceWithArgumentsKeepsNoTelegramId(): void
+    /**
+     * The trace this test makes, as the runner's php.ini would print it: arguments in (php.ini-development: 0 / 15),
+     * strings cut to '...' (php.ini-production with arguments: 0 / 0) or no arguments (php.ini-production: 1).
+     *
+     * @return iterable<string, array{string, string}> zend.exception_ignore_args, zend.exception_string_param_max_len
+     */
+    public static function traceModes(): iterable
     {
-        $ignore = ini_get('zend.exception_ignore_args');
-        ini_set('zend.exception_ignore_args', '0');
-        try {
+        yield 'arguments, strings up to 15' => ['0', '15'];
+        yield 'arguments, strings cut' => ['0', '0'];
+        yield 'no arguments' => ['1', '15'];
+    }
+
+    #[DataProvider('traceModes')]
+    public function testATraceKeepsItsFramesButNoArgumentInEveryPhpIni(string $ignoreArgs, string $maxLength): void
+    {
+        [$trace, $text] = self::inMode($ignoreArgs, $maxLength, static function (): array {
             $e = self::caught(self::ID, 'tg_'.self::ID.'_order_42', 77);
-        } finally {
-            ini_set('zend.exception_ignore_args', (string) $ignore);
+
+            return [$e->getTraceAsString(), (string) new \LogicException('outer', 0, $e)];
+        });
+        if ('0' === $ignoreArgs && '15' === $maxLength) {
+            self::assertStringContainsString(self::ID, $trace, 'this mode prints the arguments: the test proves something');
         }
-        $trace = $e->getTraceAsString();
-        self::assertStringContainsString(self::ID, $trace, 'the trace carries the arguments');
 
-        $redacted = SecretRedactor::forLog($trace);
+        foreach ([SecretRedactor::forLog($trace), SecretRedactor::forLog($text)] as $redacted) {
+            self::assertStringNotContainsString(self::ID, $redacted);
+            self::assertMatchesRegularExpression('~#0 \S+/tests/Shared/TelegramIdLogFormsTest\.php\(\d+\): App\\\\Tests\\\\Shared\\\\TelegramIdLogFormsTest::refuse\(\.\.\.\)~', $redacted, 'file, line, class and method stay');
+            self::assertMatchesRegularExpression('~#1 \S+/tests/Shared/TelegramIdLogFormsTest\.php\(\d+\): App\\\\Tests\\\\Shared\\\\TelegramIdLogFormsTest::caught\(\.\.\.\)~', $redacted);
+        }
+        self::assertStringContainsString("\nNext LogicException: outer in ", SecretRedactor::forLog($text), 'the previous-exception chain stays readable');
+    }
 
-        self::assertStringNotContainsString(self::ID, $redacted);
-        self::assertStringContainsString("refuse('[redacted]', 'tg_[redacted]_or...', 77)", $redacted, 'the int argument stays');
+    public function testTheRedactedTraceIsTheSameWhateverThePhpIni(): void
+    {
+        $traces = [];
+        foreach (self::traceModes() as $mode => [$ignoreArgs, $maxLength]) {
+            // One call site for every mode, so the lines are the same.
+            $traces[$mode] = self::inMode($ignoreArgs, $maxLength, static fn (): string => self::caught(self::ID, 'tg_'.self::ID.'_order_42', 77)->getTraceAsString());
+        }
+
+        self::assertCount(1, array_unique(array_map(SecretRedactor::forLog(...), $traces)), implode("\n---\n", array_map(SecretRedactor::forLog(...), $traces)));
+    }
+
+    /**
+     * $work run with these two ini values, restored afterwards.
+     *
+     * @template T
+     *
+     * @param \Closure(): T $work
+     *
+     * @return T
+     */
+    private static function inMode(string $ignoreArgs, string $maxLength, \Closure $work): mixed
+    {
+        $before = [ini_get('zend.exception_ignore_args'), ini_get('zend.exception_string_param_max_len')];
+        ini_set('zend.exception_ignore_args', $ignoreArgs);
+        ini_set('zend.exception_string_param_max_len', $maxLength);
+        try {
+            return $work();
+        } finally {
+            ini_set('zend.exception_ignore_args', (string) $before[0]);
+            ini_set('zend.exception_string_param_max_len', (string) $before[1]);
+        }
     }
 
     public function testPlaceholdersFollowTheKeyRule(): void

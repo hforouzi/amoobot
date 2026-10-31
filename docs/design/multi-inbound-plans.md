@@ -997,9 +997,16 @@ findings B1-1, B1-2, B3-1, B3-2). No migration, no new job.
   `[log line withheld: it could not be redacted]`, never raw (`LogRedactionLimitsTest`).
 - **The remaining Telegram id forms (E4, B3-2).** `forLog()` also masks a raw update's `"chat"` / `"from"` / `"user"` /
   `"sender_chat"` object `"id"`, URL-encoded pairs (`chat_id%3D<id>`, `%22chat_id%22%3A<id>`, after `%26`), any
-  `tg_<5+ digits>` (the client email cut short, e.g. the 15-character trace argument `'tg_512345678_or...'`), and, in
-  trace frames only (`#<n> ...(...)`), a quoted all-digit argument of 5+ digits (chat ids are passed as strings; order,
-  payment and service ids are ints and stay). **Rule for context values and `{placeholder}`s** (documented in
+  `tg_<5+ digits>` (the client email cut short, e.g. the 15-character trace argument `'tg_512345678_or...'`), and
+  **stack traces carry no argument values** (changed after CI, see below): every frame `#<n> <file>(<line>):
+  <function>(…)` keeps its number, file, line, class and function and its whole argument list becomes `(...)`, whatever
+  the arguments are (strings, ints, `Object(...)`, `Array`) and wherever the trace is (`getTraceAsString()`,
+  `(string) $exception` with its `Next` chain, frames joined on one line). The first E4 rule masked only quoted digit
+  strings in frames; CI (setup-php, from `php.ini-production`: `zend.exception_string_param_max_len = 0`, string
+  arguments printed as `'...'`) showed that a trace's form depends on the runner's `php.ini`, so the test failed its own
+  precondition there (the trace had no id to redact; nothing leaked). The tests now set both ini values themselves and
+  assert in every mode (arguments in, strings cut, no arguments) that the redacted trace is the same and keeps its
+  frames. **Rule for context values and `{placeholder}`s** (documented in
   `RedactingLogger`): under a key of `SecretRedactor::TELEGRAM_ID_KEYS` any int or string is masked (as in M2d); under a
   key that names a Telegram id (`RedactingLogger::isTelegramIdKey()`: contains `chat`, `telegram` or `actor`, or is
   `tg_id` / `tgId` / `from` / `from_id`) an int or digit string of 5+ digits is masked; every other key keeps its value,
