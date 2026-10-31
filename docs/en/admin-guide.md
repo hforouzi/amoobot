@@ -100,11 +100,15 @@ carries every attached inbound.
   **The service is delivered as soon as the primary works** (D2): an additional inbound that still fails is recorded as
   "not attached" with the reason, and never fails the payment, the order or the wallet. Further rules:
   - while the payment is being recorded (the order is locked then) only the add and its read back are sent to the
-    panel; no inbound is attached then. Right after it, before the customer's delivery message, one attach pass runs
-    with nothing locked: at most **15 seconds in all** (every call of the pass included: a call is cut short at the
+    panel; no inbound is attached then. Right after it the customer gets the delivery message (the primary's links and
+    the subscription link), then one attach pass runs with nothing locked: at most **15 seconds in all** (every call of the pass included: a call is cut short at the
     limit and none is sent after it) and at most 3 one-by-one attaches after a refused batch. What is left stays
     "attaching…" for the scheduled run; when the panel cannot be read back after the attach the inbounds are "attaching…"
-    too (the scheduled run checks the panel and finishes them). The payment and the order are never changed by it;
+    too (the scheduled run checks the panel and finishes them). The payment and the order are never changed by it. When the pass attached servers the customer gets one short
+    follow-up ("2 more servers were added to your service … update the subscription in your app"); the subscription link
+    already carries them, and the Mini App and the service page show the live state. A delivery message that could not
+    be sent (the process stopped, Telegram refused it) is sent once by the next approval or gateway retry of that
+    payment, or by the `orders` job within about 10 minutes; it is never sent twice and is given up after 3 failed tries;
   - an inbound inactive or on another panel by then is recorded "not attached" with that reason (alerted at the next
     run); an inbound **deleted** by then cannot be attached and the admins get an alert naming it at once;
   - with the switch **off** when the paid order is provisioned: the customer gets the primary on any panel, nothing is
@@ -197,8 +201,9 @@ The optional ones are needed only if you will sell that combination.
    service's email, on the three inbounds, one UUID, one subscription ID. Admin service page: service active;
    "Additional inbounds" both "attached", 1 attempt, no error. Nothing in the last error shows a Telegram id (an email
    is written `tg_[redacted]_order_<n>`).
-4. **Required: links.** Import the subscription link from the delivery message in a client app (v2rayNG, Hiddify or
-   Streisand): **three** configs. On the server run `php bin/console app:service:verify-links <service id>`: no DIFF
+4. **Required: links.** You get **one** delivery message and no follow-up (the panel put the client on the three
+   inbounds at once, so nothing was left for the pass). Import its subscription link in a client app (v2rayNG, Hiddify
+   or Streisand): **three** configs. On the server run `php bin/console app:service:verify-links <service id>`: no DIFF
    (INFO lines are fine). Admin service page → "Regenerate config": still three links stored.
 5. **Required: connect.** Connect through each of the three configs; each works, and in 3x-ui the one client's usage
    grows whichever config you use.
@@ -236,8 +241,12 @@ The optional ones are needed only if you will sell that combination.
 13. **Required: nothing waits behind the attach (B1).** In 3x-ui create one more test inbound (VMess), "Sync inbounds",
     add it to the test plan, then delete it **in 3x-ui only**. Buy the test plan paying by card; approve the payment
     and at once approve it again from a second browser tab. Expected: the second answers "already processed" without
-    waiting for the first's attach work; the first returns at most about 15 seconds after the service exists; the
-    delivery message carries the links of the inbounds that are attached; the deleted one's row is "not attached".
+    waiting for the first's attach work; the first returns at most about 15 seconds after the service exists; your
+    Telegram gets **exactly one** delivery message (sent before the attach pass, with the primary's links) and **one**
+    follow-up "2 more servers were added" (the panel refused the add that named the deleted inbound, so the sale
+    delivered the primary alone and the pass attached VMess-WS and Trojan), although you approved twice; the deleted
+    one's row is "not attached". If you take VMess-WS and Trojan off the plan first, so that only the deleted inbound is
+    left to attach, there is no follow-up at all.
     Remove that inbound from the plan afterwards.
 14. Optional: **VLESS vision + VLESS-WS** on one client (primary VLESS-REALITY with `xtls-rprx-vision`, additional
     VLESS-WS). Both connect, the flow applied only where valid; or note that it fails and do not sell that combination.
@@ -255,8 +264,9 @@ When 1 to 13 pass, activate the plans you want to sell.
 **Upgrading.** Run the migrations: `Version20261101090000` (M1) adds the `plan_additional_inbound` and
 `vpn_service_inbound` tables; M2a needs no new migration; `Version20261102090000` (M2b) adds the retry columns
 (`next_attempt_at`, `checked_at`, `alert_state`, `alerted_at`) and an index to `vpn_service_inbound`;
-`Version20261103090000` (M2c) adds `reattach_count` and `reattach_since`; M2d needs no migration and no new job (an
-`--app-only` deploy is enough once M2b's timer exists). Nothing existing is changed and nothing is backfilled. M1's `down()` refuses and changes nothing while either table has a row (remove the additional inbounds from
+`Version20261103090000` (M2c) adds `reattach_count` and `reattach_since`; M2d and M2e need no migration and no new job (an
+`--app-only` deploy is enough once M2b's timer exists; M2e's resend of a lost delivery message runs in the existing
+`orders` job, and orders paid before M2e are never resent). Nothing existing is changed and nothing is backfilled. M1's `down()` refuses and changes nothing while either table has a row (remove the additional inbounds from
 every plan first) or while M2b's migration is applied, and M2b's `down()` refuses while M2c's is applied (roll back the
 newest first). The M2b timer (`amoobot-job-attach-inbounds`) is installed by a **full** `deploy.sh` run, not
 `--app-only`; until then run the command by hand. Right after the deploy that installs it, `amoobot-check-jobs` and
