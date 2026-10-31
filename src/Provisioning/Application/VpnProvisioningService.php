@@ -18,6 +18,7 @@ use App\Provisioning\Domain\VpnPanelDriverInterface;
 use App\Provisioning\Domain\VpnServiceStatus;
 use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http\SecretRedactor;
 use App\Provisioning\Infrastructure\VpnPanelDriverRegistry;
+use App\Shared\Infrastructure\SafeErrorLog;
 use App\Shop\Application\MultiInboundSettings;
 use App\Shop\Domain\OrderStatus;
 use Doctrine\ORM\EntityManagerInterface;
@@ -382,7 +383,7 @@ class VpnProvisioningService
         int $trafficLimitGb,
         int $durationDays
     ): void {
-        error_log(sprintf(
+        SafeErrorLog::write(sprintf(
             '[VpnProvisioningService] provisioning_config source="%s" service_id=%d order_id=%d panel_id=%d inbound_id=%d uuid="%s" sub_id="%s" generated_config_link_count=%d config_text_empty=%s subscription_url_present=%s custom_order=%s final_username="%s" traffic_limit_gb=%d duration_days=%d',
             $source,
             $serviceId ?? 0,
@@ -395,7 +396,7 @@ class VpnProvisioningService
             $configTextEmpty ? 'yes' : 'no',
             $subscriptionUrlPresent ? 'yes' : 'no',
             $customOrder ? 'yes' : 'no',
-            $finalUsername,
+            SecretRedactor::maskClientEmail($finalUsername), // tg_<telegram id>_order_<n>: never the Telegram id (M2d B3)
             $trafficLimitGb,
             $durationDays
         ));

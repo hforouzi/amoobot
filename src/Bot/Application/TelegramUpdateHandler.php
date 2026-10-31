@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Bot\Application;
 
 use App\Provisioning\Domain\PublicUrlPolicy;
+use App\Shared\Infrastructure\SafeErrorLog;
 use App\Subscription\Application\AppDownloadCatalog;
 use App\Bot\Application\Admin\AdminBotHandler;
 use App\Bot\Application\DeepLink\StartPayload;
@@ -2883,6 +2884,6 @@ class TelegramUpdateHandler
 
     private function debugLog(string $message): void
     {
-        error_log('[TelegramUpdateHandler] '.$message);
+        SafeErrorLog::write('[TelegramUpdateHandler] '.$message);
     }
 }

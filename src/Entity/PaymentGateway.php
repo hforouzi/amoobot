@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Entity;
 
 use App\Payment\Domain\PaymentGatewayType;
+use App\Shared\Infrastructure\SafeErrorLog;
 use Doctrine\DBAL\Types\Types;
 use Doctrine\ORM\Mapping as ORM;
 
@@ -178,7 +179,7 @@ class PaymentGateway
 
         $encoded = json_encode($this->config, self::JSON_FLAGS);
         if (false === $encoded) {
-            error_log('[PaymentGateway] config_json_encode_failed id='.(string) ($this->id ?? 0));
+            SafeErrorLog::write('[PaymentGateway] config_json_encode_failed id='.(string) ($this->id ?? 0));
 
             return '';
         }

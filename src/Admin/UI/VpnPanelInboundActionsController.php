@@ -19,6 +19,7 @@ use App\Provisioning\Application\VpnServiceConfigRefreshService;
 use App\Provisioning\Domain\Dto\CreateVpnServiceRequest;
 use App\Provisioning\Domain\VpnServiceStatus;
 use App\Provisioning\Infrastructure\VpnPanelDriverRegistry;
+use App\Shared\Infrastructure\SafeErrorLog;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\RedirectResponse;
@@ -309,6 +310,6 @@ final class VpnPanelInboundActionsController extends AbstractController
 
     private function log(string $message): void
     {
-        error_log('[VpnPanelInboundActionsController] '.$message);
+        SafeErrorLog::write('[VpnPanelInboundActionsController] '.$message);
     }
 }

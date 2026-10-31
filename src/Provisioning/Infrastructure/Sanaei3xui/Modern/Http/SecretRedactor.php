@@ -16,6 +16,33 @@ final class SecretRedactor
     private const CONFIG_SCHEMES = 'vless|vmess|trojan|ssr?|hysteria2?|hy2|tuic|wireguard|wg|socks5?|naive\+https|juicity';
 
     /**
+     * Log fields that hold a Telegram user id (a customer's, in a private chat): masked in every log line (M2d B3).
+     *
+     * @var list<string>
+     */
+    public const TELEGRAM_ID_KEYS = ['chat', 'chat_id', 'chatId', 'actor_id', 'actorId', 'telegram_id', 'telegramId', 'telegram_user_id', 'telegramUserId', 'tg_id', 'tgId', 'from_id'];
+
+    /**
+     * What every log line goes through (SafeErrorLog, RedactingLogger; M2d B3): the customer's Telegram id is never
+     * written. A panel client email tg_<telegram id>_order_<n> becomes tg_[redacted]_order_<n> (the order id stays for
+     * support), and a key=value / key: value / "key":value pair of TELEGRAM_ID_KEYS keeps its key and loses its value.
+     * Nothing else changes, so the log lines keep their format and their other ids.
+     */
+    public static function forLog(string $text): string
+    {
+        $text = self::maskClientEmail($text);
+        $keys = implode('|', array_map(static fn (string $k): string => preg_quote($k, '/'), self::TELEGRAM_ID_KEYS));
+
+        return preg_replace('/(["\']?\b(?:'.$keys.')\b["\']?\s*[=:]\s*["\']?)-?\d{4,}/', '$1'.self::MASK, $text) ?? $text;
+    }
+
+    /** tg_<telegram id>_order_<n> (a generated panel client email) without the Telegram id. */
+    public static function maskClientEmail(string $text): string
+    {
+        return preg_replace('/(?<![A-Za-z0-9])tg_\d+(?=_order_\d)/i', 'tg_'.self::MASK, $text) ?? $text;
+    }
+
+    /**
      * @param list<string|null> $secrets exact values to remove (the panel's token, password)
      */
     public static function redact(string $text, array $secrets = [], int $maxLength = 500): string
@@ -62,7 +89,7 @@ final class SecretRedactor
         ) ?? $text;
         $text = preg_replace('#/s/[A-Za-z0-9_-]{43}#', '/s/'.self::MASK, $text) ?? $text;
         $text = preg_replace('/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i', self::MASK, $text) ?? $text;
-        $text = preg_replace('/(?<![A-Za-z0-9])tg_\d+(?=_order_\d)/i', 'tg_'.self::MASK, $text) ?? $text;
+        $text = self::maskClientEmail($text);
 
         // A value mask() already shortened ("••••wxyz") stays: it is the correlation hint a log line keeps on purpose.
         return preg_replace('/("?\b(?:sub_?id|client_?uuid|uuid|password|passwd)"?\s*[:=]\s*)(?!"?(?:••••|\[redacted\]))("[^"]*"|\'[^\']*\'|[^\s"\',;&}]+)/i', '$1"'.self::MASK.'"', $text) ?? $text;

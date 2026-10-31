@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Provisioning\Application;
 
 use App\Entity\VpnService;
+use App\Shared\Infrastructure\SafeErrorLog;
 
 final class ServiceConfigDeliveryRefresher
 {
@@ -83,6 +84,6 @@ final class ServiceConfigDeliveryRefresher
 
     private function log(string $message): void
     {
-        error_log('[ServiceConfigDeliveryRefresher] '.$message);
+        SafeErrorLog::write('[ServiceConfigDeliveryRefresher] '.$message);
     }
 }

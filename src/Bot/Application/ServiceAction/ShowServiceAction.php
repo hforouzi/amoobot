@@ -6,6 +6,7 @@ namespace App\Bot\Application\ServiceAction;
 
 use App\Bot\Application\ServiceManagementService;
 use App\Security\AdminPermission;
+use App\Shared\Infrastructure\SafeErrorLog;
 
 final class ShowServiceAction implements ServiceActionInterface
 {
@@ -35,7 +36,7 @@ final class ShowServiceAction implements ServiceActionInterface
         }
 
         $serviceId = (int) str_replace('admin_service_view:', '', $context->data);
-        error_log(sprintf('[ServiceAction] admin_service_view_opened service_id=%d actor_id="%s"', $serviceId, $context->actorId));
+        SafeErrorLog::write(sprintf('[ServiceAction] admin_service_view_opened service_id=%d actor_id="%s"', $serviceId, $context->actorId));
         $this->serviceManagementService->showAdminServiceDetail($serviceId, $context->chatId, $context->callbackId, $context->granted());
     }
 }

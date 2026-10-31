@@ -14,6 +14,7 @@ use App\Payment\Domain\PaymentGatewayType;
 use App\Payment\Domain\PaymentReturnUrl;
 use App\Payment\Domain\Webhook\GatewayNotification;
 use App\Payment\Domain\Webhook\NotificationAwareGatewayInterface;
+use App\Shared\Infrastructure\SafeErrorLog;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Contracts\HttpClient\Exception\TransportExceptionInterface;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
@@ -1317,6 +1318,6 @@ final class NowPaymentsGateway implements PaymentGatewayInterface, NotificationA
     {
         unset($context['api_key'], $context['ipn_secret']);
         $encoded = json_encode($context, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-        error_log(sprintf('[NowPaymentsGateway] %s %s', $event, false === $encoded ? '{}' : $encoded));
+        SafeErrorLog::write(sprintf('[NowPaymentsGateway] %s %s', $event, false === $encoded ? '{}' : $encoded));
     }
 }

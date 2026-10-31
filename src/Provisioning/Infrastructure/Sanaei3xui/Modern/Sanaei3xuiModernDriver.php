@@ -28,6 +28,7 @@ use App\Provisioning\Domain\TrafficLimitDriverInterface;
 use App\Provisioning\Domain\VpnPanelDriverInterface;
 use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http\PanelApiException;
 use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http\PanelFailure;
+use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http\SecretRedactor;
 use App\Provisioning\Infrastructure\Sanaei3xui\Sanaei3xuiRemoteClientRef;
 use App\Provisioning\Infrastructure\Sanaei3xui\Sanaei3xuiRemoteIdParser;
 use Psr\Clock\ClockInterface;
@@ -127,7 +128,7 @@ final class Sanaei3xuiModernDriver implements VpnPanelDriverInterface, ExistingC
             } elseif (0 !== strcasecmp((string) ($existing['id'] ?? ''), $uuid)) {
                 throw new \RuntimeException(sprintf('A client named "%s" already exists on the panel with another UUID; resolve it on the panel, then retry.', $email), 0);
             } else {
-                $this->logger->warning('sanaei_modern_create_adopted_after_failure', ['panel_id' => $panel->getId(), 'email' => $email, 'failure' => $e->failure->value]);
+                $this->logger->warning('sanaei_modern_create_adopted_after_failure', ['panel_id' => $panel->getId(), 'email' => SecretRedactor::maskClientEmail($email), 'failure' => $e->failure->value]);
             }
         }
 
@@ -168,7 +169,7 @@ final class Sanaei3xuiModernDriver implements VpnPanelDriverInterface, ExistingC
         if (null === $client) {
             return null;
         }
-        $this->logger->warning('sanaei_modern_existing_client_found', ['panel_id' => $panel->getId(), 'email' => $client['email'] ?? $email, 'matched_by' => $matchedBy]);
+        $this->logger->warning('sanaei_modern_existing_client_found', ['panel_id' => $panel->getId(), 'email' => SecretRedactor::maskClientEmail((string) ($client['email'] ?? $email)), 'matched_by' => $matchedBy]);
 
         $expiryMs = (int) ($client['expiryTime'] ?? 0);
         $totalBytes = (int) ($client['totalGB'] ?? 0);

@@ -9,6 +9,7 @@ use App\Entity\VpnService;
 use App\Provisioning\Domain\PublicUrlPolicy;
 use App\Provisioning\Infrastructure\Sanaei3xui\Sanaei3xuiConfigGenerator;
 use App\Provisioning\Infrastructure\Sanaei3xui\Sanaei3xuiRemoteIdParser;
+use App\Shared\Infrastructure\SafeErrorLog;
 
 final class VpnAccessLinkGenerator
 {
@@ -133,7 +134,7 @@ final class VpnAccessLinkGenerator
             }
         }
 
-        error_log(sprintf(
+        SafeErrorLog::write(sprintf(
             '[VpnAccessLinkGenerator] external_proxy_detected=%s external_proxy_list_count=%d generated_link_count=%d generated_subscription_url=%s missing="%s"',
             $externalProxyDetected ? 'yes' : 'no',
             count($externalProxyList),
@@ -284,7 +285,7 @@ final class VpnAccessLinkGenerator
             $subId = trim((string) ($parsedRemote?->subId ?? ''));
         }
         if ('' === $subId) {
-            error_log(sprintf(
+            SafeErrorLog::write(sprintf(
                 '[VpnAccessLinkGenerator] subscription_url_skipped reason="missing_sub_id" service_id=%d',
                 $service->getId() ?? 0
             ));
@@ -331,7 +332,7 @@ final class VpnAccessLinkGenerator
         }
 
         if ('' === $base) {
-            error_log(sprintf(
+            SafeErrorLog::write(sprintf(
                 '[VpnAccessLinkGenerator] subscription_url_skipped reason="missing_base_url" service_id=%d panel_id=%d',
                 $service->getId() ?? 0,
                 $panel->getId() ?? 0
@@ -339,7 +340,7 @@ final class VpnAccessLinkGenerator
             return null;
         }
         if (false === filter_var($base, FILTER_VALIDATE_URL)) {
-            error_log(sprintf(
+            SafeErrorLog::write(sprintf(
                 '[VpnAccessLinkGenerator] subscription_url_skipped reason="invalid_base_url" service_id=%d panel_id=%d base="%s"',
                 $service->getId() ?? 0,
                 $panel->getId() ?? 0,
@@ -754,7 +755,7 @@ final class VpnAccessLinkGenerator
                 PHP_QUERY_RFC3986
             );
 
-            error_log(sprintf(
+            SafeErrorLog::write(sprintf(
                 '[VpnAccessLinkGenerator] external_proxy_entry dest="%s" port=%d security="%s" network="%s"',
                 $dest,
                 $port,

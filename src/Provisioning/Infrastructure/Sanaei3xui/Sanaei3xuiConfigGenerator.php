@@ -6,6 +6,7 @@ namespace App\Provisioning\Infrastructure\Sanaei3xui;
 
 use App\Entity\VpnInbound;
 use App\Entity\VpnPanel;
+use App\Shared\Infrastructure\SafeErrorLog;
 
 final class Sanaei3xuiConfigGenerator
 {
@@ -89,7 +90,7 @@ final class Sanaei3xuiConfigGenerator
                 rawurlencode($remark)
             );
 
-            error_log(sprintf(
+            SafeErrorLog::write(sprintf(
                 '[Sanaei3xuiConfigGenerator] generated_link address="%s" port=%d security="%s" sub_id_present=%s',
                 $address,
                 $port,
@@ -98,7 +99,7 @@ final class Sanaei3xuiConfigGenerator
             ));
         }
 
-        error_log(sprintf(
+        SafeErrorLog::write(sprintf(
             '[Sanaei3xuiConfigGenerator] external_proxy_count=%d generated_link_count=%d inbound_id=%d',
             count($externalProxies),
             count($links),
@@ -205,7 +206,7 @@ final class Sanaei3xuiConfigGenerator
             );
         }
 
-        error_log(sprintf(
+        SafeErrorLog::write(sprintf(
             '[Sanaei3xuiConfigGenerator] legacy_external_proxy_count=%d legacy_link_generation_address_source=%s generated_link_count=%d generated_link_has_host_param=%s',
             count($externalProxies),
             [] !== $externalProxies ? 'external_proxy' : 'panel',

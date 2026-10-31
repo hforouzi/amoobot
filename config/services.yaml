@@ -133,3 +133,10 @@ when@test:
     parameters:
         app.downloads_dir_default: '%kernel.project_dir%/var/test-downloads'
         app.branding_dir_default: '%kernel.project_dir%/var/test-branding'
+    services:
+        # Under App\Shared\Infrastructure\RedactingLogger (a higher priority decorates first): records what reaches the logger.
+        App\Tests\Support\RecordingLogger:
+            decorates: logger
+            decoration_priority: 10
+            arguments: ['@.inner']
+            public: true

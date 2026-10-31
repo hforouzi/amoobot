@@ -10,6 +10,7 @@ use App\Provisioning\Domain\Dto\RenewVpnServiceRequest;
 use App\Provisioning\Domain\ServiceActivationDriverInterface;
 use App\Provisioning\Domain\VpnServiceStatus;
 use App\Provisioning\Infrastructure\VpnPanelDriverRegistry;
+use App\Shared\Infrastructure\SafeErrorLog;
 use Doctrine\ORM\EntityManagerInterface;
 
 /**
@@ -142,7 +143,7 @@ final class ServiceAdministration
 
             return true;
         } catch (\Throwable $e) {
-            error_log(sprintf('[ServiceAdministration] service_sync_failure action=%s service_id=%d message="%s"', $action, (int) $service->getId(), $e->getMessage()));
+            SafeErrorLog::write(sprintf('[ServiceAdministration] service_sync_failure action=%s service_id=%d message="%s"', $action, (int) $service->getId(), $e->getMessage()));
 
             return false;
         }

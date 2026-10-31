@@ -7,6 +7,7 @@ namespace App\Provisioning\Application;
 use App\Entity\VpnInbound;
 use App\Entity\VpnPanel;
 use App\Provisioning\Infrastructure\Sanaei3xui\Sanaei3xuiApiClient;
+use App\Shared\Infrastructure\SafeErrorLog;
 use Doctrine\ORM\EntityManagerInterface;
 
 final class VpnInboundSyncService
@@ -64,7 +65,7 @@ final class VpnInboundSyncService
                     $localInbound->getId() ?? 0,
                     $localInbound->getRemoteInboundId()
                 );
-                error_log(sprintf(
+                SafeErrorLog::write(sprintf(
                     '[VpnInboundSyncService] inbound_missing_on_panel panel_id=%d local_inbound_id=%d remote_inbound_id="%s"',
                     $panel->getId() ?? 0,
                     $localInbound->getId() ?? 0,
@@ -264,7 +265,7 @@ final class VpnInboundSyncService
         $serviceName = $this->externalProxyText($externalProxy, ['serviceName', 'grpc.serviceName'], 'externalProxy.serviceName') ?? $serviceName;
         $tlsAlpn = $alpnFromExternalProxy ?? $tlsAlpn;
 
-        error_log(sprintf(
+        SafeErrorLog::write(sprintf(
             '[VpnInboundSyncService] external_proxy_detected remote_inbound_id="%s" detected=%s host="%s" port="%s" external_proxy_list_count=%d',
             $remoteInboundId,
             [] !== $externalProxy || [] !== $externalProxyList ? 'yes' : 'no',
@@ -681,7 +682,7 @@ final class VpnInboundSyncService
             $preview = 'object';
         }
 
-        error_log(sprintf(
+        SafeErrorLog::write(sprintf(
             '[VpnInboundSyncService] metadata_type_mismatch field="%s" expected="%s" got="%s" preview="%s"',
             $field,
             $expected,
@@ -708,7 +709,7 @@ final class VpnInboundSyncService
             return $baseUrlHost;
         }
 
-        error_log(sprintf(
+        SafeErrorLog::write(sprintf(
             '[VpnInboundSyncService] inbound_host_missing panel_id=%d remote_inbound_id="%s"',
             $panel->getId() ?? 0,
             $inbound->getRemoteInboundId()
@@ -759,7 +760,7 @@ final class VpnInboundSyncService
 
         $decoded = json_decode($text, true);
         if (JSON_ERROR_NONE !== json_last_error() || !is_array($decoded)) {
-            error_log(sprintf(
+            SafeErrorLog::write(sprintf(
                 '[VpnInboundSyncService] inbound_section_invalid_json remote_inbound_id="%s" field="%s"',
                 $remoteInboundId,
                 $field
@@ -783,7 +784,7 @@ final class VpnInboundSyncService
 
     private function logInboundSyncSummary(VpnInbound $inbound): void
     {
-        error_log(sprintf(
+        SafeErrorLog::write(sprintf(
             '[VpnInboundSyncService] inbound_synced remote_inbound_id="%s" protocol="%s" port="%s" network="%s" security="%s" host="%s" sni="%s" path="%s" public_key=%s short_id=%s',
             $inbound->getRemoteInboundId(),
             (string) ($inbound->getProtocol() ?? ''),

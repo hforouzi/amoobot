@@ -7,6 +7,7 @@ namespace App\Bot\Application\ServiceAction;
 use App\Bot\Application\ServiceManagementService;
 use App\Bot\Infrastructure\TelegramApiClient;
 use App\Security\AdminPermission;
+use App\Shared\Infrastructure\SafeErrorLog;
 
 final class DeleteServiceAction implements ServiceActionInterface
 {
@@ -25,7 +26,7 @@ final class DeleteServiceAction implements ServiceActionInterface
     public function handle(ServiceActionContext $context): void
     {
         if (!$context->can(AdminPermission::SERVICES_DELETE)) {
-            error_log(sprintf('[ServiceAction] unauthorized service_delete actor_id="%s"', $context->actorId));
+            SafeErrorLog::write(sprintf('[ServiceAction] unauthorized service_delete actor_id="%s"', $context->actorId));
             $this->telegramApiClient->answerCallbackQuery($context->callbackId, 'Unauthorized', true);
 
             return;
@@ -34,7 +35,7 @@ final class DeleteServiceAction implements ServiceActionInterface
         if (str_starts_with($context->data, 'service_delete_confirm:')) {
             $serviceId = (int) str_replace('service_delete_confirm:', '', $context->data);
             if ($serviceId <= 0) {
-                error_log(sprintf('[ServiceAction] invalid service_delete_confirm data="%s" actor_id="%s"', $context->data, $context->actorId));
+                SafeErrorLog::write(sprintf('[ServiceAction] invalid service_delete_confirm data="%s" actor_id="%s"', $context->data, $context->actorId));
                 $this->telegramApiClient->answerCallbackQuery($context->callbackId, 'سرویس معتبر نیست.', true);
 
                 return;
@@ -49,7 +50,7 @@ final class DeleteServiceAction implements ServiceActionInterface
 
         $serviceId = (int) str_replace('service_delete:', '', $context->data);
         if ($serviceId <= 0) {
-            error_log(sprintf('[ServiceAction] invalid service_delete data="%s" actor_id="%s"', $context->data, $context->actorId));
+            SafeErrorLog::write(sprintf('[ServiceAction] invalid service_delete data="%s" actor_id="%s"', $context->data, $context->actorId));
             $this->telegramApiClient->answerCallbackQuery($context->callbackId, 'سرویس معتبر نیست.', true);
 
             return;
