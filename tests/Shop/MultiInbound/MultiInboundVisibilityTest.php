@@ -129,6 +129,27 @@ final class MultiInboundVisibilityTest extends IntegrationTestCase
         }
     }
 
+    public function testAServerThePanelCannotAttachSaysContactSupportNotAutomatically(): void
+    {
+        // M2d B4: the panel left modern mode (or the service is on another panel type). The scheduled run skips such a
+        // service, so its not-connected inbounds, attempts left or not (NOT_MODERN, SWITCHED_OFF), are never retried.
+        $db = $this->em->getConnection();
+        $db->executeStatement("UPDATE vpn_panel SET sanaei_integration_mode = 'legacy' WHERE id = ?", [$this->panel->getId()]);
+        $db->executeStatement('UPDATE vpn_service_inbound SET attempts = 1, last_error = ? WHERE service_id = ? AND status = ?', [\App\Provisioning\Application\VpnProvisioningService::SWITCHED_OFF, $this->service->getId(), 'failed']);
+        $this->em->clear();
+
+        $bot = $this->botDetail();
+        self::assertStringContainsString("\nتعداد سرورها: 3\n1 سرور هنوز وصل نشده است؛ لطفاً با پشتیبانی تماس بگیرید.\n", $bot);
+        self::assertStringNotContainsString('خودکار اضافه می‌شود', $bot);
+        $session = $this->authenticate(self::BUYER);
+        foreach (['' => 'لطفاً با پشتیبانی تماس بگیرید', '?lang=en' => 'Please contact support.'] as $query => $support) {
+            $page = new Crawler($this->appGet('/app/view/services/'.$this->service->getId().$query, $session));
+            self::assertCount(0, $page->filter('[data-servers-connecting]'), 'never "added automatically" '.$query);
+            self::assertCount(1, $page->filter('[data-servers-not-connected]'));
+            self::assertStringContainsString($support, $page->filter('[data-servers-not-connected]')->text());
+        }
+    }
+
     public function testNothingChangesForTheCustomerWithTheSwitchOffOrWithoutAdditionalInbounds(): void
     {
         $single = $this->sell($this->createPlan(90000, $this->em->find(VpnInbound::class, $this->primary->getId()) ?? self::fail('inbound')), '8762');
