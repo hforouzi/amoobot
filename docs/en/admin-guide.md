@@ -95,22 +95,27 @@ carries every attached inbound.
   answer refuses the save.
 - **What a purchase does:** the order keeps the plan's inbounds as they were when it was taken; provisioning uses
   that list, not the plan as edited later (orders taken before M2c use the live plan). One client is added on the
-  primary and every additional inbound in one request; inbounds the panel did not attach are attached once more.
+  primary and every additional inbound in one request; inbounds the panel did not attach are attached right after the
+  payment is recorded (below).
   **The service is delivered as soon as the primary works** (D2): an additional inbound that still fails is recorded as
   "not attached" with the reason, and never fails the payment, the order or the wallet. Further rules:
-  - the attach calls made while the payment is being settled are limited to 20 seconds in all and 3 one-by-one
-    attempts; the rest is left "attaching…" for the scheduled run. When the panel cannot be read back after the attach,
-    the inbounds are "attaching…" too (the scheduled run checks the panel and finishes them) and the order is still
-    provisioned;
+  - while the payment is being recorded (the order is locked then) only the add and its read back are sent to the
+    panel; no inbound is attached then. Right after it, before the customer's delivery message, one attach pass runs
+    with nothing locked: at most **15 seconds in all** (every call of the pass included: a call is cut short at the
+    limit and none is sent after it) and at most 3 one-by-one attaches after a refused batch. What is left stays
+    "attaching…" for the scheduled run; when the panel cannot be read back after the attach the inbounds are "attaching…"
+    too (the scheduled run checks the panel and finishes them). The payment and the order are never changed by it;
   - an inbound inactive or on another panel by then is recorded "not attached" with that reason (alerted at the next
     run); an inbound **deleted** by then cannot be attached and the admins get an alert naming it at once;
   - with the switch **off** when the paid order is provisioned: the customer gets the primary on any panel, nothing is
     sent to the panel for the additional inbounds, and they are recorded "not attached" ("switched off when the service
-    was created"); after turning the switch on, use "Retry attach";
-  - with the switch **on** and the panel in **legacy** mode the plan is not sold; an order paid anyway (e.g. the mode
-    changed in between) is never provisioned on the primary alone: it becomes "provisioning failed" with "Several
-    inbounds need the panel in modern mode (Panels → test connection)" and you get the usual admin alert (fix the panel
-    mode, then retry the order as for any provisioning failure).
+    was created"); after the switch is on again the scheduled run attaches them (or "Retry attach" at once), except on a
+    panel that is not in modern mode;
+  - with the switch **on** and the panel **not in modern mode** (legacy, or another panel type) the plan is not sold; an
+    order paid anyway (e.g. the mode changed in between) still gets its primary, exactly as a one-inbound plan: the
+    additional inbounds are recorded "not attached" with "the panel is not in modern mode (Panels → test connection);
+    attached once it is", you get one "not attached" alert at the next run, and the customer is told to contact
+    support. Set the panel to modern and the next run (:25/:55) attaches them.
 - **Service page** (switch on): "Additional inbounds" lists each one with its state (attached, attaching…, not
   attached, detached), the number of attempts and the last error. **"Retry attach"** (SERVICES_MANAGE) appears while one
   is not attached: it attaches the missing inbounds to the existing client (it never creates a second client), refreshes
@@ -125,7 +130,8 @@ carries every attached inbound.
   primary or additional.
 - **Deleting** an inbound that a plan uses as an additional inbound, or a panel with such an inbound, is refused and the
   plans are named. Deleting a plan's primary inbound works as before (the plan then has no inbound).
-- Trial plans keep one inbound.
+- **Trial plans keep one inbound:** a trial's hidden plan ("[Trial] …" in the plan list) refuses additional inbounds on
+  save, and a trial is not given out while its hidden plan has any (from before this rule).
 
 ### Scheduled retry and alerts
 
@@ -150,8 +156,9 @@ carries every attached inbound.
   one message per service when an inbound fails for the first time, one when its attempts are used up, and one when it
   is attached again; plus one, at once, when an inbound of the order was deleted before provisioning. They name the
   service, user, plan and inbound by id and title and quote the error, never a link, UUID, client email, token or panel
-  address. An inbound found removed on the panel and attached again in the same run sends nothing. The stored last error
-  and the job's log lines never show a customer's Telegram id (a client email is written `tg_[redacted]_order_<n>`).
+  address. An inbound found removed on the panel and attached again in the same run sends nothing. No stored error and no
+  log line of the app (the jobs', the web's and the payment plugins') shows a customer's Telegram id: a client email is
+  written `tg_[redacted]_order_<n>` and a Telegram id field `[redacted]`.
 - **Where to see failures:** the services list has a badge "N inbounds not attached" and a tab **"Inbounds not
   attached"**; the service page lists each inbound with its state, attempts, last error and when the next automatic try
   is (or that the attempts are used up); the panel page and `app:panel:doctor <panel id>` count the not attached ones.
@@ -159,14 +166,15 @@ carries every attached inbound.
   and the attempt limit.
 - **Customers** (bot service detail, Mini App service page): "Servers: N" and, for the ones not attached, either "1
   server is still being connected and will be added automatically" (the scheduled retry will still try it) or "1 server
-  is not connected yet. Please contact support." (its attempts are used up, a re-attach loop was stopped, or the
-  scheduled retry is off). Never which one, where or why. Services without additional inbounds look as before.
+  is not connected yet. Please contact support." (its attempts are used up, a re-attach loop was stopped, the scheduled
+  retry is off, or the service's panel is not in modern mode so no automatic retry runs). Never which one, where or
+  why. Services without additional inbounds look as before.
 - **How to disable:** untick `plans.attach_retry_enabled` (no retry, no check; the alerts still go out), or turn the
   switch `plans.multi_inbound_enabled` off (the job then reads and changes nothing, and nothing is shown).
 
 ### Before turning the switch on (real-panel checklist, 3x-ui v3.11.0)
 
-Run this once on your own panel with test inbounds, not customers' inbounds, after deploying M2c (a **full**
+Run this once on your own panel with test inbounds, not customers' inbounds, after deploying M2d (a **full**
 `deploy.sh`, so the `attach-inbounds` timer exists). Turn the switch on, but keep **every multi-inbound plan inactive
 except one test plan** that only you buy (from your own Telegram account, paying from your wallet or with a card payment
 you approve yourself). Steps marked **required** must pass before you sell; if one fails, turn the switch off and report
@@ -175,7 +183,7 @@ The optional ones are needed only if you will sell that combination.
 
 1. **Required: panel mode.** Panels → your panel → "Test connection" reports **modern**. Prefer setting the mode to
    "modern" rather than "auto", so a panel change cannot silently switch it (with legacy the plan is not sold, and an
-   order paid meanwhile fails closed).
+   order paid meanwhile gets its primary only: step 12).
 2. **Required: when the plan is sold (F1).** In 3x-ui create three test inbounds: VLESS-REALITY (TCP), VMess-WS,
    Trojan (TLS). In the admin panel: Panels → "Sync inbounds". Create the test plan: primary VLESS-REALITY, additional
    VMess-WS and Trojan; save (warnings about several protocols are expected) and activate it. Then check, from your own
@@ -219,24 +227,36 @@ The optional ones are needed only if you will sell that combination.
 11. **Required: reset links and claim.** On a new test service use "Reset links" in the bot, then a claim link to move
     the service to a second Telegram account: the client keeps its three inbounds, and the subscription imports three
     configs with the new UUID.
-12. Optional: **VLESS vision + VLESS-WS** on one client (primary VLESS-REALITY with `xtls-rprx-vision`, additional
+12. **Required: panel not in modern mode after payment (B2).** Start a purchase of the test plan and stop at the payment
+    step. Set the panel's mode to **legacy** (Panels → your panel), then pay. Expected: the payment is approved and the
+    service delivered on the primary only (it connects); both rows "not attached" with "the panel is not in modern
+    mode"; at the next run (:25/:55) one "not attached" alert for the service, and no second one at the run after;
+    the customer's service page says "not connected yet. Please contact support.", never "added automatically". Set the
+    mode back to **modern**: the next run attaches both rows and the subscription imports three configs.
+13. **Required: nothing waits behind the attach (B1).** In 3x-ui create one more test inbound (VMess), "Sync inbounds",
+    add it to the test plan, then delete it **in 3x-ui only**. Buy the test plan paying by card; approve the payment
+    and at once approve it again from a second browser tab. Expected: the second answers "already processed" without
+    waiting for the first's attach work; the first returns at most about 15 seconds after the service exists; the
+    delivery message carries the links of the inbounds that are attached; the deleted one's row is "not attached".
+    Remove that inbound from the plan afterwards.
+14. Optional: **VLESS vision + VLESS-WS** on one client (primary VLESS-REALITY with `xtls-rprx-vision`, additional
     VLESS-WS). Both connect, the flow applied only where valid; or note that it fails and do not sell that combination.
-13. Optional: **two Shadowsocks inbounds** with the same method; record what works (two different 2022 methods are
+15. Optional: **two Shadowsocks inbounds** with the same method; record what works (two different 2022 methods are
     refused by the plan form).
-14. Optional: **removed by hand.** Remove the client from one inbound by hand in 3x-ui. `verify-links` reports a DIFF
+16. Optional: **removed by hand.** Remove the client from one inbound by hand in 3x-ui. `verify-links` reports a DIFF
     for that inbound. Run `php bin/console app:services:attach-inbounds` (the comparison runs every 6 hours; set the
     row's `checked_at` to NULL to force it): the command reports it found removed and the client is attached again in
     the same run. **No alert is sent** for that (one is sent only if attaching it fails, or once if it keeps being
     removed: the third re-attach within 24 hours is the last, the next removal stops the automatic re-attach with one
     "attempts used up" alert).
 
-When 1 to 11 pass, activate the plans you want to sell.
+When 1 to 13 pass, activate the plans you want to sell.
 
 **Upgrading.** Run the migrations: `Version20261101090000` (M1) adds the `plan_additional_inbound` and
 `vpn_service_inbound` tables; M2a needs no new migration; `Version20261102090000` (M2b) adds the retry columns
 (`next_attempt_at`, `checked_at`, `alert_state`, `alerted_at`) and an index to `vpn_service_inbound`;
-`Version20261103090000` (M2c) adds `reattach_count` and `reattach_since`. Nothing existing is changed and nothing is
-backfilled. M1's `down()` refuses and changes nothing while either table has a row (remove the additional inbounds from
+`Version20261103090000` (M2c) adds `reattach_count` and `reattach_since`; M2d needs no migration and no new job (an
+`--app-only` deploy is enough once M2b's timer exists). Nothing existing is changed and nothing is backfilled. M1's `down()` refuses and changes nothing while either table has a row (remove the additional inbounds from
 every plan first) or while M2b's migration is applied, and M2b's `down()` refuses while M2c's is applied (roll back the
 newest first). The M2b timer (`amoobot-job-attach-inbounds`) is installed by a **full** `deploy.sh` run, not
 `--app-only`; until then run the command by hand. Right after the deploy that installs it, `amoobot-check-jobs` and

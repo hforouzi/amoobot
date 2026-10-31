@@ -49,6 +49,8 @@ final class ProgrammableVpnPanelDriver implements VpnPanelDriverInterface, Exist
     private ?string $failureMessage = null;
     private bool $failAfterCreate = false;
     public int $createCalls = 0;
+    /** @var list<CreateVpnServiceRequest> every create request, in order */
+    public array $createRequests = [];
     public int $renewCalls = 0;
     public int $lookupCalls = 0;
     public ?VpnUsage $usage = null;
@@ -84,6 +86,7 @@ final class ProgrammableVpnPanelDriver implements VpnPanelDriverInterface, Exist
 
     public function reset(): void
     {
+        $this->createRequests = [];
         $this->failuresLeft = 0;
         $this->failAfterCreate = false;
         $this->createCalls = 0;
@@ -225,6 +228,7 @@ final class ProgrammableVpnPanelDriver implements VpnPanelDriverInterface, Exist
     public function createService(CreateVpnServiceRequest $request, ?VpnPanel $panel = null): CreatedVpnService
     {
         ++$this->createCalls;
+        $this->createRequests[] = $request;
         $delay = (int) ($_SERVER['TEST_PANEL_DELAY_MS'] ?? getenv('TEST_PANEL_DELAY_MS') ?: 0);
         if ($delay > 0) {
             usleep($delay * 1000);

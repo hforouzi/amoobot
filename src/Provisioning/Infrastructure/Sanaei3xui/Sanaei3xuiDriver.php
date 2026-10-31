@@ -18,6 +18,7 @@ use App\Provisioning\Domain\ExistingClientAwareDriverInterface;
 use App\Provisioning\Domain\TrafficLimitDriverInterface;
 use App\Provisioning\Domain\VpnPanelDriverInterface;
 use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http\SecretRedactor;
+use App\Shared\Infrastructure\SafeErrorLog;
 use Symfony\Component\Uid\Uuid;
 
 /**
@@ -804,7 +805,7 @@ final class Sanaei3xuiDriver implements VpnPanelDriverInterface, ExistingClientA
     /** Last line of defence: a URL path, config link or UUID that reached a message is masked here too. */
     private function log(string $message): void
     {
-        error_log('[Sanaei3xuiDriver] '.SecretRedactor::maskAccess($message));
+        SafeErrorLog::write('[Sanaei3xuiDriver] '.SecretRedactor::maskAccess($message));
     }
 
     private function toNonNegativeInt(mixed $value): ?int

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Command;
 
 use App\Entity\Plan;
+use App\Shared\Infrastructure\SafeErrorLog;
 use App\Shop\Application\PlanPriceAdjustmentService;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
@@ -112,7 +113,7 @@ final class AdjustPlanPricesCommand extends Command
 
         foreach ($changes as $change) {
             $plan = $change['plan'];
-            error_log(sprintf(
+            SafeErrorLog::write(sprintf(
                 '[AdjustPlanPricesCommand] plan_id=%d field=%s before=%d after=%d',
                 $plan->getId() ?? 0,
                 (string) $change['field'],

@@ -34,6 +34,7 @@ broadcast.format.html.span: "Line {{ line }}: Telegram accepts <span> only as <s
 plan.additional_inbounds.feature_off: "Additional inbounds are switched off (Settings, Plans tab): they cannot be changed."
 plan.additional_inbounds.no_primary: "Choose the plan's inbound first: additional inbounds go with it."
 plan.additional_inbounds.customizable: "A plan with custom traffic or duration keeps one inbound: remove the additional inbounds or turn custom pricing off."
+plan.additional_inbounds.trial: "This is the hidden plan of a trial, and a trial plan keeps one inbound: remove the additional inbounds."
 plan.additional_inbounds.too_many: "At most %max% additional inbounds."
 plan.additional_inbounds.primary_repeated: "%inbound% is the plan's inbound already; it cannot also be an additional one."
 plan.additional_inbounds.other_panel: "%inbound% is on another panel: every inbound of a plan must be on the panel of the plan's inbound."

@@ -7,6 +7,7 @@ namespace App\Bot\Application;
 use App\Bot\Application\BotTextResolver;
 use App\Bot\Infrastructure\TelegramApiClient;
 use App\Entity\Order;
+use App\Shared\Infrastructure\SafeErrorLog;
 use App\Wallet\Application\WalletPayment;
 use App\Entity\OrderDraft;
 use App\Entity\Payment;
@@ -1645,7 +1646,7 @@ class ServiceManagementService
 
     private function debugLog(string $message): void
     {
-        error_log('[ServiceManagementService] '.$message);
+        SafeErrorLog::write('[ServiceManagementService] '.$message);
     }
 
     private function parsePositiveInt(string $text): ?int

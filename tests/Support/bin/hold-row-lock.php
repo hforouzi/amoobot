@@ -10,7 +10,7 @@ declare(strict_types=1);
 
 [$container, $entityManager] = require __DIR__.'/boot-test-kernel.php';
 
-[$ready, $table, $id, $milliseconds] = array_slice($argv, 1) + array_fill(0, 4, '');
+[$ready, $table, $id, $milliseconds] = array_slice($argv ?? [], 1) + array_fill(0, 4, '');
 if (!in_array($table, ['user', 'reseller', 'wallet'], true)) {
     throw new LogicException('unexpected table');
 }

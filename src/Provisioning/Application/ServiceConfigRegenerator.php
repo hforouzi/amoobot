@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Provisioning\Application;
 
 use App\Entity\VpnService;
+use App\Shared\Infrastructure\SafeErrorLog;
 use Doctrine\ORM\EntityManagerInterface;
 
 /**
@@ -119,6 +120,6 @@ final class ServiceConfigRegenerator
 
     private function log(string $message): void
     {
-        error_log('[ServiceConfigRegenerator] '.$message);
+        SafeErrorLog::write('[ServiceConfigRegenerator] '.$message);
     }
 }

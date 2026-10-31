@@ -30,6 +30,8 @@ use Symfony\Contracts\HttpClient\ResponseInterface;
  * - a GET may cap the answer's size (maxBodyBytes: counted on the decoded body as it arrives, the transfer is aborted
  *   beyond it and not retried) and name itself with a label for
  *   logs and errors, so a path that carries a credential (a subscription id) is never written out.
+ * - inside a PanelCallBudget pass (the attach pass after a sale) each request ends by the pass's end at the latest, and
+ *   none is sent once it is over;
  * Each finished call is recorded on the panel (consecutive failures -> degraded); the caller flushes.
  */
 class ModernPanelHttpClient
@@ -52,6 +54,7 @@ class ModernPanelHttpClient
         private readonly PanelCredentials $credentials,
         private readonly LoggerInterface $logger = new NullLogger(),
         ?\Closure $sleeper = null,
+        private readonly PanelCallBudget $budget = new PanelCallBudget(),
     ) {
         $this->sleeper = $sleeper ?? static function (int $ms): void { usleep($ms * 1000); };
     }
@@ -102,6 +105,15 @@ class ModernPanelHttpClient
 
         $firstStartedAt = microtime(true);
         for ($attempt = 1; ; ++$attempt) {
+            // Inside a time-limited pass (PanelCallBudget, M2d B1): never past its end, whatever this call's own limit.
+            $left = $this->budget->secondsLeft();
+            if (null !== $left) {
+                if ($left <= 0.0) {
+                    throw new PanelApiException(PanelFailure::NETWORK_TIMEOUT, sprintf('%s not sent: the time limit of this pass is used up', $method));
+                }
+                $options['max_duration'] = min(self::MAX_DURATION_S, $left);
+                $options['timeout'] = min(self::CONNECT_TIMEOUT_S, $left);
+            }
             try {
                 $response = $this->attempt($panel, $method, $path, $url, $options, $secrets, $maxBodyBytes);
                 $panel->recordCallSuccess();
@@ -112,7 +124,8 @@ class ModernPanelHttpClient
                 $retry = 'GET' === $method
                     && $attempt < self::MAX_ATTEMPTS
                     && self::isTransient($e)
-                    && self::elapsedMs($firstStartedAt) + $backoffMs < self::RETRY_BUDGET_MS;
+                    && self::elapsedMs($firstStartedAt) + $backoffMs < self::RETRY_BUDGET_MS
+                    && (null === ($left = $this->budget->secondsLeft()) || $backoffMs < 1000 * $left);
                 if ($retry) {
                     ($this->sleeper)($backoffMs);
 

@@ -9,6 +9,7 @@ use App\Entity\Payment;
 use App\Entity\TelegramAccount;
 use App\Security\AdminAccessPolicy;
 use App\Security\AdminPermission;
+use App\Shared\Infrastructure\SafeErrorLog;
 use App\Shop\Domain\OrderType;
 use Doctrine\ORM\EntityManagerInterface;
 
@@ -138,6 +139,6 @@ final class PaymentReceiptAdminNotifier
 
     private function debugLog(string $message): void
     {
-        error_log('[TelegramUpdateHandler] '.$message);
+        SafeErrorLog::write('[TelegramUpdateHandler] '.$message);
     }
 }

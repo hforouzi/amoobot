@@ -16,6 +16,7 @@ use App\Payment\Domain\PaymentReturnUrl;
 use App\Payment\Domain\Webhook\GatewayNotification;
 use App\Payment\Domain\Webhook\NotificationAwareGatewayInterface;
 use App\Payment\Domain\Webhook\RequestPayload;
+use App\Shared\Infrastructure\SafeErrorLog;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Contracts\HttpClient\Exception\TransportExceptionInterface;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
@@ -245,7 +246,7 @@ final class ZibalGateway implements PaymentGatewayInterface, NotificationAwareGa
     private function safeLog(string $event, array $context): void
     {
         $encoded = json_encode($context, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-        error_log(sprintf('[ZibalGateway] %s %s', $event, false === $encoded ? '{}' : $encoded));
+        SafeErrorLog::write(sprintf('[ZibalGateway] %s %s', $event, false === $encoded ? '{}' : $encoded));
     }
 
     /**

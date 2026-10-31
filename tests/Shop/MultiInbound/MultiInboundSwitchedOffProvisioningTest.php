@@ -12,6 +12,8 @@ use App\Entity\VpnService;
 use App\Payment\Application\Settlement\PaymentSettlementService;
 use App\Payment\Application\Settlement\SettlementOutcome;
 use App\Payment\Domain\PaymentStatus;
+use App\Provisioning\Application\InboundAttachAlerts;
+use App\Provisioning\Application\InboundAttachScheduler;
 use App\Provisioning\Application\ServiceInboundAttacher;
 use App\Provisioning\Application\VpnProvisioningService;
 use App\Provisioning\Domain\SanaeiIntegrationMode;
@@ -22,8 +24,9 @@ use App\Tests\Support\IntegrationTestCase;
 /**
  * F3 (M2c): with plans.multi_inbound_enabled off, a paid order of a plan with additional inbounds always provisions the
  * primary, on any panel type (a panel whose driver cannot attach included), exactly as a single-inbound plan; the
- * additional inbounds are not sent to the panel and get failed rows with a clear reason. With the switch on, such a
- * panel fails closed (PROVISIONING_FAILED and the admins' alert), as designed.
+ * additional inbounds are not sent to the panel and get failed rows with a clear reason. With the switch on and a panel
+ * that cannot attach (it left modern mode after the payment; M2d B2) the same: the primary is delivered, every additional
+ * inbound is failed with VpnProvisioningService::NOT_MODERN (after the per-inbound reasons) and the admins get one alert.
  */
 final class MultiInboundSwitchedOffProvisioningTest extends IntegrationTestCase
 {
@@ -40,17 +43,57 @@ final class MultiInboundSwitchedOffProvisioningTest extends IntegrationTestCase
         self::assertSame([['status' => 'failed', 'last_error' => VpnProvisioningService::SWITCHED_OFF]], $rows);
     }
 
-    public function testSwitchOnAPanelThatCannotAttachFailsClosedAndAlertsTheAdmins(): void
+    public function testSwitchOnAPanelThatCannotAttachDeliversThePrimaryAndAlertsTheAdminsOnce(): void
     {
+        // M2d B2: the panel stopped being modern (or is another type) after the order was paid; the switch is on.
         [$order, $payment] = $this->paidOrderOn($this->createTestInbound());
         $this->switch(true);
+
+        self::assertSame(SettlementOutcome::CONFIRMED, $this->approve($payment), 'a paid order is never failed for its additional inbounds');
+
+        self::assertSame(1, $this->driver()->createCalls);
+        self::assertSame([], $this->driver()->createRequests[0]->additionalInbounds, 'the panel gets exactly the single-inbound request');
+        self::assertSame(OrderStatus::PROVISIONED, $this->em->getConnection()->fetchOne('SELECT status FROM `order` WHERE id = ?', [$order->getId()]));
+        self::assertSame([['status' => 'failed', 'last_error' => VpnProvisioningService::NOT_MODERN]], $this->rowsOf($order));
+
         $before = count($this->http->telegramTexts());
+        $scheduler = self::getContainer()->get(InboundAttachScheduler::class);
+        $scheduler->run(50);
+        $scheduler->run(50);
+        $alerts = array_values(array_filter(array_slice($this->http->telegramTexts(), $before), static fn (string $t): bool => str_contains($t, InboundAttachAlerts::FAILED_TITLE)));
+        self::assertCount(1, $alerts, 'one alert, however many runs');
+        self::assertStringContainsString('not in modern mode', $alerts[0]);
+    }
 
-        self::assertSame(SettlementOutcome::PROVISIONING_FAILED, $this->approve($payment));
+    public function testThePerInboundReasonsComeBeforeThePanelMode(): void
+    {
+        [$order, $payment] = $this->paidOrderOn($this->createTestInbound());
+        $inactive = (new VpnInbound())->setPanel($this->em->find(VpnInbound::class, $order->getPlan()?->getInbound()?->getId())?->getPanel() ?? self::fail('panel'))
+            ->setRemoteInboundId('77')->setTitle('off')->setProtocol('vmess');
+        $this->em->persist($inactive);
+        $this->em->flush();
+        // The order's snapshot names two additional inbounds; one of them is inactive by the time it is paid.
+        $metadata = $order->getMetadata() ?? [];
+        $metadata[Order::PLAN_INBOUNDS]['additional'][] = (int) $inactive->getId();
+        $this->em->getConnection()->executeStatement('UPDATE `order` SET metadata = ? WHERE id = ?', [json_encode($metadata), $order->getId()]);
+        $this->em->getConnection()->executeStatement('UPDATE vpn_inbound SET is_active = 0 WHERE id = ?', [$inactive->getId()]);
+        $this->switch(true);
 
-        self::assertSame(0, $this->driver()->createCalls, 'never the primary alone');
-        self::assertSame(0, $this->countServicesForOrder($order));
-        self::assertNotEmpty(array_filter(array_slice($this->http->telegramTexts(), $before), static fn (string $t): bool => str_contains($t, 'Several inbounds need the panel in modern mode')), 'the admins are alerted');
+        self::assertSame(SettlementOutcome::CONFIRMED, $this->approve($payment));
+
+        self::assertSame([
+            ['status' => 'failed', 'last_error' => VpnProvisioningService::NOT_MODERN],
+            ['status' => 'failed', 'last_error' => 'not attached: the inbound is inactive'],
+        ], $this->rowsOf($order));
+    }
+
+    /**
+     * @return list<array{status: string, last_error: ?string}>
+     */
+    private function rowsOf(Order $order): array
+    {
+        /** @var list<array{status: string, last_error: ?string}> */
+        return $this->em->getConnection()->fetchAllAssociative('SELECT r.status, r.last_error FROM vpn_service_inbound r JOIN vpn_service s ON s.id = r.service_id WHERE s.order_id = ? ORDER BY r.id', [$order->getId()]);
     }
 
     public function testSwitchOffAModernPanelSendsExactlyTheSingleInboundRequests(): void

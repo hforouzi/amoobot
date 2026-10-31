@@ -6,6 +6,7 @@ namespace App\Provisioning\Application;
 
 use App\Entity\VpnService;
 use App\Provisioning\Infrastructure\Sanaei3xui\Sanaei3xuiDriver;
+use App\Shared\Infrastructure\SafeErrorLog;
 
 final class VpnServiceConfigRefreshService
 {
@@ -106,6 +107,6 @@ final class VpnServiceConfigRefreshService
 
     private function log(string $message): void
     {
-        error_log('[VpnServiceConfigRefreshService] '.$message);
+        SafeErrorLog::write('[VpnServiceConfigRefreshService] '.$message);
     }
 }

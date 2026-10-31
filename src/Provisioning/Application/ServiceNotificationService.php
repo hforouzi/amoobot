@@ -10,6 +10,7 @@ use App\Entity\ServiceNotificationLog;
 use App\Entity\TelegramAccount;
 use App\Entity\VpnService;
 use App\Provisioning\Domain\VpnServiceStatus;
+use App\Shared\Infrastructure\SafeErrorLog;
 use App\Shared\Infrastructure\SettingValueProvider;
 use Doctrine\ORM\EntityManagerInterface;
 
@@ -406,6 +407,6 @@ final class ServiceNotificationService
 
     private function log(string $message): void
     {
-        error_log('[ServiceNotificationService] '.$message);
+        SafeErrorLog::write('[ServiceNotificationService] '.$message);
     }
 }

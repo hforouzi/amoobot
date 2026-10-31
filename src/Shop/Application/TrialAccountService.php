@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Shop\Application;
 
+use App\Shop\Application\Checkout\PlanSaleRule;
 use App\Entity\Order;
 use App\Entity\Plan;
 use App\Entity\TelegramAccount;
@@ -21,6 +22,7 @@ final class TrialAccountService
         private readonly EntityManagerInterface $entityManager,
         private readonly OrderTrackingCodeService $orderTrackingCodeService,
         private readonly VpnProvisioningService $vpnProvisioningService,
+        private readonly PlanSaleRule $saleRule,
     ) {
     }
 
@@ -37,6 +39,10 @@ final class TrialAccountService
 
         $now = new \DateTimeImmutable();
         $backingPlan = $this->syncBackingPlan($trialPlan);
+        if (!$this->saleRule->acceptsTrial($backingPlan)) {
+            // Trial plans keep one inbound (M2d B5): never provisioned with additional ones.
+            return new TrialClaimResult(TrialClaimResult::STATUS_INACTIVE, 'در حال حاضر اکانت تست فعالی وجود ندارد.');
+        }
         $order = (new Order())
             ->setUser($telegramAccount->getUser())
             ->setPlan($backingPlan)

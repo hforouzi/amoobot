@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Provisioning\Application;
 
 use App\Entity\VpnService;
+use App\Shared\Infrastructure\SafeErrorLog;
 
 final class FinalConfigLinkProvider
 {
@@ -35,7 +36,7 @@ final class FinalConfigLinkProvider
                     static fn (mixed $link): bool => '' !== trim((string) $link)
                 )), (string) ($service->getUsername() ?? ''));
             } catch (\Throwable $e) {
-                error_log(sprintf(
+                SafeErrorLog::write(sprintf(
                     '[FinalConfigLinkProvider] generate_failed service_id=%d source_flow="%s" message="%s"',
                     (int) ($service->getId() ?? 0),
                     $sourceFlow,
@@ -133,7 +134,7 @@ final class FinalConfigLinkProvider
 
     private function logResult(VpnService $service, string $sourceFlow, int $rawCount, int $formattedCount, VpnConfigLinkSetResult $result): void
     {
-        error_log(sprintf(
+        SafeErrorLog::write(sprintf(
             '[FinalConfigLinkProvider] service_id=%d source_flow="%s" raw_link_count=%d formatted_link_count=%d final_count=%d dropped_duplicate_count=%d',
             (int) ($service->getId() ?? 0),
             $sourceFlow,

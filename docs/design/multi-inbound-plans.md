@@ -101,9 +101,10 @@ A plan with additional inbounds requires the panel in modern mode.
 
 - **Plan save:** refused on a legacy panel, with the message "Several inbounds need the panel in modern mode
   (Panels → test connection)".
-- **Panel switched to legacy later:** provisioning of such a plan fails closed with the same message
-  (PROVISIONING_FAILED, admin alert). It never silently provisions the primary only. The plan stops selling
-  (`isAvailableForSale()` false) while the panel is legacy.
+- **Panel switched to legacy later** (since M2d B2, replacing "fail closed"): the plan stops selling (the sale rule)
+  while the panel is legacy; an order already paid gets its primary exactly as a single-inbound plan, every additional
+  inbound is recorded "not attached" with "the panel is not in modern mode" and the admins get one alert. Those rows
+  are attached by the scheduled run once the panel is modern again. The paid order is never failed for them.
 
 ### 3.2 Create
 
@@ -689,9 +690,10 @@ No migration (M1's tables have every column).
 - **Adopt** (`findExistingService`, after a lost answer or on a settlement retry): the same attach-missing step, only
   for a client matched by UUID. A client matched by its generated name only is adopted unchanged and its additional
   inbounds are recorded as failed ("use Retry attach").
-- **Fail closed.** A plan with additional inbounds on a panel whose driver cannot attach (legacy mode, another panel
-  type) fails provisioning with "Several inbounds need the panel in modern mode (Panels → test connection)."
-  (PROVISIONING_FAILED, admin alert); nothing is sent to the panel. The legacy driver refuses such a request too.
+- **Fail closed** (**replaced in M2d B2**, see "M2d as built": the paid order now gets its primary). A plan with
+  additional inbounds on a panel whose driver cannot attach (legacy mode, another panel type) failed provisioning with
+  "Several inbounds need the panel in modern mode (Panels → test connection)." (PROVISIONING_FAILED, admin alert);
+  nothing was sent to the panel. The legacy driver still refuses a request that carries additional inbounds.
 - **`VpnProvisioningService`:**
   - one `vpn_service_inbound` row per additional inbound: `attached`, or `failed` with `last_error` and `attempts`,
     upserted by (service, inbound);
@@ -712,7 +714,7 @@ No migration (M1's tables have every column).
   - never creates a client (a client gone from the panel fails the rows);
   - refused while the switch is off or the panel is not modern; after an attach the link snapshot is refreshed
     (`PanelLinkSnapshot`, its own lock rules).
-- **Sale rule** (**not built in M2a, see "M2c as built"**; `PlanSaleRule`, the one place that reads the switch; `Plan::isAvailableForSale()` /
+- **Sale rule** (**not built in M2a, see "M2c as built"**; `PlanSaleRule`, the one decider of sale (other classes read the switch for their own purposes, see "M2d as built"); `Plan::isAvailableForSale()` /
   `multiInboundSaleBlocker()` hold the rule): a plan with additional inbounds is sold only with the switch on, every
   inbound (primary and additional) active and on the primary's panel, and that panel a 3x-ui panel in effective modern
   mode (plus the usual: plan active, panel usable). Used by `PlanCatalog` (bot, Mini App, resellers), the bot's
@@ -795,7 +797,8 @@ with the real-panel checklist rewritten. Migration `Version20261103090000` (addi
   clean, every new file is committed, and the pushed head is checked out into a clean directory and tested there.
 - **Sale rule (F1).** `MultiInboundSale::blocker()` (domain, one decider: switched_off, no_primary, inactive_inbound,
   other_panel, not_modern) behind `Plan::isAvailableForSale($switch)` / `multiInboundSaleBlocker()`, and
-  `PlanSaleRule` (the one service that reads the switch, memoized per request): `isSellable` / `sellable` for the
+  `PlanSaleRule` (the one decider of sale; it reads the switch at most once per call, not per request, and is not the
+  only reader: see "M2d as built", B6): `isSellable` / `sellable` for the
   catalog (`PlanCatalog`: bot plan list and choice, the bot's card-payment step, Mini App, reseller offers, quotes and
   purchases), `acceptsOrders` for draft confirmation and the bot's custom draft, `acceptsPayment(Order)` in
   `PaymentStarter` (gateway and card) and `WalletPayment` (customers and resellers), judged on the order's snapshot (F4),
@@ -814,15 +817,18 @@ with the real-panel checklist rewritten. Migration `Version20261103090000` (addi
   M2c) use the live plan.
 - **Switch off at provisioning (F3).** With the switch off a paid order for a plan with additional inbounds gets its
   primary on any panel type: the additional inbounds are not attempted and are recorded failed with
-  `VpnProvisioningService::SWITCHED_OFF` (no panel call, no driver check). "Retry attach" attaches them once the switch
-  is on. Switch on and a panel that cannot attach (legacy, other type): fail closed as in M2a (PROVISIONING_FAILED +
-  alert).
+  `VpnProvisioningService::SWITCHED_OFF` (no panel call, no driver check). Once the switch is on again the scheduled
+  run attaches them (failed rows with attempts left, due at once), and "Retry attach" does at any time; on a panel that
+  cannot attach (legacy, other type) neither runs, and the customer is told to contact support (M2d B4). Switch on and a
+  panel that cannot attach: failed closed here (PROVISIONING_FAILED + alert); **replaced in M2d B2** (the primary is
+  delivered).
 - **Unconfirmed attach (F2).** When the read back after an attach fails (`GET clients/get` error), the paid order never
   fails: if the primary was confirmed before, the additional inbounds are known-attached (on the client as read before),
   refused (failed with the panel's reason), or **pending** (`NOT_CONFIRMED`, an attempt counted); the order is
   provisioned. The scheduled run takes a pending row over once its claim is stale (5 min): it finds it attached on the
   panel or attaches it. A failed read when the primary itself was among the missing ids still throws (as before).
-- **Inline budget (F5).** Under the settlement locks the driver calls the panel for the additional inbounds for at most
+- **Inline budget (F5)** (**replaced in M2d B1**: no attach call runs under the settlement locks any more, see "M2d as
+  built"; the measured lock hold of this design was 95 s with 9.5 s panel calls). Under the settlement locks the driver called the panel for the additional inbounds for at most
   `Sanaei3xuiModernDriver::INLINE_ATTACH_BUDGET_SECONDS` = 20 s in all (checked before each call; a running call may
   overrun by its own 10 s timeout) and at most `INLINE_MAX_SINGLE_ATTACHES` = 3 one-by-one attaches after a refused
   batch. The rest is pending (`NOT_TRIED`, no attempt counted); out of time, the read back is skipped when the primary is
@@ -840,7 +846,9 @@ with the real-panel checklist rewritten. Migration `Version20261103090000` (addi
   guide promised an alert; the guide is corrected, the code sends nothing extra); an alert goes out only when the
   re-attach fails (failed, then recovered), on a stopped loop (one), and for snapshot inbounds deleted before
   provisioning (one, immediate).
-- **Customer's Telegram id (F9).** `SecretRedactor::maskAccess()` masks `tg_<id>_order_<n>` as
+- **Customer's Telegram id (F9)** (**incomplete**: the commit "never store, show or log the customer's Telegram id"
+  covered the places below only; `provisioning_config`, two driver warnings and the "settlement aborted" log still wrote
+  it. Finished in M2d B3). `SecretRedactor::maskAccess()` masks `tg_<id>_order_<n>` as
   `tg_[redacted]_order_<n>`; `VpnServiceInbound::safeError()` applies it to every `last_error` write (entity and the
   attacher's SQL write), the admin service page masks again on display (rows written before M2c), the alert's error line
   and the modern client's request log lines (`sanaei_modern_request[_failed]`, whose path holds the email) too. The
@@ -869,6 +877,84 @@ with the real-panel checklist rewritten. Migration `Version20261103090000` (addi
   them. Applies to every job.
 - **Not tested against a real panel:** all of the above runs against the fake 3x-ui; the admin guide's checklist
   (rewritten for F1 to F4) is the real-panel test.
+
+#### M2d as built
+
+Branch `fix/multi-inbound-m2d`: the last corrective phase, after the independent review of M2c (findings B1 to B7).
+Admin guide: [admin-guide.md, "Plans with several inbounds"](../en/admin-guide.md#plans-with-several-inbounds-preview),
+real-panel checklist updated for B1 and B2. No migration.
+
+- **Attach after the commit (B1).** Measured on M2c with every panel call taking 9.5 s: the order row was locked
+  47.5 s (single inbound), 47.5 s (multi-inbound, normal) and 95 s (multi-inbound, add refused), and another process's
+  `FOR UPDATE` on the order failed with 1205 after MariaDB's 50 s lock wait; the "20 s inline budget" only started after
+  the create and its read back, and the attach calls alone took 28.5 s. Now:
+  - inside the settlement transaction (order and payment rows locked) the modern driver does only what delivers the
+    primary: one `clients/add` with every inbound id and its read back, as before (plus the existing primary-only
+    fallback when the panel refuses that add: a read, then the add with the primary alone). An additional inbound the
+    read lists is attached; any other is written **pending** with `InboundAttachDriverInterface::AFTER_SALE`, no attempt
+    counted. No attach call runs under the lock;
+  - right after the commit, before the customer's delivery message (so it carries the new links), the settlement calls
+    `ServiceInboundAttacher::afterSale()`: it claims those rows, attaches them in one pass with no order, payment or
+    wallet lock held (`PanelCallBudget`: `AFTER_SALE_BUDGET_SECONDS` = 15 s for the **whole pass**, the read, the batch
+    attach, at most 3 one-by-one attaches, the read back and the link refresh included; each request's `max_duration`
+    is cut to the time left and nothing is sent after it). A failure there is written as for "Retry attach" (failed, due
+    at the next scheduled run, as the sale's attempt was in M2b); what is not known or not tried in time stays pending
+    (`NOT_CONFIRMED` / `NOT_TRIED`) and the scheduled run takes it once its claim is stale (5 min). The pass never
+    throws and never changes the payment or the order; it runs only for new-service orders sold with additional
+    inbounds and never inside a transaction;
+  - single-inbound requests are byte-identical (the pass does not run for them).
+  - Measured (real time): with every panel call taking 9.5 s (just under its 10 s limit), the order row is locked
+    47.6 s for a single-inbound plan (unchanged), 47.6 s for a multi-inbound plan whose add the panel accepts (unchanged:
+    the same 5 calls) and 66.6 s when the panel refuses that add (was 95.0 s: 7 primary calls instead of 10 calls, no
+    attach call under the lock); the pass after the commit ends within its 15 s. With 3 s per call another process's
+    `FOR UPDATE` on the order (30 s lock wait) waits 20.9 s and gets the row, where the code before M2d failed it with 1205
+    (`MultiInboundLockHoldTest`, a real second process). At 9.5 s per call on the add-refused path a 50 s lock wait still
+    runs out: that is the primary's own fallback (below), not the additional inbounds.
+  - **Not fixed here (pre-existing):** the single-inbound path holds the order row for its panel calls too (5 calls:
+    the adopt look-up `GET` + `list`, `add`, the read back, `subLinks`; 47.5 s at 9.5 s per call), and the refused-add
+    fallback adds 2 primary calls (66.5 s at 9.5 s per call). Recommendation: the claim-then-call pattern of
+    `ServiceInboundAttacher` for the primary too (mark the order "provisioning" in a short transaction, call the panel
+    with no lock, write the service in a second short transaction; the order-derived UUID already makes a retried call
+    adopt instead of duplicating), or at least a lower per-call `max_duration` while the order lock is held.
+- **Panel not modern after payment (B2).** With the switch on and a panel whose driver cannot attach (it left modern
+  mode, another type), the paid order is **not failed** any more: the per-inbound reasons come first (inactive, other
+  panel), every remaining additional inbound is failed with `VpnProvisioningService::NOT_MODERN` ("the panel is not in
+  modern mode (Panels → test connection); attached once it is"), the driver gets exactly the single-inbound request,
+  and the admins get the usual one "not attached" alert (claimed once). The scheduled run attaches them once the panel
+  is modern again. The sale rule still keeps such a plan from being sold. Replaces M2a's and M2c's "fail closed".
+- **Telegram id in logs (B3, finishes F9).** Every `error_log()` line of `src/` goes through `SafeErrorLog::write()`
+  (48 calls) and every PSR record through `RedactingLogger` (it decorates the `logger` service: the app and the payment
+  plugins), both `SecretRedactor::forLog()`: a client email `tg_<id>_order_<n>` becomes `tg_[redacted]_order_<n>` and
+  the values of the Telegram id keys (`chat`, `chat_id`, `actor_id`, `telegram_id`, `tg_id`, …) are masked; nothing else
+  changes. Fixed at the source too: `provisioning_config` `final_username`, the driver's `create_adopted_after_failure`
+  and `existing_client_found`, the "settlement aborted" error (`sanitizeError`). Stored errors already went through
+  `redactAccess` / `safeError`. The admin-only "client email" field of the service page is unchanged.
+- **Customer text (B4).** A not-connected inbound of a service whose panel cannot attach (the scheduled run skips it)
+  counts as "stuck" whatever its attempts: the bot and the Mini App say "not connected yet. Please contact support."
+  instead of "will be added automatically".
+- **Trials (B5).** "Trial plans keep one inbound" is now enforced: `PlanInboundsValidator` refuses additional inbounds
+  on a trial's backing plan (every save path: web form, bot and Mini App through `PlanAdminService::save()`), and a
+  trial claim asks `PlanSaleRule::acceptsTrial()` (a backing plan with additional inbounds, written before M2d, is
+  refused like an inactive trial; nothing is ordered or sent to the panel).
+- **Who reads the switch (B6).** `PlanSaleRule` is the one decider of **sale**; it reads `plans.multi_inbound_enabled`
+  at most once per call (a closure), not per request. Others read the switch for their own purposes:
+  `VpnProvisioningService` (what to provision), `ServiceInboundAttacher` and `InboundAttachScheduler` (no attach while
+  off), `ServiceInboundCounts` (what customers see), `PlanInboundsValidator` (save rules), and the admin pages
+  (`PlanCrudController`, `VpnInboundCrudController`, `VpnServiceCrudController`). The M2a and M2c texts above said
+  otherwise.
+- **Tests under load (B7).** **Not reproduced; no test changed.** The review's failures (ClaimReviewParallelTest 3 of 3 rounds,
+  ResellerParallelLockOrder, RegenerateResetRace, ClaimParallel, MiniAppPurchase and M2c's F5 test now and then) were
+  seen with 12 CPU burners while a container copied the repository through a macOS bind mount; that harness kept the
+  summary lines only, so no failure message exists. On this branch, with 12 CPU burners on the host plus CPU, disk and
+  bind-mount-copy stress inside Docker's VM (where MariaDB runs): the 14 race/parallel suites of the review in its order,
+  3 rounds (42 runs), the six named ones 3 rounds more (18), 5 runs with burners alone and the review's order without
+  load: **65 runs, no failure**. Without a failure message there is no cause to fix, and the tests were not weakened.
+  The one new real-time test (`MultiInboundLockHoldTest`) is in the PHPUnit group `real-time` (another process waits
+  about 21 s for the order row against a 30 s lock wait, where the old code needed about 36 s: 9 s of margin below and
+  6 s above). Recommendation: keep the output of failing
+  runs (CI artifacts) so the next flake comes with its message.
+- **Not tested against a real panel:** everything above runs against the fake 3x-ui (which now honours a request's
+  `max_duration` as curl does); the admin guide's checklist is the real-panel test (steps for B1 and B2 added).
 
 ### 9.8 Open questions and risks (Hosts)
 

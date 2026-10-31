@@ -6,6 +6,7 @@ namespace App\Provisioning\Application;
 
 use App\Entity\VpnService;
 use App\Provisioning\Domain\VpnServiceStatus;
+use App\Shared\Infrastructure\SafeErrorLog;
 use Doctrine\ORM\EntityManagerInterface;
 
 final class ServiceExpiryChecker
@@ -96,6 +97,6 @@ final class ServiceExpiryChecker
 
     private function log(string $message): void
     {
-        error_log('[ServiceExpiryChecker] '.$message);
+        SafeErrorLog::write('[ServiceExpiryChecker] '.$message);
     }
 }

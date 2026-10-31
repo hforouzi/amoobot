@@ -6,7 +6,9 @@ namespace App\Provisioning\Application;
 
 use App\Entity\VpnService;
 use App\Entity\VpnServiceInbound;
+use App\Provisioning\Domain\InboundAttachDriverInterface;
 use App\Provisioning\Domain\VpnServiceStatus;
+use App\Provisioning\Infrastructure\VpnPanelDriverRegistry;
 use App\Shop\Application\MultiInboundSettings;
 use Doctrine\DBAL\ArrayParameterType;
 use Doctrine\ORM\EntityManagerInterface;
@@ -25,6 +27,7 @@ final class ServiceInboundCounts
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
         private readonly MultiInboundSettings $settings,
+        private readonly VpnPanelDriverRegistry $driverRegistry,
     ) {
     }
 
@@ -32,8 +35,9 @@ final class ServiceInboundCounts
      * The service's servers: the primary inbound plus each additional one it keeps (detached ones are gone), and how
      * many of the additional ones are not connected yet, split for the customer's note (M2c F10): "retrying" ones the
      * scheduled retry will still try (pending, or failed with attempts left, while the retry is on), "stuck" ones it will
-     * not (attempts used up, a re-attach loop stopped, or the scheduled retry turned off): those need support. Null for
-     * a service without additional inbounds (one query).
+     * not (attempts used up, a re-attach loop stopped, the scheduled retry turned off, or, M2d B4, a panel the scheduled
+     * run skips because it cannot attach: legacy mode or another type): those need support. Null for a service without
+     * additional inbounds (one query).
      *
      * @return array{total: int, notConnected: int, retrying: int, stuck: int}|null
      */
@@ -52,7 +56,7 @@ final class ServiceInboundCounts
             return null;
         }
         $left = (int) $row['pending'] + (int) $row['failed_left'];
-        $retrying = $this->settings->attachRetryEnabled() ? $left : 0;
+        $retrying = $this->settings->attachRetryEnabled() && $this->panelCanAttach($service) ? $left : 0;
         $stuck = (int) $row['failed_used_up'] + $left - $retrying;
 
         return ['total' => 1 + (int) $row['total'], 'notConnected' => $retrying + $stuck, 'retrying' => $retrying, 'stuck' => $stuck];
@@ -99,5 +103,13 @@ final class ServiceInboundCounts
         ) ?: [];
 
         return ['failed' => (int) ($row['failed'] ?? 0), 'pending' => (int) ($row['pending'] ?? 0), 'givenUp' => (int) ($row['given_up'] ?? 0)];
+    }
+
+    /** Whether the scheduled run would try this service at all (InboundAttachScheduler skips a panel that cannot attach). */
+    private function panelCanAttach(VpnService $service): bool
+    {
+        $panel = $service->getPanel();
+
+        return null !== $panel && $this->driverRegistry->resolve($panel) instanceof InboundAttachDriverInterface;
     }
 }

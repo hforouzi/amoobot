@@ -12,6 +12,7 @@ use App\Provisioning\Domain\Dto\VpnUsage;
 use App\Provisioning\Domain\VpnServiceStatus;
 use App\Provisioning\Infrastructure\VpnPanelDriverRegistry;
 use App\Payment\Domain\PaymentStatus;
+use App\Shared\Infrastructure\SafeErrorLog;
 use App\Shop\Domain\OrderType;
 use Doctrine\ORM\EntityManagerInterface;
 
@@ -250,7 +251,7 @@ final class ServiceUsageSyncService
 
     private function log(string $message): void
     {
-        error_log('[ServiceUsageSyncService] '.$message);
+        SafeErrorLog::write('[ServiceUsageSyncService] '.$message);
     }
 
     private function sanitizeMessage(string $message): string

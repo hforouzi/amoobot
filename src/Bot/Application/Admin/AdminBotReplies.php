@@ -6,6 +6,7 @@ namespace App\Bot\Application\Admin;
 
 use App\Bot\Infrastructure\TelegramApiClient;
 use App\Entity\TelegramAccount;
+use App\Shared\Infrastructure\SafeErrorLog;
 use App\Shop\Domain\OrderType;
 
 /**
@@ -42,7 +43,7 @@ final class AdminBotReplies
 
     public function log(string $message): void
     {
-        error_log('[TelegramUpdateHandler] '.$message);
+        SafeErrorLog::write('[TelegramUpdateHandler] '.$message);
     }
 
     public function identity(?TelegramAccount $telegramAccount): string

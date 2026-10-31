@@ -17,7 +17,7 @@ use App\Wallet\Domain\WalletException;
 
 [$container, $entityManager] = require __DIR__.'/boot-test-kernel.php';
 
-[$dir, $userId, $kind, $target, $trafficGb] = array_slice($argv, 1) + array_fill(0, 5, '');
+[$dir, $userId, $kind, $target, $trafficGb] = array_slice($argv ?? [], 1) + array_fill(0, 5, '');
 $user = $entityManager->find(User::class, (int) $userId) ?? throw new LogicException('no user');
 $checkout = $container->get(ResellerCheckout::class);
 $confirmation = match ($kind) {

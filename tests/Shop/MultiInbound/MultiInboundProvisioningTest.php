@@ -141,19 +141,20 @@ final class MultiInboundProvisioningTest extends IntegrationTestCase
         self::assertSame(['attached', 'attached'], array_column($this->rows((int) $this->service($order)['id']), 2));
     }
 
-    public function testALegacyPanelFailsClosedAndNeverProvisionsThePrimaryAlone(): void
+    public function testALegacyPanelIsSentTheSingleInboundRequestOnly(): void
     {
         [$order, $payment] = $this->paidOrder();
-        // Switched to legacy after the sale.
+        // Switched to legacy after the sale (M2d B2): no longer refused for its additional inbounds; the legacy driver
+        // gets the plain single-inbound request (this fake speaks the modern API only, so the legacy driver's read fails).
         $this->em->getConnection()->executeStatement("UPDATE vpn_panel SET sanaei_integration_mode = 'legacy' WHERE id = ?", [$this->panel->getId()]);
         $this->em->clear();
 
-        self::assertSame(SettlementOutcome::PROVISIONING_FAILED, $this->approve($payment));
+        $this->approve($payment);
 
         $error = (string) $this->row('payment', (int) $payment->getId())['provisioning_error'];
-        self::assertStringContainsString('Several inbounds need the panel in modern mode', $error);
-        self::assertSame([], $this->fake->requests, 'the panel was not asked for anything');
-        self::assertSame(0, $this->countServicesForOrder($order));
+        self::assertStringNotContainsString('Several inbounds need the panel in modern mode', $error);
+        self::assertStringContainsString('could not be read to check for an existing client', $error, 'the legacy driver itself was asked (its own panel read failed here)');
+        self::assertSame([], array_filter($this->fake->requestLines(), static fn (string $l): bool => str_contains($l, 'panel/api/clients/')), 'no modern call, no attach');
     }
 
     public function testAnInactiveAdditionalInboundIsRecordedWithoutAskingThePanel(): void

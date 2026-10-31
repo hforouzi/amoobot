@@ -16,6 +16,7 @@ use App\Payment\Domain\Webhook\GatewayNotification;
 use App\Payment\Domain\Webhook\NotificationAwareGatewayInterface;
 use App\Payment\Domain\Webhook\RequestPayload;
 use App\Entity\PaymentGateway;
+use App\Shared\Infrastructure\SafeErrorLog;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
 use Symfony\Contracts\HttpClient\Exception\TransportExceptionInterface;
@@ -56,7 +57,7 @@ final class CustomApiGateway implements PaymentGatewayInterface, NotificationAwa
         try {
             $response = $this->sendRequest($method, $renderedUrl, $headers, $body);
         } catch (TransportExceptionInterface|\Throwable $e) {
-            error_log(sprintf('[CustomApiGateway] create_exception payment_id=%d message="%s"', $payment->getId() ?? 0, $e->getMessage()));
+            SafeErrorLog::write(sprintf('[CustomApiGateway] create_exception payment_id=%d message="%s"', $payment->getId() ?? 0, $e->getMessage()));
 
             return new PaymentRequestResult(success: false, message: 'در ارتباط با درگاه مشکل رخ داد.');
         }
@@ -184,7 +185,7 @@ final class CustomApiGateway implements PaymentGatewayInterface, NotificationAwa
         try {
             $response = $this->sendRequest($method, $renderedUrl, $headers, $body);
         } catch (TransportExceptionInterface|\Throwable $e) {
-            error_log(sprintf('[CustomApiGateway] verify_exception payment_id=%d message="%s"', $payment->getId() ?? 0, $e->getMessage()));
+            SafeErrorLog::write(sprintf('[CustomApiGateway] verify_exception payment_id=%d message="%s"', $payment->getId() ?? 0, $e->getMessage()));
 
             return new PaymentVerificationResult(success: false, paid: false, message: 'خطا در بررسی تراکنش.');
         }

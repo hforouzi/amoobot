@@ -8,6 +8,7 @@ use App\Entity\VpnPanel;
 use App\Provisioning\Infrastructure\PanelCredentials;
 use App\Provisioning\Infrastructure\PanelHttpClientFactory;
 use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http\SecretRedactor;
+use App\Shared\Infrastructure\SafeErrorLog;
 use Symfony\Contracts\HttpClient\Exception\TransportExceptionInterface;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 
@@ -730,6 +731,6 @@ final class Sanaei3xuiApiClient
     /** Last line of defence: a URL path, config link or UUID that reached a message is masked here too. */
     private function log(string $message): void
     {
-        error_log('[Sanaei3xuiApiClient] '.SecretRedactor::maskAccess($message));
+        SafeErrorLog::write('[Sanaei3xuiApiClient] '.SecretRedactor::maskAccess($message));
     }
 }
