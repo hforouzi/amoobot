@@ -28,6 +28,10 @@ class VpnProvisioningService
 {
     private const BYTES_PER_GB = 1073741824;
     public const SWITCHED_OFF = 'not attached: plans with several inbounds were switched off when the service was created (Settings, Plans tab)';
+    /** M2d B2: the panel could not attach when the paid order was provisioned (not 3x-ui in modern mode). */
+    public const NOT_MODERN = 'not attached: the panel is not in modern mode (Panels → test connection); attached once it is';
+    /** Reasons that leave the service on its primary alone: links as for a single-inbound service. */
+    private const PRIMARY_ONLY = [self::SWITCHED_OFF, self::NOT_MODERN];
 
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
@@ -150,9 +154,9 @@ class VpnProvisioningService
         $subscriptionUrl = $vpnService->getSubscriptionUrl();
 
         // A service on several inbounds is never given links built from the primary alone: without the panel's links
-        // it has its subscription URL only (docs/design/multi-inbound-plans.md 9.1). One created with the switch off is
-        // on its primary alone, so it is treated as a single-inbound service here.
-        $multiInbound = [] !== $attachable || [] !== array_filter($notAttached, static fn (array $n): bool => self::SWITCHED_OFF !== $n[1]);
+        // it has its subscription URL only (docs/design/multi-inbound-plans.md 9.1). One created with the switch off or on a
+        // panel that cannot attach is on its primary alone, so it is treated as a single-inbound service here.
+        $multiInbound = [] !== $attachable || [] !== array_filter($notAttached, static fn (array $n): bool => !in_array($n[1], self::PRIMARY_ONLY, true));
         if ('sanaei_3xui' !== $panelType || ([] === $configLinks && '' === $createdConfigText && !$multiInbound)) {
             $links = $this->vpnAccessLinkGenerator->generate($vpnService);
             $configLinks = array_values(array_filter((array) ($links['configLinks'] ?? []), static fn (mixed $link): bool => '' !== trim((string) $link)));
@@ -263,10 +267,11 @@ class VpnProvisioningService
      *   switch stays off (the scheduled retry, "Retry attach" and the alerts all need it on), so they are picked up
      *   only once it is turned on again;
      * - the inbound became inactive since;
-     * - the inbound is on another panel than the service (the plan's primary was moved since).
-     *
-     * With the switch on, a panel whose driver cannot attach (legacy mode, another type) fails closed: never the primary
-     * alone (PROVISIONING_FAILED and the admins' alert).
+     * - the inbound is on another panel than the service (the plan's primary was moved since);
+     * - with the switch on, a panel whose driver cannot attach (it left modern mode, or another type; M2d B2): the paid
+     *   order gets the primary exactly as a single-inbound plan (nothing else is sent), each remaining additional
+     *   inbound is failed with NOT_MODERN and the admins get the usual one "not attached" alert. The two reasons above
+     *   come first. The sale rule still keeps such a plan from being sold.
      *
      * @param list<VpnInbound> $inbounds
      *
@@ -280,9 +285,7 @@ class VpnProvisioningService
         if (!$this->multiInbound->enabled()) {
             return [[], array_map(static fn (VpnInbound $inbound): array => [$inbound, self::SWITCHED_OFF], $inbounds)];
         }
-        if (!$driver instanceof InboundAttachDriverInterface) {
-            throw new \RuntimeException(InboundAttachDriverInterface::MODERN_PANEL_REQUIRED);
-        }
+        $canAttach = $driver instanceof InboundAttachDriverInterface;
         $attachable = [];
         $notAttached = [];
         foreach ($inbounds as $inbound) {
@@ -290,6 +293,8 @@ class VpnProvisioningService
                 $notAttached[] = [$inbound, 'not attached: the inbound is inactive'];
             } elseif (null === $panel || $inbound->getPanel()->getId() !== $panel->getId()) {
                 $notAttached[] = [$inbound, ServiceInboundAttacher::OTHER_PANEL];
+            } elseif (!$canAttach) {
+                $notAttached[] = [$inbound, self::NOT_MODERN];
             } else {
                 $attachable[] = $inbound;
             }
