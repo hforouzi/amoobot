@@ -12,9 +12,17 @@ use Symfony\Component\Clock\NativeClock;
  * open, ModernPanelHttpClient shortens every request's max_duration and connect timeout to the time left, retries a GET
  * only within it, and sends nothing once it is used up (PanelApiException NETWORK_TIMEOUT, not counted on the panel).
  * Nested passes keep the earlier end. Outside a pass nothing changes (the usual 10 s per request).
+ *
+ * A request is sent only with at least MIN_SECONDS_TO_SEND left (M2e E2): curl takes max_duration in whole
+ * milliseconds and 0 means no limit at all, so a sliver of time left would have sent an unbounded request.
  */
 final class PanelCallBudget
 {
+    /** Less than this left (50 ms): nothing more is sent in this pass. */
+    public const MIN_SECONDS_TO_SEND = 0.05;
+    /** The smallest max_duration / timeout ever given to the HTTP client (1 ms: curl's unit; never 0 = unlimited). */
+    public const MIN_REQUEST_SECONDS = 0.001;
+
     private ?float $deadline = null;
 
     public function __construct(private readonly ClockInterface $clock = new NativeClock())
@@ -50,6 +58,15 @@ final class PanelCallBudget
     public function secondsLeft(): ?float
     {
         return null === $this->deadline ? null : $this->deadline - $this->now();
+    }
+
+    /** Whether a request may still be sent in the open pass (always outside one). */
+    public function canSend(): bool
+    {
+        $left = $this->secondsLeft();
+
+        // In whole milliseconds (curl's unit): the deadline is an epoch float, so "50 ms" may come out as 49.99999 ms.
+        return null === $left || round($left * 1000) >= round(self::MIN_SECONDS_TO_SEND * 1000);
     }
 
     public function now(): float
