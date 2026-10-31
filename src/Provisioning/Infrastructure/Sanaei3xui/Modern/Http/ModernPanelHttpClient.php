@@ -106,13 +106,15 @@ class ModernPanelHttpClient
         $firstStartedAt = microtime(true);
         for ($attempt = 1; ; ++$attempt) {
             // Inside a time-limited pass (PanelCallBudget, M2d B1): never past its end, whatever this call's own limit.
+            // Under PanelCallBudget::MIN_SECONDS_TO_SEND left nothing is sent (M2e E2), and the limits given to curl are
+            // never below 1 ms: curl counts max_duration in whole milliseconds and 0 means unlimited.
             $left = $this->budget->secondsLeft();
             if (null !== $left) {
-                if ($left <= 0.0) {
+                if (!$this->budget->canSend()) {
                     throw new PanelApiException(PanelFailure::NETWORK_TIMEOUT, sprintf('%s not sent: the time limit of this pass is used up', $method));
                 }
-                $options['max_duration'] = min(self::MAX_DURATION_S, $left);
-                $options['timeout'] = min(self::CONNECT_TIMEOUT_S, $left);
+                $options['max_duration'] = max(PanelCallBudget::MIN_REQUEST_SECONDS, min(self::MAX_DURATION_S, $left));
+                $options['timeout'] = max(PanelCallBudget::MIN_REQUEST_SECONDS, min(self::CONNECT_TIMEOUT_S, $left));
             }
             try {
                 $response = $this->attempt($panel, $method, $path, $url, $options, $secrets, $maxBodyBytes);
@@ -125,7 +127,7 @@ class ModernPanelHttpClient
                     && $attempt < self::MAX_ATTEMPTS
                     && self::isTransient($e)
                     && self::elapsedMs($firstStartedAt) + $backoffMs < self::RETRY_BUDGET_MS
-                    && (null === ($left = $this->budget->secondsLeft()) || $backoffMs < 1000 * $left);
+                    && (null === ($left = $this->budget->secondsLeft()) || 1000 * $left - $backoffMs >= 1000 * PanelCallBudget::MIN_SECONDS_TO_SEND);
                 if ($retry) {
                     ($this->sleeper)($backoffMs);
 

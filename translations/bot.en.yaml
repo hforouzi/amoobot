@@ -219,6 +219,7 @@ claim.reset_unconfirmed: "We could not confirm whether the reset went through. S
 claim.admin_reset_attention: "⚠️ Claim links: resetting the connection links of service #{{ service.id }} needs a check ({{ claim.what }}). Compare the client on the panel with the service and regenerate its config."
 service.renewed_for_customer: "✅ Service #{{ service.id }} was renewed for your customer.\nNew expiry: {{ service.expiresAt }}\nTotal traffic: {{ service.trafficGb }} GB\nThe customer got the details; their links are not shown to you."
 service.add_traffic_done_for_customer: "✅ Extra traffic was added to service #{{ service.id }} for your customer.\nTotal traffic: {{ service.trafficGb }} GB\nThe customer got the details; their links are not shown to you."
+service.inbounds_attached: "➕ {{ service.count }} more server(s) were added to your service #{{ service.id }}.\nThey are in your subscription link: update the subscription in your app to see them."
 reseller.claimed_on: "🔗 Claimed by your customer on {{ claim.claimedAt }}"
 reseller.claim_open: "🔗 An unused claim link is open until {{ claim.expiresAt }}"
 reseller.claim_created: "🔗 Claim link for service #{{ service.id }}\n\n{{ claim.link }}\n\nSend it to your customer: opening it and tapping “Add to my account” moves the service into their Telegram account. It works once, until {{ claim.expiresAt }}. Keep it private: whoever opens it first can take the service. This is the only time the link is shown."

@@ -10,6 +10,7 @@ use App\Entity\Payment;
 use App\Entity\VpnService;
 use App\Payment\Application\AdminPaymentAlerter;
 use App\Payment\Application\PaymentCustomerNotifier;
+use App\Payment\Application\PaymentDeliveryLog;
 use App\Payment\Domain\Money\AmountMatch;
 use App\Payment\Domain\Money\AmountMatcher;
 use App\Payment\Domain\Money\AmountMatchStatus;
@@ -52,8 +53,10 @@ use Psr\Log\LoggerInterface;
  *      payment fulfilled the order between the rollback and the new locks (closeDuplicateAfterFailure()); a wallet top-up
  *      has nothing to provision, so its failure is rolled back and reported like one before fulfilment (ERROR,
  *      nothing changed, the next verification settles it)
- *   6. after commit: the attach pass of a new service's additional inbounds (ServiceInboundAttacher::afterSale(), bounded,
- *      no lock held), then customer messages and admin alerts (never inside the transaction)
+ *   6. after commit: the customer's messages (a new service's delivery message is recorded in PaymentDeliveryLog, written
+ *      in the transaction, and resent by a retried settlement or the scheduled job if it never went out, M2e E1), then
+ *      the attach pass of a new service's additional inbounds (ServiceInboundAttacher::afterSale(), bounded, no lock
+ *      held) and its one follow-up message, then admin alerts (never inside the transaction)
  *
  * A payment of method "wallet" (WalletPayment) is settled like a gateway payment; its debit was written before. Every
  * path that rejects such a payment (admin reject, customer cancel, gateway failure; the expiry job too) gives the
@@ -87,6 +90,7 @@ class PaymentSettlementService
         private readonly WalletService $walletService,
         private readonly InboundAttachAlerts $inboundAlerts,
         private readonly ServiceInboundAttacher $inboundAttacher,
+        private readonly PaymentDeliveryLog $deliveryLog,
     ) {
     }
 
@@ -332,8 +336,13 @@ class PaymentSettlementService
 
             if (!in_array($payment->getStatus(), $allowedStatuses, true)) {
                 $connection->commit();
+                $service = $this->serviceFor($order);
+                if (PaymentStatus::CONFIRMED === $payment->getStatus() && null !== $service) {
+                    // A retried settlement (webhook, admin) of a sale whose delivery message never went out (M2e E1).
+                    $this->customerNotifier->resendMissing($payment, $service);
+                }
 
-                return new SettlementResult(SettlementOutcome::ALREADY_PROCESSED, sprintf('Payment is already %s.', $payment->getStatus()), $payment, $this->serviceFor($order));
+                return new SettlementResult(SettlementOutcome::ALREADY_PROCESSED, sprintf('Payment is already %s.', $payment->getStatus()), $payment, $service);
             }
 
             $match = null;
@@ -406,6 +415,10 @@ class PaymentSettlementService
             $released = $this->releaseOtherWalletPayments($order, $payment, $verified->adminId);
 
             $this->entityManager->flush();
+            if (OrderType::NEW_SERVICE === $order->getType() && null !== $service?->getId()) {
+                // The delivery message is due exactly when this commit fulfils the order (M2e E1).
+                $this->deliveryLog->expect((int) $service->getId(), (int) $order->getUser()->getId(), (int) $order->getId(), (int) $payment->getId());
+            }
             $connection->commit();
         } catch (\Throwable $e) {
             $rolledBack = $this->rollbackAndReset();
@@ -429,12 +442,15 @@ class PaymentSettlementService
 
         $this->logger->info('Payment settled.', ['payment_id' => $paymentId, 'source' => $source, 'flag' => $payment->getAmountFlag()]);
         $this->notifyReleased($released);
-        if (null !== $service && self::soldWithAdditionalInbounds($order)) {
-            // The additional inbounds the sale left pending (M2d B1), after the commit and before the delivery message so
-            // that it carries their links; bounded, holds no lock, and cannot change this outcome (it never throws).
-            $this->inboundAttacher->afterSale($service);
-        }
+        // The delivery message first (M2e E1): the primary's links, as before M2d. A process that dies after this point
+        // has delivered the service; one that dies before it leaves the delivery pending for a retry or the scheduled job.
         $this->customerNotifier->confirmed($payment, $service);
+        if (null !== $service && self::soldWithAdditionalInbounds($order)) {
+            // The additional inbounds the sale left pending (M2d B1): bounded, holds no lock, and cannot change this
+            // outcome (it never throws); then one short message when it attached any (the delivery is not resent).
+            $pass = $this->inboundAttacher->afterSale($service);
+            $this->customerNotifier->inboundsAttached($payment, $service, $pass->attached);
+        }
         if (null !== $service) {
             $this->inboundAlerts->missingInbounds($order, $service);
         }

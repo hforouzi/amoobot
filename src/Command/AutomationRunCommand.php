@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Command;
 
 use App\Broadcast\BroadcastSender;
+use App\Payment\Application\MissingDeliveryResender;
 use App\Payment\Application\StuckPaymentReminder;
 use App\Provisioning\Application\AutomationSettingsProvider;
 use App\Provisioning\Application\InboundAttachScheduler;
@@ -37,6 +38,7 @@ final class AutomationRunCommand extends Command
         private readonly LoggerInterface $logger,
         private readonly ClaimMaintenance $claimMaintenance,
         private readonly InboundAttachScheduler $inboundAttachScheduler,
+        private readonly MissingDeliveryResender $missingDeliveryResender,
     ) {
         parent::__construct();
     }
@@ -90,6 +92,16 @@ final class AutomationRunCommand extends Command
             } catch (\Throwable $e) {
                 ++$failed;
                 $this->logger->error('automation_task_failed', ['task' => 'remind_stuck_payments', 'error' => $e->getMessage()]);
+            }
+
+            // Not behind a toggle either: a paid new service whose delivery message never went out (M2e E1).
+            try {
+                $summary = $this->missingDeliveryResender->run($limit, $dryRun);
+                $notified += $summary['resent'];
+                $this->logger->info('automation_task_completed', ['task' => 'resend_missing_deliveries', 'summary' => $summary]);
+            } catch (\Throwable $e) {
+                ++$failed;
+                $this->logger->error('automation_task_failed', ['task' => 'resend_missing_deliveries', 'error' => $e->getMessage()]);
             }
         }
 

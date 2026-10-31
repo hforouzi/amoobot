@@ -31,6 +31,10 @@ use Psr\Log\LoggerInterface;
  * claimed with a link, docs/design/reseller-and-claim.md D5): the payer is told it is done, with the new expiry and
  * traffic but WITHOUT the subscription link or config links; the owner gets the usual message with them. The owner is
  * read from the database at that moment, not from the (possibly stale) entity.
+ *
+ * A new service's delivery message is recorded in PaymentDeliveryLog (M2e E1): it is sent by the one process that claims
+ * it, before the attach pass of additional inbounds, and sent again by resendMissing() (a retried settlement, the
+ * scheduled "orders" job) when the process that should have sent it died or nothing reached the customer.
  */
 class PaymentCustomerNotifier
 {
@@ -45,6 +49,7 @@ class PaymentCustomerNotifier
         private readonly CustomerAccessGuard $accessGuard,
         private readonly SubscriptionPageButton $subscriptionPageButton,
         private readonly WalletService $walletService,
+        private readonly PaymentDeliveryLog $deliveryLog,
     ) {
     }
 
@@ -66,6 +71,12 @@ class PaymentCustomerNotifier
             }
         }
 
+        if (OrderType::NEW_SERVICE === $orderType && $vpnService instanceof VpnService && null !== $this->trackedDelivery($payment, $vpnService)) {
+            $this->sendTrackedDelivery($payment, $vpnService);
+
+            return;
+        }
+
         // A new service: "Open subscription page" under the last message.
         $lastMessageKeyboard = OrderType::RENEWAL !== $orderType && OrderType::ADD_TRAFFIC !== $orderType ? $this->subscriptionPageButton->keyboardFor($vpnService) : null;
         $this->deliver($payment, 'confirmed', function () use ($payment, $vpnService): array {
@@ -81,6 +92,90 @@ class PaymentCustomerNotifier
 
             return $this->buildNewServiceConfirmedMessages($vpnService);
         }, $lastMessageKeyboard);
+    }
+
+    /**
+     * A new service's delivery message that was due but not sent (the process died before or while sending it, or
+     * nothing reached the customer): sent now, once, by whoever claims it. Never throws.
+     */
+    public function resendMissing(Payment $payment, VpnService $vpnService): void
+    {
+        try {
+            if (OrderType::NEW_SERVICE !== $payment->getOrder()->getType() || null === $this->trackedDelivery($payment, $vpnService)) {
+                return;
+            }
+            $this->sendTrackedDelivery($payment, $vpnService);
+        } catch (\Throwable $e) {
+            $this->logger->error('Customer delivery resend failed.', ['payment_id' => $payment->getId(), 'error' => $e->getMessage()]);
+        }
+    }
+
+    /**
+     * After the attach pass of a new service (M2e E1): one short message when it attached additional servers, at most
+     * once per order, and only after the delivery message (a delivery still to be sent is built from the live state and
+     * carries them anyway). Never throws.
+     */
+    public function inboundsAttached(Payment $payment, VpnService $vpnService, int $attached): void
+    {
+        try {
+            $order = $payment->getOrder();
+            if ($attached <= 0 || PaymentDeliveryLog::SENT !== $this->trackedDelivery($payment, $vpnService)
+                || !$this->deliveryLog->followUpOnce((int) $vpnService->getId(), (int) $order->getUser()->getId(), (int) $order->getId(), $attached)) {
+                return;
+            }
+            $account = $this->entityManager->getRepository(TelegramAccount::class)->findOneBy(['user' => $order->getUser()]);
+            if ($account instanceof TelegramAccount) {
+                $this->telegramApiClient->sendMessage($account->getTelegramId(), $this->botTextResolver->message('service.inbounds_attached', ['service' => ['id' => (int) $vpnService->getId(), 'count' => $attached]]));
+            }
+        } catch (\Throwable $e) {
+            $this->logger->error('Customer follow-up after the attach pass failed.', ['payment_id' => $payment->getId(), 'error' => $e->getMessage()]);
+        }
+    }
+
+    /** The state of this order's delivery in PaymentDeliveryLog; null for an order settled before M2e (not tracked). */
+    private function trackedDelivery(Payment $payment, VpnService $vpnService): ?string
+    {
+        return null === $vpnService->getId() ? null : $this->deliveryLog->state((int) $vpnService->getId(), (int) $payment->getOrder()->getId());
+    }
+
+    /**
+     * The delivery message of a new service, sent by the one process that claims it: the same messages and requests as
+     * deliver(), each send checked. Nothing sent (the first message failed, or the messages could not be built):
+     * released for a later attempt. A later message failing still counts as sent, so nothing is ever sent twice.
+     */
+    private function sendTrackedDelivery(Payment $payment, VpnService $vpnService): void
+    {
+        $serviceId = (int) $vpnService->getId();
+        $orderId = (int) $payment->getOrder()->getId();
+        if (!$this->deliveryLog->claim($serviceId, $orderId)) {
+            return; // sent, being sent by another process, or given up
+        }
+        $sent = 0;
+        $failed = false;
+        try {
+            $telegramAccount = $this->entityManager->getRepository(TelegramAccount::class)->findOneBy(['user' => $payment->getOrder()->getUser()]);
+            if ($telegramAccount instanceof TelegramAccount) {
+                $keyboard = $this->subscriptionPageButton->keyboardFor($vpnService);
+                $messages = array_values($this->buildNewServiceConfirmedMessages($vpnService));
+                foreach ($messages as $i => $message) {
+                    $markup = $i === count($messages) - 1 ? $keyboard : null;
+                    if (str_contains($message, '<code>')) {
+                        $this->telegramApiClient->sendHtmlMessageStrict($telegramAccount->getTelegramId(), $message, $markup);
+                    } else {
+                        $this->telegramApiClient->sendMessageStrict($telegramAccount->getTelegramId(), $message, $markup);
+                    }
+                    ++$sent;
+                }
+            }
+        } catch (\Throwable $e) {
+            $failed = true;
+            $this->logger->error('Customer payment notification failed.', ['payment_id' => $payment->getId(), 'kind' => 'confirmed', 'sent' => $sent, 'error' => $e->getMessage()]);
+        }
+        try {
+            $failed && 0 === $sent ? $this->deliveryLog->release($serviceId, $orderId) : $this->deliveryLog->sent($serviceId, $orderId);
+        } catch (\Throwable $e) {
+            $this->logger->error('Customer delivery state could not be recorded.', ['payment_id' => $payment->getId(), 'error' => $e->getMessage()]);
+        }
     }
 
     /**

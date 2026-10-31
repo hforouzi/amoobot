@@ -893,7 +893,8 @@ real-panel checklist updated for B1 and B2. No migration.
     fallback when the panel refuses that add: a read, then the add with the primary alone). An additional inbound the
     read lists is attached; any other is written **pending** with `InboundAttachDriverInterface::AFTER_SALE`, no attempt
     counted. No attach call runs under the lock;
-  - right after the commit, before the customer's delivery message (so it carries the new links), the settlement calls
+  - right after the commit, before the customer's delivery message (so it carries the new links; **changed in M2e E1**:
+    the delivery message now comes first, then the pass and one follow-up), the settlement calls
     `ServiceInboundAttacher::afterSale()`: it claims those rows, attaches them in one pass with no order, payment or
     wallet lock held (`PanelCallBudget`: `AFTER_SALE_BUDGET_SECONDS` = 15 s for the **whole pass**, the read, the batch
     attach, at most 3 one-by-one attaches, the read back and the link refresh included; each request's `max_duration`
@@ -922,7 +923,7 @@ real-panel checklist updated for B1 and B2. No migration.
   modern mode (Panels → test connection); attached once it is"), the driver gets exactly the single-inbound request,
   and the admins get the usual one "not attached" alert (claimed once). The scheduled run attaches them once the panel
   is modern again. The sale rule still keeps such a plan from being sold. Replaces M2a's and M2c's "fail closed".
-- **Telegram id in logs (B3, finishes F9).** Every `error_log()` line of `src/` goes through `SafeErrorLog::write()`
+- **Telegram id in logs (B3, finishes F9; bounded and extended in M2e E3, E4).** Every `error_log()` line of `src/` goes through `SafeErrorLog::write()`
   (48 calls) and every PSR record through `RedactingLogger` (it decorates the `logger` service: the app and the payment
   plugins), both `SecretRedactor::forLog()`: a client email `tg_<id>_order_<n>` becomes `tg_[redacted]_order_<n>` and
   the values of the Telegram id keys (`chat`, `chat_id`, `actor_id`, `telegram_id`, `tg_id`, …) are masked; nothing else
@@ -955,6 +956,64 @@ real-panel checklist updated for B1 and B2. No migration.
   runs (CI artifacts) so the next flake comes with its message.
 - **Not tested against a real panel:** everything above runs against the fake 3x-ui (which now honours a request's
   `max_duration` as curl does); the admin guide's checklist is the real-panel test (steps for B1 and B2 added).
+
+#### M2e as built
+
+Branch `fix/multi-inbound-m2e`: a small corrective phase after the independent review of M2d (merged as PR #81;
+findings B1-1, B1-2, B3-1, B3-2). No migration, no new job.
+
+- **Delivery message first, and never lost (E1, B1-1).** The review killed a settlement during the attach pass (M2d B1:
+  the pass ran before the customer's delivery message): the service was paid and delivered on the panel, but the
+  customer never got the "service ready" message, a retried settlement answered `already_processed` without sending it
+  and nothing else did. Now, after the commit, `PaymentSettlementService` sends the delivery message **first** (the
+  primary's links and the subscription link, exactly as before M2d), then runs `ServiceInboundAttacher::afterSale()`,
+  then, only when the pass attached servers, one short follow-up (`service.inbounds_attached`, en/fa: "N more servers
+  were added to your service #id ... update the subscription"). The Mini App and the service page read the live state.
+  The delivery is recorded in `service_notification_log` (`PaymentDeliveryLog`, no migration; the state is the row's
+  `type`, key `order:<id>`): `delivery_pending` is written **inside the settlement transaction** (so it exists exactly
+  when the order was fulfilled; orders paid before M2e have no row and are never resent), one process claims it
+  (`delivery_sending`, one atomic `UPDATE`) and marks it `delivery_sent`. If nothing reached the customer (the first
+  message failed, Telegram down) it is pending again (at most 3 attempts, then `delivery_failed`); a sender that died
+  leaves `delivery_sending`, taken over after 5 minutes. A retried settlement of the confirmed payment (webhook, admin)
+  and the scheduled `orders` job (`MissingDeliveryResender`, every 10 minutes, not behind a toggle) send a due delivery
+  once; a delivery whose payment is no longer confirmed or whose service was deleted is given up. The follow-up is
+  claimed once per order (`delivery_follow_up`) and only after the delivery was sent. The tracked send uses
+  `sendMessageStrict` / `sendHtmlMessageStrict` (new; the same request as `sendHtmlMessage`, a failure is thrown); a
+  failure after the first message still counts as sent, so no message is ever sent twice. The one duplicate this
+  allows: a process killed after Telegram accepted the message and before it was marked sent (milliseconds); that
+  message is sent again after 5 minutes. Single-inbound sales send the same messages and the same panel requests as
+  before M2d (the row is written for them too, so a lost delivery is resent for every new service).
+  Tests: `DeliveryMessageTest` (real processes): kill -9 during the pass, two settlements at once, nothing attached,
+  Telegram down, died while sending, single-inbound.
+- **No request in the last 50 ms (E2, B1-2).** With a sliver of the pass left, `max_duration` became e.g. 0.4 ms; curl
+  takes it in whole milliseconds and 0 means unlimited. Now nothing is sent with less than
+  `PanelCallBudget::MIN_SECONDS_TO_SEND` (50 ms) left (compared in whole milliseconds), `max_duration` and `timeout`
+  are never below 1 ms, and a GET is retried only if 50 ms would be left after its backoff (`PanelCallBudgetTest`).
+- **Bounded, fail-closed redaction (E3, B3-1).** A self-referencing array in a log context recursed until the memory
+  limit. `RedactingLogger` now walks the context to 5 levels and 1000 values in all, cuts strings over 1 MiB (so does
+  `SafeErrorLog`), casts a `Stringable` inside a try (a throwing `__toString()` is `[unprintable]`), passes other objects
+  and resources on unchanged, and never throws (a context it cannot redact is dropped, the message is still written; a
+  failing inner logger is ignored). `SecretRedactor::forLog()` fails closed: a text PCRE cannot process is written as
+  `[log line withheld: it could not be redacted]`, never raw (`LogRedactionLimitsTest`).
+- **The remaining Telegram id forms (E4, B3-2).** `forLog()` also masks a raw update's `"chat"` / `"from"` / `"user"` /
+  `"sender_chat"` object `"id"`, URL-encoded pairs (`chat_id%3D<id>`, `%22chat_id%22%3A<id>`, after `%26`), any
+  `tg_<5+ digits>` (the client email cut short, e.g. the 15-character trace argument `'tg_512345678_or...'`), and
+  **stack traces carry no argument values** (changed after CI, see below): every frame `#<n> <file>(<line>):
+  <function>(…)` keeps its number, file, line, class and function and its whole argument list becomes `(...)`, whatever
+  the arguments are (strings, ints, `Object(...)`, `Array`) and wherever the trace is (`getTraceAsString()`,
+  `(string) $exception` with its `Next` chain, frames joined on one line). The first E4 rule masked only quoted digit
+  strings in frames; CI (setup-php, from `php.ini-production`: `zend.exception_string_param_max_len = 0`, string
+  arguments printed as `'...'`) showed that a trace's form depends on the runner's `php.ini`, so the test failed its own
+  precondition there (the trace had no id to redact; nothing leaked). The tests now set both ini values themselves and
+  assert in every mode (arguments in, strings cut, no arguments) that the redacted trace is the same and keeps its
+  frames. **Rule for context values and `{placeholder}`s** (documented in
+  `RedactingLogger`): under a key of `SecretRedactor::TELEGRAM_ID_KEYS` any int or string is masked (as in M2d); under a
+  key that names a Telegram id (`RedactingLogger::isTelegramIdKey()`: contains `chat`, `telegram` or `actor`, or is
+  `tg_id` / `tgId` / `from` / `from_id`) an int or digit string of 5+ digits is masked; every other key keeps its value,
+  so order, payment and service ids, amounts and ports are never touched, and a Telegram id must be logged under such a
+  key. A `Stringable` is redacted as text. (`TelegramIdLogFormsTest`, with negative cases.)
+- **Not tested against a real panel or real Telegram:** the kill, retry and resend tests run against the fake 3x-ui and
+  a recorded Telegram; the admin guide's checklist steps 4 and 13 cover the messages on a real panel.
 
 ### 9.8 Open questions and risks (Hosts)
 
