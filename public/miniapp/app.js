@@ -37,6 +37,7 @@
  *   button[data-action][data-into]  the answer's (server-rendered, escaped) html goes into that element
  *   a[data-telegram-link]  a t.me link, opened inside Telegram (openTelegramLink)
  *   button[data-close-app] closes the Mini App (back to the chat)
+ *   [data-scroll-to]       scrolled into view once the section is shown (the guide topic ?topic= opened)
  *
  * Deep links: opened with startapp=<payload>, the app signs in again (even with a stored session) and opens the section
  * the /app/auth answer names in "start" (a claim link's screen), with Home behind it.
@@ -345,7 +346,10 @@
             if (root) {
                 root.querySelectorAll('form[data-check-now]').forEach(function (form) { check(form, 0); });
             }
-            if (!keepScroll) {
+            var scrollTarget = root && root.querySelector('[data-scroll-to]');
+            if (scrollTarget) {
+                scrollTarget.scrollIntoView({block: 'start'});
+            } else if (!keepScroll) {
                 window.scrollTo(0, 0);
             }
         }).catch(function () {
