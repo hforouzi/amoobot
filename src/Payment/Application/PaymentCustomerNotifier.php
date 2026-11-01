@@ -9,6 +9,8 @@ use App\Bot\Application\SubscriptionPageButton;
 use App\Bot\Application\VpnAccessMessageFormatter;
 use App\Entity\VpnService;
 use App\Bot\Infrastructure\TelegramApiClient;
+use App\Bot\Infrastructure\TelegramApiRejected;
+use App\Broadcast\BroadcastFormat;
 use App\Entity\Payment;
 use App\Entity\TelegramAccount;
 use Doctrine\ORM\EntityManagerInterface;
@@ -54,6 +56,7 @@ class PaymentCustomerNotifier
         private readonly SubscriptionPageButton $subscriptionPageButton,
         private readonly WalletService $walletService,
         private readonly PaymentDeliveryLog $deliveryLog,
+        private readonly AdminPaymentAlerter $adminAlerter,
     ) {
     }
 
@@ -153,50 +156,110 @@ class PaymentCustomerNotifier
     }
 
     /**
-     * The delivery message of a new service, sent by the one process that claims it: the same messages and requests as
-     * deliver(), each send checked. Nothing sent (the first message failed, or the messages could not be built):
-     * released for a later attempt. A later message failing still counts as sent, so nothing is ever sent twice.
+     * The delivery message of a new service, sent by the one process that claims it (review R3): the same messages and
+     * requests as deliver(), each send checked. A message Telegram accepted is recorded at once (PaymentDeliveryLog::
+     * accepted(), before and independent of the bot message log) and never sent again; a failed message does not stop
+     * the next ones; an HTML message Telegram cannot parse is sent again as plain text (links kept). The delivery is SENT
+     * only when every message was accepted, else a later attempt sends the rest; an unknown outcome (timeout) counts as
+     * not accepted (sent again: at least once). After the last attempt it is FAILED and the admins are alerted once.
+     * Never throws.
      */
     private function sendTrackedDelivery(Payment $payment, VpnService $vpnService): void
     {
         $serviceId = (int) $vpnService->getId();
         $orderId = (int) $payment->getOrder()->getId();
-        if (!$this->deliveryLog->claim($serviceId, $orderId)) {
-            return; // sent, being sent by another process, or given up
-        }
-        $reason = $this->undeliverable($payment, $vpnService, true);
-        if (null !== $reason) {
-            $this->deliveryLog->abandon($serviceId, $orderId, $reason);
-            $this->logger->warning('Customer delivery abandoned, nothing sent.', ['reason' => $reason]);
+        try {
+            $claim = $this->deliveryLog->claim($serviceId, $orderId);
+            if (null === $claim) {
+                // Sent, being sent by another process, given up; or its attempts are used up (the last one died).
+                if ($this->deliveryLog->exhaust($serviceId, $orderId)) {
+                    $this->adminAlerter->deliveryFailed($payment, PaymentDeliveryLog::MAX_ATTEMPTS);
+                }
+
+                return;
+            }
+            $reason = $this->undeliverable($payment, $vpnService, true);
+            $telegramAccount = null === $reason ? $this->entityManager->getRepository(TelegramAccount::class)->findOneBy(['user' => $payment->getOrder()->getUser()]) : null;
+            $reason ??= $telegramAccount instanceof TelegramAccount ? null : 'no_telegram_account';
+            if (null !== $reason || !$telegramAccount instanceof TelegramAccount) {
+                $this->deliveryLog->abandon($serviceId, $orderId, (string) $reason);
+                $this->logger->warning('Customer delivery abandoned, nothing sent.', ['reason' => $reason]);
+
+                return;
+            }
+        } catch (\Throwable $e) {
+            $this->logger->error('Customer delivery could not be started.', ['payment_id' => $payment->getId(), 'error_class' => $e::class]);
 
             return;
         }
-        $sent = 0;
-        $failed = false;
+
+        $accepted = array_fill_keys($claim['accepted'], true);
+        $total = null;
         try {
-            $telegramAccount = $this->entityManager->getRepository(TelegramAccount::class)->findOneBy(['user' => $payment->getOrder()->getUser()]);
-            if ($telegramAccount instanceof TelegramAccount) {
-                $keyboard = $this->subscriptionPageButton->keyboardFor($vpnService);
-                $messages = array_values($this->buildNewServiceConfirmedMessages($vpnService));
-                foreach ($messages as $i => $message) {
-                    $markup = $i === count($messages) - 1 ? $keyboard : null;
-                    if (str_contains($message, '<code>')) {
-                        $this->telegramApiClient->sendHtmlMessageStrict($telegramAccount->getTelegramId(), $message, $markup);
-                    } else {
-                        $this->telegramApiClient->sendMessageStrict($telegramAccount->getTelegramId(), $message, $markup);
-                    }
-                    ++$sent;
+            $keyboard = $this->subscriptionPageButton->keyboardFor($vpnService);
+            $messages = array_values($this->buildNewServiceConfirmedMessages($vpnService));
+            $total = count($messages);
+            foreach ($messages as $i => $message) {
+                if (isset($accepted[$i])) {
+                    continue;
                 }
+                if ($this->sendDeliveryMessage($telegramAccount->getTelegramId(), $message, $i === $total - 1 ? $keyboard : null, function () use ($serviceId, $orderId, $i, &$accepted): void {
+                    $accepted[$i] = true;
+                    try {
+                        $this->deliveryLog->accepted($serviceId, $orderId, $i);
+                    } catch (\Throwable $e) {
+                        $this->logger->error('Customer delivery progress could not be recorded.', ['error_class' => $e::class]);
+                    }
+                })) {
+                    continue;
+                }
+                $this->logger->error('Customer payment notification failed.', ['payment_id' => $payment->getId(), 'kind' => 'confirmed', 'message' => $i + 1, 'of' => $total, 'attempt' => $claim['attempt']]);
             }
         } catch (\Throwable $e) {
-            $failed = true;
-            $this->logger->error('Customer payment notification failed.', ['payment_id' => $payment->getId(), 'kind' => 'confirmed', 'sent' => $sent, 'error' => $e->getMessage()]);
+            $this->logger->error('Customer payment notification failed.', ['payment_id' => $payment->getId(), 'kind' => 'confirmed', 'attempt' => $claim['attempt'], 'error' => $e->getMessage()]);
+        }
+
+        $complete = null !== $total && count(array_intersect_key($accepted, range(0, max(0, $total - 1)))) >= $total;
+        try {
+            if (PaymentDeliveryLog::FAILED === $this->deliveryLog->finish($serviceId, $orderId, $claim['token'], $complete)) {
+                $this->adminAlerter->deliveryFailed($payment, $claim['attempt']);
+            }
+        } catch (\Throwable $e) {
+            $this->logger->error('Customer delivery state could not be recorded.', ['payment_id' => $payment->getId(), 'error_class' => $e::class]);
+        }
+    }
+
+    /**
+     * One message of a delivery; true when Telegram accepted it ($onAccepted has run, even if the bot message log failed
+     * afterwards). An HTML message Telegram cannot parse is sent once more as plain text, its links kept.
+     *
+     * @param array<string, mixed>|null $markup
+     */
+    private function sendDeliveryMessage(string $chatId, string $message, ?array $markup, \Closure $onAccepted): bool
+    {
+        $done = false;
+        $accept = static function () use (&$done, $onAccepted): void {
+            $done = true;
+            $onAccepted();
+        };
+        $html = str_contains($message, '<code>');
+        try {
+            $html ? $this->telegramApiClient->sendHtmlMessageStrict($chatId, $message, $markup, $accept) : $this->telegramApiClient->sendMessageStrict($chatId, $message, $markup, $accept);
+
+            return true;
+        } catch (TelegramApiRejected $e) {
+            if ($done || !$html || !BroadcastFormat::isParseError($e->getMessage())) {
+                return $done;
+            }
+        } catch (\Throwable) {
+            return $done;
         }
         try {
-            $failed && 0 === $sent ? $this->deliveryLog->release($serviceId, $orderId) : $this->deliveryLog->sent($serviceId, $orderId);
-        } catch (\Throwable $e) {
-            $this->logger->error('Customer delivery state could not be recorded.', ['payment_id' => $payment->getId(), 'error' => $e->getMessage()]);
+            $this->telegramApiClient->sendMessageStrict($chatId, html_entity_decode(strip_tags($message), ENT_QUOTES | ENT_HTML5, 'UTF-8'), $markup, $accept);
+        } catch (\Throwable) {
         }
+
+        return $done;
     }
 
     /**
