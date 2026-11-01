@@ -137,10 +137,19 @@ class PaymentCustomerNotifier
         }
     }
 
-    /** The state of this order's delivery in PaymentDeliveryLog; null for an order settled before M2e (not tracked). */
+    /**
+     * The state of this order's delivery in PaymentDeliveryLog; null for an order settled before M2e or whose row could
+     * not be recorded (review R2): not tracked, delivered as before M2e. A failed read is "not tracked" too, never thrown.
+     */
     private function trackedDelivery(Payment $payment, VpnService $vpnService): ?string
     {
-        return null === $vpnService->getId() ? null : $this->deliveryLog->state((int) $vpnService->getId(), (int) $payment->getOrder()->getId());
+        try {
+            return null === $vpnService->getId() ? null : $this->deliveryLog->state((int) $vpnService->getId(), (int) $payment->getOrder()->getId());
+        } catch (\Throwable $e) {
+            $this->logger->error('Delivery tracking could not be read; the delivery message is sent untracked.', ['error_class' => $e::class]);
+
+            return null;
+        }
     }
 
     /**

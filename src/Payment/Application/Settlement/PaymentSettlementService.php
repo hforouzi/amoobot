@@ -32,6 +32,7 @@ use App\Wallet\Domain\TopUpCredit;
 use App\Wallet\Domain\WalletKeys;
 use App\Wallet\Domain\WalletReferenceType;
 use App\Wallet\Domain\WalletTransactionType;
+use Doctrine\DBAL\Exception\RetryableException;
 use Doctrine\DBAL\LockMode;
 use Doctrine\ORM\EntityManagerInterface;
 use Psr\Log\LoggerInterface;
@@ -417,7 +418,7 @@ class PaymentSettlementService
             $this->entityManager->flush();
             if (OrderType::NEW_SERVICE === $order->getType() && null !== $service?->getId()) {
                 // The delivery message is due exactly when this commit fulfils the order (M2e E1).
-                $this->deliveryLog->expect((int) $service->getId(), (int) $order->getUser()->getId(), (int) $order->getId(), (int) $payment->getId());
+                $this->expectDelivery($service, $order, $payment);
             }
             $connection->commit();
         } catch (\Throwable $e) {
@@ -462,6 +463,24 @@ class PaymentSettlementService
     }
 
     /** A new service sold with additional inbounds (its snapshot, or the live plan for an order taken before M2c). */
+    /**
+     * The delivery row, inside the settlement transaction (M2e E1 review R2): it must never fail or roll back the sale.
+     * A deadlock or lock wait timeout is rethrown (the server rolled the whole transaction back; the existing handling
+     * records a provisioning failure that is retried). Any other failure is logged (its class only, no ids or SQL) and the
+     * sale goes on untracked: the delivery message is sent once after the commit, as before M2e, and never resent. The
+     * scheduled job does not reconcile it, since nothing tells it whether that untracked message reached the customer.
+     */
+    private function expectDelivery(VpnService $service, Order $order, Payment $payment): void
+    {
+        try {
+            $this->deliveryLog->expect((int) $service->getId(), (int) $order->getUser()->getId(), (int) $order->getId(), (int) $payment->getId());
+        } catch (RetryableException $e) {
+            throw $e;
+        } catch (\Throwable $e) {
+            $this->logger->error('Delivery tracking not recorded; the delivery message is sent untracked.', ['error_class' => $e::class]);
+        }
+    }
+
     private static function soldWithAdditionalInbounds(Order $order): bool
     {
         if (OrderType::NEW_SERVICE !== $order->getType()) {
