@@ -111,7 +111,9 @@ carries every attached inbound.
     that payment, or by the `orders` job within about 10 minutes (a sender that stopped is taken over after 5 minutes),
     only the messages Telegram has not accepted yet. It is sent only to the customer who bought the service and still owns
     it, only while the service is active, and only within 60 minutes of the sale; otherwise nothing is sent to anyone
-    (claimed or transferred, suspended or deleted, too late). At most 3 attempts: a message whose answer was lost
+    (claimed or transferred, suspended or deleted, too late). This is checked again before each message, so a delivery of
+    several messages stops at the next one; a claim or transfer at the very instant of a send can still let that one
+    message reach the previous owner (only what he already had). At most 3 attempts: a message whose answer was lost
     (timeout) may reach the customer once per attempt, so up to 3 copies; after the third failed attempt you get one
     alert "📭 پیام تحویل سرویس به مشتری نرسید" (payment and order) and should give the customer the links yourself;
   - an inbound inactive or on another panel by then is recorded "not attached" with that reason (alerted at the next
