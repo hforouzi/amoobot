@@ -466,8 +466,12 @@ class PaymentSettlementService
     /** A new service sold with additional inbounds (its snapshot, or the live plan for an order taken before M2c). */
     /**
      * The delivery row, inside the settlement transaction (M2e E1 review R2): it must never fail or roll back the sale.
-     * A deadlock or lock wait timeout is rethrown (the server rolled the whole transaction back; the existing handling
-     * records a provisioning failure that is retried). Any other failure is logged (its class only, no ids or SQL) and the
+     * A deadlock or lock wait timeout (RetryableException) is rethrown. They differ on MariaDB 10.11: a deadlock (1213)
+     * has already rolled the whole transaction back, while a lock wait timeout (1205) rolls back only the failed statement
+     * (innodb_rollback_on_timeout is off by default) and the transaction could go on. Both are still rethrown on purpose,
+     * which is conservative: the sale is rolled back and ends provisioning_failed (retried), rather than committed with
+     * its delivery untracked because of a transient lock conflict that a retry resolves, and one path serves both errors
+     * whatever the server's rollback-on-timeout setting. Any other failure is logged (its class only, no ids or SQL) and the
      * sale goes on untracked: the delivery message is sent once after the commit, as before M2e, and never resent. The
      * scheduled job does not reconcile it, since nothing tells it whether that untracked message reached the customer.
      */
