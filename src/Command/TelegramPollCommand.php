@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Command;
 
 use App\Bot\Application\BotMessageLogger;
+use App\Bot\Application\TelegramChatScope;
 use App\Bot\Application\TelegramUpdateHandler;
 use App\Bot\Domain\BotMessageDirection;
 use App\Bot\Infrastructure\TelegramApiClient;
@@ -105,6 +106,10 @@ class TelegramPollCommand extends Command
                 $updateId = (int) ($update['update_id'] ?? 0);
                 if ($updateId > 0) {
                     $offset = $updateId + 1;
+                }
+                // Private chats only (TelegramChatScope): an update of a group, supergroup or channel is skipped, not logged.
+                if (TelegramChatScope::isOutsidePrivateChats($update)) {
+                    continue;
                 }
 
                 $io->writeln(sprintf('Processing update_id=%d', $updateId));

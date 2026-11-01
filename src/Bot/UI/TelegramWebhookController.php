@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Bot\UI;
 
 use App\Bot\Application\BotMessageLogger;
+use App\Bot\Application\TelegramChatScope;
 use App\Bot\Application\TelegramUpdateHandler;
 use App\Bot\Domain\BotMessageDirection;
 use Psr\Log\LoggerInterface;
@@ -48,7 +49,8 @@ class TelegramWebhookController extends AbstractController
         }
 
         $payload = json_decode($request->getContent(), true);
-        if (!is_array($payload)) {
+        // Private chats only (TelegramChatScope): an update of a group, supergroup or channel is not even logged.
+        if (!is_array($payload) || TelegramChatScope::isOutsidePrivateChats($payload)) {
             return new JsonResponse(['ok' => true]);
         }
 
