@@ -55,6 +55,27 @@ final class StorePaymentMethodResolver
     }
 
     /**
+     * The methods a customer can be offered at all, whatever the order: active, on an active gateway that is configured
+     * and has its driver (plugin enabled and healthy). The order-dependent rules (currency, amount range, order state)
+     * are not applied. For the customer guide's list of payment methods, which shows their titles only.
+     *
+     * @return list<StorePaymentMethod>
+     */
+    public function getOfferableMethods(): array
+    {
+        $offerable = [];
+        foreach ($this->allMethods() as $method) {
+            $gateway = $method->getGateway();
+            if ($method->isActive() && $gateway->isActive() && null === $this->pluginStatusReason($gateway)
+                && null === $this->driverError($gateway) && $this->isGatewayConfiguredForResolver($gateway)) {
+                $offerable[] = $method;
+            }
+        }
+
+        return $offerable;
+    }
+
+    /**
      * @return array{
      *     orderId: int,
      *     amount: int,

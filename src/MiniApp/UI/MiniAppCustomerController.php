@@ -6,6 +6,7 @@ namespace App\MiniApp\UI;
 
 use App\Bot\Application\BotTextResolver;
 use App\Entity\VpnService;
+use App\MiniApp\Guide\MiniAppGuide;
 use App\MiniApp\Security\MiniAppUser;
 use App\Provisioning\Application\CustomerServiceFinder;
 use App\Provisioning\Application\ServiceInboundCounts;
@@ -50,6 +51,7 @@ final class MiniAppCustomerController extends AbstractController
         private readonly WalletSettings $walletSettings,
         private readonly WalletService $wallets,
         private readonly ServiceInboundCounts $inboundCounts,
+        private readonly MiniAppGuide $guide,
         private readonly string $serviceNotifyTrafficThresholds = '80',
     ) {
     }
@@ -137,12 +139,21 @@ final class MiniAppCustomerController extends AbstractController
         ]);
     }
 
-    /** The bot's own support text (bot.support, editable in the admin's bot texts), so both say the same. */
+    /**
+     * The customer guide (MiniAppGuide: the topics the shop's current state allows, the same for every customer) and
+     * the bot's own support text (bot.support, editable in the admin's bot texts, so both say the same), escaped as
+     * text whatever it holds. ?topic=<slug> opens that topic's card; any other value opens none.
+     */
     #[Route('/app/view/help', name: 'miniapp_help', defaults: ['_miniapp_section' => 'help'], methods: ['GET'])]
     public function help(Request $request): Response
     {
+        $locale = MiniAppLocale::fromRequest($request);
+        $topics = $this->guide->topics($locale);
+
         return $this->fragments->render($request, 'miniapp/view/help.html.twig', [
-            'supportText' => $this->botTexts->message('bot.support', [], MiniAppLocale::fromRequest($request)),
+            'topics' => $topics,
+            'openTopic' => MiniAppGuide::requestedTopic($request->query->all()['topic'] ?? null, $topics),
+            'supportText' => $this->guide->plain($this->botTexts->message('bot.support', [], $locale)),
         ]);
     }
 
