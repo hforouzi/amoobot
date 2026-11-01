@@ -7,6 +7,7 @@ namespace App\Payment\Application;
 use App\Entity\Payment;
 use App\Entity\VpnService;
 use App\Payment\Domain\PaymentStatus;
+use App\Shared\Infrastructure\TransactionRollback;
 use Doctrine\ORM\EntityManagerInterface;
 
 /**
@@ -22,6 +23,7 @@ final class MissingDeliveryResender
         private readonly EntityManagerInterface $entityManager,
         private readonly PaymentDeliveryLog $deliveryLog,
         private readonly PaymentCustomerNotifier $customerNotifier,
+        private readonly TransactionRollback $transactionRollback,
     ) {
     }
 
@@ -33,6 +35,9 @@ final class MissingDeliveryResender
         $summary = ['due' => 0, 'resent' => 0, 'abandoned' => 0];
         foreach ($this->deliveryLog->due($limit) as $row) {
             ++$summary['due'];
+            // An open, empty entity manager for every delivery (review R3): a flush that failed for the previous one
+            // (e.g. its bot message log) closed it.
+            $this->transactionRollback->resetEntityManager();
             $payment = $this->entityManager->find(Payment::class, $row['payment_id']);
             $service = $this->entityManager->find(VpnService::class, $row['service_id']);
             if (!$payment instanceof Payment || !$service instanceof VpnService || PaymentStatus::CONFIRMED !== $payment->getStatus()) {

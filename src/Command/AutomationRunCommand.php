@@ -14,6 +14,7 @@ use App\Provisioning\Application\ServiceExpiryChecker;
 use App\Provisioning\Application\ServiceNotificationService;
 use App\Provisioning\Application\ServiceUsageSyncService;
 use App\Reseller\Application\ClaimMaintenance;
+use App\Shared\Infrastructure\TransactionRollback;
 use App\Shop\Application\IncompleteOrderExpiryService;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\Console\Attribute\AsCommand;
@@ -39,6 +40,7 @@ final class AutomationRunCommand extends Command
         private readonly ClaimMaintenance $claimMaintenance,
         private readonly InboundAttachScheduler $inboundAttachScheduler,
         private readonly MissingDeliveryResender $missingDeliveryResender,
+        private readonly TransactionRollback $transactionRollback,
     ) {
         parent::__construct();
     }
@@ -76,15 +78,24 @@ final class AutomationRunCommand extends Command
         $broadcasts = 0;
 
         if ($this->shouldRun($only, 'orders')) {
-            if ($this->automationSettingsProvider->expireIncompleteOrdersEnabled()) {
-                $summary = $this->incompleteOrderExpiryService->expire($dryRun, null, $limit);
-                $updated += (int) $summary['draftsExpired'] + (int) $summary['ordersExpired'];
-                $this->logger->info('automation_task_completed', ['task' => 'expire_incomplete_orders', 'summary' => $summary]);
-            } else {
-                $this->logger->info('automation_task_skipped_by_setting', ['task' => 'expire_incomplete_orders']);
+            // Each task of the orders job on its own (M2e E1 review R3): a failure is logged and counted, never skips the
+            // next task, and the next one starts with an open, empty entity manager (a failed flush closes it).
+            try {
+                if ($this->automationSettingsProvider->expireIncompleteOrdersEnabled()) {
+                    $summary = $this->incompleteOrderExpiryService->expire($dryRun, null, $limit);
+                    $updated += (int) $summary['draftsExpired'] + (int) $summary['ordersExpired'];
+                    $this->logger->info('automation_task_completed', ['task' => 'expire_incomplete_orders', 'summary' => $summary]);
+                } else {
+                    $this->logger->info('automation_task_skipped_by_setting', ['task' => 'expire_incomplete_orders']);
+                }
+            } catch (\Throwable $e) {
+                ++$failed;
+                $this->logger->error('automation_task_failed', ['task' => 'expire_incomplete_orders', 'error' => $e->getMessage()]);
             }
 
             // Not behind a toggle: a payment waiting for an admin (money taken, nothing delivered) must not be forgotten.
+            $this->transactionRollback->rollBack();
+            $this->transactionRollback->resetEntityManager();
             try {
                 $summary = $this->stuckPaymentReminder->remind($dryRun, $limit);
                 $notified += $summary['reminded'];
@@ -95,6 +106,8 @@ final class AutomationRunCommand extends Command
             }
 
             // Not behind a toggle either: a paid new service whose delivery message never went out (M2e E1).
+            $this->transactionRollback->rollBack();
+            $this->transactionRollback->resetEntityManager();
             try {
                 $summary = $this->missingDeliveryResender->run($limit, $dryRun);
                 $notified += $summary['resent'];
