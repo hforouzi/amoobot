@@ -970,21 +970,51 @@ findings B1-1, B1-2, B3-1, B3-2). No migration, no new job.
   then, only when the pass attached servers, one short follow-up (`service.inbounds_attached`, en/fa: "N more servers
   were added to your service #id ... update the subscription"). The Mini App and the service page read the live state.
   The delivery is recorded in `service_notification_log` (`PaymentDeliveryLog`, no migration; the state is the row's
-  `type`, key `order:<id>`): `delivery_pending` is written **inside the settlement transaction** (so it exists exactly
-  when the order was fulfilled; orders paid before M2e have no row and are never resent), one process claims it
-  (`delivery_sending`, one atomic `UPDATE`) and marks it `delivery_sent`. If nothing reached the customer (the first
-  message failed, Telegram down) it is pending again (at most 3 attempts, then `delivery_failed`); a sender that died
-  leaves `delivery_sending`, taken over after 5 minutes. A retried settlement of the confirmed payment (webhook, admin)
-  and the scheduled `orders` job (`MissingDeliveryResender`, every 10 minutes, not behind a toggle) send a due delivery
-  once; a delivery whose payment is no longer confirmed or whose service was deleted is given up. The follow-up is
-  claimed once per order (`delivery_follow_up`) and only after the delivery was sent. The tracked send uses
-  `sendMessageStrict` / `sendHtmlMessageStrict` (new; the same request as `sendHtmlMessage`, a failure is thrown); a
-  failure after the first message still counts as sent, so no message is ever sent twice. The one duplicate this
-  allows: a process killed after Telegram accepted the message and before it was marked sent (milliseconds); that
-  message is sent again after 5 minutes. Single-inbound sales send the same messages and the same panel requests as
-  before M2d (the row is written for them too, so a lost delivery is resent for every new service).
-  Tests: `DeliveryMessageTest` (real processes): kill -9 during the pass, two settlements at once, nothing attached,
-  Telegram down, died while sending, single-inbound.
+  `type`, key `order:<id>`; the payload holds `payment_id`, `attempts`, `accepted`, `created`, `claim`):
+  `delivery_pending` is written **inside the settlement transaction** (so it exists exactly when the order was
+  fulfilled; orders paid before M2e have no row and are never resent). If that `INSERT` fails with anything but a
+  deadlock or lock wait timeout, the error class is logged and the sale goes on **untracked** (review R2): its delivery
+  message is sent once after the commit, as before M2e, and never resent; the job does not reconcile it, since nothing
+  tells it whether that message reached the customer. A deadlock or lock wait keeps the existing handling (the server
+  rolled the transaction back: provisioning failure, retried).
+  Sending (review R3): one process claims the delivery (`delivery_sending`, one atomic `UPDATE`); **every claim is an
+  attempt**, a takeover of a sender that died (`delivery_sending` older than 5 minutes) too, at most
+  `PaymentDeliveryLog::MAX_ATTEMPTS` = 3. Every message Telegram accepted is recorded at once (one autocommit `UPDATE`
+  run from `TelegramApiClient` right after the acceptance, before and independent of the bot message log and of any
+  EntityManager flush), so a later attempt sends only the messages not accepted yet. A failed message does not stop the
+  next ones; an HTML message Telegram cannot parse is sent again as plain text, links kept. The delivery is
+  `delivery_sent` only when every message was accepted; otherwise it is pending again for the next attempt, and after
+  the last one `delivery_failed`, and the admins get one alert (`AdminPaymentAlerter::deliveryFailed()`, sent by the one
+  process that made it failed; payment and order ids as in every payment alert, no Telegram id, link or error text).
+  A timeout or any other unknown outcome is "not accepted": that message is sent again (at least once).
+  **Bounds:** a message whose acceptance was recorded is never sent again; a message with an unknown outcome (timeout,
+  or a process killed between Telegram's acceptance and the recording) can reach the customer once per attempt, so at
+  most 3 copies; a message Telegram refused on all 3 attempts is lost and the admins are alerted. Measured (real
+  processes, `DeliveryAccountingTest`): killed before sending: 1 copy, sent once the sender is stale (5 to 15 minutes
+  later); killed after Telegram accepted and before the recording: 2; timeout after acceptance once: 2, on every try: 3
+  then failed + 1 alert; closed EntityManager in the job: 1; killed on every stale takeover: 3 then failed + 1 alert; two
+  settlements and a job at once, three jobs at once on stale rows: 1 each.
+  Who and when (review R1, D5): before every send the service's owner and status are read from the database; a delivery
+  is **abandoned** (`delivery_abandoned`, the reason in the payload, nothing sent to anyone) when the service changed
+  owner (a claim, an admin transfer: `owner_changed`), is not active (`service_not_active`, `service_deleted`), is gone,
+  the customer has no Telegram account, the payment is no longer confirmed, or the sale is older than
+  `PaymentDeliveryLog::MAX_AGE` = 60 minutes (`too_old`: a "service ready" message that late is no longer expected and
+  the service may have changed hands). Only the reason and counts are logged. The follow-up for extra servers carries no
+  link and goes to the order's user only while he still owns the active service; renewal and add-traffic confirmations
+  already read the owner fresh (the payer who no longer owns the service gets the no-links variant).
+  A retried settlement of the confirmed payment (webhook, admin) and the scheduled `orders` job
+  (`MissingDeliveryResender`, every 10 minutes, not behind a toggle) send a due delivery under these rules. Each task of
+  the `orders` job runs in its own `try/catch` (`expire_incomplete_orders` too, so its failure never skips the resend)
+  and starts with an open, empty EntityManager (rebuilt when a failed flush closed it); the resender does the same for
+  every delivery. The follow-up is claimed once per order (`delivery_follow_up`) and only after the delivery was sent.
+  Single-inbound sales send the same messages and the same panel requests as before M2d (the row is written for them
+  too). Tests (real processes): `DeliveryMessageTest` (kill -9 during the pass, two settlements at once, nothing
+  attached, Telegram down, died while sending, single-inbound), `DeliveryAccountingTest` (the bounds above, a failed
+  middle message, the plain-text fallback); `DeliveryOwnershipTest` (claim, admin transfer, suspended, deleted, too old,
+  the normal resend, the follow-up), `DeliveryTrackingFailureTest` (the row cannot be written; a deadlock),
+  `DeliveryOrdersJobTest` (a failing expiry task with a closed EntityManager).
+  Not done (future work): an index on `service_notification_log (type, sent_at)` for the job's query (a full scan,
+  about 70 ms for 400,000 rows), and purging old delivery rows.
 - **No request in the last 50 ms (E2, B1-2).** With a sliver of the pass left, `max_duration` became e.g. 0.4 ms; curl
   takes it in whole milliseconds and 0 means unlimited. Now nothing is sent with less than
   `PanelCallBudget::MIN_SECONDS_TO_SEND` (50 ms) left (compared in whole milliseconds), `max_duration` and `timeout`

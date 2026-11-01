@@ -24,6 +24,7 @@ class AdminPaymentAlerter
 {
     public const WALLET_CREDIT_FAILED_TITLE = '🚨 پرداخت شارژ کیف پول تایید شد اما واریز به کیف پول انجام نشد';
     public const STUCK_REMINDER_TITLE = '⏰ یادآوری: این پرداخت هنوز منتظر تصمیم مدیر است';
+    public const DELIVERY_FAILED_TITLE = '📭 پیام تحویل سرویس به مشتری نرسید';
     public const SETTLEMENT_INTERRUPTED_TITLE = '🚨 ثبت پرداخت با خطای پایگاه داده قطع شد؛ وضعیت پرداخت را بررسی کنید';
 
     public function __construct(
@@ -58,6 +59,19 @@ class AdminPaymentAlerter
             $walletDebitHeld ? '; the customer\'s wallet debit is held' : '',
             (string) ($payment->getProvisioningError() ?? $payment->getReviewReason() ?? '-')
         ), true);
+    }
+
+    /**
+     * A new service's delivery message ("service ready", with its links) did not fully reach the customer after
+     * PaymentDeliveryLog::MAX_ATTEMPTS attempts (M2e E1 review R3). Once per order: only the process that moved the
+     * delivery to FAILED calls it. No Telegram id, link or error text in it.
+     */
+    public function deliveryFailed(Payment $payment, int $attempts): void
+    {
+        $this->send($payment, self::DELIVERY_FAILED_TITLE, sprintf(
+            'The service was created, but its delivery message was not accepted by Telegram after %d attempt(s) (the customer may have blocked the bot). It is not sent again: give the customer the service\'s links yourself.',
+            $attempts
+        ));
     }
 
     public function overpaid(Payment $payment): void

@@ -23,8 +23,8 @@ use Symfony\Component\Process\Process;
 /**
  * M2e E1, in real PHP processes on MariaDB against one fake 3x-ui (tests/Support/bin/delivery.php): the customer's
  * delivery message ("service ready") is sent before the attach pass of the additional inbounds, recorded in
- * PaymentDeliveryLog, sent again by a retried settlement or the scheduled job when it never went out, and never twice;
- * one short follow-up when the pass attached servers. Every Telegram call of every process is counted.
+ * PaymentDeliveryLog, sent again by a retried settlement or the scheduled job when it never went out, not twice in
+ * these cases (the exact bounds: DeliveryAccountingTest); one short follow-up when the pass attached servers. Every Telegram call of every process is counted.
  */
 #[Group('subprocess')]
 final class DeliveryMessageTest extends IntegrationTestCase

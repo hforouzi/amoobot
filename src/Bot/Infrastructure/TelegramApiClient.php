@@ -59,8 +59,12 @@ class TelegramApiClient
         $this->botMessageLogger->log(BotMessageDirection::OUTGOING, ['method' => 'sendMessage', 'payload' => $payload], $chatId, 'message');
     }
 
-    /** sendHtmlMessage() with the same request, but a failure is thrown (a delivery that must know it was sent). */
-    public function sendHtmlMessageStrict(string $chatId, string $text, ?array $replyMarkup = null): void
+    /**
+     * sendHtmlMessage() with the same request, but a failure is thrown (a delivery that must know it was sent):
+     * TelegramApiRejected when Telegram refused it, another exception when the outcome is unknown. $onAccepted runs as
+     * soon as Telegram accepted the message, before the message is logged (a failing log never hides the acceptance).
+     */
+    public function sendHtmlMessageStrict(string $chatId, string $text, ?array $replyMarkup = null, ?\Closure $onAccepted = null): void
     {
         $payload = [
             'chat_id' => $chatId,
@@ -74,10 +78,12 @@ class TelegramApiClient
         }
 
         $this->callApi('sendMessage', $payload);
+        null === $onAccepted || $onAccepted();
         $this->botMessageLogger->log(BotMessageDirection::OUTGOING, ['method' => 'sendMessage', 'payload' => $payload], $chatId, 'message');
     }
 
-    public function sendMessageStrict(string $chatId, string $text, ?array $replyMarkup = null): void
+    /** sendHtmlMessageStrict() without parse mode. */
+    public function sendMessageStrict(string $chatId, string $text, ?array $replyMarkup = null, ?\Closure $onAccepted = null): void
     {
         $payload = [
             'chat_id' => $chatId,
@@ -89,6 +95,7 @@ class TelegramApiClient
         }
 
         $this->callApi('sendMessage', $payload);
+        null === $onAccepted || $onAccepted();
         $this->botMessageLogger->log(BotMessageDirection::OUTGOING, ['method' => 'sendMessage', 'payload' => $payload], $chatId, 'message');
     }
 
@@ -396,7 +403,7 @@ class TelegramApiClient
 
         if (true !== ($data['ok'] ?? false)) {
             $description = (string) ($data['description'] ?? 'unknown error');
-            throw new \RuntimeException(sprintf('Telegram API returned ok=false on method "%s": %s', $method, $description));
+            throw new TelegramApiRejected(sprintf('Telegram API returned ok=false on method "%s": %s', $method, $description));
         }
 
         return $data;
