@@ -61,7 +61,7 @@ final class DeliveryAccountingTest extends IntegrationTestCase
 
     protected function tearDown(): void
     {
-        foreach (['', '.lock', '.sent'] as $suffix) {
+        foreach (['', '.lock', '.sent', '.sent.paused', '.sent.go'] as $suffix) {
             @unlink($this->stateFile.$suffix);
         }
         parent::tearDown();
@@ -208,6 +208,81 @@ final class DeliveryAccountingTest extends IntegrationTestCase
         self::assertStringNotContainsString('<code>', $messages[0]['text']);
         self::assertMatchesRegularExpression('#vless://[0-9a-f-]+@#', $messages[0]['text'], 'the links are in the plain text');
         self::assertSame(PaymentDeliveryLog::SENT, $this->state($payment));
+    }
+
+    /**
+     * Review follow-up R1: the service changes owner (a transfer, committed by another connection) while Telegram is
+     * answering message 1 of 3. Message 2 is not sent to the previous owner, nor to the new one; the delivery is
+     * abandoned (owner_changed), and message 1's acceptance is still recorded. The update is made with a 2 s lock wait:
+     * it would fail if the sender held a lock on the service or the delivery row while calling Telegram.
+     */
+    public function testAnOwnerChangeBetweenTwoMessagesStopsTheDeliveryBeforeTheNextOne(): void
+    {
+        $this->longLinks();
+        $payment = $this->payment();
+        $newOwner = $this->createUser('8901');
+        $sender = $this->start('settle', $payment, 'pause-after-first');
+        $this->whilePaused($sender, fn (int $serviceId) => $this->em->getConnection()->executeStatement('UPDATE vpn_service SET user_id = ? WHERE id = ?', [$newOwner->getId(), $serviceId]));
+
+        self::assertSame('confirmed', self::assertSubprocessClean($sender, 'settle'));
+        $texts = $this->texts($payment);
+        self::assertCount(1, $texts, 'only the message already with Telegram reached the previous owner');
+        self::assertStringStartsWith(self::DELIVERY, $texts[0]);
+        self::assertSame([], $this->sentTo('8901'), 'the new owner is not sent the delivery either');
+        self::assertSame(PaymentDeliveryLog::ABANDONED, $this->state($payment));
+        self::assertSame(['reason' => 'owner_changed', 'accepted' => [0], 'attempts' => 1], $this->payload($payment));
+
+        self::assertSame('resent=0', $this->runStep('resend-job', '-'), 'an abandoned delivery is never resent');
+        self::assertCount(1, $this->texts($payment));
+    }
+
+    public function testASuspensionBetweenTwoMessagesStopsTheDeliveryBeforeTheNextOne(): void
+    {
+        $this->longLinks();
+        $payment = $this->payment();
+        $sender = $this->start('settle', $payment, 'pause-after-first');
+        $this->whilePaused($sender, fn (int $serviceId) => $this->em->getConnection()->executeStatement("UPDATE vpn_service SET status = 'suspended' WHERE id = ?", [$serviceId]));
+
+        self::assertSame('confirmed', self::assertSubprocessClean($sender, 'settle'));
+        self::assertCount(1, $this->texts($payment));
+        self::assertSame(PaymentDeliveryLog::ABANDONED, $this->state($payment));
+        self::assertSame('service_not_active', $this->payload($payment)['reason']);
+    }
+
+    /** Waits until $sender is inside Telegram's answer to message 1, runs $change on the service, lets $sender go on. */
+    private function whilePaused(Process $sender, \Closure $change): void
+    {
+        for ($i = 0; !file_exists($this->sentFile.'.paused') && $sender->isRunning() && $i < 6000; ++$i) {
+            usleep(10_000);
+        }
+        self::assertFileExists($this->sentFile.'.paused', 'the sender reached message 1: '.$sender->getErrorOutput());
+        try {
+            $connection = $this->em->getConnection();
+            $connection->executeStatement('SET SESSION innodb_lock_wait_timeout = 2');
+            $serviceId = (int) $connection->fetchOne('SELECT service_id FROM service_notification_log WHERE type = ?', [PaymentDeliveryLog::SENDING]);
+            self::assertGreaterThan(0, $serviceId, 'the delivery is being sent');
+            $change($serviceId);
+            $connection->executeStatement('UPDATE service_notification_log SET sent_at = sent_at WHERE service_id = ?', [$serviceId]);
+        } finally {
+            touch($this->sentFile.'.go');
+            $sender->wait();
+        }
+    }
+
+    /** @return array<string, mixed> the delivery row's reason, accepted messages and attempts */
+    private function payload(Payment $payment): array
+    {
+        $payload = json_decode((string) $this->em->getConnection()->fetchOne('SELECT payload FROM service_notification_log WHERE key_name = ? AND type = ?', [PaymentDeliveryLog::key((int) $payment->getOrder()->getId()), PaymentDeliveryLog::ABANDONED]), true);
+
+        return ['reason' => $payload['reason'] ?? null, 'accepted' => $payload['accepted'] ?? null, 'attempts' => $payload['attempts'] ?? null];
+    }
+
+    /** @return list<string> everything Telegram accepted for this chat */
+    private function sentTo(string $chat): array
+    {
+        $lines = array_map(static fn (string $l): array => json_decode($l, true), file($this->sentFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: []);
+
+        return array_column(array_filter($lines, static fn (array $l): bool => $l['chat_id'] === $chat), 'text');
     }
 
     /** Three hosts with very long remarks on the primary: the delivery is three messages (one link each). */

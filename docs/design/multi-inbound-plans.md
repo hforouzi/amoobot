@@ -975,8 +975,10 @@ findings B1-1, B1-2, B3-1, B3-2). No migration, no new job.
   fulfilled; orders paid before M2e have no row and are never resent). If that `INSERT` fails with anything but a
   deadlock or lock wait timeout, the error class is logged and the sale goes on **untracked** (review R2): its delivery
   message is sent once after the commit, as before M2e, and never resent; the job does not reconcile it, since nothing
-  tells it whether that message reached the customer. A deadlock or lock wait keeps the existing handling (the server
-  rolled the transaction back: provisioning failure, retried).
+  tells it whether that message reached the customer. A deadlock or lock wait timeout keeps the existing handling: it is
+  rethrown, the sale is rolled back and ends `provisioning_failed`, retried. (On MariaDB 10.11 a deadlock, 1213, has
+  already rolled the whole transaction back; a lock wait timeout, 1205, rolls back only the failed statement. Both are
+  rethrown on purpose, conservatively, rather than committing the sale untracked over a transient lock conflict.)
   Sending (review R3): one process claims the delivery (`delivery_sending`, one atomic `UPDATE`); **every claim is an
   attempt**, a takeover of a sender that died (`delivery_sending` older than 5 minutes) too, at most
   `PaymentDeliveryLog::MAX_ATTEMPTS` = 3. Every message Telegram accepted is recorded at once (one autocommit `UPDATE`
@@ -994,12 +996,18 @@ findings B1-1, B1-2, B3-1, B3-2). No migration, no new job.
   later); killed after Telegram accepted and before the recording: 2; timeout after acceptance once: 2, on every try: 3
   then failed + 1 alert; closed EntityManager in the job: 1; killed on every stale takeover: 3 then failed + 1 alert; two
   settlements and a job at once, three jobs at once on stale rows: 1 each.
-  Who and when (review R1, D5): before every send the service's owner and status are read from the database; a delivery
+  Who and when (review R1, D5): when an attempt starts, and again before each message of a multi-message delivery, the
+  service's owner and status are read from the database (fresh, no lock is held while Telegram is called); a delivery
   is **abandoned** (`delivery_abandoned`, the reason in the payload, nothing sent to anyone) when the service changed
   owner (a claim, an admin transfer: `owner_changed`), is not active (`service_not_active`, `service_deleted`), is gone,
   the customer has no Telegram account, the payment is no longer confirmed, or the sale is older than
   `PaymentDeliveryLog::MAX_AGE` = 60 minutes (`too_old`: a "service ready" message that late is no longer expected and
-  the service may have changed hands). Only the reason and counts are logged. The follow-up for extra servers carries no
+  the service may have changed hands). A change detected between two messages stops the delivery before the next one
+  (abandoned with the same reason; the messages already accepted stay recorded). **Limit:** the check is not atomic with
+  the Telegram call: a claim or transfer in the instant between the check and the send can still deliver that one
+  message to the previous owner. It is built only from data that owner already had (the service he bought, its links),
+  and a claim has already rotated the subscription-page token, so the page link in it no longer works. Only the reason
+  and counts are logged. The follow-up for extra servers carries no
   link and goes to the order's user only while he still owns the active service; renewal and add-traffic confirmations
   already read the owner fresh (the payer who no longer owns the service gets the no-links variant).
   A retried settlement of the confirmed payment (webhook, admin) and the scheduled `orders` job
@@ -1010,7 +1018,7 @@ findings B1-1, B1-2, B3-1, B3-2). No migration, no new job.
   Single-inbound sales send the same messages and the same panel requests as before M2d (the row is written for them
   too). Tests (real processes): `DeliveryMessageTest` (kill -9 during the pass, two settlements at once, nothing
   attached, Telegram down, died while sending, single-inbound), `DeliveryAccountingTest` (the bounds above, a failed
-  middle message, the plain-text fallback); `DeliveryOwnershipTest` (claim, admin transfer, suspended, deleted, too old,
+  middle message, the plain-text fallback, an owner change or suspension between two messages); `DeliveryOwnershipTest` (claim, admin transfer, suspended, deleted, too old,
   the normal resend, the follow-up), `DeliveryTrackingFailureTest` (the row cannot be written; a deadlock),
   `DeliveryOrdersJobTest` (a failing expiry task with a closed EntityManager).
   Not done (future work): an index on `service_notification_log (type, sent_at)` for the job's query (a full scan,
