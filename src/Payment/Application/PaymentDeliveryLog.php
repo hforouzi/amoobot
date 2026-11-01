@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Payment\Application;
 
 use Doctrine\DBAL\Connection;
+use Psr\Clock\ClockInterface;
 
 /**
  * Whether the customer's delivery message of a new service ("service ready", with its links) was sent (M2e E1), in
@@ -16,6 +17,9 @@ use Doctrine\DBAL\Connection;
  * - sent() / release(): after the send; a send whose first message failed is released (pending again, attempt + 1),
  *   at most MAX_ATTEMPTS times, then FAILED. A process killed between Telegram's answer and sent() leaves "sending":
  *   that one message may be sent again once stale (the only duplicate this allows).
+ * - abandon(): never to be sent (review R1, D5): the service changed owner, is no longer active or is gone, the payment is
+ *   no longer confirmed, or the delivery is older than MAX_AGE (a "service ready" message an hour late is no longer
+ *   expected and the service may have changed hands meanwhile); ABANDONED, with the reason in the payload.
  * Orders settled before M2e have no row and are never resent. The follow-up after the attach pass is claimed once
  * per order (followUpOnce()).
  */
@@ -25,12 +29,17 @@ final class PaymentDeliveryLog
     public const SENDING = 'delivery_sending';
     public const SENT = 'delivery_sent';
     public const FAILED = 'delivery_failed';
+    public const ABANDONED = 'delivery_abandoned';
     public const FOLLOW_UP = 'delivery_follow_up';
     public const STALE_SENDING = '-5 minutes';
     public const MAX_ATTEMPTS = 3;
+    /** A delivery not sent within this time after the sale is abandoned, never sent (review R1). */
+    public const MAX_AGE = '-60 minutes';
 
-    public function __construct(private readonly Connection $connection)
-    {
+    public function __construct(
+        private readonly Connection $connection,
+        private readonly ClockInterface $clock,
+    ) {
     }
 
     public static function key(int $orderId): string
@@ -43,7 +52,7 @@ final class PaymentDeliveryLog
     {
         $this->connection->executeStatement(
             'INSERT IGNORE INTO service_notification_log (service_id, user_id, type, key_name, sent_at, payload) VALUES (?, ?, ?, ?, ?, ?)',
-            [$serviceId, $userId, self::PENDING, self::key($orderId), self::now(), json_encode(['payment_id' => $paymentId, 'attempts' => 0])],
+            [$serviceId, $userId, self::PENDING, self::key($orderId), $this->now(), json_encode(['payment_id' => $paymentId, 'attempts' => 0, 'created' => $this->now()])],
         );
     }
 
@@ -51,8 +60,8 @@ final class PaymentDeliveryLog
     public function state(int $serviceId, int $orderId): ?string
     {
         $type = $this->connection->fetchOne(
-            'SELECT type FROM service_notification_log WHERE service_id = ? AND key_name = ? AND type IN (?, ?, ?, ?)',
-            [$serviceId, self::key($orderId), self::PENDING, self::SENDING, self::SENT, self::FAILED],
+            'SELECT type FROM service_notification_log WHERE service_id = ? AND key_name = ? AND type IN (?, ?, ?, ?, ?)',
+            [$serviceId, self::key($orderId), self::PENDING, self::SENDING, self::SENT, self::FAILED, self::ABANDONED],
         );
 
         return false === $type ? null : (string) $type;
@@ -63,7 +72,7 @@ final class PaymentDeliveryLog
     {
         return 1 === $this->connection->executeStatement(
             'UPDATE service_notification_log SET type = ?, sent_at = ? WHERE service_id = ? AND key_name = ? AND (type = ? OR (type = ? AND sent_at < ?))',
-            [self::SENDING, self::now(), $serviceId, self::key($orderId), self::PENDING, self::SENDING, (new \DateTimeImmutable(self::STALE_SENDING))->format('Y-m-d H:i:s')],
+            [self::SENDING, $this->now(), $serviceId, self::key($orderId), self::PENDING, self::SENDING, $this->clock->now()->modify(self::STALE_SENDING)->format('Y-m-d H:i:s')],
         );
     }
 
@@ -80,7 +89,7 @@ final class PaymentDeliveryLog
         $data['attempts'] = (int) ($data['attempts'] ?? 0) + 1;
         $this->connection->executeStatement(
             'UPDATE service_notification_log SET type = ?, payload = ?, sent_at = ? WHERE service_id = ? AND key_name = ? AND type = ?',
-            [$data['attempts'] >= self::MAX_ATTEMPTS ? self::FAILED : self::PENDING, json_encode($data), self::now(), $serviceId, self::key($orderId), self::SENDING],
+            [$data['attempts'] >= self::MAX_ATTEMPTS ? self::FAILED : self::PENDING, json_encode($data), $this->now(), $serviceId, self::key($orderId), self::SENDING],
         );
     }
 
@@ -93,7 +102,7 @@ final class PaymentDeliveryLog
     {
         $rows = $this->connection->fetchAllAssociative(
             'SELECT service_id, key_name, payload FROM service_notification_log WHERE type = ? OR (type = ? AND sent_at < ?) ORDER BY id LIMIT '.max(1, $limit),
-            [self::PENDING, self::SENDING, (new \DateTimeImmutable(self::STALE_SENDING))->format('Y-m-d H:i:s')],
+            [self::PENDING, self::SENDING, $this->clock->now()->modify(self::STALE_SENDING)->format('Y-m-d H:i:s')],
         );
 
         return array_map(static fn (array $row): array => [
@@ -103,13 +112,25 @@ final class PaymentDeliveryLog
         ], $rows);
     }
 
-    /** Not to be sent any more (the payment is no longer confirmed, or the service is gone): FAILED. */
-    public function giveUp(int $serviceId, int $orderId): void
+    /** Never to be sent (see the class comment): ABANDONED with its reason; true when this call abandoned it. */
+    public function abandon(int $serviceId, int $orderId, string $reason): bool
     {
-        $this->connection->executeStatement(
-            'UPDATE service_notification_log SET type = ?, sent_at = ? WHERE service_id = ? AND key_name = ? AND type IN (?, ?)',
-            [self::FAILED, self::now(), $serviceId, self::key($orderId), self::PENDING, self::SENDING],
+        return 1 === $this->connection->executeStatement(
+            'UPDATE service_notification_log SET type = ?, sent_at = ?, payload = JSON_SET(COALESCE(payload, \'{}\'), \'$.reason\', ?) WHERE service_id = ? AND key_name = ? AND type IN (?, ?)',
+            [self::ABANDONED, $this->now(), $reason, $serviceId, self::key($orderId), self::PENDING, self::SENDING],
         );
+    }
+
+    /** True when the sale that made this delivery due is older than MAX_AGE. */
+    public function tooOld(int $serviceId, int $orderId): bool
+    {
+        $row = $this->connection->fetchAssociative('SELECT payload, sent_at FROM service_notification_log WHERE service_id = ? AND key_name = ? AND type IN (?, ?)', [$serviceId, self::key($orderId), self::PENDING, self::SENDING]);
+        if (false === $row) {
+            return false;
+        }
+        $created = ((array) json_decode((string) $row['payload'], true))['created'] ?? $row['sent_at'];
+
+        return (string) $created < $this->clock->now()->modify(self::MAX_AGE)->format('Y-m-d H:i:s');
     }
 
     /** True once per order: the follow-up after the attach pass may be sent. */
@@ -117,7 +138,7 @@ final class PaymentDeliveryLog
     {
         return 1 === $this->connection->executeStatement(
             'INSERT IGNORE INTO service_notification_log (service_id, user_id, type, key_name, sent_at, payload) VALUES (?, ?, ?, ?, ?, ?)',
-            [$serviceId, $userId, self::FOLLOW_UP, self::key($orderId), self::now(), json_encode(['attached' => $attached])],
+            [$serviceId, $userId, self::FOLLOW_UP, self::key($orderId), $this->now(), json_encode(['attached' => $attached])],
         );
     }
 
@@ -125,12 +146,12 @@ final class PaymentDeliveryLog
     {
         $this->connection->executeStatement(
             'UPDATE service_notification_log SET type = ?, sent_at = ? WHERE service_id = ? AND key_name = ? AND type = ?',
-            [$to, self::now(), $serviceId, self::key($orderId), self::SENDING],
+            [$to, $this->now(), $serviceId, self::key($orderId), self::SENDING],
         );
     }
 
-    private static function now(): string
+    private function now(): string
     {
-        return (new \DateTimeImmutable())->format('Y-m-d H:i:s');
+        return $this->clock->now()->format('Y-m-d H:i:s');
     }
 }

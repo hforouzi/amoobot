@@ -17,6 +17,7 @@ use App\Provisioning\Application\CustomerAccessGuard;
 use App\Provisioning\Application\FinalConfigLinkProvider;
 use App\Provisioning\Application\ServiceConfigDeliveryRefresher;
 use App\Provisioning\Application\ServiceConfigRefreshOutcome;
+use App\Provisioning\Domain\VpnServiceStatus;
 use App\Wallet\Application\WalletService;
 use App\Wallet\Domain\WalletKeys;
 use Psr\Log\LoggerInterface;
@@ -34,7 +35,10 @@ use Psr\Log\LoggerInterface;
  *
  * A new service's delivery message is recorded in PaymentDeliveryLog (M2e E1): it is sent by the one process that claims
  * it, before the attach pass of additional inbounds, and sent again by resendMissing() (a retried settlement, the
- * scheduled "orders" job) when the process that should have sent it died or nothing reached the customer.
+ * scheduled "orders" job) when the process that should have sent it died or nothing reached the customer. Before every
+ * send (review R1, D5) the service's owner and state are read from the database: a service that changed owner (a claim,
+ * an admin transfer), is not active, or a delivery older than PaymentDeliveryLog::MAX_AGE is abandoned, sent to nobody.
+ * The follow-up after the attach pass carries no link and goes to the order's user only while he still owns the service.
  */
 class PaymentCustomerNotifier
 {
@@ -120,6 +124,7 @@ class PaymentCustomerNotifier
         try {
             $order = $payment->getOrder();
             if ($attached <= 0 || PaymentDeliveryLog::SENT !== $this->trackedDelivery($payment, $vpnService)
+                || null !== $this->undeliverable($payment, $vpnService, false)
                 || !$this->deliveryLog->followUpOnce((int) $vpnService->getId(), (int) $order->getUser()->getId(), (int) $order->getId(), $attached)) {
                 return;
             }
@@ -150,6 +155,13 @@ class PaymentCustomerNotifier
         if (!$this->deliveryLog->claim($serviceId, $orderId)) {
             return; // sent, being sent by another process, or given up
         }
+        $reason = $this->undeliverable($payment, $vpnService, true);
+        if (null !== $reason) {
+            $this->deliveryLog->abandon($serviceId, $orderId, $reason);
+            $this->logger->warning('Customer delivery abandoned, nothing sent.', ['reason' => $reason]);
+
+            return;
+        }
         $sent = 0;
         $failed = false;
         try {
@@ -176,6 +188,24 @@ class PaymentCustomerNotifier
         } catch (\Throwable $e) {
             $this->logger->error('Customer delivery state could not be recorded.', ['payment_id' => $payment->getId(), 'error' => $e->getMessage()]);
         }
+    }
+
+    /**
+     * Why this order's service must not be delivered (to anyone) now, or null: read fresh from the database, never from
+     * the (possibly stale) entity. $checkAge: also a delivery older than PaymentDeliveryLog::MAX_AGE.
+     */
+    private function undeliverable(Payment $payment, VpnService $vpnService, bool $checkAge): ?string
+    {
+        $row = $this->entityManager->getConnection()->fetchAssociative('SELECT user_id, status FROM vpn_service WHERE id = ?', [$vpnService->getId()]);
+
+        return match (true) {
+            false === $row => 'service_missing',
+            (int) $row['user_id'] !== (int) $payment->getOrder()->getUser()->getId() => 'owner_changed',
+            VpnServiceStatus::DELETED === $row['status'] => 'service_deleted',
+            VpnServiceStatus::ACTIVE !== $row['status'] => 'service_not_active',
+            $checkAge && $this->deliveryLog->tooOld((int) $vpnService->getId(), (int) $payment->getOrder()->getId()) => 'too_old',
+            default => null,
+        };
     }
 
     /**
