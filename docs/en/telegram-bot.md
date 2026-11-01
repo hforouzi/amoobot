@@ -2,6 +2,10 @@
 
 The Telegram bot is the customer-facing shop. It creates orders, collects payment, and shows provisioned services.
 
+> The bot works in **private chats only**. In a group, a supergroup or a channel it ignores everything: it does not
+> answer, creates no account and does not log the update (it does not leave the chat either). Customers and admins use
+> it in their own chat with the bot.
+
 ## Purchase Flow
 
 1. User starts the bot.

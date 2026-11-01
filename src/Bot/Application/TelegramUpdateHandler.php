@@ -136,6 +136,11 @@ class TelegramUpdateHandler
 
     public function handle(array $update): void
     {
+        // Private chats only: a group, supergroup or channel update is dropped before any account or answer.
+        if (TelegramChatScope::isOutsidePrivateChats($update)) {
+            return;
+        }
+
         if (isset($update['callback_query'])) {
             $this->handleCallbackQuery($update['callback_query']);
 
