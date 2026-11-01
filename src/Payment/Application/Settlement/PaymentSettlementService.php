@@ -55,7 +55,8 @@ use Psr\Log\LoggerInterface;
  *      has nothing to provision, so its failure is rolled back and reported like one before fulfilment (ERROR,
  *      nothing changed, the next verification settles it)
  *   6. after commit: the customer's messages (a new service's delivery message is recorded in PaymentDeliveryLog, written
- *      in the transaction, and resent by a retried settlement or the scheduled job if it never went out, M2e E1), then
+ *      in the transaction; if that row cannot be written the sale goes on untracked; resent by a retried settlement or
+ *      the scheduled job while the order's user still owns the active service, within an hour, M2e E1), then
  *      the attach pass of a new service's additional inbounds (ServiceInboundAttacher::afterSale(), bounded, no lock
  *      held) and its one follow-up message, then admin alerts (never inside the transaction)
  *

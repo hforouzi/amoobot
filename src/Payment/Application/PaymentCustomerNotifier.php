@@ -171,7 +171,7 @@ class PaymentCustomerNotifier
         try {
             $claim = $this->deliveryLog->claim($serviceId, $orderId);
             if (null === $claim) {
-                // Sent, being sent by another process, given up; or its attempts are used up (the last one died).
+                // Sent, being sent by another process, failed or abandoned; or its attempts are used up (the last one died).
                 if ($this->deliveryLog->exhaust($serviceId, $orderId)) {
                     $this->adminAlerter->deliveryFailed($payment, PaymentDeliveryLog::MAX_ATTEMPTS);
                 }
