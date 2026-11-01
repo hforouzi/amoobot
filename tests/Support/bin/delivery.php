@@ -20,7 +20,9 @@ declare(strict_types=1);
  * - always-timeout: the same for every customer message of this process;
  * - fail-second: Telegram refuses the customer's second message (ok=false), the others go through;
  * - parse-error: Telegram refuses every customer message sent with parse_mode HTML ("can't parse entities");
- * - em-closed: the entity manager is closed before the step runs (an earlier task's flush failed).
+ * - em-closed: the entity manager is closed before the step runs (an earlier task's flush failed);
+ * - pause-after-first: Telegram accepts the customer's first message, then the process writes <sentFile>.paused and
+ *   waits (at most 60 s) for <sentFile>.go before answering, so the test can change the service in between.
  */
 
 use App\Entity\Payment;
@@ -79,6 +81,15 @@ $http->on('api.telegram.org', static function (string $method, string $url, arra
             if (in_array('telegram-down', $scenarios, true)) {
                 return $refuse('Too Many Requests');
             }
+        }
+        if (0 === $n && in_array('pause-after-first', $scenarios, true)) {
+            $accept();
+            touch($sentFile.'.paused');
+            for ($waited = 0; !file_exists($sentFile.'.go') && $waited < 6000; ++$waited) {
+                usleep(10_000);
+            }
+
+            return new MockResponse('{"ok":true,"result":{"message_id":1}}', ['response_headers' => ['content-type' => 'application/json']]);
         }
     }
     $accept();

@@ -37,9 +37,12 @@ use Psr\Log\LoggerInterface;
  *
  * A new service's delivery message is recorded in PaymentDeliveryLog (M2e E1): it is sent by the one process that claims
  * it, before the attach pass of additional inbounds, and sent again by resendMissing() (a retried settlement, the
- * scheduled "orders" job) when the process that should have sent it died or nothing reached the customer. Before every
- * send (review R1, D5) the service's owner and state are read from the database: a service that changed owner (a claim,
- * an admin transfer), is not active, or a delivery older than PaymentDeliveryLog::MAX_AGE is abandoned, sent to nobody.
+ * scheduled "orders" job) when the process that should have sent it died or nothing reached the customer. When an
+ * attempt starts (review R1, D5) the service's owner and state are read from the database: a service that changed owner
+ * (a claim, an admin transfer), is not active, or a delivery older than PaymentDeliveryLog::MAX_AGE is abandoned, sent to
+ * nobody. The owner and state are read again before each message of the delivery, and it is abandoned before the next
+ * message once they changed. That read is not atomic with the Telegram call (no lock is held while sending): a change in
+ * that instant can still let one message through, built only from what the previous owner already had.
  * The follow-up after the attach pass carries no link and goes to the order's user only while he still owns the service.
  */
 class PaymentCustomerNotifier
@@ -162,7 +165,8 @@ class PaymentCustomerNotifier
      * the next ones; an HTML message Telegram cannot parse is sent again as plain text (links kept). The delivery is SENT
      * only when every message was accepted, else a later attempt sends the rest; an unknown outcome (timeout) counts as
      * not accepted (sent again: at least once). After the last attempt it is FAILED and the admins are alerted once.
-     * Never throws.
+     * Before each message the owner and state are read again (undeliverable(), without the age): once they changed, the
+     * delivery is abandoned and no further message is sent. Never throws.
      */
     private function sendTrackedDelivery(Payment $payment, VpnService $vpnService): void
     {
@@ -202,6 +206,15 @@ class PaymentCustomerNotifier
             foreach ($messages as $i => $message) {
                 if (isset($accepted[$i])) {
                     continue;
+                }
+                // The owner and state again before each message, read fresh (no lock is held while Telegram is called):
+                // a claim or transfer during a multi-message delivery stops it before the next message.
+                $reason = $this->undeliverable($payment, $vpnService, false);
+                if (null !== $reason) {
+                    $this->deliveryLog->abandon($serviceId, $orderId, $reason);
+                    $this->logger->warning('Customer delivery abandoned before all its messages were sent.', ['reason' => $reason, 'message' => $i + 1, 'of' => $total]);
+
+                    return;
                 }
                 if ($this->sendDeliveryMessage($telegramAccount->getTelegramId(), $message, $i === $total - 1 ? $keyboard : null, function () use ($serviceId, $orderId, $i, &$accepted): void {
                     $accepted[$i] = true;
