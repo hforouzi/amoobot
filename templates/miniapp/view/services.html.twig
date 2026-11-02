@@ -10,8 +10,10 @@
                 <p class="muted">{{ 'home.get_service'|trans }}</p>
                 <div class="row" style="margin-top:10px">
                     <a class="btn small" href="{{ path('miniapp_shop') }}" data-nav data-shop-link>🛒 {{ 'home.open_shop'|trans }}</a>
-                    <a class="btn secondary small" href="{{ path('miniapp_help', {topic: 'connect'}) }}" data-nav data-guide-link>📖 {{ 'home.open_guide'|trans }}</a>
+                    {% set connect_url = guide_link('connect') %}
+                    {% if connect_url %}<a class="btn secondary small" href="{{ connect_url }}" data-nav data-guide-link>📖 {{ 'home.open_guide'|trans }}</a>{% endif %}
                 </div>
+                {{ include('miniapp/view/_guide_link.html.twig', {slug: 'start'}) }}
             </div>
         {% endif %}
     </section>

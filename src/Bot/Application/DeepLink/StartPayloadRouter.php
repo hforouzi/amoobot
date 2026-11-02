@@ -16,6 +16,8 @@ use Symfony\Component\DependencyInjection\Attribute\AutowireIterator;
  */
 class StartPayloadRouter
 {
+    public const MINI_APP_TARGET = '#^/app/view/[A-Za-z0-9/_-]{1,200}(?:\?topic=[a-z_]{1,32})?$#D';
+
     /** @var array<string, StartPayloadHandler> */
     private array $handlers = [];
 
@@ -60,8 +62,9 @@ class StartPayloadRouter
         }
         $target = $handler->miniAppTarget($account, $payload->value);
 
-        // Only a section of the app itself, so a handler can never send the app elsewhere.
-        return null !== $target && 1 === preg_match('#^/app/view/[A-Za-z0-9/_-]{1,200}$#D', $target) ? $target : null;
+        // Only a section of the app itself, so a handler can never send the app elsewhere; the one query allowed is a
+        // guide topic (?topic=<slug>, the same rule app.js applies).
+        return null !== $target && 1 === preg_match(self::MINI_APP_TARGET, $target) ? $target : null;
     }
 
     private function handlerFor(?StartPayload $payload): ?StartPayloadHandler
@@ -72,6 +75,11 @@ class StartPayloadRouter
         $handler = $this->handlers[$payload->prefix] ?? null;
         if (null === $handler || !$handler->enabled()) {
             $this->logger->info('start_payload_ignored', ['prefix' => $payload->prefix, 'reason' => null === $handler ? 'no_handler' : 'disabled']);
+
+            return null;
+        }
+        if (!$handler->accepts($payload->value)) {
+            $this->logger->info('start_payload_ignored', ['prefix' => $payload->prefix, 'reason' => 'not_accepted']);
 
             return null;
         }

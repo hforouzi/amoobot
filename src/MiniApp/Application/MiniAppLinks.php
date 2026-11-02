@@ -35,6 +35,20 @@ final class MiniAppLinks
     }
 
     /**
+     * The app opened at a guide topic (app.js reads ?guide=<slug> and checks it again), for a bot button; null as for
+     * forTelegram(). The caller passes a slug it checked (GuideLinks).
+     */
+    public function forGuide(string $slug): ?string
+    {
+        if (!$this->isEnabled()) {
+            return null;
+        }
+        $url = $this->urlGenerator->generate('miniapp_entry', ['guide' => $slug], UrlGeneratorInterface::ABSOLUTE_URL);
+
+        return null !== $this->publicUrl() && str_starts_with($url, 'https://') ? $url : null;
+    }
+
+    /**
      * The app's public HTTPS URL whatever the setting (the menu button command), or null when Telegram cannot open it.
      * With a service id the app opens that service (app.js reads ?service=; the server still checks ownership).
      */

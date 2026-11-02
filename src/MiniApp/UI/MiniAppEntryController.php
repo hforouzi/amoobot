@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\MiniApp\UI;
 
+use App\MiniApp\Guide\GuideLinks;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
 use Symfony\Component\HttpFoundation\Request;
@@ -35,6 +36,8 @@ final class MiniAppEntryController extends AbstractController
         return MiniAppHeaders::apply($this->render('miniapp/entry.html.twig', [
             'lang' => $locale,
             'assetVersion' => $this->assetVersion(),
+            // The fixed allow-list app.js checks ?guide=<slug> against (the same for everyone; never the value itself).
+            'guideTopics' => GuideLinks::topicSlugs(),
         ]));
     }
 

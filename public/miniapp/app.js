@@ -266,7 +266,7 @@
                     throw error;
                 }
                 saveSession({token: data.token, csrfToken: data.csrfToken, expiresAt: data.expiresAt});
-                if (typeof data.start === 'string' && /^\/app\/view\/[A-Za-z0-9\/_-]{1,200}$/.test(data.start)) {
+                if (typeof data.start === 'string' && START_TARGET.test(data.start)) {
                     startTarget = data.start;
                 }
             });
@@ -837,6 +837,33 @@
     /* ---------- start ---------- */
 
     /* Opened from a deep link (initData has start_param): sign in again so the server routes it, even with a session. */
+    /* What /app/auth may name as the first section (StartPayloadRouter::MINI_APP_TARGET): a section of the app, with at
+       most a guide topic as query. */
+    var START_TARGET = /^\/app\/view\/[A-Za-z0-9\/_-]{1,200}(?:\?topic=[a-z_]{1,32})?$/;
+
+    /* ?guide=<slug> on /app (the bot's guide button): the slug only when it is one of the guide's topics (the fixed
+       list in body[data-guide-topics]); anything else is ignored. */
+    function guideParam() {
+        var slug = new URLSearchParams(window.location.search).get('guide');
+        var topics = (document.body.getAttribute('data-guide-topics') || '').split(' ');
+        return slug && /^[a-z_]{1,32}$/.test(slug) && topics.indexOf(slug) !== -1 ? slug : null;
+    }
+
+    /* Opens target with Home behind the BackButton; when it did not load (or, for a guide topic, the topic's card is not
+       there: switched off or emptied), the usual home instead. */
+    function openFirst(target) {
+        stack = ['/app/view/home'];
+        var topic = /\?topic=([a-z_]{1,32})$/.exec(target);
+        return navigate(target, true).then(function () {
+            var ok = !!view.querySelector('.view-root')
+                && (!topic || !!view.querySelector('details[data-guide-topic="' + topic[1] + '"][open]'));
+            if (!ok) {
+                stack = [];
+                return navigate('/app/view/home', true);
+            }
+        });
+    }
+
     function hasStartParam() {
         try {
             return !!new URLSearchParams(tg.initData).get('start_param');
@@ -853,13 +880,7 @@
             if (startTarget) {
                 var target = startTarget;
                 startTarget = null;
-                stack = ['/app/view/home'];
-                return navigate(target, true).then(function () {
-                    if (!view.querySelector('.view-root')) {
-                        stack = [];
-                        return navigate('/app/view/home', true);
-                    }
-                });
+                return openFirst(target);
             }
             // ?service=ID (the bot's "View in the app" button): that service, with Home behind the BackButton.
             var service = new URLSearchParams(window.location.search).get('service');
@@ -871,6 +892,11 @@
                         return navigate('/app/view/home', true);
                     }
                 });
+            }
+            // ?guide=<slug> (the bot's guide button): that topic of the guide.
+            var guide = guideParam();
+            if (guide) {
+                return openFirst('/app/view/help?topic=' + guide);
             }
             stack = [];
             return navigate('/app/view/home', true);

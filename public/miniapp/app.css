@@ -335,3 +335,6 @@ a.btn.guide-support-link { margin-top: 12px; color: var(--accent-fg); } /* not t
 .guide-apps-others { margin: 0; font-size: .9rem; }
 .guide-apps-others a { display: inline-flex; align-items: center; min-height: 44px; }
 .guide-apps p { margin: 4px 0; }
+/* A small link to a guide topic from another view (templates/miniapp/view/_guide_link.html.twig). */
+.guide-link { margin: 10px 0 0; font-size: .9rem; }
+.guide-link a { display: inline-flex; align-items: center; min-height: 44px; color: var(--accent); text-decoration: none; }
