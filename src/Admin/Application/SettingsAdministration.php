@@ -7,6 +7,7 @@ namespace App\Admin\Application;
 use App\Branding\BrandingSettings;
 use App\Branding\BrandLogoRejected;
 use App\Branding\BrandLogoStorage;
+use App\Branding\SupportLinkSettings;
 use App\Entity\Setting;
 use App\Provisioning\Application\AutomationSettingsProvider;
 use App\Provisioning\Application\RenewalSettingsProvider;
@@ -25,7 +26,7 @@ use Symfony\Component\HttpFoundation\File\UploadedFile;
  * pricing" (sales switches, the sales-closed message, renewal pricing, traffic add-on), "automation" (automation
  * switches, batch limit, incomplete-order expiry), "wallet" (wallet switches, top-up range and quick amounts) and "resellers"
  * (the reseller switch, the wholesale floor and rounding); on the web only, "plans" and "branding" (brand name, logo and
- * accent colour of customer-facing pages). Only these keys are read or written here; nothing secret is among them. Input is a form's fields by the web form's names, a checkbox being on when its field is present.
+ * accent colour of customer-facing pages, and the support chat link). Only these keys are read or written here; nothing secret is among them. Input is a form's fields by the web form's names, a checkbox being on when its field is present.
  * A refused form saves nothing and names the first problem: the field and its message key (admin domain), in the
  * order the web page checks them. The caller audits.
  */
@@ -97,13 +98,15 @@ final class SettingsAdministration
         private readonly MultiInboundSettings $multiInboundSettings,
         private readonly BrandingSettings $brandingSettings,
         private readonly BrandLogoStorage $logoStorage,
+        private readonly SupportLinkSettings $supportLink,
     ) {
     }
 
     /**
-     * The branding form's current values: '' for a name that is not set, the default accent when none is set.
+     * The branding form's current values: '' for a name or support link that is not set, the default accent when none
+     * is set.
      *
-     * @return array{brand_name: string, brand_accent_color: string, brand_logo: string|null}
+     * @return array{brand_name: string, brand_accent_color: string, brand_logo: string|null, support_url: string}
      */
     public function brandingValues(): array
     {
@@ -113,12 +116,14 @@ final class SettingsAdministration
             'brand_name' => $branding->name ?? '',
             'brand_accent_color' => $branding->accentColor,
             'brand_logo' => $branding->logo,
+            'support_url' => $this->supportLink->url() ?? '',
         ];
     }
 
     /**
      * The name and colour exactly as sent (nothing trimmed): empty unsets them; otherwise the name follows PlainText
-     * and the colour is #rrggbb.
+     * and the colour is #rrggbb; the support link is https://t.me/<username> or https://telegram.me/<username>
+     * (SupportLinkSettings), or empty for no support button.
      *
      * @param array<string, mixed> $form
      *
@@ -128,11 +133,13 @@ final class SettingsAdministration
     {
         $name = $form['brand_name'] ?? '';
         $accent = $form['brand_accent_color'] ?? '';
+        $supportUrl = $form['support_url'] ?? '';
         $nameProblem = !is_string($name) ? 'characters' : ('' === $name ? null : BrandingSettings::nameProblem($name));
 
         return match (true) {
             null !== $nameProblem => ['field' => 'brand_name', 'message' => 'flash.settings.brand_name.'.$nameProblem],
             !is_string($accent) || ('' !== $accent && 1 !== preg_match(BrandingSettings::ACCENT_PATTERN, $accent)) => ['field' => 'brand_accent_color', 'message' => 'flash.settings.brand_accent'],
+            !is_string($supportUrl) || !SupportLinkSettings::isValid($supportUrl) => ['field' => 'support_url', 'message' => 'flash.settings.support_url'],
             default => null,
         };
     }
@@ -164,6 +171,7 @@ final class SettingsAdministration
         try {
             $this->set(BrandingSettings::NAME, (string) ($form['brand_name'] ?? ''), 'text');
             $this->set(BrandingSettings::ACCENT, (string) ($form['brand_accent_color'] ?? ''), 'text');
+            $this->set(SupportLinkSettings::URL, SupportLinkSettings::canonical((string) ($form['support_url'] ?? '')) ?? '', 'text');
             if (null !== $stored) {
                 $this->set(BrandingSettings::LOGO, $stored->storedName, 'text');
             }
@@ -174,6 +182,7 @@ final class SettingsAdministration
             throw $e;
         } finally {
             $this->brandingSettings->reset();
+            $this->supportLink->reset();
         }
         if (null !== $stored && $previous !== $stored->storedName) {
             $this->logoStorage->delete($previous);

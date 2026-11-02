@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Branding;
 
 use App\Branding\BrandingSettings;
+use App\Branding\SupportLinkSettings;
 use App\Entity\AdminUser;
 use App\Tests\Support\BrandImages;
 use App\Tests\Support\IntegrationTestCase;
@@ -62,7 +63,7 @@ final class BrandingAdminTest extends IntegrationTestCase
         self::assertCount(1, $audit);
         self::assertSame(['settings.update', 'web'], [$audit[0]['action'], $audit[0]['source']]);
         $details = json_decode((string) $audit[0]['details'], true);
-        self::assertSame(['page' => 'branding', 'brand_name' => 'فروشگاه‌ امو <VPN>', 'brand_accent_color' => '#1d4ed8', 'logo' => 'replaced'], $details);
+        self::assertSame(['page' => 'branding', 'brand_name' => 'فروشگاه‌ امو <VPN>', 'brand_accent_color' => '#1d4ed8', 'support_url' => '', 'logo' => 'replaced'], $details);
 
         $html = (string) $this->client->getResponse()->getContent();
         self::assertStringContainsString('/brand/logo/'.$settings[BrandingSettings::LOGO], $html, 'the current logo is shown');
@@ -91,6 +92,19 @@ final class BrandingAdminTest extends IntegrationTestCase
         yield 'colour not hex' => [['brand_accent_color' => '#16653g'], 'flash.settings.brand_accent'];
         yield 'colour with a trailing line break' => [['brand_accent_color' => "#166534\n"], 'flash.settings.brand_accent'];
         yield 'colour as css' => [['brand_accent_color' => 'red;background:url(x)'], 'flash.settings.brand_accent'];
+        yield 'support link: javascript' => [['support_url' => 'javascript:alert(1)'], 'flash.settings.support_url'];
+        yield 'support link: tg scheme' => [['support_url' => 'tg://resolve?domain=shop_support'], 'flash.settings.support_url'];
+        yield 'support link: other host' => [['support_url' => 'https://evil.example/shop_support'], 'flash.settings.support_url'];
+        yield 'support link: look-alike host' => [['support_url' => 'https://t.me.evil.example/shop_support'], 'flash.settings.support_url'];
+        yield 'support link: upper-case host' => [['support_url' => 'https://T.ME/shop_support'], 'flash.settings.support_url'];
+        yield 'support link: http' => [['support_url' => 'http://t.me/shop_support'], 'flash.settings.support_url'];
+        yield 'support link: query string' => [['support_url' => 'https://t.me/shop_support?start=x'], 'flash.settings.support_url'];
+        yield 'support link: path after the name' => [['support_url' => 'https://t.me/shop_support/1'], 'flash.settings.support_url'];
+        yield 'support link: trailing space' => [['support_url' => 'https://t.me/shop_support '], 'flash.settings.support_url'];
+        yield 'support link: line break' => [['support_url' => "https://t.me/shop_support
+x"], 'flash.settings.support_url'];
+        yield 'support link: short name' => [['support_url' => 'https://t.me/abcd'], 'flash.settings.support_url'];
+        yield 'support link: very long' => [['support_url' => 'https://t.me/'.str_repeat('a', 5000)], 'flash.settings.support_url'];
     }
 
     /**
@@ -114,6 +128,34 @@ final class BrandingAdminTest extends IntegrationTestCase
 
         $this->assertFlash('branding.logo.extension', ['%allowed%' => 'png, jpg, jpeg, webp']);
         $this->assertNothingSaved();
+    }
+
+    public function testTheSupportLinkIsSavedAsATmeLinkShownAndAudited(): void
+    {
+        $this->login(AdminUser::ROLE_SUPER_ADMIN);
+        $this->save(['brand_name' => 'Amoo', 'support_url' => 'https://telegram.me/Shop_Support']);
+
+        $this->assertFlash('flash.settings.branding_saved');
+        self::assertSame('https://t.me/Shop_Support', $this->settings()[SupportLinkSettings::URL], 'stored as the t.me link');
+        self::assertSame('https://t.me/Shop_Support', $this->supportUrl());
+        $details = json_decode((string) $this->em->getConnection()->fetchOne('SELECT details FROM admin_audit_log ORDER BY id DESC LIMIT 1'), true);
+        self::assertSame('https://t.me/Shop_Support', $details['support_url']);
+        $this->client->request('GET', '/admin/settings?tab=branding');
+        self::assertSame('https://t.me/Shop_Support', $this->client->getCrawler()->filter('input[name="support_url"]')->attr('value'));
+
+        // Emptied: no button.
+        $this->save(['brand_name' => 'Amoo', 'support_url' => '']);
+        self::assertSame('', $this->settings()[SupportLinkSettings::URL]);
+        self::assertNull($this->supportUrl());
+    }
+
+    public function testASupportLinkChangedByHandThatBreaksTheRuleIsIgnored(): void
+    {
+        foreach (['javascript:alert(1)', 'https://evil.example/x_support', 'https://t.me/shop_support?start=1', ' https://t.me/shop_support'] as $value) {
+            $this->em->getConnection()->executeStatement('DELETE FROM setting WHERE key_name = ?', [SupportLinkSettings::URL]);
+            $this->setRaw(SupportLinkSettings::URL, $value);
+            self::assertNull($this->supportUrl(), $value);
+        }
     }
 
     public function testEmptyValuesMeanNoNameAndTheDefaultColour(): void
@@ -338,12 +380,20 @@ final class BrandingAdminTest extends IntegrationTestCase
      */
     private function settings(): array
     {
-        return $this->em->getConnection()->fetchAllKeyValue("SELECT key_name, value FROM setting WHERE key_name LIKE 'brand.%'");
+        return $this->em->getConnection()->fetchAllKeyValue("SELECT key_name, value FROM setting WHERE key_name LIKE 'brand.%' OR key_name = 'support.url'");
     }
 
     private function setRaw(string $key, string $value): void
     {
         $this->em->getConnection()->executeStatement('INSERT INTO setting (key_name, value, type, created_at) VALUES (?, ?, ?, NOW())', [$key, $value, 'text']);
+    }
+
+    private function supportUrl(): ?string
+    {
+        $settings = self::getContainer()->get(SupportLinkSettings::class);
+        $settings->reset();
+
+        return $settings->url();
     }
 
     private function branding(): \App\Branding\Branding

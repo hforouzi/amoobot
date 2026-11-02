@@ -8,6 +8,7 @@ use App\Provisioning\Domain\PublicUrlPolicy;
 use App\Shared\Infrastructure\SafeErrorLog;
 use App\Subscription\Application\AppDownloadCatalog;
 use App\Bot\Application\Admin\AdminBotHandler;
+use App\Branding\SupportLinkSettings;
 use App\Bot\Application\DeepLink\StartPayload;
 use App\Bot\Application\DeepLink\StartPayloadRouter;
 use App\Reseller\UI\ClaimBotHandler;
@@ -121,6 +122,7 @@ class TelegramUpdateHandler
         private readonly StartPayloadRouter $startPayloadRouter,
         private readonly ClaimBotHandler $claimBotHandler,
         private readonly OrderServiceAccess $orderServices,
+        private readonly SupportLinkSettings $supportLink,
     ) {
     }
 
@@ -1955,10 +1957,11 @@ class TelegramUpdateHandler
         $this->telegramApiClient->sendMessage($chatId, $this->botTextResolver->message('downloads.list'), $this->keyboardFactory->appDownloads($downloads));
     }
 
+    /** bot.support as it is; the "Message support" button above "Back" only when the admin set a support chat. */
     private function handleSupport(string $chatId, ?string $callbackId = null): void
     {
         $this->acknowledgeCallback($callbackId);
-        $this->telegramApiClient->sendMessage($chatId, $this->botTextResolver->message('bot.support'), $this->keyboardFactory->backToMainMenu());
+        $this->telegramApiClient->sendMessage($chatId, $this->botTextResolver->message('bot.support'), $this->keyboardFactory->supportMenu($this->supportLink->url()));
     }
 
     private function handleReceiptPhoto(Payment $openPayment, array $message, string $chatId): void

@@ -322,3 +322,4 @@ fieldset.field legend { padding: 0; margin-bottom: 6px; }
 .guide-body a { color: var(--accent); }
 .guide-support { margin-top: 12px; padding: 10px 12px; border-radius: 10px; background: var(--code); }
 .guide-support p { margin: 4px 0; }
+.guide-support-link { margin-top: 12px; }

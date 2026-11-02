@@ -21,7 +21,7 @@ use Symfony\Component\HttpFoundation\Response;
 
 /**
  * One settings page (SETTINGS_MANAGE) with tabs, ?tab=...: sales & renewal pricing, automation, wallet, resellers, plans (the
- * multi-inbound switch, web only), branding (name, logo and accent colour of customer-facing pages, web only; its form
+ * multi-inbound switch, web only), branding (name, logo and accent colour of customer-facing pages, the support chat link, web only; its form
  * and the logo removal carry a CSRF token), required channels
  * (the RequiredChannel list; create/edit stay on its CRUD pages) and advanced (the raw Setting keys, behind a
  * warning). Each form tab saves only its own keys and validates as the separate pages did; the old pages redirect
@@ -112,6 +112,7 @@ final class SettingsAdminController extends AbstractController
             'page' => 'branding',
             'brand_name' => $values['brand_name'],
             'brand_accent_color' => $values['brand_accent_color'],
+            'support_url' => $values['support_url'],
             'logo' => $values['brand_logo'] === $before ? 'unchanged' : 'replaced',
         ]);
         $this->flash('success', 'flash.settings.branding_saved');

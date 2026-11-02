@@ -287,6 +287,67 @@ final class MiniAppGuideTest extends IntegrationTestCase
 
         self::assertCount(1, $crawler->filter('[data-support-card] [data-support-text]'));
         self::assertCount(1, $crawler->filter('[data-support-card] button[data-close-app]'));
+        self::assertCount(0, $crawler->filter('[data-support-link]'), 'no support chat given: no button');
+
+        $withLink = new Crawler(self::getContainer()->get('twig')->render('miniapp/view/help.html.twig', ['topics' => array_values($topics), 'openTopic' => null, 'supportText' => self::getContainer()->get(MiniAppGuide::class)->plain('Ask us'), 'supportUrl' => 'https://t.me/shop_support', 'lang' => 'en']));
+        self::assertSame('https://t.me/shop_support', $withLink->filter('[data-support-card] a[data-support-link]')->attr('href'));
+    }
+
+    public function testWithoutASupportChatThereIsNoSupportButton(): void
+    {
+        foreach (['/app/view/help', '/app/view/help?lang=en'] as $path) {
+            $html = $this->appGet($path, $this->session());
+            self::assertCount(0, (new Crawler($html))->filter('[data-support-link], a[data-telegram-link]'), $path);
+            self::assertStringNotContainsString('t.me', $html, $path);
+        }
+    }
+
+    public function testTheSupportTopicShowsAMessageSupportButtonForTheSupportChat(): void
+    {
+        $this->setting('support.url', 'https://telegram.me/Shop_Support');
+
+        foreach (['fa' => ['/app/view/help', 'پیام به پشتیبانی'], 'en' => ['/app/view/help?lang=en', 'Message support']] as $locale => [$path, $label]) {
+            $crawler = new Crawler($this->appGet($path, $this->session()));
+            $buttons = $crawler->filter('a[data-support-link]');
+
+            self::assertCount(1, $buttons, $locale.': one button');
+            self::assertCount(1, $crawler->filter('details[data-guide-topic="support"] a[data-support-link]'), $locale.': in the support topic');
+            $button = $buttons->first();
+            self::assertSame('https://t.me/Shop_Support', $button->attr('href'), 'the validated chat, as a t.me link (openTelegramLink)');
+            self::assertNotNull($button->attr('data-telegram-link'), 'opened with Telegram.WebApp.openTelegramLink');
+            self::assertSame('_blank', $button->attr('target'));
+            self::assertSame('noopener noreferrer', $button->attr('rel'));
+            self::assertStringContainsString('btn', (string) $button->attr('class'));
+            self::assertStringContainsString($label, $button->text(), $locale);
+            self::assertCount(1, $crawler->filter('a[href^="https://t.me/"]'), $locale.': the only t.me link on the page');
+        }
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function brokenSupportLinks(): iterable
+    {
+        yield 'javascript' => ['javascript:alert(1)'];
+        yield 'tg scheme' => ['tg://resolve?domain=shop_support'];
+        yield 'other host' => ['https://evil.example/shop_support'];
+        yield 'query string' => ['https://t.me/shop_support?start=x'];
+        yield 'upper-case host' => ['https://T.ME/shop_support'];
+        yield 'markup' => ['https://t.me/x"><script>alert(1)</script>'];
+    }
+
+    /** A row changed by hand (the "advanced" tab) that breaks the rule shows no button, and nothing of it. */
+    #[DataProvider('brokenSupportLinks')]
+    public function testABrokenSupportLinkShowsNoButton(string $value): void
+    {
+        $this->setting('support.url', $value);
+
+        $html = $this->appGet('/app/view/help?lang=en', $this->session());
+
+        self::assertSame(200, $this->httpStatus());
+        self::assertCount(0, (new Crawler($html))->filter('[data-support-link]'));
+        self::assertStringNotContainsString('<script>alert', $html);
+        self::assertStringNotContainsString('evil.example', $html);
     }
 
     public function testThePageIsTheSameForEveryCustomerAndHoldsNothingSecret(): void

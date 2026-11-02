@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\MiniApp\UI;
 
 use App\Bot\Application\BotTextResolver;
+use App\Branding\SupportLinkSettings;
 use App\Entity\VpnService;
 use App\MiniApp\Guide\MiniAppGuide;
 use App\MiniApp\Security\MiniAppUser;
@@ -52,6 +53,7 @@ final class MiniAppCustomerController extends AbstractController
         private readonly WalletService $wallets,
         private readonly ServiceInboundCounts $inboundCounts,
         private readonly MiniAppGuide $guide,
+        private readonly SupportLinkSettings $supportLink,
         private readonly string $serviceNotifyTrafficThresholds = '80',
     ) {
     }
@@ -142,7 +144,9 @@ final class MiniAppCustomerController extends AbstractController
     /**
      * The customer guide (MiniAppGuide: the topics the shop's current state allows, the same for every customer) and
      * the bot's own support text (bot.support, editable in the admin's bot texts, so both say the same), escaped as
-     * text whatever it holds. ?topic=<slug> opens that topic's card; any other value opens none.
+     * text whatever it holds, and the "Message support" button when the admin set a support chat (SupportLinkSettings:
+     * only a validated https://t.me/<username>, never anything from the guide texts). ?topic=<slug> opens that topic's
+     * card; any other value opens none.
      */
     #[Route('/app/view/help', name: 'miniapp_help', defaults: ['_miniapp_section' => 'help'], methods: ['GET'])]
     public function help(Request $request): Response
@@ -154,6 +158,7 @@ final class MiniAppCustomerController extends AbstractController
             'topics' => $topics,
             'openTopic' => MiniAppGuide::requestedTopic($request->query->all()['topic'] ?? null, $topics),
             'supportText' => $this->guide->plain($this->botTexts->message('bot.support', [], $locale)),
+            'supportUrl' => $this->supportLink->url(),
         ]);
     }
 

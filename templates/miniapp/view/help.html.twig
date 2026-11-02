@@ -3,12 +3,17 @@
 {# The customer guide (MiniAppGuide): one collapsible card per topic the shop's current state allows. topic.body is
    built by GuideRenderer from escaped text only; supportText is the admin's support message escaped as plain text.
    The support message and the back-to-bot button are always on the page: in the "support" topic, or in a card of
-   their own when that topic is not shown. #}
+   their own when that topic is not shown. supportUrl (SupportLinkSettings, a validated https://t.me/<username>, or
+   null) adds the "Message support" button: openTelegramLink in Telegram (app.js, a[data-telegram-link]), a plain
+   link in a new tab otherwise. #}
 {% block section %}help{% endblock %}
 {% block title %}{{ 'nav.help'|trans }}{% endblock %}
-{% macro support(supportText) %}
+{% macro support(supportText, supportUrl) %}
     {% trans_default_domain 'miniapp' %}
     <div class="guide-support" data-support-text>{{ supportText }}</div>
+    {% if supportUrl %}
+        <a class="btn guide-support-link" href="{{ supportUrl }}" target="_blank" rel="noopener noreferrer" data-telegram-link data-support-link>💬 {{ 'help.message_support'|trans }}</a>
+    {% endif %}
     <p class="muted">{{ 'help.bot_text'|trans }}</p>
     <button type="button" class="btn secondary" data-close-app>{{ 'help.back_to_bot'|trans }}</button>
 {% endmacro %}
@@ -23,7 +28,7 @@
                 <summary><bdi>{{ topic.title }}</bdi></summary>
                 <div class="guide-body">
                     {{ topic.body }}
-                    {% if topic.slug == 'support' %}{{ _self.support(supportText) }}{% endif %}
+                    {% if topic.slug == 'support' %}{{ _self.support(supportText, supportUrl|default(null)) }}{% endif %}
                 </div>
             </details>
         {% endfor %}
@@ -31,7 +36,7 @@
     {% if 'support' not in topics|column('slug') %}
         <section class="card" data-support-card>
             <h2>{{ 'help.title'|trans }}</h2>
-            {{ _self.support(supportText) }}
+            {{ _self.support(supportText, supportUrl|default(null)) }}
         </section>
     {% endif %}
 {% endblock %}

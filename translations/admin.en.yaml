@@ -978,6 +978,7 @@ flash:
   settings.brand_name.control: "The brand name contains an invisible or control character (such as a direction mark or a line break). Type it again without it."
   settings.brand_name.characters: "The brand name contains characters that are not allowed."
   settings.brand_accent: "The accent colour must be a hex colour such as #166534, or empty for the default."
+  settings.support_url: "The support link must be https://t.me/username or https://telegram.me/username (a username of 5 to 32 letters, digits or _), with nothing after it, or empty for no button."
   bulk_price.invalid: "The form values are not valid."
   bulk_price.positive: "The value must be a positive number."
   bulk_price.confirm: "Tick the final confirmation to apply."
@@ -1249,6 +1250,7 @@ branding_settings:
   sections:
     identity: Brand
     logo: Logo
+    support: Support chat
   fields:
     name: Brand name
     accent_color: Accent colour
@@ -1256,10 +1258,12 @@ branding_settings:
     current_logo: Current logo
     no_logo: "No logo: the brand name is shown instead (or nothing when it is empty too)."
     remove_logo: Remove logo
+    support_url: Support chat link
   help:
     name: "Shown in the page header when there is no logo, and in the browser tab. At most 60 characters, exactly as typed: no space at either end, no invisible or control characters. Leave empty for none."
     accent_color: "The colour of the main button and the top bar, as #rrggbb (for example #166534, the default). Leave empty for the default. The button text turns dark on a light colour so it stays readable."
     logo: "PNG, JPEG or WebP, at most %max% KB, %min% to %side% pixels per side. A square PNG of about 256×256 with a transparent background works best. The image is re-saved without its metadata; choosing a new file replaces the old one."
+    support_url: "The Telegram chat customers reach with the “Message support” button, in the Mini App guide (Contact support) and under the bot's support message. Only https://t.me/<username> or https://telegram.me/<username>; leave empty for no button. The support message text itself is edited in the bot texts (bot.support)."
 
 branding:
   logo:
