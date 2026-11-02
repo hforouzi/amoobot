@@ -4,8 +4,22 @@ declare(strict_types=1);
 
 namespace App\Bot\Application;
 
+use App\MiniApp\Guide\GuideTextRules;
+
 final class BotContentRegistry
 {
+    /**
+     * The texts of the Mini App guide (guide.<topic>.title / .body, category "guide"). Unlike the messages below they
+     * are not seeded: the shipped default (translations/bot.*.yaml) applies until an admin customizes one in Bot
+     * Content, so a seed on deploy never freezes an old default into the database.
+     *
+     * @return list<string>
+     */
+    public function guideKeys(): array
+    {
+        return GuideTextRules::keys();
+    }
+
     public const DEFAULT_LOCALE = 'fa';
 
     /**
