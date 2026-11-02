@@ -1,0 +1,18 @@
+{# GuideTextAdminController::reset: confirm deleting the admin's row of a guide text (the shipped default shows again). #}
+{% extends '@EasyAdmin/page/content.html.twig' %}
+{% trans_default_domain 'admin' %}
+
+{% block content_title %}{{ 'guide_text.reset.title'|trans }}{% endblock %}
+
+{% block main %}
+    <div class="admin-custom-page admin-form-card" data-guide-reset>
+        <p>{{ 'guide_text.reset.question'|trans }}</p>
+        <p><bdi dir="ltr"><code data-reset-key>{{ row.key }}</code></bdi> · {{ ('locale.' ~ row.locale)|trans }}</p>
+        <p class="form-text">{{ 'guide_text.reset.help'|trans }}</p>
+        <form method="post" action="{{ path('admin_bot_texts_guide_reset', {id: row.id}) }}" data-reset-form>
+            <input type="hidden" name="_token" value="{{ csrf_token(csrf) }}">
+            <button type="submit" class="btn btn-danger">{{ 'guide_text.reset.submit'|trans }}</button>
+            <a class="btn btn-secondary" href="{{ cancelUrl }}">{{ 'guide_text.reset.cancel'|trans }}</a>
+        </form>
+    </div>
+{% endblock %}

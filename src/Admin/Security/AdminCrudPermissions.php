@@ -91,6 +91,8 @@ final class AdminCrudPermissions
             Crud\BroadcastDeliveryCrudController::class => $p(AdminPermission::BROADCAST_SEND),
             \App\Admin\UI\BroadcastActionsController::class => $p(AdminPermission::BROADCAST_SEND),
             Crud\BotMessageTemplateCrudController::class => $p(AdminPermission::BOT_TEXTS_MANAGE),
+            // Mini App guide texts: live preview and reset to default (the Bot Content permission).
+            \App\Admin\UI\GuideTextAdminController::class => $p(AdminPermission::BOT_TEXTS_MANAGE),
             Crud\BotButtonLabelCrudController::class => $p(AdminPermission::BOT_TEXTS_MANAGE),
             SettingsAdminController::class => $p(AdminPermission::SETTINGS_MANAGE),
             Crud\SettingCrudController::class => $p(AdminPermission::SETTINGS_MANAGE),

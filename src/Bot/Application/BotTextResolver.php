@@ -59,24 +59,37 @@ final class BotTextResolver
      */
     public function guideText(string $key, string $locale, array $keep = []): string
     {
-        $variables = [];
-        foreach ($keep as $name) {
-            $variables[$name] = '{{ '.$name.' }}';
-        }
-        $variables = $this->withBotVariables($variables);
-
         try {
             $template = $this->findTemplate($key, $locale);
             if ($template instanceof BotMessageTemplate) {
-                return $this->render($template->getBody(), $variables);
+                return $this->fillGuideText($template->getBody(), $keep);
             }
         } catch (\Throwable $e) {
             $this->logger->error('Bot template rendering failed.', ['key' => $key, 'locale' => $locale, 'exception' => $e]);
         }
 
-        $translated = $this->translate($key, $locale);
+        return $this->fillGuideText($this->shippedText($key, $locale) ?? '', $keep);
+    }
 
-        return null === $translated ? '' : $this->render($translated, $variables);
+    /**
+     * The placeholders of a guide text filled in as guideText() does (the admin's preview of an unsaved text).
+     *
+     * @param list<string> $keep
+     */
+    public function fillGuideText(string $text, array $keep = []): string
+    {
+        $variables = [];
+        foreach ($keep as $name) {
+            $variables[$name] = '{{ '.$name.' }}';
+        }
+
+        return $this->render($text, $this->withBotVariables($variables));
+    }
+
+    /** The shipped default of a text (translations/bot.<locale>.yaml) as written, null when there is none. */
+    public function shippedText(string $key, string $locale): ?string
+    {
+        return $this->translate($key, $locale);
     }
 
     public function button(string $key, ?string $locale = null): string

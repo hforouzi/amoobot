@@ -1,0 +1,7 @@
+{# Edit page of a bot message template; a guide text gets its live preview and "Reset to default" (_guide_preview). #}
+{% extends '@EasyAdmin/crud/edit.html.twig' %}
+
+{% block main %}
+    {{ parent() }}
+    {% if guide_preview is defined %}{{ include('admin/bot_text/_guide_preview.html.twig') }}{% endif %}
+{% endblock %}

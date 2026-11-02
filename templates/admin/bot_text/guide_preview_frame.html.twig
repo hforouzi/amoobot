@@ -1,0 +1,20 @@
+{# GuidePreview: one topic card of the Mini App guide, for the sandboxed preview iframe of the Bot Content edit page
+   (no script runs in it). body is built by GuideRenderer from escaped text only; title is escaped here. Links do
+   nothing in the preview. #}
+<!DOCTYPE html>
+<html lang="{{ locale }}" dir="{{ dir }}" data-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="/miniapp/app.css">
+    <style>a { pointer-events: none; } body { padding: 12px; margin: 0; }</style>
+</head>
+<body data-lang="{{ locale }}">
+<div class="guide">
+    <details class="card guide-topic" id="guide-{{ slug }}" data-guide-topic="{{ slug }}" open>
+        <summary><bdi>{{ title }}</bdi></summary>
+        <div class="guide-body">{{ body }}</div>
+    </details>
+</div>
+</body>
+</html>
