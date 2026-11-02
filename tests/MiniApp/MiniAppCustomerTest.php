@@ -57,12 +57,55 @@ final class MiniAppCustomerTest extends IntegrationTestCase
         self::assertCount(1, (new Crawler($html))->filter('a[data-nav][href="/app/view/services"]'), 'quick action');
     }
 
-    public function testHomeWithoutServicesPointsToTheBot(): void
+    public function testHomeWithoutServicesPointsToTheShopAndTheGuide(): void
     {
-        $html = $this->appGet('/app/view/home', $this->authenticate('8402'));
+        $session = $this->authenticate('8402');
+        foreach (['/app/view/home', '/app/view/services'] as $path) {
+            foreach (['fa' => '', 'en' => '?lang=en'] as $locale => $query) {
+                $html = $this->appGet($path.$query, $session);
+                $empty = (new Crawler($html))->filter('[data-no-services]');
 
-        self::assertSame('0', (new Crawler($html))->filter('[data-summary]')->attr('data-active-count'));
-        self::assertCount(1, (new Crawler($html))->filter('[data-no-services]'));
+                self::assertCount(1, $empty, $path.' '.$locale);
+                self::assertSame('/app/view/shop', $empty->filter('a[data-nav][data-shop-link]')->attr('href'), $path.' '.$locale);
+                self::assertSame('/app/view/help?topic=connect', $empty->filter('a[data-nav][data-guide-link]')->attr('href'), $path.' '.$locale);
+                self::assertStringNotContainsStringIgnoringCase('bot', $empty->text(), $path.' '.$locale.': buying is done here, not in the bot');
+                self::assertStringNotContainsString('ربات', $empty->text(), $path.' '.$locale);
+            }
+        }
+        self::assertSame('0', (new Crawler($this->appGet('/app/view/home', $session)))->filter('[data-summary]')->attr('data-active-count'));
+    }
+
+    public function testTheLowTrafficCardPointsToTheServiceNotTheBot(): void
+    {
+        $user = $this->createUser('8411');
+        $service = $this->service($user)->setTrafficUsedBytes(46 * 1073741824);
+        $this->em->flush();
+        $session = $this->authenticate('8411');
+
+        foreach (['fa' => '', 'en' => '?lang=en'] as $locale => $query) {
+            $card = (new Crawler($this->appGet('/app/view/home'.$query, $session)))->filter('[data-low-traffic]');
+            self::assertSame('/app/view/services/'.$service->getId(), $card->filter('a[data-nav][data-service-link]')->attr('href'), $locale);
+            self::assertStringNotContainsStringIgnoringCase('bot', $card->text(), $locale);
+            self::assertStringNotContainsString('ربات', $card->text(), $locale);
+        }
+        self::assertStringContainsString('Renew or add traffic', $this->appGet('/app/view/home?lang=en', $session));
+    }
+
+    public function testAServiceThatEndedPointsToRenewInTheAppNotTheBot(): void
+    {
+        $service = $this->service($this->createUser('8412'))->setStatus(VpnServiceStatus::EXPIRED);
+        $this->em->flush();
+        $session = $this->authenticate('8412');
+
+        foreach (['/app/view/services/'.$service->getId(), '/app/view/services/'.$service->getId().'/subscription'] as $path) {
+            $en = $this->appGet($path.'?lang=en', $session);
+            self::assertSame(200, $this->httpStatus(), $path);
+            self::assertStringContainsString('“Renew or add traffic” on the service page', $en, $path);
+            self::assertStringNotContainsString('in the bot', $en, $path);
+            $fa = $this->appGet($path, $session);
+            self::assertStringContainsString('«تمدید و افزایش حجم»', $fa, $path);
+            self::assertStringNotContainsString('از ربات اقدام کنید', $fa, $path);
+        }
     }
 
     public function testTheServicesListShowsOnlyTheOwnersLiveServices(): void
