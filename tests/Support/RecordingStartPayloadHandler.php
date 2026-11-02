@@ -15,7 +15,10 @@ final class RecordingStartPayloadHandler implements StartPayloadHandler
     /** @var list<string> */
     public array $seen = [];
 
-    public function __construct(private readonly string $prefix, private readonly bool $enabled, private readonly ?string $target)
+    /**
+     * @param list<string>|null $accepted the values accepts() takes (null: every value)
+     */
+    public function __construct(private readonly string $prefix, private readonly bool $enabled, private readonly ?string $target, private readonly ?array $accepted = null)
     {
     }
 
@@ -27,6 +30,11 @@ final class RecordingStartPayloadHandler implements StartPayloadHandler
     public function enabled(): bool
     {
         return $this->enabled;
+    }
+
+    public function accepts(string $value): bool
+    {
+        return null === $this->accepted || in_array($value, $this->accepted, true);
     }
 
     public function handleBot(TelegramAccount $account, string $chatId, string $value): void

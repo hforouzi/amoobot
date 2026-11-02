@@ -1,0 +1,7 @@
+{# A small in-app link to one guide topic (G-4), shown only while that topic is listed in the guide (guide_link(): the
+   feature is on and the text not emptied), so it never leads to a hidden topic. slug: a GuideTopic value; platform
+   (optional, ClientPlatform): kept for the connect topic's device switch. #}
+{% set guide_url = guide_link(slug, platform|default(null)) %}
+{% if guide_url %}
+    <p class="guide-link" data-guide-to="{{ slug }}"><a href="{{ guide_url }}" data-nav>📖 {{ ('guide_link.' ~ slug)|trans({}, 'miniapp') }}</a></p>
+{% endif %}

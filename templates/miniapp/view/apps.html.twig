@@ -4,6 +4,7 @@
 {% block section %}apps{% endblock %}
 {% block title %}{{ 'nav.apps'|trans }}{% endblock %}
 {% block content %}
+    {{ include('miniapp/view/_guide_link.html.twig', {slug: 'connect', platform: view.platform}) }}
     {% if view.apps is not empty %}
         {{ include('subscription/_apps.html.twig', {view: view, platforms: platforms, in_app: true}) }}
     {% endif %}

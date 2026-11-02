@@ -66,6 +66,12 @@ final class ClaimBotHandler implements StartPayloadHandler
         return $this->settings->claimsEnabled();
     }
 
+    /** Every well-formed value: an unusable claim link gets its own answer (ClaimService), as before. */
+    public function accepts(#[\SensitiveParameter] string $value): bool
+    {
+        return true;
+    }
+
     public function handleBot(TelegramAccount $account, string $chatId, #[\SensitiveParameter] string $value): void
     {
         if (!$this->membershipGate->allowed($account, $chatId, null, TelegramChannelMembershipGate::CONTEXT_PURCHASE)) {

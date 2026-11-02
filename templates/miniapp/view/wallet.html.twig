@@ -14,6 +14,7 @@
         {% if wallet and wallet.frozen %}
             <p class="notice" data-wallet-frozen>{{ 'wallet.frozen'|trans }}</p>
         {% endif %}
+        {{ include('miniapp/view/_guide_link.html.twig', {slug: 'wallet'}) }}
     </section>
 
     {% if not (wallet and wallet.frozen) %}

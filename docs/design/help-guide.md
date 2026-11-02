@@ -1,6 +1,6 @@
 # Customer Help / Guide in the Mini App — design
 
-Status: **G-1 implemented** (guide renderer, fa/en default topics, the Help view; admin guide: [docs/en/miniapp-guide.md](../en/miniapp-guide.md)), with the **G-1b** follow-up (owner decision: the default connect text recommends Happ on every platform, V2Box named once as an alternative; `support.url` adds a "Message support" button to the support topic and the bot's support answer; the Mini App no longer sends customers to the bot to buy or renew); **G-2** (editing in Bot Content) and **G-3** (the connect topic from the client apps: the active apps of the customer's device, the first one recommended, a general fallback without app names, the Client apps admin hint and per-device warning; the shipped connect text no longer names an app, start and troubleshoot unchanged) implemented; G-4 to G-6 not yet. Owner decisions: G1 as written with a 5-question FAQ and refunds only as "ask support"; G2 bot-content storage in G-2 (keys unchanged); G3 own format; G4 no search in G-1; G5 an empty topic is hidden; Q1 no link from the subscription page; Q3 no reseller topic; Q2 open. Persian version: [docs/fa/design/help-guide.md](../fa/design/help-guide.md).
+Status: **G-1 implemented** (guide renderer, fa/en default topics, the Help view; admin guide: [docs/en/miniapp-guide.md](../en/miniapp-guide.md)), with the **G-1b** follow-up (owner decision: the default connect text recommends Happ on every platform, V2Box named once as an alternative; `support.url` adds a "Message support" button to the support topic and the bot's support answer; the Mini App no longer sends customers to the bot to buy or renew); **G-2** (editing in Bot Content) and **G-3** (the connect topic from the client apps: the active apps of the customer's device, the first one recommended, a general fallback without app names, the Client apps admin hint and per-device warning; the shipped connect text no longer names an app, start and troubleshoot unchanged) and **G-4** (deep links: in-app links to the matching topic, only while it is shown; `?guide=<slug>` and `startapp=guide_<slug>`; admin guide: "Deep links into the guide") implemented; G-5 and G-6 not yet. Owner decisions: G1 as written with a 5-question FAQ and refunds only as "ask support"; G2 bot-content storage in G-2 (keys unchanged); G3 own format; G4 no search in G-1; G5 an empty topic is hidden; Q1 no link from the subscription page; Q3 no reseller topic; Q2 open. Persian version: [docs/fa/design/help-guide.md](../fa/design/help-guide.md).
 Companion design (admin side): [activity-group-and-daily-report.md](activity-group-and-daily-report.md).
 
 Items marked **DECISION NEEDED (Gx)** are decisions this document takes with a recommendation; the owner confirms or
@@ -115,15 +115,23 @@ fingerprint). Personal data (the customer's link, balance, services) stays on th
 
 ### 3.4 Deep links
 
-- In-app: `/app/view/help?topic=<slug>[&platform=<p>]` (unknown slug → the full list). Links added on:
-  - empty *My services* (`services.html.twig`, `data-no-services`) → `buy`;
-  - an expired / out-of-traffic service card or page → `renew` / `traffic` (only if visible);
-  - the Apps view → `connect` with the same platform;
-  - a card-to-card payment page → `pay`;
-  - the service page "not working?" link → `troubleshoot`.
-- From the bot or t.me: `startapp=guide_<slug>` handled by a `StartPayloadHandler` with prefix `guide` in
-  `StartPayloadRouter` (opens the help section at that topic, Home behind it), and `?guide=<slug>` on the `web_app`
-  URL for bot buttons (same handling as `?service=`).
+- In-app: `/app/view/help?topic=<slug>[&platform=<p>]` (unknown slug → the full list). As built (G-4), through
+  `guide_link()` / `templates/miniapp/view/_guide_link.html.twig`, each shown only while its topic is listed
+  (`GuideLinks`, checked per topic with `MiniAppGuide::isListed`):
+  - empty Home / *My services* → `start` (the existing install-and-connect button → `connect`, now also only while
+    listed);
+  - a service page: expired → `renew`; out of traffic → `traffic` if listed, else `renew`; suspended → `troubleshoot`;
+  - a payment: paid with its service → `connect`; pending / in review (not a wallet top-up) → `pay`; the order's pay
+    page → `pay`;
+  - the wallet → `wallet`; the Apps view → `connect` with the same platform.
+  - Not on the public subscription page `/s/...` (Q1).
+- From the bot or t.me: `startapp=guide_<slug>` handled by `GuideStartHandler` (prefix `guide`) in
+  `StartPayloadRouter` (opens the help section at that topic, Home behind it); `/start guide_<slug>` answers with the
+  usual "open the app" message whose `web_app` button is `/app?guide=<slug>` (`MiniAppLinks::forGuide`); `?guide=` is
+  read by `app.js` like `?service=`. Slugs are checked against the fixed `GuideTopic` list (`GuideLinks::isTopicSlug`,
+  exact, no case folding) and the topic must be visible; anything else is ignored (no echo, not logged).
+  `StartPayloadHandler::accepts()` lets a handler refuse a value so the router treats it as unrouted; the Mini App
+  target may carry only `?topic=<slug>` (`StartPayloadRouter::MINI_APP_TARGET`, same rule in `app.js`).
 
 ## 4. Feature awareness and empty states
 

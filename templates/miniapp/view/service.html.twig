@@ -42,6 +42,14 @@
         {% else %}
             <p>{{ ('notice.' ~ view.status)|trans({}, 'subscription') }}</p>
             <p class="muted">{{ 'service.renew_hint'|trans }}</p>
+            {# Expired: renewing; out of traffic: adding traffic (else renewing); switched off: the checklist. #}
+            {% if view.status == 'expired' %}
+                {{ include('miniapp/view/_guide_link.html.twig', {slug: 'renew'}) }}
+            {% elseif view.status == 'limited' %}
+                {{ include('miniapp/view/_guide_link.html.twig', {slug: guide_link('traffic') ? 'traffic' : 'renew'}) }}
+            {% elseif view.status == 'suspended' %}
+                {{ include('miniapp/view/_guide_link.html.twig', {slug: 'troubleshoot'}) }}
+            {% endif %}
         {% endif %}
     </section>
     <section class="card">

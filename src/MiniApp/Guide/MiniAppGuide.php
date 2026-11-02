@@ -100,6 +100,36 @@ final class MiniAppGuide
         ]), 'UTF-8');
     }
 
+    /**
+     * Whether topics() lists this one topic right now (its feature is on, its title and body are not empty and the body
+     * renders to something), worked out for that topic alone: what a deep link (GuideLinks) checks, so a view with a
+     * link to the guide does not render the whole guide. The connect topic always has the client apps block. The shop's
+     * state is asked for only when the answer depends on it (a topic behind a feature switch, a text with "::: if" or
+     * {{ payment_methods }}), so a link to an always-shown topic costs no settings reads.
+     *
+     * @param (\Closure(): GuideState)|null $state the current state (default: GuideStateProvider::current())
+     */
+    public function isListed(GuideTopic $topic, string $locale, ?\Closure $state = null): bool
+    {
+        $state ??= $this->stateProvider->current(...);
+        // Topic visibility only ever needs features to be ON: a topic shown with everything off is always shown.
+        $nothingOn = new GuideState([]);
+        if (!$topic->isVisible($nothingOn) && !$topic->isVisible($state())) {
+            return false;
+        }
+        $title = $this->renderer->title($this->text($topic->titleKey(), $locale));
+        $body = $this->text($topic->bodyKey(), $locale);
+        if ('' === $title || '' === trim($body)) {
+            return false;
+        }
+        if (GuideTopic::CONNECT === $topic) {
+            return true;
+        }
+        $usesState = str_contains($body, ':::') || str_contains($body, '{{ payment_methods }}');
+
+        return '' !== (string) $this->renderer->render($body, $usesState ? $state() : $nothingOn, static fn (string $slug): ?string => null);
+    }
+
     /** Whether the text places the client apps itself ({{ apps }} on a line of its own). */
     public static function hasAppsLine(string $body): bool
     {

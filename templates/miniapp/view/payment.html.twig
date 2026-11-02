@@ -15,10 +15,14 @@
             <a class="btn" href="{{ path('miniapp_wallet') }}" data-nav data-go-wallet>👛 {{ 'wallet.title'|trans }}</a>
         {% elseif state == 'paid' and service %}
             <a class="btn" href="{{ path('miniapp_subscription', {id: service.id}) }}" data-nav data-go-service>{{ 'payment.go_to_subscription'|trans }}</a>
+            {{ include('miniapp/view/_guide_link.html.twig', {slug: 'connect'}) }}
         {% elseif state in ['failed', 'cancelled', 'expired'] %}
             <a class="btn secondary" href="{{ path('miniapp_shop') }}" data-nav>{{ 'payment.back_to_shop'|trans }}</a>
         {% elseif state == 'provision_failed' %}
             <a class="btn secondary" href="{{ path('miniapp_help') }}" data-nav>{{ 'payment.contact_support'|trans }}</a>
+        {% endif %}
+        {% if state in ['pending', 'review'] and not order.walletTopUp %}
+            {{ include('miniapp/view/_guide_link.html.twig', {slug: 'pay'}) }}
         {% endif %}
     </section>
 

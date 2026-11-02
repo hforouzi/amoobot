@@ -17,6 +17,7 @@
     <script src="/miniapp/app.js?v={{ assetVersion }}" defer></script>
 </head>
 <body data-lang="{{ lang }}"
+      data-guide-topics="{{ guideTopics|join(' ') }}"
       data-msg-copied="{{ 'toast.copied'|trans }}"
       data-msg-copy-failed="{{ 'toast.copy_failed'|trans }}"
       data-msg-error="{{ 'state.error'|trans }}"

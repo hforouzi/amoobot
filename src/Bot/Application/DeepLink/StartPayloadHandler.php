@@ -22,13 +22,20 @@ interface StartPayloadHandler
     public function enabled(): bool;
 
     /**
+     * Whether this value is one the handler takes at all (e.g. a known guide topic). When false the payload is ignored
+     * exactly like a payload without a handler: /start and the Mini App behave as without one. Must not have side
+     * effects or depend on who sent it.
+     */
+    public function accepts(#[\SensitiveParameter] string $value): bool;
+
+    /**
      * The bot received "/start <prefix>_<value>" from this account (already created / updated, like any /start).
      */
     public function handleBot(TelegramAccount $account, string $chatId, #[\SensitiveParameter] string $value): void;
 
     /**
      * The Mini App was opened with this start parameter by this (signed-in) account: the section path to open first
-     * (/app/view/...), or null for the usual home.
+     * (/app/view/..., optionally with ?topic=<slug> for a guide topic), or null for the usual home.
      */
     public function miniAppTarget(TelegramAccount $account, #[\SensitiveParameter] string $value): ?string;
 }

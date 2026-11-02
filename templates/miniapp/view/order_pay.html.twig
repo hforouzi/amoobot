@@ -6,6 +6,7 @@
 {% block attributes %} data-back{% endblock %}
 {% block content %}
     {{ include('miniapp/view/_order_summary.html.twig', {order: order, summary: summary}) }}
+    {{ include('miniapp/view/_guide_link.html.twig', {slug: 'pay'}) }}
     {% if openPayment %}
         <section class="card notice">
             <p>{{ 'pay.open_payment'|trans }}</p>
