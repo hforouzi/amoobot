@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Command;
 
+use App\Bot\Application\BotContentRegistry;
 use App\Entity\BotButtonLabel;
 use App\Entity\BotMessageTemplate;
 use Doctrine\ORM\EntityManagerInterface;
@@ -16,8 +17,10 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 #[AsCommand(name: 'app:bot-content:list', description: 'List bot content counts')]
 final class BotContentListCommand extends Command
 {
-    public function __construct(private readonly EntityManagerInterface $entityManager)
-    {
+    public function __construct(
+        private readonly EntityManagerInterface $entityManager,
+        private readonly BotContentRegistry $registry,
+    ) {
         parent::__construct();
     }
 
@@ -46,6 +49,18 @@ final class BotContentListCommand extends Command
             (string) $row['messages'],
             (string) $row['buttons'],
         ], $rows));
+
+        // Mini App guide texts (not seeded): each key with "customized" or "default" per language.
+        $customized = [];
+        foreach ($this->entityManager->getRepository(BotMessageTemplate::class)->findBy(['key' => $this->registry->guideKeys()]) as $row) {
+            $customized[$row->getKey()][$row->getLocale()] = $row->isActive() ? 'customized' : 'customized (inactive)';
+        }
+        $io->section('Mini App guide texts');
+        $io->table(['Key', 'fa', 'en'], array_map(static fn (string $key): array => [
+            $key,
+            $customized[$key]['fa'] ?? 'default',
+            $customized[$key]['en'] ?? 'default',
+        ], $this->registry->guideKeys()));
 
         return Command::SUCCESS;
     }

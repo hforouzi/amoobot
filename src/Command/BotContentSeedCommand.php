@@ -102,6 +102,7 @@ final class BotContentSeedCommand extends Command
 
         $this->entityManager->flush();
 
+        $io->note(sprintf('The %d Mini App guide texts (guide.*) are not seeded: the shipped default applies until an admin customizes one (Bot Content, Guide).', count($this->registry->guideKeys())));
         $io->success(sprintf(
             'Seeded locale %s. Messages created=%d updated=%d; buttons created=%d updated=%d.',
             $locale,

@@ -56,6 +56,19 @@ final class BotContentMissingCommand extends Command
             }
         }
 
+        // Mini App guide texts: no database row is needed (the shipped default applies until customized), but the
+        // shipped default must exist.
+        $customized = 0;
+        foreach ($this->registry->guideKeys() as $key) {
+            if ($this->entityManager->getRepository(BotMessageTemplate::class)->findOneBy(['key' => $key, 'locale' => $locale])) {
+                ++$customized;
+            }
+            if ($this->translator->trans($key, [], 'bot', $locale) === $key) {
+                $missing[] = ['guide translation', $key];
+            }
+        }
+        $io->note(sprintf('Mini App guide texts: %d, customized for locale %s: %d (not seeded; the shipped default applies until customized).', count($this->registry->guideKeys()), $locale, $customized));
+
         if ([] === $missing) {
             $io->success(sprintf('No missing bot content for locale %s.', $locale));
 

@@ -1204,3 +1204,9 @@ html[dir="ltr"] .admin-actions {
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 }
+/* Mini App guide texts in Bot Content (templates/admin/bot_text/): overview and live preview. */
+.admin-guide-overview, .admin-guide-preview { margin-top: 16px; }
+.admin-guide-overview code { white-space: nowrap; }
+.admin-guide-frame { display: block; width: 100%; max-width: 420px; height: 480px; border: 1px solid var(--border-color, #e5e7eb); border-radius: 12px; background: #f4f6fb; }
+.admin-guide-notes, .admin-guide-problems { padding-inline-start: 18px; }
+.admin-guide-notes:empty, .admin-guide-problems:empty { display: none; }

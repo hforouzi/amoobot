@@ -83,6 +83,7 @@ abstract class IntegrationTestCase extends KernelTestCase
         // Never leave the wallet (or another switch) on for a test that does not purge.
         if (isset($this->em) && $this->em->isOpen()) {
             $this->em->getConnection()->executeStatement("DELETE FROM setting WHERE key_name LIKE 'wallet.%' OR key_name LIKE 'reseller.%' OR key_name LIKE 'plans.%' OR key_name LIKE 'brand.%' OR key_name = 'support.url'");
+            $this->em->getConnection()->executeStatement("DELETE FROM bot_message_template WHERE template_key LIKE 'guide.%'");
         }
         parent::tearDown();
     }
@@ -96,6 +97,8 @@ abstract class IntegrationTestCase extends KernelTestCase
         }
         // The wallet, resellers, multi-inbound plans, branding and the support link are off unless a test switches them on (settings are not purged otherwise).
         $connection->executeStatement("DELETE FROM setting WHERE key_name LIKE 'wallet.%' OR key_name LIKE 'reseller.%' OR key_name LIKE 'plans.%' OR key_name LIKE 'brand.%' OR key_name = 'support.url'");
+        // Guide texts edited by a test (Bot Content, parse mode "guide"): the shipped defaults unless a test overrides them.
+        $connection->executeStatement("DELETE FROM bot_message_template WHERE template_key LIKE 'guide.%'");
         $connection->executeStatement('SET FOREIGN_KEY_CHECKS = 1');
         $this->em->clear();
     }

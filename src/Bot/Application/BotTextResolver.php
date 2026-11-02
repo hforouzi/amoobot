@@ -47,6 +47,51 @@ final class BotTextResolver
         return $this->render($this->registry->emergencyMessage($key, $locale), $this->withBotVariables($variables));
     }
 
+    /**
+     * A text of the Mini App guide (guide.<slug>.title / guide.<slug>.body, docs/design/help-guide.md): the admin's
+     * active row for exactly this language, else the shipped default of this language (translations/bot.<locale>.yaml),
+     * else ''. Unlike message(), the default language's row is not used for another language, so a Persian edit never
+     * shows on the English guide. An active row with an empty body is returned as '' (the guide then hides the topic).
+     * {{ bot.* }} variables are filled in as in message(); the placeholders named in $keep (the guide's own, e.g.
+     * payment_methods) are left as written for GuideRenderer; any other {{ … }} becomes empty, as in message().
+     *
+     * @param list<string> $keep
+     */
+    public function guideText(string $key, string $locale, array $keep = []): string
+    {
+        try {
+            $template = $this->findTemplate($key, $locale);
+            if ($template instanceof BotMessageTemplate) {
+                return $this->fillGuideText($template->getBody(), $keep);
+            }
+        } catch (\Throwable $e) {
+            $this->logger->error('Bot template rendering failed.', ['key' => $key, 'locale' => $locale, 'exception' => $e]);
+        }
+
+        return $this->fillGuideText($this->shippedText($key, $locale) ?? '', $keep);
+    }
+
+    /**
+     * The placeholders of a guide text filled in as guideText() does (the admin's preview of an unsaved text).
+     *
+     * @param list<string> $keep
+     */
+    public function fillGuideText(string $text, array $keep = []): string
+    {
+        $variables = [];
+        foreach ($keep as $name) {
+            $variables[$name] = '{{ '.$name.' }}';
+        }
+
+        return $this->render($text, $this->withBotVariables($variables));
+    }
+
+    /** The shipped default of a text (translations/bot.<locale>.yaml) as written, null when there is none. */
+    public function shippedText(string $key, string $locale): ?string
+    {
+        return $this->translate($key, $locale);
+    }
+
     public function button(string $key, ?string $locale = null): string
     {
         $locale = $this->locale($locale);

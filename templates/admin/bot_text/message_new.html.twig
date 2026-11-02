@@ -1,0 +1,7 @@
+{# New bot message template; "Customize" of a guide text (prefilled) gets the live preview (_guide_preview). #}
+{% extends '@EasyAdmin/crud/new.html.twig' %}
+
+{% block main %}
+    {{ parent() }}
+    {% if guide_preview is defined %}{{ include('admin/bot_text/_guide_preview.html.twig') }}{% endif %}
+{% endblock %}

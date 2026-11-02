@@ -1,0 +1,38 @@
+{# BotMessageTemplateCrudController index: the tab strip (index_tabs) and, with the "Guide" category filter, every text
+   of the Mini App guide in both languages (guide_overview): Default (shipped text) or Customized (the admin's row). #}
+{% extends 'admin/crud/index_tabs.html.twig' %}
+{% trans_default_domain 'admin' %}
+
+{% block main %}
+    {% if guide_overview is defined %}
+        <div class="admin-form-card admin-guide-overview" data-guide-overview>
+            <h2>{{ 'guide_text.overview.title'|trans }}</h2>
+            <p class="form-text">{{ 'guide_text.overview.help'|trans }}</p>
+            <table class="table datagrid">
+                <thead><tr>
+                    <th>{{ 'guide_text.overview.key'|trans }}</th>
+                    {% for locale in ['fa', 'en'] %}<th>{{ ('locale.' ~ locale)|trans }}</th>{% endfor %}
+                </tr></thead>
+                <tbody>
+                {% for item in guide_overview %}
+                    <tr data-guide-key="{{ item.key }}">
+                        <td><bdi dir="ltr"><code>{{ item.key }}</code></bdi>{% if not item.visible %} <span class="badge badge-secondary" data-hidden-now>{{ 'guide_text.overview.hidden_now'|trans }}</span>{% endif %}</td>
+                        {% for locale, entry in item.locales %}
+                            <td data-locale="{{ locale }}">
+                                {% if entry.row %}
+                                    <span class="badge badge-success" data-status="customized">{{ 'guide_text.overview.customized'|trans }}</span>{% if not entry.row.active %} <span class="badge badge-secondary">{{ 'guide_text.overview.inactive'|trans }}</span>{% endif %}
+                                    <a href="{{ entry.url }}" data-edit>{{ 'guide_text.overview.edit'|trans }}</a>
+                                {% else %}
+                                    <span class="badge badge-light" data-status="default">{{ 'guide_text.overview.default'|trans }}</span>
+                                    <a href="{{ entry.url }}" data-customize>{{ 'guide_text.overview.customize'|trans }}</a>
+                                {% endif %}
+                            </td>
+                        {% endfor %}
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% endif %}
+    {{ parent() }}
+{% endblock %}

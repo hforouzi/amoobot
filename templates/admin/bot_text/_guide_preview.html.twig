@@ -1,0 +1,17 @@
+{# The live preview of a guide text on its edit / new page (guide_preview from BotMessageTemplateCrudController):
+   GuidePreview's document in a sandboxed iframe (no script runs in it), updated by assets/admin/admin.js from
+   POST admin_bot_texts_guide_preview (CSRF token) while the admin types; problems = what saving would refuse. #}
+{% trans_default_domain 'admin' %}
+<div class="admin-form-card admin-guide-preview" data-guide-preview
+     data-url="{{ guide_preview.url }}" data-token="{{ csrf_token(guide_preview.csrf) }}"
+     data-key="{{ guide_preview.key }}" data-locale="{{ guide_preview.locale }}">
+    <h2>{{ 'guide_text.preview.title'|trans }}</h2>
+    <p class="form-text">{{ 'guide_text.preview.help'|trans }}</p>
+    <ul class="admin-guide-notes" data-guide-notes>{% for note in guide_preview.initial.notes %}<li>{{ note }}</li>{% endfor %}</ul>
+    <ul class="admin-guide-problems text-danger" data-guide-problems>{% for problem in guide_preview.initial.problems %}<li>{{ problem }}</li>{% endfor %}</ul>
+    <iframe class="admin-guide-frame" sandbox="" title="{{ 'guide_text.preview.title'|trans }}" data-guide-frame
+            srcdoc="{{ guide_preview.initial.document }}"></iframe>
+    {% if guide_preview.resetUrl %}
+        <p><a class="btn btn-outline-danger" href="{{ guide_preview.resetUrl }}" data-guide-reset-link>{{ 'guide_text.reset.action'|trans }}</a></p>
+    {% endif %}
+</div>
