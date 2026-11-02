@@ -13,7 +13,8 @@ use Twig\Markup;
  *
  *   blank line                 new paragraph (single line breaks inside a paragraph stay)
  *   ## Title                   sub-heading (h3)
- *   - item  /  1. item         bulleted / numbered list
+ *   - item  /  1. item         bulleted / numbered list (the typed numbers are not kept: a list counts from 1, also
+ *                              when a "::: if" block hides its first items)
  *   **bold**                   strong
  *   [text](#slug)              link to another visible topic of the guide (else the text alone)
  *   [text](https://…)          external link, opened by Telegram (a[data-open-link]); any other URL: the text alone

@@ -8,6 +8,7 @@ use App\MiniApp\Guide\GuideRenderer;
 use App\MiniApp\Guide\GuideState;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use Symfony\Component\Yaml\Yaml;
 
 /**
  * The guide's text format (docs/design/help-guide.md, section 3.1): everything is escaped, only the fixed constructs
@@ -149,6 +150,33 @@ final class GuideRendererTest extends TestCase
 
         self::assertLessThan(2.0, microtime(true) - $started);
         $this->assertOnlyAllowedMarkup($html);
+    }
+
+    public function testANumberedListAlwaysCountsFromOne(): void
+    {
+        // The numbers as typed are not kept: the list is an <ol> without "start", so it shows 1., 2., ...
+        self::assertSame('<ol><li>a</li><li>b</li></ol>', $this->render("5. a\n7. b"));
+        self::assertSame('<ol><li>a</li><li>b</li></ol>', $this->render("::: if new_orders\n1. hidden\n:::\n2. a\n3. b"));
+    }
+
+    /**
+     * Sales closed: guide.start hides its first step ("1. Buy …" inside "::: if new_orders"); the steps left are still
+     * one list counted from 1, in both languages.
+     */
+    public function testSalesClosedTheStartStepsStillCountFromOne(): void
+    {
+        foreach (['fa', 'en'] as $locale) {
+            $body = Yaml::parseFile(dirname(__DIR__, 3).'/translations/bot.'.$locale.'.yaml')['guide.start.body'];
+
+            foreach ([0 => 2, 1 => 3] as $open => $steps) {
+                $html = $this->render($body, $this->state(['new_orders' => 1 === $open]));
+                self::assertSame(1, preg_match_all('/<ol>/', $html), $locale.': one list');
+                self::assertSame(1, preg_match('#<ol>(.*?)</ol>#s', $html, $list));
+                self::assertSame($steps, substr_count($list[1], '<li>'), $locale);
+                self::assertStringNotContainsString('start=', $html, $locale);
+                self::assertDoesNotMatchRegularExpression('/<li>\s*\d/', $html, $locale.': no number typed into an item');
+            }
+        }
     }
 
     public function testConditionalBlocksFollowTheFeatureFlags(): void

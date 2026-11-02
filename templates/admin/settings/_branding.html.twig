@@ -1,4 +1,5 @@
-{# Settings page, "branding" tab: name, logo and accent colour of customer-facing pages (templates/public/layout.html.twig). #}
+{# Settings page, "branding" tab: name, logo and accent colour of customer-facing pages (templates/public/layout.html.twig),
+   and the support chat link (SupportLinkSettings: the "Message support" button in the Mini App guide and the bot). #}
 {% trans_default_domain 'admin' %}
 {% set storage = 'App\\Branding\\BrandLogoStorage' %}
     <p class="admin-page-subtitle">{{ 'branding_settings.subtitle'|trans }}</p>
@@ -21,6 +22,15 @@
                     </div>
                     <div class="form-text">{{ 'branding_settings.help.accent_color'|trans }}</div>
                 </div>
+            </div>
+        </div>
+
+        <div class="admin-section">
+            <h2>{{ 'branding_settings.sections.support'|trans }}</h2>
+            <div class="admin-form-row">
+                <label class="form-label" for="support_url">{{ 'branding_settings.fields.support_url'|trans }}</label>
+                <input class="form-control" type="url" id="support_url" name="support_url" dir="ltr" maxlength="{{ constant('App\\Branding\\SupportLinkSettings::MAX_LENGTH') }}" placeholder="https://t.me/your_support" autocomplete="off" value="{{ values.support_url }}">
+                <div class="form-text">{{ 'branding_settings.help.support_url'|trans }}</div>
             </div>
         </div>
 

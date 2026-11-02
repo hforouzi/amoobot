@@ -41,7 +41,7 @@
             </div>
         {% else %}
             <p>{{ ('notice.' ~ view.status)|trans({}, 'subscription') }}</p>
-            <p class="muted">{{ 'notice.renew_in_bot'|trans({}, 'subscription') }}</p>
+            <p class="muted">{{ 'service.renew_hint'|trans }}</p>
         {% endif %}
     </section>
     <section class="card">

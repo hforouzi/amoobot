@@ -61,6 +61,10 @@ link the download to a client app so that app's "Install app" button leads to it
 web root under a random name; its SHA-256 is shown on the detail page and on the customer page. Customers download through
 `/d/<id>`, which counts downloads and supports resuming. The bot shows a "Download apps" button whenever at least one download is active.
 
+The customer guide recommends **Happ** on every platform (V2Box as the one alternative). Add Happ (and V2Box if you
+like) here, with a download per platform for Windows and Linux: the guide's "Install and connect" topic shows these
+download buttons once G-3 ships ([Mini App guide](miniapp-guide.md#download-buttons-for-happ-and-v2box)).
+
 ## Plans with several inbounds (preview)
 
 A plan can name **additional inbounds** of the same panel: a buyer's one client (one email, one UUID, one subscription)
@@ -290,6 +294,10 @@ still not succeeded after its max age (95 minutes) it becomes NEVER.
   non-joiner is fine). Leave it empty for none.
 - **Accent colour**: the top bar and the main button, as `#rrggbb`. Empty means the default green `#166534`. On a
   light colour the button text turns dark so it stays readable.
+- **Support chat link** (`support.url`): `https://t.me/<username>` or `https://telegram.me/<username>` (username 5 to
+  32 letters, digits or `_`, nothing after it), saved as the `t.me` link. When set, the Mini App guide's "Contact
+  support" topic and the bot's support answer show a **Message support** button that opens this chat. Empty means no
+  button (both look as before). Details: [Mini App guide](miniapp-guide.md#message-support-button-supporturl).
 - **Logo**: PNG, JPEG or WebP (SVG is not accepted), at most 512 KB, 16 to 1024 pixels per side. A **square PNG of
   about 256×256 with a transparent background** works best: it is shown 56 px high, on light and dark backgrounds.
   The file is checked and saved again without its metadata (EXIF, comments). Choosing a new file replaces the old one

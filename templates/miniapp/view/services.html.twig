@@ -6,7 +6,13 @@
     <section class="card">
         <h1>{{ 'services.title'|trans }}</h1>
         {% if cards is empty %}
-            <p class="muted" data-no-services>{{ 'home.buy_in_bot'|trans }}</p>
+            <div data-no-services>
+                <p class="muted">{{ 'home.get_service'|trans }}</p>
+                <div class="row" style="margin-top:10px">
+                    <a class="btn small" href="{{ path('miniapp_shop') }}" data-nav data-shop-link>🛒 {{ 'home.open_shop'|trans }}</a>
+                    <a class="btn secondary small" href="{{ path('miniapp_help', {topic: 'connect'}) }}" data-nav data-guide-link>📖 {{ 'home.open_guide'|trans }}</a>
+                </div>
+            </div>
         {% endif %}
     </section>
     {% if cards is not empty %}

@@ -99,6 +99,7 @@ button.service.refresh_usage: "🔄 Refresh usage"
 button.service.page: "🌐 Open subscription page"
 button.service.miniapp: "📱 View in the app"
 button.miniapp.open: "📱 Open app"
+button.support.message: "💬 Message support"
 button.miniapp.menu: "App"
 payment.rejected_refunded: "↩️ This payment (for example a duplicate) was rejected and the money returned to you. Your order and service are unchanged."
 payment.under_review: "⏳ Your payment was received and sent to support for review (the paid amount or currency did not match the order). We will let you know the result."
@@ -253,14 +254,14 @@ button.reseller.new_claim_link: "🔗 New claim link (the open one stops working
 # Never a link, token, card number or anything of one customer.
 guide.start.title: "Getting started"
 guide.start.body: |
-  This shop sells VPN services. Each service gives you a personal subscription link that you add to a VPN app on your phone or computer.
+  This shop sells VPN services. Each service has a personal subscription link. You add it to the **Happ** app on your phone or computer.
 
   How it works:
   ::: if new_orders
   1. Buy a service in **Buy**.
   :::
-  2. Install a VPN app on your device.
-  3. Add your service to the app and connect.
+  2. Install the **Happ** app.
+  3. Add your service to Happ and connect.
 
   Step by step: [Install and connect](#connect).
 guide.buy.title: "Buying a service"
@@ -310,12 +311,24 @@ guide.wallet.body: |
   :::
 guide.connect.title: "Install and connect"
 guide.connect.body: |
-  1. Install a VPN app that supports subscription links on your phone or computer. If you are not sure which app to use, ask support.
-  2. Open **Services**, choose your service, and open its subscription page. There you find your subscription link and its QR code.
-  3. In the VPN app, add a new subscription: paste the link, or scan the QR code.
-  4. Update the subscription in the app, choose a server, and connect.
+  ## 1. Install Happ
+  On iPhone, iPad or Mac: search for **Happ** in the App Store and install it.
+  On Android: search for **Happ** in Google Play and install it.
+  On Windows or Linux: use the download button below if you see one. If not, ask support.
 
-  Keep your subscription link private: anyone who has it can use your service.
+  If you prefer, V2Box is also a good choice.
+
+  ## 2. Copy your link
+  Open **My services** and choose your service. Open its subscription page. Copy the link there (the QR code is there too).
+
+  ## 3. Add it to Happ
+  In Happ, tap the add button (**+**). Paste the link you copied, or scan the QR code.
+
+  ## 4. Connect
+  Update (refresh) the subscription. Pick any server. Tap connect.
+  The first time, your phone asks to add a VPN configuration. Tap **Allow**.
+
+  **Never give your subscription link to anyone, not even to support.** Anyone who has it can use your service.
 guide.usage.title: "Usage and expiry"
 guide.usage.body: |
   Open **Services** to see how many days and how much traffic each service has left.
@@ -340,12 +353,12 @@ guide.troubleshoot.title: "When it does not connect"
 guide.troubleshoot.body: |
   Try these steps in order:
 
-  1. In **Services**, check that the service is active, not expired, and still has traffic.
-  2. Update (refresh) the subscription in your VPN app.
-  3. Choose another config or server in the app.
+  1. In **My services**, check that the service is active, not expired, and still has traffic.
+  2. Update (refresh) the subscription in Happ.
+  3. Pick another server in Happ.
   4. Make sure the date and time on your phone are set to automatic.
   5. Try another network: switch between Wi-Fi and mobile data.
-  6. Remove the service from the app and add it again.
+  6. Remove the service from Happ and add it again.
   7. Still not working? Contact support and tell them your service number (the number after # on the service, for example Service #12).
 
   **Never send your subscription link to anyone, not even to support.**

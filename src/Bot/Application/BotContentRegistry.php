@@ -237,6 +237,7 @@ final class BotContentRegistry
             'button.service.page' => ['label' => '🌐 صفحه اشتراک', 'buttonType' => 'inline', 'category' => 'service'],
             'button.service.miniapp' => ['label' => '📱 مشاهده در اپ', 'buttonType' => 'inline', 'category' => 'service'],
             'button.miniapp.open' => ['label' => '📱 باز کردن اپ', 'buttonType' => 'inline', 'category' => 'main'],
+            'button.support.message' => ['label' => '💬 پیام به پشتیبانی', 'buttonType' => 'inline', 'category' => 'main'],
             'button.miniapp.menu' => ['label' => 'اپلیکیشن', 'buttonType' => 'inline', 'category' => 'main'],
         ] + Admin\AdminBotTexts::buttons() + \App\Wallet\UI\WalletBotTexts::buttons();
     }
@@ -293,6 +294,7 @@ final class BotContentRegistry
             'button.service.page' => '🌐 Open subscription page',
             'button.service.miniapp' => '📱 View in the app',
             'button.miniapp.open' => '📱 Open app',
+            'button.support.message' => '💬 Message support',
             'button.miniapp.menu' => 'App',
         ];
         foreach ($labels as $key => $label) {

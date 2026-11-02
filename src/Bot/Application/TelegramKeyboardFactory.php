@@ -210,6 +210,22 @@ class TelegramKeyboardFactory
     }
 
     /**
+     * Under the bot's support message: "Message support" (an inline URL button to the admin's support chat,
+     * SupportLinkSettings, already validated) above "Back"; without a support chat, exactly backToMainMenu().
+     *
+     * @return array<string, array<array<array<string, string>>>>
+     */
+    public function supportMenu(?string $supportUrl): array
+    {
+        $keyboard = $this->backToMainMenu();
+        if (null !== $supportUrl) {
+            array_unshift($keyboard['inline_keyboard'], [['text' => $this->button('button.support.message'), 'url' => $supportUrl]]);
+        }
+
+        return $keyboard;
+    }
+
+    /**
      * @return array<string, array<array<array<string, string>>>>
      */
     public function paymentInstructionsMenu(): array

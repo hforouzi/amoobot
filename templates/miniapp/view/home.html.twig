@@ -11,7 +11,11 @@
         {% if activeCount == 0 %}
             <div data-no-services>
                 <h2>{{ 'home.no_services'|trans }}</h2>
-                <p class="muted">{{ 'home.buy_in_bot'|trans }}</p>
+                <p class="muted">{{ 'home.get_service'|trans }}</p>
+                <div class="row" style="margin-top:10px">
+                    <a class="btn small" href="{{ path('miniapp_shop') }}" data-nav data-shop-link>🛒 {{ 'home.open_shop'|trans }}</a>
+                    <a class="btn secondary small" href="{{ path('miniapp_help', {topic: 'connect'}) }}" data-nav data-guide-link>📖 {{ 'home.open_guide'|trans }}</a>
+                </div>
             </div>
         {% else %}
             <div class="stats">
@@ -44,7 +48,8 @@
     {% for card in lowTraffic %}
         <section class="card notice" data-low-traffic="{{ card.service.id }}">
             <p>⚠️ {{ 'home.low_traffic'|trans({'%name%': card.view.planName ?? 'service.number'|trans({'%id%': card.service.id}), '%percent%': card.view.usedPercent}) }}</p>
-            <p class="muted">{{ 'home.add_traffic_in_bot'|trans }}</p>
+            <p class="muted">{{ 'home.low_traffic_hint'|trans }}</p>
+            <a class="btn secondary small" href="{{ path('miniapp_service', {id: card.service.id}) }}" data-nav data-service-link>{{ 'home.open_nearest'|trans({'%name%': card.view.planName ?? 'service.number'|trans({'%id%': card.service.id})}) }}</a>
         </section>
     {% endfor %}
     <section class="card">
