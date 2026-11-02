@@ -4,7 +4,10 @@ declare(strict_types=1);
 
 namespace App\Entity;
 
+use App\MiniApp\Guide\GuideTextRules;
 use Doctrine\ORM\Mapping as ORM;
+use Symfony\Component\Validator\Constraints as Assert;
+use Symfony\Component\Validator\Context\ExecutionContextInterface;
 
 #[ORM\Entity]
 #[ORM\UniqueConstraint(name: 'uniq_bot_message_template_key_locale', columns: ['template_key', 'locale'])]
@@ -120,9 +123,39 @@ class BotMessageTemplate
 
     public function setParseMode(string $parseMode): self
     {
-        $this->parseMode = in_array($parseMode, ['html', 'markdown', 'plain'], true) ? $parseMode : 'html';
+        $this->parseMode = in_array($parseMode, ['html', 'markdown', 'plain', GuideTextRules::PARSE_MODE], true) ? $parseMode : 'html';
 
         return $this;
+    }
+
+    /**
+     * A text of the Mini App guide (guide.<topic>.title / .body) is saved with parse mode "guide" only, and only when
+     * GuideTextRules accepts it; parse mode "guide" is for those keys only.
+     */
+    #[Assert\Callback]
+    public function validateGuideText(ExecutionContextInterface $context): void
+    {
+        $isGuideKey = GuideTextRules::isGuideKey($this->key);
+        $isGuideMode = GuideTextRules::PARSE_MODE === $this->parseMode;
+        if (!$isGuideKey && str_starts_with($this->key, 'guide.')) {
+            // guide.* is the guide's: only its topics' keys.
+            $context->buildViolation('guide_text.key')->atPath('key')->addViolation();
+
+            return;
+        }
+        if (!$isGuideKey) {
+            if ($isGuideMode) {
+                $context->buildViolation('guide_text.mode_not_guide_key')->atPath('parseMode')->addViolation();
+            }
+
+            return;
+        }
+        if (!$isGuideMode) {
+            $context->buildViolation('guide_text.mode_required')->atPath('parseMode')->addViolation();
+        }
+        foreach (GuideTextRules::problems($this->key, $this->body) as $problem) {
+            $context->buildViolation($problem['message'])->setParameters($problem['parameters'])->atPath('body')->addViolation();
+        }
     }
 
     public function getVariables(): ?array

@@ -194,7 +194,7 @@ final class GuideRenderer
     }
 
     /** https only, a host, no credentials; the URL is escaped again when it is written into the attribute. */
-    private static function isSafeExternalUrl(string $url): bool
+    public static function isSafeExternalUrl(string $url): bool
     {
         if (false === filter_var($url, FILTER_VALIDATE_URL)) {
             return false;
