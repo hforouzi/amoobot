@@ -13,7 +13,7 @@ A topic about a feature that is switched off is not shown, and the other topics 
 | Buying a service | new orders are open (`sales.new_orders_enabled`) |
 | Payment methods | at least one payment method customers can use (an active method on an active, configured gateway), or wallet payment |
 | Wallet | the wallet is on (`wallet.enabled`) |
-| Install and connect | always: four short steps with **Happ**, the app the shop recommends on every platform (App Store or Google Play; on Windows/Linux the download button when there is one, otherwise ask support). V2Box is named once there as an alternative, and nowhere else. No link, store URL or deep link |
+| Install and connect | always: four short steps; step 1 shows the client apps you set up for the customer's device (see [Client apps in "Install and connect"](#client-apps-in-install-and-connect)), or a general text without app names when there is none. The text itself names no app |
 | Usage and expiry | always |
 | Renewing | renewals are open (`sales.renewals_enabled`) |
 | Adding traffic | extra traffic can be bought (`sales.add_traffic_enabled`, `traffic_addon.enabled` and a price per GB) |
@@ -42,13 +42,30 @@ With the field empty, both look exactly as before. The support text itself (`bot
 bot texts; the button never takes a link from that text or from the guide texts. A value changed by hand in
 **Settings → Advanced** that breaks the rule shows no button.
 
-## Download buttons for Happ and V2Box
+## Client apps in "Install and connect"
 
-The connect topic tells Windows and Linux customers to use "the download button below, if you see one". To offer
-those buttons, add Happ (and V2Box if you like) under **Catalog → Apps**: a **Download** per platform (file or
-external link) and, if you want, a **Client app** linked to it. The guide shows them once **G-3** (the connect topic
-built from the client apps) ships; until then the topic is the same for every shop, and the downloads appear on the
-subscription page and the Apps tab as before.
+The connect topic is built from your **Catalog → Apps → Client apps** records (no app name is written in the guide
+texts or in the code):
+
+- **Device.** The guide picks the customer's device from the browser's User-Agent (Android, iOS/iPadOS, Windows,
+  macOS, Linux) and shows a row of device buttons so the customer can switch (`/app/view/help?topic=connect&platform=ios`).
+  When the device is unknown, the customer is asked to choose one.
+- **Which apps.** Only **active** client apps whose platforms include that device, in the order of the Client apps
+  list (sort order, then name). The **first** one is shown as **Recommended** with a big **Install** button; any others
+  appear in a smaller "Other apps" line. To recommend Happ, make Happ the active app with the lowest sort order for
+  each device and V2Box the next one.
+- **Install link.** The app's active download for that device (through `/d/<id>`, which counts it), otherwise the app's
+  install page (store URL). Only `http`/`https` links are used, exactly as you entered them (no tracking parameter is
+  added); a broken link shows the app name without a button. Links open in Telegram's browser (`openLink`).
+- **"Add subscription".** The guide never shows an import link, because that link contains the customer's
+  subscription. If an app has a link template, the guide adds "you can add your service with one tap in **My
+  services**", where the existing buttons are.
+- **No app.** With no active app for the device (or none at all), the topic shows a general text ("install a VPN app
+  that can add a subscription link from your device's app store… ask support") without any app name or button. The
+  Client apps page warns you about each device without an active app.
+
+The page is the same for every customer on the same device and language: names and icons are escaped and nothing of
+the customer is in it. Setting up Happ and V2Box: [Admin guide](admin-guide.md#client-apps-in-the-customer-guide).
 
 ## Opening a topic
 
@@ -88,7 +105,8 @@ The rules on save:
 - a body at most 4,000 characters, a title at most 80 characters on one line;
 - no control characters (tab, escape codes) and no invisible characters (direction overrides and isolates, zero-width
   space, byte order mark); the zero-width non-joiner of Persian is fine;
-- placeholders: only `{{ payment_methods }}` (body, on a line of its own) and `{{ bot.brandName }}`,
+- placeholders: only `{{ payment_methods }}` and `{{ apps }}` (body, on a line of its own; `{{ apps }}` only in the
+  "Install and connect" body) and `{{ bot.brandName }}`,
   `{{ bot.footerText }}`, `{{ bot.supportText }}`; nothing of one customer can be shown;
 - `::: if <feature>` only with a feature from the list below, each closed by `:::` on its own line (blocks may nest);
 - links only to a topic of the guide (`#pay`) or a full `https://` address.
@@ -104,6 +122,7 @@ The format is plain text (no HTML; anything that looks like HTML is shown as tex
 | `[text](#troubleshoot)` | link to another topic |
 | `[text](https://example.com)` | external link (https only) |
 | `{{ payment_methods }}` (own line) | the payment methods' titles |
+| `{{ apps }}` (own line, connect only) | the client apps of the customer's device; if the text has no such line, the apps are shown on top of the topic |
 | `::: if wallet` … `:::` | shown only while that feature is on |
 
 Features for `::: if`: `new_orders`, `renewals`, `add_traffic`, `wallet`, `wallet_payment`, `claims`, `trial`,

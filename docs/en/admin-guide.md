@@ -61,9 +61,39 @@ link the download to a client app so that app's "Install app" button leads to it
 web root under a random name; its SHA-256 is shown on the detail page and on the customer page. Customers download through
 `/d/<id>`, which counts downloads and supports resuming. The bot shows a "Download apps" button whenever at least one download is active.
 
-The customer guide recommends **Happ** on every platform (V2Box as the one alternative). Add Happ (and V2Box if you
-like) here, with a download per platform for Windows and Linux: the guide's "Install and connect" topic shows these
-download buttons once G-3 ships ([Mini App guide](miniapp-guide.md#download-buttons-for-happ-and-v2box)).
+### Client apps in the customer guide
+
+The **active** client apps are also the apps of the Mini App guide's **Install and connect** topic
+([Mini App guide](miniapp-guide.md#client-apps-in-install-and-connect)): for the customer's device, the first active app
+of this list is shown as **Recommended** with an **Install** button, the others in a smaller "Other apps" line. The
+Client apps page says so at the top and warns about every device (Android, iOS, Windows, macOS, Linux) without an active
+app: there the guide only shows a general text without app names or buttons. The guide never shows the "Add
+subscription" link; it sends customers to **My services** for that.
+
+The shop recommends **Happ**; **V2Box** is the alternative. Add **one record per platform**, so each one has that
+platform's official install page (Apps -> Client apps -> Add):
+
+| Name | Platforms | Sort order | Install page (store URL) |
+|---|---|---|---|
+| Happ | Android | 1 | `https://play.google.com/store/apps/details?id=com.happproxy` |
+| Happ | iOS | 1 | `https://apps.apple.com/us/app/happ-proxy-utility/id6504287215` |
+| Happ | macOS | 1 | the App Store link above, or the macOS download on `https://www.happ.su/` |
+| Happ | Windows | 1 | `https://www.happ.su/` (or add a Download: the installer from the official site or `https://github.com/Happ-proxy/happ-desktop/releases`, linked to this record) |
+| Happ | Linux | 1 | as for Windows |
+| V2Box | iOS | 2 | `https://apps.apple.com/us/app/v2box-v2ray-client/id6446814690` |
+| V2Box | Android | 2 | the V2Box page on Google Play (`https://play.google.com/store/apps/details?id=dev.hexasoftware.v2box`) |
+
+- Open each link before you save it and check the publisher: these were taken from the vendors' sites and the
+  stores in November 2026; copy-cat apps with similar names exist. The V2Box Google Play package in particular could
+  not be confirmed from the vendor's own site.
+- Keep Happ's sort order lower than V2Box's, so Happ is the recommended app on every device. Any other active app with
+  a lower sort order would be recommended instead: the seeded list has **Hiddify** (sort order 10), v2rayNG, NekoBox
+  and v2rayN **active**, and Happ and V2Box inactive. Deactivate the seeded apps you do not want, or give them a higher
+  sort order; activate or delete the seeded Happ/V2Box records (their link templates are not verified, see their
+  notes) when you add your own.
+- Link template: leave it empty unless you tested the app's scheme on a phone (customers then copy the link). With a
+  template, the service pages show the one-tap button; the guide only points there.
+- A **Download** linked to the record (same platform) takes precedence over the store URL, and is counted.
 
 ## Plans with several inbounds (preview)
 
