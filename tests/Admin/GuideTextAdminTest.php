@@ -74,7 +74,7 @@ final class GuideTextAdminTest extends IntegrationTestCase
         $form = $crawler->filter('form[name="BotMessageTemplate"]')->form();
         self::assertSame('guide.connect.body', $form['BotMessageTemplate[key]']->getValue());
         self::assertSame('guide', $form['BotMessageTemplate[category]']->getValue());
-        self::assertStringContainsString('Install Happ', (string) $form['BotMessageTemplate[body]']->getValue());
+        self::assertStringContainsString("Install an app\n{{ apps }}", (string) $form['BotMessageTemplate[body]']->getValue());
         self::assertSame(['guide'], $this->options($crawler, 'BotMessageTemplate[parseMode]'), 'only the guide parse mode');
         self::assertCount(1, $crawler->filter('[data-guide-preview] iframe[sandbox=""][data-guide-frame]'));
 

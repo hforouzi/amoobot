@@ -19,6 +19,8 @@ use Twig\Markup;
  *   [text](#slug)              link to another visible topic of the guide (else the text alone)
  *   [text](https://…)          external link, opened by Telegram (a[data-open-link]); any other URL: the text alone
  *   {{ payment_methods }}      on a line of its own: the labels of the payment methods customers can use
+ *   {{ apps }}                 on a line of its own: the client-app block the caller passes in $blocks (only the
+ *                              "connect" topic gets one, MiniAppGuide); without a block the line shows nothing
  *   ::: if <flag>  …  :::      lines shown only while that feature is on (GuideState::FLAGS; unknown flag: hidden)
  *
  * Control, format (bidi overrides, zero-width space, ...), private-use and unassigned characters are removed, except
@@ -32,13 +34,16 @@ final class GuideRenderer
     private const FORBIDDEN = '/(?![\x{200C}\x{200D}\n])[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Co}\p{Cs}\p{Cn}]/u';
     public const LINK = '/\[([^\[\]\n]{1,200})\]\(([^()\s]{1,500})\)/u';
     /** The guide's own placeholders, each on a line of its own (the {{ bot.* }} variables are filled in before). */
-    public const PLACEHOLDERS = ['payment_methods'];
+    public const PLACEHOLDERS = ['payment_methods', 'apps'];
+    public const PLACEHOLDER_APPS = '{{ apps }}';
     private const PLACEHOLDER_PAYMENT_METHODS = '{{ payment_methods }}';
 
     /**
      * @param \Closure(string): ?string $topicUrl the URL of a visible topic's card, null for a hidden or unknown slug
+     * @param array<'apps', Markup>     $blocks   markup built by the caller from escaped data (Twig), put in for the
+     *                                            {{ apps }} line
      */
-    public function render(string $text, GuideState $state, \Closure $topicUrl): Markup
+    public function render(string $text, GuideState $state, \Closure $topicUrl, array $blocks = []): Markup
     {
         $html = [];
         $paragraph = [];
@@ -72,6 +77,12 @@ final class GuideRenderer
                 self::flushList($list, $items, $html);
                 if ([] !== $state->paymentMethods) {
                     $html[] = '<ul class="guide-methods">'.implode('', array_map(static fn (string $label): string => '<li>'.self::escape($label).'</li>', $state->paymentMethods)).'</ul>';
+                }
+            } elseif (self::PLACEHOLDER_APPS === $line) {
+                self::flushParagraph($paragraph, $html);
+                self::flushList($list, $items, $html);
+                if (isset($blocks['apps']) && '' !== trim((string) $blocks['apps'])) {
+                    $html[] = (string) $blocks['apps'];
                 }
             } elseif (1 === preg_match('/^(?:(-)|\d{1,3}\.) (.+)$/sD', $line, $m)) {
                 self::flushParagraph($paragraph, $html);

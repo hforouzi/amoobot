@@ -54,6 +54,7 @@ guide_text.characters: "متن نویسه‌های نامرئی یا غیرعا�
 guide_text.placeholder: "جای‌نگهدار ناشناخته {{ %name% }}. موارد مجاز در اینجا: %allowed%."
 guide_text.placeholder_unclosed: "یک جای‌نگهدار بسته نشده است: آن را به شکل {{ name }} با دو آکولاد در هر طرف بنویسید."
 guide_text.placeholder_own_line: "%name% باید به‌تنهایی در یک خط جداگانه باشد."
+guide_text.apps_only_connect: "{{ apps }} (برنامه‌های دستگاه مشتری) فقط در متن «نصب و اتصال» (guide.connect.body) به کار می‌رود."
 guide_text.block_in_title: "عنوان موضوع نمی‌تواند بلوک ::: داشته باشد."
 guide_text.block_feature: "خط %line%: قابلیت ناشناخته «%name%» در «::: if». قابلیت‌های شناخته‌شده: %allowed%."
 guide_text.block_line: "خط %line%: «%text%» خط بلوک معتبری نیست. بلوک را با «::: if <feature>» باز و با «:::» به‌تنهایی در یک خط ببندید."

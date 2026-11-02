@@ -7,6 +7,7 @@ namespace App\MiniApp\Guide;
 use App\Bot\Application\BotTextResolver;
 use Symfony\Contracts\Translation\TranslatorInterface;
 use Twig\Environment;
+use Twig\Markup;
 
 /**
  * The admin's live preview of a guide text (Bot Content edit page, docs/design/help-guide.md, section 6): the topic's
@@ -45,7 +46,15 @@ final class GuidePreview
         foreach (GuideTopic::cases() as $other) {
             $visible[$other->value] = $other->isVisible($state);
         }
-        $html = $this->renderer->render($body, $state, static fn (string $slug): ?string => ($visible[$slug] ?? false) ? '#guide-'.$slug : null);
+        // The client apps depend on the customer's device: the preview shows where they go, not one device's list.
+        $blocks = [];
+        if (GuideTopic::CONNECT === $topic && '' !== trim($body)) {
+            $blocks['apps'] = new Markup('<p class="muted" data-preview-apps>'.htmlspecialchars($this->translator->trans('guide_text.preview.apps', [], 'admin'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8').'</p>', 'UTF-8');
+            if (!MiniAppGuide::hasAppsLine($body)) {
+                $body = GuideRenderer::PLACEHOLDER_APPS."\n\n".$body;
+            }
+        }
+        $html = $this->renderer->render($body, $state, static fn (string $slug): ?string => ($visible[$slug] ?? false) ? '#guide-'.$slug : null, $blocks);
 
         $notes = [];
         if (!$topic->isVisible($state)) {

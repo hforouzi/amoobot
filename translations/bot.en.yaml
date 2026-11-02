@@ -250,7 +250,7 @@ button.reseller.make_claim_link: "🔗 Make claim link"
 button.reseller.new_claim_link: "🔗 New claim link (the open one stops working)"
 # Customer guide in the Mini App's Help section (App\MiniApp\Guide, docs/en/miniapp-guide.md): guide.<topic>.title and
 # guide.<topic>.body. Format: blank line = new paragraph, "## " sub-heading, "- " / "1. " lists, **bold**,
-# [text](#topic) link to another topic, "{{ payment_methods }}" on its own line, "::: if <feature>" … ":::" blocks.
+# [text](#topic) link to another topic, "{{ payment_methods }}" on its own line, "{{ apps }}" on its own line (connect only: the client apps from the Apps admin), "::: if <feature>" … ":::" blocks.
 # Never a link, token, card number or anything of one customer.
 guide.start.title: "Getting started"
 guide.start.body: |
@@ -311,18 +311,14 @@ guide.wallet.body: |
   :::
 guide.connect.title: "Install and connect"
 guide.connect.body: |
-  ## 1. Install Happ
-  On iPhone, iPad or Mac: search for **Happ** in the App Store and install it.
-  On Android: search for **Happ** in Google Play and install it.
-  On Windows or Linux: use the download button below if you see one. If not, ask support.
-
-  If you prefer, V2Box is also a good choice.
+  ## 1. Install an app
+  {{ apps }}
 
   ## 2. Copy your link
   Open **My services** and choose your service. Open its subscription page. Copy the link there (the QR code is there too).
 
-  ## 3. Add it to Happ
-  In Happ, tap the add button (**+**). Paste the link you copied, or scan the QR code.
+  ## 3. Add it to the app
+  In the app, tap the add button (**+**). Paste the link you copied, or scan the QR code.
 
   ## 4. Connect
   Update (refresh) the subscription. Pick any server. Tap connect.

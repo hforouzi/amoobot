@@ -54,6 +54,7 @@ guide_text.characters: "The text contains invisible or unusual characters (direc
 guide_text.placeholder: "Unknown placeholder {{ %name% }}. Allowed here: %allowed%."
 guide_text.placeholder_unclosed: "A placeholder is not closed: write it as {{ name }}, with two braces on each side."
 guide_text.placeholder_own_line: "%name% must stand alone on its own line."
+guide_text.apps_only_connect: "{{ apps }} (the client apps of the customer's device) can only be used in the body of \"Install and connect\" (guide.connect.body)."
 guide_text.block_in_title: "A topic title cannot contain ::: blocks."
 guide_text.block_feature: "Line %line%: unknown feature \"%name%\" in \"::: if\". Known features: %allowed%."
 guide_text.block_line: "Line %line%: \"%text%\" is not a block line. Open a block with \"::: if <feature>\" and close it with \":::\" alone on its line."

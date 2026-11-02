@@ -5,11 +5,11 @@ declare(strict_types=1);
 namespace App\Tests\MiniApp\Guide;
 
 use App\Entity\BotMessageTemplate;
-use App\Entity\ClientApp;
 use App\Entity\TrialPlan;
 use App\MiniApp\Guide\MiniAppGuide;
 use App\Payment\Domain\PaymentGatewayType;
 use App\Reseller\Application\ResellerSettings;
+use App\Tests\Support\GuideClientAppFixtures;
 use App\Tests\Support\IntegrationTestCase;
 use App\Tests\Support\MiniAppShopFixtures;
 use App\Tests\Support\MiniAppTestTrait;
@@ -24,11 +24,9 @@ use Symfony\Component\DomCrawler\Crawler;
  */
 final class MiniAppGuideTest extends IntegrationTestCase
 {
+    use GuideClientAppFixtures;
     use MiniAppShopFixtures;
     use MiniAppTestTrait;
-
-    private const APP_NAME = 'Zeta Tunnel Client';
-    private const STORE_URL = 'https://store.example/zeta-tunnel';
 
     protected function setUp(): void
     {
@@ -42,7 +40,7 @@ final class MiniAppGuideTest extends IntegrationTestCase
     {
         $connection = $this->em->getConnection();
         $connection->executeStatement("DELETE FROM bot_message_template WHERE template_key = 'bot.support'");
-        $connection->executeStatement('DELETE FROM client_app WHERE name = ?', [self::APP_NAME]);
+        $this->restoreClientApps();
         $connection->executeStatement("DELETE FROM setting WHERE key_name LIKE 'sales.%' OR key_name LIKE 'traffic_addon.%'");
         $connection->executeStatement('DELETE FROM trial_claim');
         $connection->executeStatement('DELETE FROM trial_plan');
@@ -160,20 +158,6 @@ final class MiniAppGuideTest extends IntegrationTestCase
         foreach (['کیف پول', 'تمدید', 'حجم اضافه', 'فروشنده', 'کارت به کارت', 'آنلاین', 'رمزارز', 'اکانت تست'] as $word) {
             self::assertStringNotContainsString($word, $fa, 'mentions "'.$word.'"');
         }
-    }
-
-    public function testTheConnectTopicIsGenericEvenWithClientAppsConfigured(): void
-    {
-        $generic = $this->topicText('connect', 'en');
-        self::assertStringContainsString('ask support', $generic);
-
-        $this->em->persist((new ClientApp())->setName(self::APP_NAME)->setPlatforms(['android', 'ios'])->setStoreUrl(self::STORE_URL)->setImportUrlTemplate('zeta://import/{url}'));
-        $this->em->flush();
-
-        $withApps = $this->topicText('connect', 'en');
-        self::assertSame($generic, $withApps);
-        self::assertStringNotContainsString(self::APP_NAME, $this->appGet('/app/view/help?lang=en', $this->session()));
-        self::assertStringNotContainsString('store.example', $this->appGet('/app/view/help?lang=en', $this->session()));
     }
 
     public function testTheHelpViewShowsEveryTopicAsACollapsedCard(): void
@@ -356,6 +340,9 @@ final class MiniAppGuideTest extends IntegrationTestCase
 
     public function testThePageIsTheSameForEveryCustomerAndHoldsNothingSecret(): void
     {
+        // No client app: then no admin install link either, so no URL at all may be on the page (with apps:
+        // MiniAppGuideClientAppsTest).
+        $this->switchOffClientApps();
         $service = $this->createActiveService($this->user);
         $service->setSubscriptionUrl('https://sub.panel-shop.example:2096/sub/k3j9x7q2m1zt5w8a');
         $order = $this->createOrder($this->user, $this->plan);
