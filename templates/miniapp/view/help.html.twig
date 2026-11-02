@@ -1,15 +1,37 @@
 {% extends 'miniapp/view/_base.html.twig' %}
 {% trans_default_domain 'miniapp' %}
+{# The customer guide (MiniAppGuide): one collapsible card per topic the shop's current state allows. topic.body is
+   built by GuideRenderer from escaped text only; supportText is the admin's support message escaped as plain text.
+   The support message and the back-to-bot button are always on the page: in the "support" topic, or in a card of
+   their own when that topic is not shown. #}
 {% block section %}help{% endblock %}
 {% block title %}{{ 'nav.help'|trans }}{% endblock %}
+{% macro support(supportText) %}
+    {% trans_default_domain 'miniapp' %}
+    <div class="guide-support" data-support-text>{{ supportText }}</div>
+    <p class="muted">{{ 'help.bot_text'|trans }}</p>
+    <button type="button" class="btn secondary" data-close-app>{{ 'help.back_to_bot'|trans }}</button>
+{% endmacro %}
 {% block content %}
     <section class="card">
-        <h1>{{ 'help.title'|trans }}</h1>
-        <p class="pre-line">{{ supportText }}</p>
+        <h1>{{ 'help.guide_title'|trans }}</h1>
+        <p class="muted">{{ 'help.guide_intro'|trans }}</p>
     </section>
-    <section class="card">
-        <h2>{{ 'help.bot_title'|trans }}</h2>
-        <p class="muted">{{ 'help.bot_text'|trans }}</p>
-        <button type="button" class="btn secondary" data-close-app>{{ 'help.back_to_bot'|trans }}</button>
-    </section>
+    <div class="guide" data-guide>
+        {% for topic in topics %}
+            <details class="card guide-topic" id="guide-{{ topic.slug }}" data-guide-topic="{{ topic.slug }}"{% if topic.slug == openTopic %} open data-scroll-to{% endif %}>
+                <summary><bdi>{{ topic.title }}</bdi></summary>
+                <div class="guide-body">
+                    {{ topic.body }}
+                    {% if topic.slug == 'support' %}{{ _self.support(supportText) }}{% endif %}
+                </div>
+            </details>
+        {% endfor %}
+    </div>
+    {% if 'support' not in topics|column('slug') %}
+        <section class="card" data-support-card>
+            <h2>{{ 'help.title'|trans }}</h2>
+            {{ _self.support(supportText) }}
+        </section>
+    {% endif %}
 {% endblock %}

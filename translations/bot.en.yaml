@@ -247,3 +247,147 @@ button.claim.reset_confirm: "♻️ Yes, give me new links"
 button.reseller.claim_links: "🔗 Claim links"
 button.reseller.make_claim_link: "🔗 Make claim link"
 button.reseller.new_claim_link: "🔗 New claim link (the open one stops working)"
+# Customer guide in the Mini App's Help section (App\MiniApp\Guide, docs/en/miniapp-guide.md): guide.<topic>.title and
+# guide.<topic>.body. Format: blank line = new paragraph, "## " sub-heading, "- " / "1. " lists, **bold**,
+# [text](#topic) link to another topic, "{{ payment_methods }}" on its own line, "::: if <feature>" … ":::" blocks.
+# Never a link, token, card number or anything of one customer.
+guide.start.title: "Getting started"
+guide.start.body: |
+  This shop sells VPN services. Each service gives you a personal subscription link that you add to a VPN app on your phone or computer.
+
+  How it works:
+  ::: if new_orders
+  1. Buy a service in **Buy**.
+  :::
+  2. Install a VPN app on your device.
+  3. Add your service to the app and connect.
+
+  Step by step: [Install and connect](#connect).
+guide.buy.title: "Buying a service"
+guide.buy.body: |
+  1. Open **Buy** and choose a plan.
+  2. If you have a discount code, enter it before you pay.
+  3. Choose how to pay and finish the payment.
+  4. Your new service appears in **Services** shortly after the payment is confirmed.
+  ::: if trial
+
+  Want to try first? **Buy** also offers a free trial account.
+  :::
+
+  Payment options: [Payment methods](#pay).
+guide.pay.title: "Payment methods"
+guide.pay.body: |
+  ::: if payment_methods
+  You can pay with:
+  {{ payment_methods }}
+  :::
+  ::: if wallet_payment
+  You can also pay from your **wallet** when its balance covers the whole price.
+  :::
+  ::: if card_to_card
+
+  ## Card to card
+  Transfer the exact amount shown on the payment page, then send a photo of the receipt there. Support checks it, and then your service is delivered.
+  :::
+  ::: if online
+
+  ## Online payment
+  You are taken to the payment page of the bank or payment service. After you pay, come back to the app: the payment is checked automatically.
+  :::
+  ::: if crypto
+
+  ## Crypto
+  Send exactly the amount shown, on the network shown. Confirmation can take a few minutes.
+  :::
+guide.wallet.title: "Wallet"
+guide.wallet.body: |
+  Your wallet holds money you add in advance.
+
+  - Open **My wallet** (on Home, or under Services) to see your balance and history.
+  - Add money there with any payment method.
+  ::: if wallet_payment
+  - When the balance covers the whole price, you can pay an order from the wallet in one tap.
+  :::
+guide.connect.title: "Install and connect"
+guide.connect.body: |
+  1. Install a VPN app that supports subscription links on your phone or computer. If you are not sure which app to use, ask support.
+  2. Open **Services**, choose your service, and open its subscription page. There you find your subscription link and its QR code.
+  3. In the VPN app, add a new subscription: paste the link, or scan the QR code.
+  4. Update the subscription in the app, choose a server, and connect.
+
+  Keep your subscription link private: anyone who has it can use your service.
+guide.usage.title: "Usage and expiry"
+guide.usage.body: |
+  Open **Services** to see how many days and how much traffic each service has left.
+
+  - **Active**: the service works.
+  - **Out of traffic**: the traffic is used up.
+  - **Expired**: the time is over.
+  - **Disabled**: the service is switched off.
+
+  Tap **Refresh usage** on the service page to see the latest numbers.
+guide.renew.title: "Renewing"
+guide.renew.body: |
+  Open your service in **Services** and choose **Renew or add traffic**, then **Renew service**.
+
+  You can renew before or after the service ends. The renew page shows the new days and traffic before you pay. Whether unused days and traffic carry over depends on the shop's rules.
+guide.traffic.title: "Adding traffic"
+guide.traffic.body: |
+  Running low on traffic? Open your service in **Services**, choose **Renew or add traffic**, then **Buy extra traffic**. Pick the amount and pay.
+
+  The extra traffic is added to the same service. Your days do not change.
+guide.troubleshoot.title: "When it does not connect"
+guide.troubleshoot.body: |
+  Try these steps in order:
+
+  1. In **Services**, check that the service is active, not expired, and still has traffic.
+  2. Update (refresh) the subscription in your VPN app.
+  3. Choose another config or server in the app.
+  4. Make sure the date and time on your phone are set to automatic.
+  5. Try another network: switch between Wi-Fi and mobile data.
+  6. Remove the service from the app and add it again.
+  7. Still not working? Contact support and tell them your service number (the number after # on the service, for example Service #12).
+
+  **Never send your subscription link to anyone, not even to support.**
+guide.claim.title: "Got a service link from someone?"
+guide.claim.body: |
+  A seller can hand a service over to you with a special link.
+
+  - Open the link in Telegram and confirm. The service is then added to your account.
+  - The link works only once, and only for a limited time.
+  - After you accept, the seller can no longer see the service's links.
+
+  If the link does not work, ask the person who sent it for a new one.
+guide.faq.title: "Questions"
+guide.faq.body: |
+  ## It does not connect. What can I do?
+  Follow the steps in [When it does not connect](#troubleshoot).
+
+  ## How many devices can use one service?
+  It depends on your plan and the shop's rules. Ask support if you are not sure.
+
+  ## Why did my traffic run out so fast?
+  Both download and upload count. Apps working in the background and automatic updates also use traffic.
+  ::: if renewals
+
+  ## How do I renew?
+  See [Renewing](#renew).
+  :::
+
+  ## I paid, but my service did not appear.
+  Wait a few minutes, then check **My orders** under Services.
+  ::: if card_to_card
+  A card-to-card payment is delivered after support approves the receipt.
+  :::
+  ::: if online
+  For an online payment: if the service still does not appear after a few minutes, send the order's tracking code to support.
+  :::
+  ::: if crypto
+  For a crypto payment: confirmation can take longer. If it still does not appear, send the order's tracking code to support.
+  :::
+
+  ## Can I get a refund?
+  Please ask support.
+guide.support.title: "Contact support"
+guide.support.body: |
+  If something is not clear or does not work, write to support. Tell them your service number, never your subscription link.

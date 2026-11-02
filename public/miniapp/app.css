@@ -301,3 +301,24 @@ fieldset.field legend { padding: 0; margin-bottom: 6px; }
 /* Logs (M3c): filters, the masked JSON. */
 .filters .row .field { margin: 0; }
 .json-box pre.admin-json { direction: ltr; text-align: left; white-space: pre-wrap; overflow-wrap: anywhere; font-size: .78rem; background: var(--code); border-radius: 10px; padding: 10px; margin: 0; max-height: 70vh; overflow: auto; }
+
+/* Customer guide (templates/miniapp/view/help.html.twig): collapsible topic cards, text built by GuideRenderer. */
+.guide { display: grid; gap: 10px; }
+.guide-topic { padding: 0; margin: 0; }
+.guide-topic > summary {
+    list-style: none; padding: 14px 16px; min-height: 48px; font-weight: 700; color: var(--fg);
+    display: flex; justify-content: space-between; align-items: center; gap: 12px;
+}
+.guide-topic > summary::-webkit-details-marker { display: none; }
+.guide-topic > summary::after { content: '▾'; color: var(--muted); transition: transform .15s; flex: none; }
+.guide-topic:not([open]) > summary::after { transform: rotate(90deg); }
+[dir="rtl"] .guide-topic:not([open]) > summary::after { transform: rotate(-90deg); }
+.guide-topic[open] > summary { border-bottom: 1px solid var(--border); }
+.guide-body { padding: 4px 16px 16px; overflow-wrap: anywhere; }
+.guide-body h3 { font-size: 1rem; margin: 14px 0 4px; }
+.guide-body p { margin: 10px 0; }
+.guide-body ul, .guide-body ol { margin: 8px 0; padding-inline-start: 22px; }
+.guide-body li { margin: 4px 0; }
+.guide-body a { color: var(--accent); }
+.guide-support { margin-top: 12px; padding: 10px 12px; border-radius: 10px; background: var(--code); }
+.guide-support p { margin: 4px 0; }

@@ -1,6 +1,6 @@
 # Customer Help / Guide in the Mini App — design
 
-Status: **design, not implemented.** Persian version: [docs/fa/design/help-guide.md](../fa/design/help-guide.md).
+Status: **G-1 implemented** (guide renderer, fa/en default topics, the Help view; admin guide: [docs/en/miniapp-guide.md](../en/miniapp-guide.md)); G-2 to G-6 not yet. Owner decisions: G1 as written with a 5-question FAQ and refunds only as "ask support"; G2 bot-content storage in G-2 (keys unchanged); G3 own format; G4 no search in G-1; G5 an empty topic is hidden; Q1 no link from the subscription page; Q3 no reseller topic; Q2 open. Persian version: [docs/fa/design/help-guide.md](../fa/design/help-guide.md).
 Companion design (admin side): [activity-group-and-daily-report.md](activity-group-and-daily-report.md).
 
 Items marked **DECISION NEEDED (Gx)** are decisions this document takes with a recommendation; the owner confirms or
