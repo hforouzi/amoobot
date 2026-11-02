@@ -30,7 +30,9 @@ final class GuideRenderer
     public const MAX_CHARS = 8000;
     public const MAX_TITLE_CHARS = 80;
     private const FORBIDDEN = '/(?![\x{200C}\x{200D}\n])[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Co}\p{Cs}\p{Cn}]/u';
-    private const LINK = '/\[([^\[\]\n]{1,200})\]\(([^()\s]{1,500})\)/u';
+    public const LINK = '/\[([^\[\]\n]{1,200})\]\(([^()\s]{1,500})\)/u';
+    /** The guide's own placeholders, each on a line of its own (the {{ bot.* }} variables are filled in before). */
+    public const PLACEHOLDERS = ['payment_methods'];
     private const PLACEHOLDER_PAYMENT_METHODS = '{{ payment_methods }}';
 
     /**

@@ -4,20 +4,22 @@ declare(strict_types=1);
 
 namespace App\MiniApp\Guide;
 
+use App\Bot\Application\BotTextResolver;
 use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
-use Symfony\Contracts\Translation\TranslatorInterface;
 use Twig\Markup;
 
 /**
  * The customer guide of the Mini App's Help section (docs/design/help-guide.md): the topics the shop's current state
- * allows (GuideTopic::isVisible), in order, each with its title and its body rendered by GuideRenderer. The texts are
- * guide.<slug>.title / guide.<slug>.body of the bot domain (translations/bot.*.yaml, fa and en). A topic whose title
- * or body is empty, missing or renders to nothing is not shown. Nothing here depends on who is reading.
+ * allows (GuideTopic::isVisible: in code, never in the texts), in order, each with its title and its body rendered by
+ * GuideRenderer. The texts are the bot texts guide.<slug>.title / guide.<slug>.body, read through
+ * BotTextResolver::guideText(): the admin's row for that language (Bot Content, parse mode "guide"), else the shipped
+ * default (translations/bot.*.yaml). A topic whose title or body is empty, missing or renders to nothing is not shown,
+ * so an admin hides a topic by emptying its body. Nothing here depends on who is reading.
  */
 final class MiniAppGuide
 {
     public function __construct(
-        private readonly TranslatorInterface $translator,
+        private readonly BotTextResolver $texts,
         private readonly GuideRenderer $renderer,
         private readonly GuideStateProvider $stateProvider,
         private readonly UrlGeneratorInterface $urlGenerator,
@@ -74,11 +76,9 @@ final class MiniAppGuide
         return $this->renderer->plain($text);
     }
 
-    /** The translation, or '' when there is none (the translator answers with the key itself). */
+    /** The admin's text for this language or the shipped default ('' when neither exists), guide placeholders kept. */
     private function text(string $key, string $locale): string
     {
-        $text = $this->translator->trans($key, [], 'bot', $locale);
-
-        return $text === $key ? '' : $text;
+        return $this->texts->guideText($key, $locale, GuideRenderer::PLACEHOLDERS);
     }
 }
