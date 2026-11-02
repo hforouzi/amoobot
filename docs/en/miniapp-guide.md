@@ -72,6 +72,50 @@ the customer is in it. Setting up Happ and V2Box: [Admin guide](admin-guide.md#c
 `/app/view/help?topic=<topic>` opens that topic's card (`start`, `buy`, `pay`, `wallet`, `connect`, `usage`, `renew`,
 `traffic`, `troubleshoot`, `claim`, `faq`, `support`). An unknown or hidden topic opens none.
 
+## Deep links into the guide
+
+### Links inside the app
+
+Some screens show a small 📖 link to the topic that helps right there:
+
+| Screen | Situation | Topic |
+|---|---|---|
+| Home and *My services* | no services yet | `start` (and the *install and connect* button: `connect`) |
+| A service | expired | `renew` |
+| A service | out of traffic | `traffic` while extra traffic can be bought, else `renew` |
+| A service | suspended | `troubleshoot` |
+| A payment | paid, the service is ready | `connect` |
+| A payment | waiting for payment or for the receipt check | `pay` |
+| Paying an order | always | `pay` |
+| Wallet | always | `wallet` |
+| Apps | always | `connect` (for the device chosen there) |
+
+A link is shown only while its topic is shown in the guide: its feature is switched on (for example no `renew` link
+while renewals are closed, no `traffic` link without the traffic add-on, no `pay` link without any way to pay) and its
+text in that language is not empty. Empty a topic's text and its links disappear too. The public subscription page
+(`/s/...`) has no guide links.
+
+### Links from outside the app
+
+Use these to open the Mini App at a topic, for example in the bot's menu button or in a channel post. `<topic>` is one
+of the topic names above, written exactly as shown (lower case).
+
+| Where | Link |
+|---|---|
+| A channel post, a message, a QR code | `https://t.me/<bot>?startapp=guide_<topic>`, e.g. `https://t.me/amoo_bot?startapp=guide_connect` |
+| The bot's menu button (BotFather → *Bot Settings → Menu Button*) | `https://<shop address>/app?guide=<topic>`, e.g. `https://shop.example.com/app?guide=start` |
+| Inside the bot | `https://t.me/<bot>?start=guide_<topic>`: the bot answers with its usual *open the app* message, whose button opens that topic |
+
+- `startapp=` needs the bot's **Main Mini App** set in BotFather (*Bot Settings → Configure Mini App*), the same as
+  claim links; `<bot>` is the bot's username without `@`.
+- All of them work only while the Mini App is switched on (setting `miniapp.enabled`) and the shop has a public HTTPS
+  address.
+- The app opens the Help section at that topic, with Home behind the Back button.
+- Anything else (a name that is not a topic, a topic that is hidden now, other letters or capitals, a link that was cut
+  off) is ignored without a message: the app opens the usual Home and the bot answers as to any unknown command. What
+  was typed after `guide_` is never shown or logged. Links that existed before (claim links, a plain `/start`) work as
+  before.
+
 ## The texts
 
 The default texts are in `translations/bot.fa.yaml` and `translations/bot.en.yaml`, keys `guide.<topic>.title` and
