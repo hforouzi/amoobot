@@ -321,6 +321,10 @@ final class MiniAppGuideTest extends IntegrationTestCase
             self::assertStringContainsString($label, $button->text(), $locale);
             self::assertCount(1, $crawler->filter('a[href^="https://t.me/"]'), $locale.': the only t.me link on the page');
         }
+
+        // ".guide-body a" colours links with the accent: the button must keep the button text colour (else blue on blue).
+        $css = (string) file_get_contents(dirname(__DIR__, 3).'/public/miniapp/app.css');
+        self::assertMatchesRegularExpression('/a\.btn\.guide-support-link\s*\{[^}]*color:\s*var\(--accent-fg\)/', $css);
     }
 
     /**
