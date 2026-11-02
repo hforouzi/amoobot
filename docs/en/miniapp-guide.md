@@ -13,19 +13,42 @@ A topic about a feature that is switched off is not shown, and the other topics 
 | Buying a service | new orders are open (`sales.new_orders_enabled`) |
 | Payment methods | at least one payment method customers can use (an active method on an active, configured gateway), or wallet payment |
 | Wallet | the wallet is on (`wallet.enabled`) |
-| Install and connect | always (generic steps; it names no app and no store) |
+| Install and connect | always: four short steps with **Happ**, the app the shop recommends on every platform (App Store or Google Play; on Windows/Linux the download button when there is one, otherwise ask support). V2Box is named once there as an alternative, and nowhere else. No link, store URL or deep link |
 | Usage and expiry | always |
 | Renewing | renewals are open (`sales.renewals_enabled`) |
 | Adding traffic | extra traffic can be bought (`sales.add_traffic_enabled`, `traffic_addon.enabled` and a price per GB) |
 | When it does not connect | always |
 | Got a service link from someone? | claim links are on (`reseller.enabled` and `reseller.claims_enabled`) |
 | Questions | always |
-| Contact support | always; it also shows your support text (**Bot Content → `bot.support`**) and the back-to-bot button |
+| Contact support | always; it also shows your support text (**Bot Content → `bot.support`**), the back-to-bot button and, when a support chat is set (`support.url`), a **Message support** button |
 
 Payment methods are listed by their **title** only (Payment methods admin), never with card numbers or gateway
 settings. A trial account is mentioned under "Buying a service" while a trial plan is active.
 
 The guide is the same for every customer: it shows no personal data, link, token or tracking code.
+
+## Message support button (`support.url`)
+
+**Settings → Branding → Support chat link** (permission *Manage settings*, audited with the branding form). Enter
+`https://t.me/<username>` or `https://telegram.me/<username>`: a username of 5 to 32 letters, digits or `_`, nothing
+after it (no `?start=…`, no path, no `tg://`, no other site). It is saved as the `t.me` link. Leave it empty for no
+button. When it is set:
+
+- the guide's **Contact support** topic shows a clearly visible **«پیام به پشتیبانی» / Message support** button that
+  opens the chat inside Telegram;
+- the bot's support answer (**🎧 Support**) gets the same button above **Back**.
+
+With the field empty, both look exactly as before. The support text itself (`bot.support`) is still edited in the
+bot texts; the button never takes a link from that text or from the guide texts. A value changed by hand in
+**Settings → Advanced** that breaks the rule shows no button.
+
+## Download buttons for Happ and V2Box
+
+The connect topic tells Windows and Linux customers to use "the download button below, if you see one". To offer
+those buttons, add Happ (and V2Box if you like) under **Catalog → Apps**: a **Download** per platform (file or
+external link) and, if you want, a **Client app** linked to it. The guide shows them once **G-3** (the connect topic
+built from the client apps) ships; until then the topic is the same for every shop, and the downloads appear on the
+subscription page and the Apps tab as before.
 
 ## Opening a topic
 
@@ -43,7 +66,7 @@ The format is plain text (no HTML; anything that looks like HTML is shown as tex
 |---|---|
 | blank line | new paragraph |
 | `## Title` | sub-heading |
-| `- item` or `1. item` | list |
+| `- item` or `1. item` | list (a numbered list always counts from 1, also when a `::: if` block hides its first items) |
 | `**bold**` | bold |
 | `[text](#troubleshoot)` | link to another topic |
 | `[text](https://example.com)` | external link (https only) |
