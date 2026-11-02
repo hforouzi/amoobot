@@ -1,0 +1,17 @@
+{# Client apps (tab of the Apps page): the list, and above it how these apps show up in the customer guide of the Mini
+   App ("Install and connect", GuideClientApps) with a warning for each device no active app is set up for (there the
+   guide falls back to a general text without app names or buttons). #}
+{% extends 'admin/crud/index_tabs.html.twig' %}
+{% trans_default_domain 'admin' %}
+
+{% block main %}
+    <div class="alert alert-info" data-guide-apps-hint>{{ 'client_app_guide.hint'|trans }}</div>
+    {% if guide_missing_platforms is defined and guide_missing_platforms is not empty %}
+        {% set missing = [] %}
+        {% for p in guide_missing_platforms %}{% set missing = missing|merge([('platform.' ~ p.value)|trans({}, 'subscription')]) %}{% endfor %}
+        <div class="alert alert-warning" data-guide-apps-missing>
+            {{ 'client_app_guide.missing'|trans({'%platforms%': missing|join(', ')}) }}
+        </div>
+    {% endif %}
+    {{ parent() }}
+{% endblock %}

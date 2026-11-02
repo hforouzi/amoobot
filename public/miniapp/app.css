@@ -323,3 +323,15 @@ fieldset.field legend { padding: 0; margin-bottom: 6px; }
 .guide-support { margin-top: 12px; padding: 10px 12px; border-radius: 10px; background: var(--code); }
 .guide-support p { margin: 4px 0; }
 a.btn.guide-support-link { margin-top: 12px; color: var(--accent-fg); } /* not the accent colour of .guide-body links */
+/* Client apps of the "connect" topic (templates/miniapp/view/_guide_apps.html.twig). */
+.guide-apps { display: grid; gap: 8px; margin: 10px 0; }
+.guide-apps .platforms { margin: 0; }
+.guide-app { border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; }
+.guide-app .head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.guide-app .row { margin-top: 8px; }
+.guide-app .btn.small { min-height: 44px; }
+.guide-body .guide-app a.btn { color: var(--accent-fg); }
+.badge.recommended, .guide-app .badge { background: var(--accent); color: var(--accent-fg); }
+.guide-apps-others { margin: 0; font-size: .9rem; }
+.guide-apps-others a { display: inline-flex; align-items: center; min-height: 44px; }
+.guide-apps p { margin: 4px 0; }

@@ -16,8 +16,9 @@ use App\Shared\Domain\PlainText;
  *  - PlainText's character rules: valid UTF-8, no control or invisible characters (bidi overrides, zero-width space,
  *    BOM, tabs, ...; the zero-width non-joiner and joiner are fine), no private-use or unassigned code points; line
  *    breaks only in a body;
- *  - placeholders: only {{ payment_methods }} (body, on a line of its own) and the shop-wide bot variables
- *    (BOT_VARIABLES); an unknown one, or a stray "{{" / "}}", is refused;
+ *  - placeholders: only {{ payment_methods }} and {{ apps }} (body, on a line of its own; {{ apps }} only in the
+ *    "connect" body) and the shop-wide bot variables (BOT_VARIABLES); an unknown one, or a stray "{{" / "}}", is
+ *    refused;
  *  - feature blocks: "::: if <feature>" with a feature of GuideState::FLAGS, closed by ":::"; balanced; any other line
  *    starting with ":::" is refused;
  *  - links: [text](#slug) to a topic of the guide, or [text](https://host/...) without credentials; anything else
@@ -103,6 +104,10 @@ final class GuideTextRules
         }
         if (0 !== preg_match(self::INVISIBLE, $text) || 0 !== preg_match(PlainText::FORBIDDEN, $text)) {
             $problems[] = self::problem('guide_text.characters');
+        }
+
+        if ('guide.connect.body' !== $key && 1 === preg_match('/\{\{\s*apps\s*\}\}/', $text)) {
+            $problems[] = self::problem('guide_text.apps_only_connect');
         }
 
         return [...$problems, ...self::placeholderProblems($text, $title), ...self::blockProblems($text, $title), ...self::linkProblems($text)];

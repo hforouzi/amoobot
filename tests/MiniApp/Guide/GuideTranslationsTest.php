@@ -14,7 +14,7 @@ use Symfony\Component\Yaml\Yaml;
  * The shipped guide texts (translations/bot.{fa,en}.yaml, guide.<topic>.title / .body) and the Help page's own strings
  * (miniapp domain, help.*): both languages have the same keys, every topic has a title and a body, and both languages
  * use the same feature blocks, topic links and placeholders, so a switch hides the same sentences in each. The texts
- * recommend Happ (V2Box named once, in "connect") and hold no link, token or card number.
+ * hold no link, token or card number; "connect" names no app (G-3: the apps come from the Apps admin).
  */
 final class GuideTranslationsTest extends TestCase
 {
@@ -84,27 +84,28 @@ final class GuideTranslationsTest extends TestCase
     }
 
     /**
-     * Owner decision: the shop recommends Happ everywhere; V2Box is named once, in "connect", and nowhere else. The
-     * stores are named only where the customer installs the app. No other app is named.
+     * G-3: the "connect" topic names no app and no store: the apps the shop recommends come from the Apps admin
+     * ({{ apps }}), and without any the generic text (miniapp help.apps.*) names none either. "start" and
+     * "troubleshoot" still say Happ (G-1b owner decision, unchanged). No other app is named anywhere.
      */
-    public function testHappIsTheAppAndV2BoxIsNamedOnceInConnect(): void
+    public function testConnectNamesNoAppAndTheOtherTextsOnlyHapp(): void
     {
         foreach (['fa', 'en'] as $locale) {
             $texts = self::texts('bot', $locale, '/^guide\./');
+            $connect = $texts['guide.connect.body'];
 
-            self::assertSame(1, preg_match_all('/v2box/i', implode("\n", $texts)), $locale.': V2Box once');
-            self::assertSame(1, preg_match_all('/v2box/i', $texts['guide.connect.body']), $locale.': V2Box in connect');
-            foreach (['guide.start.body', 'guide.connect.body', 'guide.troubleshoot.body'] as $key) {
+            self::assertSame(1, preg_match_all('/^\s*\{\{ apps \}\}\s*$/m', $connect), $locale.': the apps once, on their own line');
+            self::assertDoesNotMatchRegularExpression('/\bhapp\b|v2box|google play|app store/i', $connect, $locale.': no app or store in connect');
+            foreach (['guide.start.body', 'guide.troubleshoot.body'] as $key) {
                 self::assertStringContainsString('Happ', $texts[$key], $locale.' '.$key);
             }
             foreach ($texts as $key => $text) {
-                self::assertDoesNotMatchRegularExpression('/v2rayng|hiddify|streisand|nekobox|shadowrocket|foxray|karing|sing-?box|clash/i', $text, 'no other app named in '.$key);
-                if ('guide.connect.body' !== $key) {
-                    self::assertDoesNotMatchRegularExpression('/google play|app store/i', $text, 'no store named in '.$key);
-                }
+                self::assertDoesNotMatchRegularExpression('/v2box|v2rayng|hiddify|streisand|nekobox|shadowrocket|foxray|karing|sing-?box|clash/i', $text, 'no other app named in '.$key);
+                self::assertDoesNotMatchRegularExpression('/google play|app store/i', $text, 'no store named in '.$key);
             }
-            self::assertStringContainsString('App Store', $texts['guide.connect.body'], $locale);
-            self::assertStringContainsString('Google Play', $texts['guide.connect.body'], $locale);
+            foreach (self::texts('miniapp', $locale, '/^help\.apps\./') as $key => $text) {
+                self::assertDoesNotMatchRegularExpression('/\bhapp\b|v2box|v2ray|hiddify|nekobox|sing-?box|streisand|shadowrocket|foxray|clash/i', $text, 'no app named in '.$key);
+            }
         }
     }
 
@@ -122,12 +123,12 @@ final class GuideTranslationsTest extends TestCase
                 self::assertLessThanOrEqual(160, mb_strlen($line), $locale.': short lines: '.$line);
             }
         }
-        foreach (['App Store', 'Google Play', 'Windows or Linux', 'ask support', 'My services', 'subscription page', 'QR code', 'Update (refresh) the subscription', 'Pick any server', 'VPN configuration'] as $step) {
+        foreach (['Install an app', 'My services', 'subscription page', 'QR code', 'Update (refresh) the subscription', 'Pick any server', 'VPN configuration'] as $step) {
             self::assertStringContainsString($step, $en);
         }
         self::assertStringContainsString('**Never give your subscription link to anyone, not even to support.**', $en);
         self::assertStringContainsString('**لینک اشتراکتان را به هیچ‌کس ندهید، حتی به پشتیبانی.**', $fa);
-        foreach (['v2ray', 'vless', 'vmess', '\bconfigs?\b', 'protocol', 'subscription url', 'import', 'deep link'] as $jargon) {
+        foreach (['v2ray', 'vless', 'vmess', 'configs?', 'protocol', 'subscription url', 'import', 'deep link'] as $jargon) {
             self::assertDoesNotMatchRegularExpression('/'.$jargon.'/i', $en, 'no jargon: '.$jargon);
         }
     }

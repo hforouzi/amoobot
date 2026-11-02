@@ -1110,6 +1110,10 @@ client_app:
   template.no_url: "The link must contain {url}, {url_encoded} or {url_base64}."
   platforms.required: "Choose at least one platform."
 
+client_app_guide:
+  hint: "The active apps also appear in the customer guide of the Mini App (Help → Install and connect), for the device the customer picks, in the order of this list: the first active app of a device is shown as the recommended one with a big install button, the others in a smaller \"Other apps\" line. The install button leads to the app's download for that device, else to its install page. The guide never shows the \"Add subscription\" link; it points customers to My services for that."
+  missing: "No active app for: %platforms%. On these devices the guide shows only a general text without app names or buttons. Add an app for them or activate one."
+
 wallet_admin:
   title: "Wallets"
   detail_title: "Wallet of %customer%"
@@ -1485,6 +1489,7 @@ guide_text:
   preview.help: "How customers will see this topic, updated while you type. Nothing is saved until you press Save. Links do nothing here."
   preview.hidden_feature: "This topic is hidden in the Mini App right now: its feature is switched off in the settings."
   preview.hidden_empty: "With this text the topic is hidden (an empty title or body hides it)."
+  preview.apps: "[Here customers see the client apps for their device, from Apps → Client apps: the first active app is the recommended one. Without any app, a general text without app names.]"
   reset.action: "Reset to default"
   reset.title: "Reset to default"
   reset.question: "Delete your text and show the shipped default again?"
@@ -1492,4 +1497,4 @@ guide_text:
   reset.submit: "Delete and reset"
   reset.cancel: "Cancel"
   reset.done: "%key% (%locale%) is back to its default text."
-  help: "Guide syntax: a blank line starts a paragraph. \"## Title\" is a sub-heading. \"- item\" or \"1. item\" makes a list. **bold**. [text](#topic) links to another topic (start, buy, pay, wallet, connect, usage, renew, traffic, troubleshoot, claim, faq, support); [text](https://…) links to a site. {{ payment_methods }} on its own line lists the payment methods; {{ bot.brandName }}, {{ bot.footerText }}, {{ bot.supportText }} are filled in. Lines between \"::: if wallet\" and \":::\" show only while that feature is on. HTML is shown as text. At most 4000 characters; a title at most 80, one line. An empty body hides the topic."
+  help: "Guide syntax: a blank line starts a paragraph. \"## Title\" is a sub-heading. \"- item\" or \"1. item\" makes a list. **bold**. [text](#topic) links to another topic (start, buy, pay, wallet, connect, usage, renew, traffic, troubleshoot, claim, faq, support); [text](https://…) links to a site. {{ payment_methods }} on its own line lists the payment methods; {{ apps }} on its own line (only in \"Install and connect\") shows the client apps of the customer's device (Apps admin; without it they are shown on top); {{ bot.brandName }}, {{ bot.footerText }}, {{ bot.supportText }} are filled in. Lines between \"::: if wallet\" and \":::\" show only while that feature is on. HTML is shown as text. At most 4000 characters; a title at most 80, one line. An empty body hides the topic."

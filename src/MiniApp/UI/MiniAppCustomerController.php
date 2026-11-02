@@ -146,13 +146,16 @@ final class MiniAppCustomerController extends AbstractController
      * the bot's own support text (bot.support, editable in the admin's bot texts, so both say the same), escaped as
      * text whatever it holds, and the "Message support" button when the admin set a support chat (SupportLinkSettings:
      * only a validated https://t.me/<username>, never anything from the guide texts). ?topic=<slug> opens that topic's
-     * card; any other value opens none.
+     * card; any other value opens none. The "connect" topic lists the client apps of the device: ?platform=<value> (the
+     * customer's switch), else the one the User-Agent suggests, else none chosen yet.
      */
     #[Route('/app/view/help', name: 'miniapp_help', defaults: ['_miniapp_section' => 'help'], methods: ['GET'])]
     public function help(Request $request): Response
     {
         $locale = MiniAppLocale::fromRequest($request);
-        $topics = $this->guide->topics($locale);
+        $chosen = $request->query->all()['platform'] ?? null;
+        $platform = (is_string($chosen) ? ClientPlatform::tryFrom($chosen) : null) ?? ClientPlatform::fromUserAgent($request->headers->get('User-Agent'));
+        $topics = $this->guide->topics($locale, null, $platform);
 
         return $this->fragments->render($request, 'miniapp/view/help.html.twig', [
             'topics' => $topics,

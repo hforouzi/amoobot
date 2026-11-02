@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace App\MiniApp\Guide;
 
 use App\Bot\Application\BotTextResolver;
+use App\Subscription\Domain\ClientPlatform;
 use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
+use Twig\Environment;
 use Twig\Markup;
 
 /**
@@ -14,7 +16,9 @@ use Twig\Markup;
  * GuideRenderer. The texts are the bot texts guide.<slug>.title / guide.<slug>.body, read through
  * BotTextResolver::guideText(): the admin's row for that language (Bot Content, parse mode "guide"), else the shipped
  * default (translations/bot.*.yaml). A topic whose title or body is empty, missing or renders to nothing is not shown,
- * so an admin hides a topic by emptying its body. Nothing here depends on who is reading.
+ * so an admin hides a topic by emptying its body. The "connect" topic also shows the client apps the admin set up for
+ * the reader's device (GuideClientApps, templates/miniapp/view/_guide_apps.html.twig) at its {{ apps }} line, or on top
+ * when its text has none. Nothing here depends on who is reading: only on the language and the device chosen.
  */
 final class MiniAppGuide
 {
@@ -23,13 +27,15 @@ final class MiniAppGuide
         private readonly GuideRenderer $renderer,
         private readonly GuideStateProvider $stateProvider,
         private readonly UrlGeneratorInterface $urlGenerator,
+        private readonly GuideClientApps $clientApps,
+        private readonly Environment $twig,
     ) {
     }
 
     /**
      * @return list<array{slug: string, title: string, body: Markup}>
      */
-    public function topics(string $locale, ?GuideState $state = null): array
+    public function topics(string $locale, ?GuideState $state = null, ?ClientPlatform $platform = null): array
     {
         $state ??= $this->stateProvider->current();
         $candidates = [];
@@ -48,7 +54,14 @@ final class MiniAppGuide
         $topicUrl = fn (string $slug): ?string => isset($candidates[$slug]) ? $this->urlGenerator->generate('miniapp_help', ['topic' => $slug]) : null;
         $topics = [];
         foreach ($candidates as $slug => [$title, $body]) {
-            $html = $this->renderer->render($body, $state, $topicUrl);
+            $blocks = [];
+            if (GuideTopic::CONNECT->value === $slug) {
+                $blocks['apps'] = $this->appsBlock($locale, $platform);
+                if (!self::hasAppsLine($body)) {
+                    $body = GuideRenderer::PLACEHOLDER_APPS."\n\n".$body;
+                }
+            }
+            $html = $this->renderer->render($body, $state, $topicUrl, $blocks);
             if ('' !== (string) $html) {
                 $topics[] = ['slug' => $slug, 'title' => $title, 'body' => $html];
             }
@@ -69,6 +82,34 @@ final class MiniAppGuide
         }
 
         return in_array($value, array_column($topics, 'slug'), true) ? $value : null;
+    }
+
+    /** The client-app block of the "connect" topic: the device switch and that device's apps, or the generic text. */
+    private function appsBlock(string $locale, ?ClientPlatform $platform): Markup
+    {
+        $apps = $this->clientApps->forPlatform($platform);
+
+        return new Markup($this->twig->render('miniapp/view/_guide_apps.html.twig', [
+            'locale' => $locale,
+            'platform' => $platform,
+            'platforms' => ClientPlatform::cases(),
+            'anyApps' => [] !== $apps || $this->clientApps->any(),
+            'recommended' => $apps[0] ?? null,
+            'others' => array_slice($apps, 1),
+            'importButtons' => [] !== array_filter($apps, static fn (GuideClientApp $app): bool => $app->hasImportButton),
+        ]), 'UTF-8');
+    }
+
+    /** Whether the text places the client apps itself ({{ apps }} on a line of its own). */
+    public static function hasAppsLine(string $body): bool
+    {
+        foreach (explode("\n", $body) as $line) {
+            if (GuideRenderer::PLACEHOLDER_APPS === trim($line, " \r")) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public function plain(string $text): Markup

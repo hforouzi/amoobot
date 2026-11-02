@@ -44,7 +44,8 @@ final class GuideTextSourceTest extends IntegrationTestCase
 
     /**
      * Regression: with no Bot Content row the topics (titles and rendered bodies) are byte for byte what the G-1 code
-     * produced from the translator, in both languages, with features on and off.
+     * produced from the translator, in both languages, with features on and off; the only addition is the client-app
+     * block of "connect" (G-3, MiniAppGuideClientAppsTest), taken out here.
      */
     public function testWithoutRowsTheGuideIsWhatTheTranslationsGaveBefore(): void
     {
@@ -68,7 +69,7 @@ final class GuideTextSourceTest extends IntegrationTestCase
             $state = self::getContainer()->get(GuideStateProvider::class)->current();
             foreach ($this->beforeG2($locale, $state) as $topic) {
                 self::assertStringContainsString('<bdi>'.htmlspecialchars($topic['title'], ENT_QUOTES | ENT_HTML5).'</bdi>', $html, $locale);
-                self::assertStringContainsString($topic['body'], $html, $locale.' '.$topic['slug']);
+                self::assertStringContainsString($topic['body'], self::withoutApps($html), $locale.' '.$topic['slug']);
             }
             self::assertSame(array_column($this->beforeG2($locale, $state), 'slug'), (new Crawler($html))->filter('details[data-guide-topic]')->each(static fn (Crawler $c): string => (string) $c->attr('data-guide-topic')));
             self::assertCount(count($guide->topics($locale)), (new Crawler($html))->filter('details[data-guide-topic]'));
@@ -81,13 +82,13 @@ final class GuideTextSourceTest extends IntegrationTestCase
         $this->guideRow('guide.connect.title', 'fa', 'اتصال (ویرایش‌شده)');
 
         self::assertSame('اتصال (ویرایش‌شده)', $this->topic('connect', 'fa')['title']);
-        self::assertSame("<h3>نصب</h3>\n<p>متن تازهٔ مدیر</p>", (string) $this->topic('connect', 'fa')['body']);
+        self::assertSame("<h3>نصب</h3>\n<p>متن تازهٔ مدیر</p>", self::withoutApps((string) $this->topic('connect', 'fa')['body']));
         $en = $this->topic('connect', 'en');
         self::assertSame('Install and connect', $en['title'], 'no Persian edit on the English guide');
-        self::assertStringContainsString('Install Happ', (string) $en['body']);
+        self::assertStringContainsString('Install an app', (string) $en['body']);
 
         $this->guideRow('guide.connect.body', 'en', 'English edit');
-        self::assertSame('<p>English edit</p>', (string) $this->topic('connect', 'en')['body']);
+        self::assertSame('<p>English edit</p>', self::withoutApps((string) $this->topic('connect', 'en')['body']));
     }
 
     public function testAnInactiveRowIsIgnored(): void
@@ -192,7 +193,13 @@ final class GuideTextSourceTest extends IntegrationTestCase
      */
     private function now(string $locale, GuideState $state): array
     {
-        return array_map(static fn (array $t): array => ['slug' => $t['slug'], 'title' => $t['title'], 'body' => (string) $t['body']], self::getContainer()->get(MiniAppGuide::class)->topics($locale, $state));
+        return array_map(static fn (array $t): array => ['slug' => $t['slug'], 'title' => $t['title'], 'body' => self::withoutApps((string) $t['body'])], self::getContainer()->get(MiniAppGuide::class)->topics($locale, $state));
+    }
+
+    /** HTML without the client-app block of "connect" (MiniAppGuide puts it in as one piece, before an h3 or p). */
+    private static function withoutApps(string $html): string
+    {
+        return (string) preg_replace('~<div class="guide-apps".*?</div>\s*(?=<h3>|<p>|$)~s', '', $html);
     }
 
     /**

@@ -1,0 +1,55 @@
+{# The client apps of the guide's "connect" topic (MiniAppGuide::appsBlock, GuideClientApps), put in at the topic
+   text's {{ apps }} line. Everything here is the admin's data or a fixed text: names and icons escaped by Twig, install
+   links only a /d/{id} path or a validated http(s) store URL (GuideClientApps::isSafeInstallUrl). Install links open
+   with Telegram's openLink (app.js, a[data-open-link]); without the script they are plain links in a new tab. The
+   device switch reloads the guide with ?platform= (no inline script, CSP). No subscription or import link here: apps
+   with a one-tap import button only get a pointer to My services. With no active app at all, or none for the chosen
+   device, the generic text names no app and shows no button. #}
+{% set apps_in_shop = anyApps %}
+<div class="guide-apps" data-guide-apps="{{ platform ? platform.value : '' }}">
+    {% if apps_in_shop %}
+        <nav class="platforms" aria-label="{{ 'help.apps.platform'|trans({}, 'miniapp', locale) }}" data-guide-platforms>
+            {% for p in platforms %}
+                <a href="{{ path('miniapp_help', {topic: 'connect', platform: p.value}) }}" data-nav data-replace data-guide-platform="{{ p.value }}"{% if platform == p %} class="current" aria-current="true"{% endif %}>{{ ('platform.' ~ p.value)|trans({}, 'subscription', locale) }}</a>
+            {% endfor %}
+        </nav>
+    {% endif %}
+    {% if apps_in_shop and platform is null %}
+        <p class="muted" data-guide-apps-choose>{{ 'help.apps.choose'|trans({}, 'miniapp', locale) }}</p>
+    {% elseif recommended %}
+        <article class="app guide-app" data-guide-app-recommended>
+            <div class="head">
+                <span>{% if recommended.icon %}{{ recommended.icon }} {% endif %}<strong><bdi class="app-name">{{ recommended.name }}</bdi></strong></span>
+                <span class="badge" data-guide-recommended>{{ 'help.apps.recommended'|trans({}, 'miniapp', locale) }}</span>
+            </div>
+            {% if recommended.installUrl %}
+                <div class="row">
+                    <a class="btn small" href="{{ recommended.installUrl }}" target="_blank" rel="noopener noreferrer" data-open-link data-guide-install>⬇️ {{ 'help.apps.install'|trans({}, 'miniapp', locale) }}</a>
+                </div>
+            {% else %}
+                <p class="muted" data-guide-no-link>{{ 'help.apps.no_link'|trans({}, 'miniapp', locale) }}</p>
+            {% endif %}
+        </article>
+        {% if others is not empty %}
+            <p class="guide-apps-others" data-guide-apps-others>
+                <span class="muted">{{ 'help.apps.others'|trans({}, 'miniapp', locale) }}</span>
+                {% for other in others %}
+                    {% if other.installUrl %}
+                        <a href="{{ other.installUrl }}" target="_blank" rel="noopener noreferrer" data-open-link data-guide-other>{% if other.icon %}{{ other.icon }} {% endif %}<bdi>{{ other.name }}</bdi></a>
+                    {%- else -%}
+                        <span data-guide-other>{% if other.icon %}{{ other.icon }} {% endif %}<bdi>{{ other.name }}</bdi></span>
+                    {%- endif -%}
+                    {{ not loop.last ? ' · ' }}
+                {% endfor %}
+            </p>
+        {% endif %}
+        {% if importButtons %}
+            <p class="muted" data-guide-import-hint>{{ 'help.apps.import_hint'|trans({}, 'miniapp', locale) }} <a href="{{ path('miniapp_services') }}" data-nav>{{ 'help.apps.my_services'|trans({}, 'miniapp', locale) }}</a></p>
+        {% endif %}
+    {% else %}
+        <div data-guide-apps-generic>
+            <p>{{ 'help.apps.generic'|trans({}, 'miniapp', locale) }}</p>
+            <p class="muted">{{ 'help.apps.generic_support'|trans({}, 'miniapp', locale) }}</p>
+        </div>
+    {% endif %}
+</div>
