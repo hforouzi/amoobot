@@ -76,3 +76,13 @@ What happens when someone ACTIVATES it (confirmed):
   exists before the delete counts references. Lock order: `trial_plan`, then `plan`, then `order`.
 - **Existing data**: `app:trial-plans:backing-audit` (dry run by default, `--apply` to write) lists backing plans and
   fixes an active or priced one (inactive, price 0) and wholesale rules on one (removed).
+  It also turns off customization and per-GB / per-day prices, and works plan by plan under the plan row's lock. Each
+  fix is audited (`trial_plan.backing_plan_fixed`). It is idempotent and deletes no plan, order or service. Plans only
+  titled "[Trial] …" are listed as a note and left alone.
+- **Deleting a backing plan with nothing referring to it**: discount codes limited to it are deactivated (the foreign
+  key's `SET NULL` would otherwise turn them into codes for every plan). Its wholesale rules are deleted. Order drafts
+  and additional-inbound rows go with it (`ON DELETE CASCADE`).
+- **Left as before, on purpose**: a trial plan's claims are still deleted with it (`trial_claim.trial_plan_id`
+  `ON DELETE CASCADE`). The trial orders and services keep the history. Renewals and extra traffic of a trial
+  service still run on its backing plan (they already did, and need no sales-side access). The panel's
+  "plans using it" guard in modern mode still counts active plans only, which a backing plan never is.
