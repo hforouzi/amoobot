@@ -20,6 +20,7 @@ use App\Reseller\Domain\ResellerStatus;
 use App\Reseller\Domain\WholesaleQuote;
 use App\Shared\Infrastructure\TransactionRollback;
 use App\Shop\Application\Checkout\PaymentStarter;
+use App\Shop\Application\Catalog\TrialBackingPlans;
 use App\Shop\Application\Checkout\PlanCatalog;
 use App\Shop\Application\Checkout\PlanOptions;
 use App\Shop\Application\OrderTrackingCodeService;
@@ -101,6 +102,7 @@ class ResellerCheckout
         private readonly ResellerConfirmations $confirmations,
         private readonly PaymentStarter $paymentStarter,
         private readonly LoggerInterface $logger,
+        private readonly TrialBackingPlans $trialBacking,
     ) {
     }
 
@@ -138,7 +140,7 @@ class ResellerCheckout
         }
         $forSale = $this->planCatalog->forSale();
         if ([] === $forSale) {
-            $configured = (int) $this->entityManager->getRepository(Plan::class)->count(['isActive' => true]);
+            $configured = $this->trialBacking->countSalesPlans(['isActive' => true]);
 
             return ['offers' => [], 'reason' => 0 === $configured ? self::OFFERS_NO_PLANS : self::OFFERS_NOT_FOR_SALE];
         }

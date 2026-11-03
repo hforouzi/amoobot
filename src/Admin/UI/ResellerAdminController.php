@@ -8,6 +8,7 @@ use App\Admin\UI\Support\CsvCell;
 use App\Entity\AdminUser;
 use App\Entity\Order;
 use App\Entity\Plan;
+use App\Shop\Application\Catalog\TrialBackingPlans;
 use App\Entity\Reseller;
 use App\Entity\ResellerPlanPrice;
 use App\Reseller\Application\ResellerAdministration;
@@ -53,6 +54,7 @@ final class ResellerAdminController extends AbstractController
         private readonly ResellerCheckout $checkout,
         private readonly WalletService $wallets,
         private readonly WalletQueries $walletQueries,
+        private readonly TrialBackingPlans $trialBacking,
     ) {
     }
 
@@ -133,7 +135,8 @@ final class ResellerAdminController extends AbstractController
             'spentToday' => null === $reseller->getDailySpendLimit() ? null : $reseller->getDailySpendLimit() - (int) $this->checkout->remainingToday($reseller),
             'rules' => $rules,
             'clipped' => $clipped,
-            'plans' => $this->entityManager->getRepository(Plan::class)->findBy([], ['title' => 'ASC']),
+            // The wholesale rule picker: never a trial's backing plan (TrialBackingPlans).
+            'plans' => $this->trialBacking->salesPlans([], ['title' => 'ASC']),
             'orders' => $orders,
             'refundable' => $refunds['refundable'],
             'refunded' => $refunds['refunded'],

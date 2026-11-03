@@ -8,6 +8,7 @@ use App\Entity\DiscountCode;
 use App\Entity\Plan;
 use App\MiniApp\Admin\Catalog\CatalogEditor;
 use App\MiniApp\Admin\Catalog\CatalogInput;
+use App\Shop\Application\Catalog\TrialBackingPlans;
 use App\Shop\Application\PlanPriceSanityChecker;
 use App\Tests\Support\IntegrationTestCase;
 
@@ -19,7 +20,7 @@ final class CatalogInputTest extends IntegrationTestCase
 {
     public function testTheFormIsReadAsTyped(): void
     {
-        $input = new CatalogInput($this->em);
+        $input = new CatalogInput($this->em, new TrialBackingPlans($this->em));
         $plan = new Plan();
         $errors = $input->toPlan($plan, ['title' => ' Gold ', 'durationDays' => '۳۰', 'price' => '۱۵۰٬۰۰۰', 'trafficGb' => '', 'isActive' => '1', 'ipLimit' => '2.5']);
 

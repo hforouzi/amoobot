@@ -16,6 +16,7 @@ use App\MiniApp\UI\MiniAppLocale;
 use App\Security\AdminAuditLogger;
 use App\Shop\Application\Catalog\PlanAdminService;
 use App\Shop\Application\Catalog\PlanInUse;
+use App\Shop\Application\Catalog\TrialBackingPlans;
 use App\Shop\Application\PlanPriceSanityChecker;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
@@ -33,6 +34,9 @@ use Symfony\Contracts\Translation\TranslatorInterface;
  * web form's fields in sections, create, edit (a price change is confirmed old -> new, with the plausibility
  * warnings), duplicate, activate / deactivate and delete (refused while orders refer to the plan). Every write goes
  * through PlanAdminService, as on the web and in the bot; the rules are the entity's.
+ *
+ * A trial's backing plan (TrialBackingPlans) is not a sales plan: never listed; its URL shows "this plan belongs to the
+ * trial plan ..." with a link there, and every call on it is answered 409 with that message (nothing changes).
  */
 #[IsGranted(MiniAppUser::ROLE)]
 final class MiniAppAdminPlanController extends AbstractController
@@ -50,6 +54,7 @@ final class MiniAppAdminPlanController extends AbstractController
         private readonly AdminAuditLogger $auditLogger,
         private readonly MiniAppFragments $fragments,
         private readonly TranslatorInterface $translator,
+        private readonly TrialBackingPlans $trialBacking,
     ) {
     }
 
@@ -62,6 +67,8 @@ final class MiniAppAdminPlanController extends AbstractController
             ->leftJoin('p.inbound', 'i')->leftJoin('i.panel', 'panel')
             // As the web list and the bot: in creation order.
             ->orderBy('p.id', 'ASC');
+        // The sales plans: a trial's backing plan is managed from its trial plan (TrialBackingPlans).
+        TrialBackingPlans::exclude($qb, 'p');
         if ('all' !== $tab) {
             $qb->andWhere('p.isActive = :active')->setParameter('active', 'active' === $tab);
         }
@@ -71,7 +78,8 @@ final class MiniAppAdminPlanController extends AbstractController
         /** @var list<Plan> $plans */
         $plans = $qb->getQuery()->getResult();
         $counts = ['all' => 0, 'active' => 0, 'inactive' => 0];
-        foreach ($this->entityManager->createQueryBuilder()->select('p.isActive AS active', 'COUNT(p.id) AS n')->from(Plan::class, 'p')->groupBy('p.isActive')->getQuery()->getArrayResult() as $row) {
+        $countQuery = TrialBackingPlans::exclude($this->entityManager->createQueryBuilder()->select('p.isActive AS active', 'COUNT(p.id) AS n')->from(Plan::class, 'p')->groupBy('p.isActive'), 'p');
+        foreach ($countQuery->getQuery()->getArrayResult() as $row) {
             $counts[$row['active'] ? 'active' : 'inactive'] = (int) $row['n'];
             $counts['all'] += (int) $row['n'];
         }
@@ -96,7 +104,16 @@ final class MiniAppAdminPlanController extends AbstractController
     #[Route('/app/admin/plans/{id}', name: 'miniapp_admin_plan', requirements: ['id' => '\d+'], defaults: ['_miniapp_section' => 'admin.plans'], methods: ['GET'])]
     public function edit(Request $request, int $id): Response
     {
-        return $this->form($request, $this->plan($id));
+        $plan = $this->plan($id);
+        if ($this->trialBacking->isBacking($plan)) {
+            return $this->fragments->render($request, 'miniapp/admin/catalog/plan_trial_backing.html.twig', [
+                'plan' => $plan,
+                'trial' => $this->trialBacking->trialPlanOf($plan),
+                'message' => $this->trialBackingMessage($request, $plan),
+            ]);
+        }
+
+        return $this->form($request, $plan);
     }
 
     #[Route('/app/api/admin/plans', name: 'miniapp_admin_plan_create', defaults: ['_miniapp_section' => 'admin.plans'], methods: ['POST'])]
@@ -124,6 +141,9 @@ final class MiniAppAdminPlanController extends AbstractController
     public function update(Request $request, #[CurrentUser] MiniAppUser $user, int $id): JsonResponse
     {
         $plan = $this->plan($id);
+        if (null !== $refused = $this->trialBackingRefusal($request, $plan)) {
+            return $refused;
+        }
         $before = CatalogInput::snapshot($plan, CatalogInput::PLAN_FIELDS);
         $body = AdminForms::body($request);
 
@@ -149,6 +169,9 @@ final class MiniAppAdminPlanController extends AbstractController
         $body = AdminForms::body($request);
         $id = (int) ($body['id'] ?? 0);
         $plan = $id > 0 ? $this->plan($id) : new Plan();
+        if (null !== $refused = $this->trialBackingRefusal($request, $plan)) {
+            return $refused;
+        }
 
         return $this->editor->check(
             $request, $id > 0 ? $plan : null,
@@ -163,6 +186,9 @@ final class MiniAppAdminPlanController extends AbstractController
     public function duplicate(Request $request, #[CurrentUser] MiniAppUser $user, int $id): JsonResponse
     {
         $source = $this->plan($id);
+        if (null !== $refused = $this->trialBackingRefusal($request, $source)) {
+            return $refused;
+        }
 
         return $this->actions->run($request, $user, $id, null, function () use ($request, $user, $source): array {
             $copy = new Plan();
@@ -192,6 +218,9 @@ final class MiniAppAdminPlanController extends AbstractController
     public function delete(Request $request, #[CurrentUser] MiniAppUser $user, int $id): JsonResponse
     {
         $plan = $this->plan($id);
+        if (null !== $refused = $this->trialBackingRefusal($request, $plan)) {
+            return $refused;
+        }
         $confirm = $this->translator->trans('admin.plan.confirm.delete', ['%title%' => $plan->getTitle()], 'miniapp', MiniAppLocale::fromRequest($request));
 
         return $this->actions->run($request, $user, $id, $confirm, function () use ($request, $user, $plan, $id): array {
@@ -210,6 +239,9 @@ final class MiniAppAdminPlanController extends AbstractController
     private function toggle(Request $request, MiniAppUser $user, int $id, bool $active): JsonResponse
     {
         $plan = $this->plan($id);
+        if (null !== $refused = $this->trialBackingRefusal($request, $plan)) {
+            return $refused;
+        }
         $confirm = $this->translator->trans($active ? 'admin.plan.confirm.activate' : 'admin.plan.confirm.deactivate', ['%title%' => $plan->getTitle()], 'miniapp', MiniAppLocale::fromRequest($request));
 
         return $this->actions->run($request, $user, $id, $confirm, function () use ($request, $user, $plan, $active): array {
@@ -278,6 +310,25 @@ final class MiniAppAdminPlanController extends AbstractController
             'warnings' => null === $plan->getId() ? [] : $this->warnings($request, $plan),
             'orderCount' => $this->plans->orderCount($plan),
         ]);
+    }
+
+    /** A trial's backing plan: refused with the message (409, nothing changed); null for a sales plan. */
+    private function trialBackingRefusal(Request $request, Plan $plan): ?JsonResponse
+    {
+        if (!$this->trialBacking->isBacking($plan)) {
+            return null;
+        }
+
+        return AdminActions::json(['error' => 'trial_backing_plan', 'message' => $this->trialBackingMessage($request, $plan)], Response::HTTP_CONFLICT);
+    }
+
+    private function trialBackingMessage(Request $request, Plan $plan): string
+    {
+        $trial = $this->trialBacking->trialPlanOf($plan);
+
+        return null === $trial
+            ? $this->message($request, 'admin.plan.trial_backing_orphan', ['%plan%' => $plan->getTitle()])
+            : $this->message($request, 'admin.plan.trial_backing', ['%plan%' => $plan->getTitle(), '%trial%' => $trial->getTitle()]);
     }
 
     private function plan(int $id): Plan

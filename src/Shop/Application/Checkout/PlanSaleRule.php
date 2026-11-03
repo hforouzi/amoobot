@@ -7,6 +7,7 @@ namespace App\Shop\Application\Checkout;
 use App\Entity\Order;
 use App\Entity\Plan;
 use App\Entity\VpnInbound;
+use App\Shop\Application\Catalog\TrialBackingPlans;
 use App\Shop\Application\MultiInboundSettings;
 use App\Shop\Domain\MultiInboundSale;
 use App\Shop\Domain\OrderType;
@@ -25,18 +26,22 @@ use Doctrine\ORM\EntityManagerInterface;
  *   the existing client (one email, all its inbounds), whatever the switch.
  *
  * A plan without additional inbounds is sold exactly as before.
+ *
+ * A trial's backing plan (TrialBackingPlans) is never sold, listed, ordered or paid as a new service, even when its row
+ * is active and priced (activated by SQL, say): only acceptsTrial() takes it.
  */
 final class PlanSaleRule
 {
     public function __construct(
         private readonly MultiInboundSettings $settings,
         private readonly EntityManagerInterface $entityManager,
+        private readonly TrialBackingPlans $trialBacking,
     ) {
     }
 
     public function isSellable(Plan $plan): bool
     {
-        return $plan->isAvailableForSale($this->switch());
+        return $plan->isAvailableForSale($this->switch()) && !$this->trialBacking->isBacking($plan);
     }
 
     /**
@@ -47,14 +52,17 @@ final class PlanSaleRule
     public function sellable(array $plans): array
     {
         $switch = $this->switch();
+        $plans = array_values(array_filter($plans, static fn (Plan $plan): bool => $plan->isAvailableForSale($switch)));
+        // One query for the whole list.
+        $backing = $this->trialBacking->backingAmong(array_values(array_filter(array_map(static fn (Plan $plan): ?int => $plan->getId(), $plans))));
 
-        return array_values(array_filter($plans, static fn (Plan $plan): bool => $plan->isAvailableForSale($switch)));
+        return [] === $backing ? $plans : array_values(array_filter($plans, static fn (Plan $plan): bool => !in_array($plan->getId(), $backing, true)));
     }
 
     /** A chosen plan may still become an order: active, and the multi-inbound rule holds. */
     public function acceptsOrders(Plan $plan): bool
     {
-        return $plan->isActive() && null === $plan->multiInboundSaleBlocker($this->switch());
+        return $plan->isActive() && null === $plan->multiInboundSaleBlocker($this->switch()) && !$this->trialBacking->isBacking($plan);
     }
 
     /**
@@ -76,7 +84,7 @@ final class PlanSaleRule
             return true;
         }
         $plan = $order->requirePlan();
-        if (!$plan->isActive()) {
+        if (!$plan->isActive() || $this->trialBacking->isBacking($plan)) {
             return false;
         }
         $snapshot = $order->planInboundSnapshot();

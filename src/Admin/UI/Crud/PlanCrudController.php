@@ -8,19 +8,29 @@ use App\Admin\UI\TranslatedFlashes;
 use App\Admin\UI\Support\AdminFormat;
 use App\Admin\UI\DashboardController;
 use App\Entity\Plan;
+use App\Entity\TrialPlan;
 use App\Entity\VpnInbound;
 use App\Shop\Application\Catalog\InvalidCatalogEntry;
 use App\Shop\Application\Catalog\PlanAdminService;
 use App\Shop\Application\Catalog\PlanInboundUsage;
 use App\Shop\Application\Catalog\PlanInboundWarnings;
 use App\Shop\Application\Catalog\PlanInUse;
+use App\Shop\Application\Catalog\TrialBackingPlanLocked;
+use App\Shop\Application\Catalog\TrialBackingPlans;
 use App\Shop\Application\MultiInboundSettings;
 use App\Shop\Application\PlanPriceSanityChecker;
 use Doctrine\ORM\EntityManagerInterface;
+use Doctrine\ORM\QueryBuilder;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Action;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Actions;
+use EasyCorp\Bundle\EasyAdminBundle\Collection\FieldCollection;
+use EasyCorp\Bundle\EasyAdminBundle\Collection\FilterCollection;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Crud;
+use EasyCorp\Bundle\EasyAdminBundle\Config\KeyValueStore;
+use EasyCorp\Bundle\EasyAdminBundle\Context\AdminContext;
 use EasyCorp\Bundle\EasyAdminBundle\Controller\AbstractCrudController;
+use EasyCorp\Bundle\EasyAdminBundle\Dto\EntityDto;
+use EasyCorp\Bundle\EasyAdminBundle\Dto\SearchDto;
 use EasyCorp\Bundle\EasyAdminBundle\Field\AssociationField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\BooleanField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\DateTimeField;
@@ -31,6 +41,8 @@ use EasyCorp\Bundle\EasyAdminBundle\Field\TextareaField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\TextField;
 use EasyCorp\Bundle\EasyAdminBundle\Router\AdminUrlGeneratorInterface;
 use Symfony\Bridge\Doctrine\Form\Type\EntityType;
+use Symfony\Component\HttpFoundation\RedirectResponse;
+use Symfony\Component\HttpFoundation\Response;
 use Symfony\Contracts\Translation\TranslatorInterface;
 
 class PlanCrudController extends AbstractCrudController
@@ -48,12 +60,64 @@ class PlanCrudController extends AbstractCrudController
         private readonly MultiInboundSettings $multiInbound,
         private readonly PlanInboundUsage $inboundUsage,
         private readonly EntityManagerInterface $entityManager,
+        private readonly TrialBackingPlans $trialBacking,
     ) {
     }
 
     public static function getEntityFqcn(): string
     {
         return Plan::class;
+    }
+
+    /**
+     * The list, its search and its filters: never a trial's backing plan
+     * (docs/design/trial-backing-plans.md). It is managed from the trial plans.
+     */
+    public function createIndexQueryBuilder(SearchDto $searchDto, EntityDto $entityDto, FieldCollection $fields, FilterCollection $filters): QueryBuilder
+    {
+        return TrialBackingPlans::exclude(parent::createIndexQueryBuilder($searchDto, $entityDto, $fields, $filters), 'entity');
+    }
+
+    /** A backing plan's detail page (a direct URL): the message and its trial plan instead. */
+    public function detail(AdminContext $context): KeyValueStore|Response
+    {
+        return $this->trialBackingRedirect($context) ?? parent::detail($context);
+    }
+
+    /** A backing plan's form, and the list's active toggle (a PATCH to this action): refused, nothing changes. */
+    public function edit(AdminContext $context): KeyValueStore|Response
+    {
+        return $this->trialBackingRedirect($context) ?? parent::edit($context);
+    }
+
+    public function delete(AdminContext $context): KeyValueStore|Response
+    {
+        return $this->trialBackingRedirect($context) ?? parent::delete($context);
+    }
+
+    /**
+     * @param AdminContext<object> $context
+     */
+    private function trialBackingRedirect(AdminContext $context): ?RedirectResponse
+    {
+        $plan = $context->getEntity()->getInstance();
+        if (!$plan instanceof Plan || !$this->trialBacking->isBacking($plan)) {
+            return null;
+        }
+        $trial = $this->trialBacking->trialPlanOf($plan);
+        $this->flashTrialBacking($plan, $trial);
+        $url = $this->adminUrlGenerator->unsetAll()->setDashboard(DashboardController::class)->setController(TrialPlanCrudController::class);
+
+        return new RedirectResponse(null === $trial ? $url->setAction(Action::INDEX)->generateUrl() : $url->setAction(Action::DETAIL)->setEntityId($trial->getId())->generateUrl());
+    }
+
+    /** "This plan belongs to the trial plan ..." (or to a trial plan deleted since). */
+    private function flashTrialBacking(Plan $plan, ?TrialPlan $trial = null): void
+    {
+        $trial ??= $this->trialBacking->trialPlanOf($plan);
+        null === $trial
+            ? $this->flash('warning', 'flash.plan.trial_backing_orphan', ['%plan%' => $plan->getTitle()])
+            : $this->flash('warning', 'flash.plan.trial_backing', ['%plan%' => $plan->getTitle(), '%trial%' => $trial->getTitle()]);
     }
 
     /**
@@ -174,6 +238,11 @@ class PlanCrudController extends AbstractCrudController
         }
         try {
             $this->plans->save($plan);
+        } catch (TrialBackingPlanLocked) {
+            $this->entityManager->refresh($plan);
+            $this->flashTrialBacking($plan);
+
+            return;
         } catch (InvalidCatalogEntry $e) {
             // The form already showed these inline (the same constraint); a rule only the service sees ends here.
             foreach ($e->violations as $messages) {
@@ -282,6 +351,9 @@ class PlanCrudController extends AbstractCrudController
             $this->plans->delete($entityInstance);
         } catch (PlanInUse $e) {
             $this->flash('danger', 'flash.plan.in_use', ['%plan%' => $entityInstance->getTitle(), '%count%' => $e->orderCount]);
+        } catch (TrialBackingPlanLocked) {
+            // A batch delete that names one (the list never shows it).
+            $this->flashTrialBacking($entityInstance);
         }
     }
 

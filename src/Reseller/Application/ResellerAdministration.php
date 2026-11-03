@@ -13,6 +13,7 @@ use App\MiniApp\Session\MiniAppSessionManager;
 use App\Reseller\Domain\ResellerStatus;
 use App\Security\AdminActor;
 use App\Security\AdminAuditLogger;
+use App\Shop\Application\Catalog\TrialBackingPlans;
 use Doctrine\ORM\EntityManagerInterface;
 
 /**
@@ -35,6 +36,7 @@ final class ResellerAdministration
         private readonly MiniAppSessionManager $sessions,
         private readonly ResellerPricing $pricing,
         private readonly ClaimLinks $claimLinks,
+        private readonly TrialBackingPlans $trialBacking,
     ) {
     }
 
@@ -123,6 +125,10 @@ final class ResellerAdministration
      */
     public function setPlanPrice(Reseller $reseller, Plan $plan, string $kind, string $value, AdminActor $admin): bool
     {
+        // A trial's backing plan is never sold (TrialBackingPlans): no wholesale rule for it.
+        if ($this->trialBacking->isBacking($plan)) {
+            throw new \InvalidArgumentException('reseller_admin.error.trial_plan');
+        }
         $override = $this->entityManager->getRepository(ResellerPlanPrice::class)->findOneBy(['reseller' => $reseller, 'plan' => $plan]);
         $before = $override instanceof ResellerPlanPrice ? ['discount_bp' => $override->getDiscountBp(), 'fixed_amount' => $override->getFixedAmount()] : null;
         $override ??= new ResellerPlanPrice($reseller, $plan);

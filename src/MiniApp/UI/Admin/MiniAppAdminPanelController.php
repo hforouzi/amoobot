@@ -6,6 +6,7 @@ namespace App\MiniApp\UI\Admin;
 
 use App\Admin\UI\Support\PanelHealth;
 use App\Entity\Plan;
+use App\Shop\Application\Catalog\TrialBackingPlans;
 use App\Entity\VpnInbound;
 use App\Entity\VpnPanel;
 use App\MiniApp\Admin\AdminActions;
@@ -201,8 +202,9 @@ final class MiniAppAdminPanelController extends AbstractController
     private function planCounts(string $groupBy): array
     {
         $counts = [];
-        $rows = $this->entityManager->createQueryBuilder()->select($groupBy.' AS target', 'COUNT(p.id) AS n')->from(Plan::class, 'p')
-            ->join('p.inbound', 'i')->groupBy('target')->getQuery()->getArrayResult();
+        // The sales plans: a trial's backing plan is not counted (TrialBackingPlans).
+        $rows = TrialBackingPlans::exclude($this->entityManager->createQueryBuilder()->select($groupBy.' AS target', 'COUNT(p.id) AS n')->from(Plan::class, 'p')
+            ->join('p.inbound', 'i')->groupBy('target'), 'p')->getQuery()->getArrayResult();
         foreach ($rows as $row) {
             $counts[(int) $row['target']] = (int) $row['n'];
         }

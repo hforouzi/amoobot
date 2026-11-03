@@ -1,0 +1,18 @@
+{% extends 'miniapp/view/_base.html.twig' %}
+{% trans_default_domain 'miniapp' %}
+{# A trial's backing plan reached by its URL (docs/design/trial-backing-plans.md): not a sales plan, so no form. It is
+   managed from its trial plan; the link goes there (or to the trial plans when its trial plan was deleted). #}
+{% block section %}admin{% endblock %}
+{% block title %}{{ plan.title }}{% endblock %}
+{% block attributes %} data-back data-trial-backing-plan="{{ plan.id }}"{% endblock %}
+{% block content %}
+    <section class="card" data-trial-backing>
+        <h1>{{ plan.title }}</h1>
+        <p>{{ message }}</p>
+        {% if trial %}
+            <a class="btn small fit" href="{{ path('miniapp_admin_trial_plan', {id: trial.id}) }}" data-nav data-trial-link>{{ 'admin.plan.trial_backing_open'|trans({'%trial%': trial.title}) }}</a>
+        {% else %}
+            <a class="btn secondary small fit" href="{{ path('miniapp_admin_trial_plans') }}" data-nav data-trial-link>{{ 'admin.trial.title'|trans }}</a>
+        {% endif %}
+    </section>
+{% endblock %}

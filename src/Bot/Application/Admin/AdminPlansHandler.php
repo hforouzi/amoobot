@@ -8,6 +8,7 @@ use App\Entity\Plan;
 use App\Entity\TrialClaim;
 use App\Security\AdminPermission;
 use App\Shop\Application\Catalog\PlanAdminService;
+use App\Shop\Application\Catalog\TrialBackingPlans;
 use App\Shop\Application\PlanPriceAdjustmentService;
 use App\Shop\Application\PlanPriceSanityChecker;
 use Doctrine\ORM\EntityManagerInterface;
@@ -28,6 +29,7 @@ final class AdminPlansHandler implements AdminArea
         private readonly PlanPriceAdjustmentService $priceAdjustment,
         private readonly PlanAdminService $plans,
         private readonly AdminScreen $screen,
+        private readonly TrialBackingPlans $trialBacking,
     ) {
     }
 
@@ -65,12 +67,12 @@ final class AdminPlansHandler implements AdminArea
     public function answer(AdminRequest $request, string $kind, string $target, string $text): void
     {
         if (self::PRICE_PROMPT === $kind) {
-            $plan = $this->entityManager->getRepository(Plan::class)->find((int) $target);
             [$min, $max] = PlanPriceSanityChecker::PRICE_RANGE;
             $price = AdminScreen::parseInt($text, $min, $max);
-            if (!$plan instanceof Plan) {
+            $plan = $this->entityManager->getRepository(Plan::class)->find((int) $target);
+            if (!$plan instanceof Plan || $this->trialBacking->isBacking($plan)) {
                 $this->screen->endPrompt($request);
-                $this->screen->notice($request, 'admin.not_found', [], 'admin.pl:l:0');
+                $this->salesPlan($request, (int) $target);
 
                 return;
             }
@@ -108,10 +110,9 @@ final class AdminPlansHandler implements AdminArea
 
     private function list(AdminRequest $request, int $page): void
     {
-        $repository = $this->entityManager->getRepository(Plan::class);
-        [$page, $pages] = $this->screen->page($page, $repository->count([]));
-        /** @var list<Plan> $plans */
-        $plans = $repository->findBy([], ['id' => 'ASC'], AdminScreen::PAGE_SIZE, $page * AdminScreen::PAGE_SIZE);
+        // The sales plans: a trial's backing plan is managed from its trial plan (TrialBackingPlans).
+        [$page, $pages] = $this->screen->page($page, $this->trialBacking->countSalesPlans());
+        $plans = $this->trialBacking->salesPlans([], ['id' => 'ASC'], AdminScreen::PAGE_SIZE, $page * AdminScreen::PAGE_SIZE);
 
         $lines = [$this->screen->text('admin.plans.title', ['page_info' => $this->screen->pageInfo($page, $pages)])];
         $buttons = [];
@@ -131,10 +132,8 @@ final class AdminPlansHandler implements AdminArea
 
     private function detail(AdminRequest $request, int $id): void
     {
-        $plan = $this->entityManager->getRepository(Plan::class)->find($id);
-        if (!$plan instanceof Plan) {
-            $this->screen->notice($request, 'admin.not_found', [], 'admin.pl:l:0');
-
+        $plan = $this->salesPlan($request, $id);
+        if (null === $plan) {
             return;
         }
 
@@ -149,10 +148,8 @@ final class AdminPlansHandler implements AdminArea
 
     private function askToggle(AdminRequest $request, int $id): void
     {
-        $plan = $this->entityManager->getRepository(Plan::class)->find($id);
-        if (!$plan instanceof Plan) {
-            $this->screen->notice($request, 'admin.not_found', [], 'admin.pl:l:0');
-
+        $plan = $this->salesPlan($request, $id);
+        if (null === $plan) {
             return;
         }
         $activate = !$plan->isActive();
@@ -161,10 +158,8 @@ final class AdminPlansHandler implements AdminArea
 
     private function toggle(AdminRequest $request, int $id, bool $active): void
     {
-        $plan = $this->entityManager->getRepository(Plan::class)->find($id);
-        if (!$plan instanceof Plan) {
-            $this->screen->notice($request, 'admin.not_found', [], 'admin.pl:l:0');
-
+        $plan = $this->salesPlan($request, $id);
+        if (null === $plan) {
             return;
         }
         if (!$this->plans->setActive($plan, $active)) {
@@ -178,10 +173,8 @@ final class AdminPlansHandler implements AdminArea
 
     private function askPrice(AdminRequest $request, int $id): void
     {
-        $plan = $this->entityManager->getRepository(Plan::class)->find($id);
-        if (!$plan instanceof Plan) {
-            $this->screen->notice($request, 'admin.not_found', [], 'admin.pl:l:0');
-
+        $plan = $this->salesPlan($request, $id);
+        if (null === $plan) {
             return;
         }
         [$min, $max] = PlanPriceSanityChecker::PRICE_RANGE;
@@ -192,16 +185,40 @@ final class AdminPlansHandler implements AdminArea
 
     private function setPrice(AdminRequest $request, int $id, int $price): void
     {
-        $plan = $this->entityManager->getRepository(Plan::class)->find($id);
+        $plan = $this->salesPlan($request, $id);
         [$min, $max] = PlanPriceSanityChecker::PRICE_RANGE;
-        if (!$plan instanceof Plan || $price < $min || $price > $max) {
-            $this->screen->notice($request, $plan instanceof Plan ? 'admin.state_changed' : 'admin.not_found', [], 'admin.pl:l:0');
+        if (null === $plan) {
+            return;
+        }
+        if ($price < $min || $price > $max) {
+            $this->screen->notice($request, 'admin.state_changed', [], 'admin.pl:l:0');
 
             return;
         }
         $before = $this->plans->changePrice($plan, $price);
         $this->screen->audit($request, 'plan.price_update', 'Plan', $id, ['before' => $before, 'after' => $price]);
         $this->screen->notice($request, 'admin.plans.price_done', ['title' => $plan->getTitle(), 'old' => AdminScreen::money($before), 'new' => AdminScreen::money($price)], 'admin.pl:v:'.$id);
+    }
+
+    /**
+     * The plan of the sales area, or null after telling the admin why not: not found, or a trial's backing plan (it is
+     * managed from its trial plan, TrialBackingPlans).
+     */
+    private function salesPlan(AdminRequest $request, int $id): ?Plan
+    {
+        $plan = $this->entityManager->getRepository(Plan::class)->find($id);
+        if (!$plan instanceof Plan) {
+            $this->screen->notice($request, 'admin.not_found', [], 'admin.pl:l:0');
+
+            return null;
+        }
+        if ($this->trialBacking->isBacking($plan)) {
+            $this->screen->notice($request, 'admin.plans.trial_backing', ['title' => $plan->getTitle(), 'trial' => $this->trialBacking->trialPlanOf($plan)?->getTitle() ?? '-'], 'admin.pl:l:0');
+
+            return null;
+        }
+
+        return $plan;
     }
 
     private function bulk(AdminRequest $request, string $signedPercent): void

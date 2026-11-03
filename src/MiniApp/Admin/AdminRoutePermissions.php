@@ -84,6 +84,7 @@ final class AdminRoutePermissions
             'miniapp_admin_trial_plan_check' => AdminPermission::PLANS_MANAGE,
             'miniapp_admin_trial_plan_activate' => AdminPermission::PLANS_MANAGE,
             'miniapp_admin_trial_plan_deactivate' => AdminPermission::PLANS_MANAGE,
+            'miniapp_admin_trial_plan_delete' => AdminPermission::PLANS_MANAGE,
             'miniapp_admin_trial_claims' => AdminPermission::PLANS_MANAGE,
 
             'miniapp_admin_discounts' => AdminPermission::DISCOUNTS_MANAGE,

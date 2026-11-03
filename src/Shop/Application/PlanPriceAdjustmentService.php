@@ -5,12 +5,14 @@ declare(strict_types=1);
 namespace App\Shop\Application;
 
 use App\Entity\Plan;
+use App\Shop\Application\Catalog\TrialBackingPlans;
 use Doctrine\ORM\EntityManagerInterface;
 
 final class PlanPriceAdjustmentService
 {
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
+        private readonly TrialBackingPlans $trialBacking,
     ) {
     }
 
@@ -27,7 +29,8 @@ final class PlanPriceAdjustmentService
             $criteria['id'] = [] === $scope->planIds ? [0] : $scope->planIds;
         }
         /** @var list<Plan> $plans */
-        $plans = $this->entityManager->getRepository(Plan::class)->findBy($criteria, ['id' => 'ASC']);
+        // Never a trial's backing plan (TrialBackingPlans): its price stays 0.
+        $plans = $this->trialBacking->salesPlans($criteria, ['id' => 'ASC']);
         $fields = 'all' === $field ? ['price', 'pricePerGb', 'pricePerDay'] : [$field];
         $changes = [];
 
@@ -63,8 +66,13 @@ final class PlanPriceAdjustmentService
     public function apply(array $changes): int
     {
         $applied = 0;
+        // preview() never offers a backing plan; a list built elsewhere still cannot price one.
+        $backing = $this->trialBacking->backingAmong(array_values(array_unique(array_map(static fn (array $change): int => (int) $change['plan']->getId(), $changes))));
         foreach ($changes as $change) {
             $plan = $change['plan'];
+            if (in_array((int) $plan->getId(), $backing, true)) {
+                continue;
+            }
             $this->writeField($plan, (string) $change['field'], (int) $change['after']);
             $plan->setUpdatedAt(new \DateTimeImmutable());
             ++$applied;

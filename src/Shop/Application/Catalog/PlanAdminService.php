@@ -13,13 +13,27 @@ use Symfony\Component\Validator\Validator\ValidatorInterface;
  * An admin's changes to plans, the same from the web panel (PlanCrudController), the bot (AdminPlansHandler) and the
  * Mini App: validate (the entity's rules), save (create or update), activate / deactivate, change the price, delete
  * (refused while orders refer to the plan). Callers check the permission (PLANS_MANAGE) and audit.
+ *
+ * A trial's backing plan (TrialBackingPlans) is not changed here at all: every write refuses it (TrialBackingPlanLocked,
+ * nothing written). Its trial plan manages it (TrialPlanAdminService, TrialAccountService).
  */
 final class PlanAdminService
 {
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
         private readonly ValidatorInterface $validator,
+        private readonly TrialBackingPlans $trialBacking,
     ) {
+    }
+
+    /**
+     * @throws TrialBackingPlanLocked
+     */
+    public function assertSalesPlan(Plan $plan): void
+    {
+        if ($this->trialBacking->isBacking($plan)) {
+            throw new TrialBackingPlanLocked((int) $plan->getId());
+        }
     }
 
     /**
@@ -31,10 +45,12 @@ final class PlanAdminService
     }
 
     /**
-     * @throws InvalidCatalogEntry nothing saved
+     * @throws InvalidCatalogEntry    nothing saved
+     * @throws TrialBackingPlanLocked nothing saved
      */
     public function save(Plan $plan): void
     {
+        $this->assertSalesPlan($plan);
         $violations = $this->violations($plan);
         if ([] !== $violations) {
             throw new InvalidCatalogEntry($violations);
@@ -47,9 +63,14 @@ final class PlanAdminService
         $this->entityManager->flush();
     }
 
-    /** @return bool false when the plan already was in that state (nothing written) */
+    /**
+     * @return bool false when the plan already was in that state (nothing written)
+     *
+     * @throws TrialBackingPlanLocked
+     */
     public function setActive(Plan $plan, bool $active): bool
     {
+        $this->assertSalesPlan($plan);
         if ($plan->isActive() === $active) {
             return false;
         }
@@ -59,9 +80,14 @@ final class PlanAdminService
         return true;
     }
 
-    /** @return int the price before */
+    /**
+     * @return int the price before
+     *
+     * @throws TrialBackingPlanLocked
+     */
     public function changePrice(Plan $plan, int $price): int
     {
+        $this->assertSalesPlan($plan);
         $before = $plan->getPrice();
         $plan->setPrice($price)->setUpdatedAt(new \DateTimeImmutable());
         $this->entityManager->flush();
@@ -76,10 +102,12 @@ final class PlanAdminService
     }
 
     /**
-     * @throws PlanInUse orders refer to it; nothing deleted
+     * @throws PlanInUse              orders refer to it; nothing deleted
+     * @throws TrialBackingPlanLocked nothing deleted (its trial plan deletes it, TrialPlanAdminService)
      */
     public function delete(Plan $plan): void
     {
+        $this->assertSalesPlan($plan);
         $orders = $this->orderCount($plan);
         if ($orders > 0) {
             throw new PlanInUse($orders);

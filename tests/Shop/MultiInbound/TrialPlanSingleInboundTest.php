@@ -10,7 +10,7 @@ use App\Entity\TrialPlan;
 use App\Entity\VpnInbound;
 use App\Entity\VpnPanel;
 use App\Provisioning\Domain\SanaeiIntegrationMode;
-use App\Shop\Application\Catalog\InvalidCatalogEntry;
+use App\Shop\Application\Catalog\TrialBackingPlanLocked;
 use App\Shop\Application\Catalog\PlanAdminService;
 use App\Shop\Application\TrialAccountService;
 use App\Shop\Application\TrialClaimResult;
@@ -22,6 +22,9 @@ use Symfony\Bundle\FrameworkBundle\KernelBrowser;
  * plan row) accepts no additional inbounds on any save (the web plan form and PlanAdminService::save(), which the bot
  * and the Mini App use), and a trial claim goes through the sale rule (PlanSaleRule::acceptsTrial()): a backing plan
  * that has additional inbounds anyway (data written before M2d) is not provisioned.
+ *
+ * Since docs/design/trial-backing-plans.md the sales area does not save a backing plan at all (TrialBackingPlanLocked,
+ * its form redirects to the trial plan); the inbound rule stays behind it (PlanInboundsValidator).
  */
 final class TrialPlanSingleInboundTest extends IntegrationTestCase
 {
@@ -56,9 +59,11 @@ final class TrialPlanSingleInboundTest extends IntegrationTestCase
         try {
             self::getContainer()->get(PlanAdminService::class)->save($plan);
             self::fail('a trial plan was given a second inbound');
-        } catch (InvalidCatalogEntry $e) {
-            self::assertStringContainsString('trial plan keeps one inbound', implode(' ', $e->violations['additionalInboundList'] ?? []));
+        } catch (TrialBackingPlanLocked $e) {
+            self::assertSame($this->backing->getId(), $e->planId);
         }
+        // The rule itself still refuses it (a save that would reach validation).
+        self::assertStringContainsString('trial plan keeps one inbound', implode(' ', self::getContainer()->get(PlanAdminService::class)->violations($plan)['additionalInboundList'] ?? []));
         $this->em->clear();
         self::assertSame(0, (int) $this->em->getConnection()->fetchOne('SELECT COUNT(*) FROM plan_additional_inbound'));
     }
@@ -67,14 +72,13 @@ final class TrialPlanSingleInboundTest extends IntegrationTestCase
     {
         [, $extra] = $this->onAModernPanel();
         $client = $this->admin();
-        $form = $client->request('GET', '/admin/plan/'.$this->backing->getId().'/edit')->filter('form[name="Plan"]')->form();
-        $values = $form->getPhpValues();
-        $values['Plan']['additionalInboundList'] = [(string) $extra->getId()];
+        $client->request('GET', '/admin/plan/'.$this->backing->getId().'/edit');
+        self::assertTrue($client->getResponse()->isRedirect(), 'no form: the trial plan manages it');
 
-        $client->request('POST', $form->getUri(), $values);
+        // A crafted post of the form: refused the same way.
+        $client->request('POST', '/admin/plan/'.$this->backing->getId().'/edit', ['Plan' => ['title' => '[Trial] test', 'durationDays' => '1', 'price' => '0', 'inbound' => (string) $this->primary->getId(), 'additionalInboundList' => [(string) $extra->getId()]]]);
 
-        self::assertFalse($client->getResponse()->isRedirect(), 'refused, the form is shown again');
-        self::assertMatchesRegularExpression('/trial plan keeps one inbound|پلن تست تک‌اینباندی می‌ماند/u', (string) $client->getResponse()->getContent());
+        self::assertTrue($client->getResponse()->isRedirect());
         self::assertSame(0, (int) $this->em->getConnection()->fetchOne('SELECT COUNT(*) FROM plan_additional_inbound'));
     }
 
