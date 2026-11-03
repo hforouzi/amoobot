@@ -151,6 +151,9 @@ whole provisioning, would block a paid customer over one secondary inbound.
 
 ## 4. Changing inbounds after sales
 
+**Superseded (2026-11-03) by [plan-inbound-change.md](plan-inbound-change.md)** (design for review): moving existing
+services when a plan's primary or additional inbounds change. Where the two disagree, that document wins.
+
 - **Editing a plan's inbounds affects new sales only.** Existing services keep what they have.
 - **"Apply to existing services"** (explicit admin action on the plan, PLANS_MANAGE + SERVICES_MANAGE):
   - creates `pending` rows for the plan's live services missing an inbound;
