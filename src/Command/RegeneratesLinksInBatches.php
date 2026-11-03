@@ -16,7 +16,11 @@ use Symfony\Component\Console\Style\SymfonyStyle;
  * own. A pause separates the batches; after MAX_CONSECUTIVE_FAILURES failed services in a row the run stops (the panel
  * is probably down) and says how to resume.
  *
- * Needs $this->entityManager (EntityManagerInterface) and $this->linkRegenerator (ServiceLinkRegenerator).
+ * A service not on the inbound its plan now sells gets a line saying why its links are still that inbound's
+ * (PlanInboundDrift, one query per batch).
+ *
+ * Needs $this->entityManager (EntityManagerInterface), $this->linkRegenerator (ServiceLinkRegenerator) and
+ * $this->inboundDrift (PlanInboundDrift).
  */
 trait RegeneratesLinksInBatches
 {
@@ -49,6 +53,7 @@ trait RegeneratesLinksInBatches
             if ([] === $ids) {
                 break;
             }
+            $notices = $this->inboundDrift->ofServices($ids);
             foreach ($ids as $serviceId) {
                 // Loaded one by one: each service is written (and committed) on its own, before the next is read.
                 $service = $this->entityManager->find(VpnService::class, $serviceId);
@@ -66,7 +71,7 @@ trait RegeneratesLinksInBatches
                 }
                 ++$counts['total'];
                 ++$counts[$change->outcome];
-                $this->printChange($io, $serviceId, $change, $apply);
+                $this->printChange($io, $serviceId, $change, $apply, isset($notices[$serviceId]) ? $this->inboundDrift->serviceText('plan_inbound_drift.regenerate', $notices[$serviceId], 'en') : null);
                 $lastId = $serviceId;
                 if (ServiceLinkChange::FAILED === $change->outcome) {
                     ++$failuresInARow;

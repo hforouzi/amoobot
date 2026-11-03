@@ -13,6 +13,7 @@ use App\Entity\VpnServiceInbound;
 use App\Provisioning\Application\FinalConfigLinkProvider;
 use App\Provisioning\Application\ServiceInboundCounts;
 use App\Security\AdminPermission;
+use App\Shop\Application\Catalog\PlanInboundDrift;
 use App\Shop\Application\MultiInboundSettings;
 use App\Subscription\Application\SubscriptionPageUrl;
 use Doctrine\ORM\EntityManagerInterface;
@@ -60,6 +61,7 @@ class VpnServiceCrudController extends AbstractCrudController
         private readonly MultiInboundSettings $multiInbound,
         private readonly TranslatorInterface $translator,
         private readonly ServiceInboundCounts $inboundCounts,
+        private readonly PlanInboundDrift $inboundDrift,
     ) {
     }
 
@@ -177,6 +179,7 @@ class VpnServiceCrudController extends AbstractCrudController
             AssociationField::new('order')->hideOnIndex(),
             AssociationField::new('panel'),
             AssociationField::new('inbound')->hideOnIndex(),
+            ...$this->inboundNoticeField($pageName),
             ...$this->inboundRowsField(),
             TextField::new('status')->setTemplatePath(AdminFormat::TEMPLATE)->formatValue(fn (mixed $v, ?VpnService $s = null): string => $f->status($v).$this->notConnectedBadge($s)),
             DateTimeField::new('expiresAt')->setTemplatePath(AdminFormat::TEMPLATE)->formatValue(fn (mixed $v): string => $f->expiry($v)),
@@ -233,6 +236,25 @@ class VpnServiceCrudController extends AbstractCrudController
         }
 
         return ServiceTabs::apply($queryBuilder, 'entity', $this->notConnectedFilter() ? 'all' : $this->currentTab(), $this->clock->now());
+    }
+
+    /**
+     * On the detail page of a service whose plan now sells another inbound: it stays on its own, it is not moved
+     * (docs/design/plan-inbound-change.md 3.3 (d)). One query; nothing shown otherwise.
+     *
+     * @return list<Field>
+     */
+    private function inboundNoticeField(string $pageName): array
+    {
+        $service = Crud::PAGE_DETAIL === $pageName ? $this->getContext()?->getEntity()->getInstance() : null;
+        $notice = $service instanceof VpnService ? $this->inboundDrift->ofService($service) : null;
+        if (null === $notice) {
+            return [];
+        }
+        $text = $this->inboundDrift->serviceText('plan_inbound_drift.service', $notice);
+
+        // Not a mapped property (EasyAdmin would replace the field by its own association field, unformatted); escaped.
+        return [AdminFormat::field('inboundNotice', static fn (): string => '<span class="text-warning" data-inbound-notice>⚠ '.AdminFormat::e($text).'</span>', 'field.inbound_notice')->onlyOnDetail()];
     }
 
     /**

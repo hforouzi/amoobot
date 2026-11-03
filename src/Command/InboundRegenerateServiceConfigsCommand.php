@@ -7,6 +7,7 @@ namespace App\Command;
 use App\Entity\VpnInbound;
 use App\Provisioning\Application\ServiceLinkChange;
 use App\Provisioning\Application\ServiceLinkRegenerator;
+use App\Shop\Application\Catalog\PlanInboundDrift;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
@@ -26,6 +27,7 @@ final class InboundRegenerateServiceConfigsCommand extends Command
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
         private readonly ServiceLinkRegenerator $linkRegenerator,
+        private readonly PlanInboundDrift $inboundDrift,
     ) {
         parent::__construct();
     }

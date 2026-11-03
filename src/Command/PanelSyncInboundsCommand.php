@@ -8,6 +8,7 @@ use App\Entity\VpnInbound;
 use App\Entity\VpnPanel;
 use App\Provisioning\Application\ServiceLinkChange;
 use App\Provisioning\Application\ServiceLinkRegenerator;
+use App\Shop\Application\Catalog\PlanInboundDrift;
 use App\Provisioning\Application\VpnInboundSyncService;
 use App\Provisioning\Infrastructure\Sanaei3xui\Sanaei3xuiApiClient;
 use Doctrine\ORM\EntityManagerInterface;
@@ -31,6 +32,7 @@ final class PanelSyncInboundsCommand extends Command
         private readonly VpnInboundSyncService $inboundSyncService,
         private readonly Sanaei3xuiApiClient $apiClient,
         private readonly ServiceLinkRegenerator $linkRegenerator,
+        private readonly PlanInboundDrift $inboundDrift,
     ) {
         parent::__construct();
     }

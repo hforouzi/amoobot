@@ -19,6 +19,7 @@ use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http\PanelEndpoint;
 use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http\SecretRedactor;
 use App\Provisioning\Infrastructure\Sanaei3xui\Modern\ModernClientsApi;
 use App\Security\AdminAuditLogger;
+use App\Shop\Application\Catalog\PlanInboundDrift;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\Form\FormError;
@@ -176,7 +177,7 @@ final class PanelSetupController extends AbstractController
     }
 
     #[Route('/{id}/plans', name: 'admin_panel_setup_plans', methods: ['GET', 'POST'], requirements: ['id' => '\d+'])]
-    public function plans(VpnPanel $panel, Request $request, AdminAuditLogger $auditLogger): Response
+    public function plans(VpnPanel $panel, Request $request, AdminAuditLogger $auditLogger, PlanInboundDrift $inboundDrift): Response
     {
         $inbounds = $this->entityManager->getRepository(VpnInbound::class)->findBy(['panel' => $panel, 'isActive' => true], ['id' => 'ASC']);
         $plans = $this->entityManager->getRepository(Plan::class)->findBy([], ['isActive' => 'DESC', 'id' => 'ASC']);
@@ -192,17 +193,24 @@ final class PanelSetupController extends AbstractController
                 $byId[(int) $inbound->getId()] = $inbound;
             }
             $changed = 0;
+            $changedIds = [];
             foreach ($request->request->all('plan') as $planId => $inboundId) {
                 $plan = $this->entityManager->find(Plan::class, (int) $planId);
                 $inbound = $byId[(int) $inboundId] ?? null;
                 if ($plan instanceof Plan && null !== $inbound && $plan->getInbound()?->getId() !== $inbound->getId()) {
                     $plan->setInbound($inbound);
                     ++$changed;
+                    $changedIds[] = (int) $plan->getId();
                 }
             }
             $this->entityManager->flush();
             $auditLogger->record('vpn_panel.plans_update', 'VpnPanel', $panel->getId(), ['changed' => $changed]);
             $this->flash('success', 'panel_connection.plans.saved', ['%count%' => $changed]);
+            // The existing services of the plans changed here stay on their old inbound (design plan-inbound-change 3.3 (c)).
+            $staying = $inboundDrift->totalOfPlans($changedIds);
+            if ($staying > 0) {
+                $this->flash('warning', 'plan_inbound_drift.wizard', ['%plans%' => $changed, '%count%' => $staying]);
+            }
 
             return $this->redirectToRoute('admin_panel_setup_plans', ['id' => $panel->getId()]);
         }
