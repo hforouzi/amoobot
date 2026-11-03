@@ -784,6 +784,7 @@ field:
   id: "ID"
   inbound: "Inbound"
   additional_inbounds: "Additional inbounds"
+  inbound_notice: "Inbound notice"
   inbound_attachments: "Additional inbounds not attached"
   inbounds: "Inbounds"
   used_by_plans: "Used by plans"
@@ -1220,6 +1221,19 @@ plan_inbounds:
   warning:
     inactive: "%inbound% became inactive since it was chosen."
     mixed: "Protocols %protocols% together: run the real-panel check (design 7.3) before relying on this mix."
+
+plan_inbound_drift:
+  plan_saved: "Plan \"%plan%\" now uses inbound \"%new%\" for new sales. %count% existing service(s) of this plan are on another inbound (%breakdown%) and keep it: changing a plan never moves existing services, and \"Regenerate config\" only re-reads the links of the inbound a service is on. See the admin guide, \"Changing a plan's inbound\"."
+  trial_plan_saved: "Trial plan \"%plan%\" now uses inbound \"%new%\" for new trials. %count% existing service(s) of this trial plan are on another inbound (%breakdown%) and keep it: changing a plan never moves existing services, and \"Regenerate config\" only re-reads the links of the inbound a service is on. See the admin guide, \"Changing a plan's inbound\"."
+  form: "%count% existing service(s) of this plan are not on this inbound (%breakdown%). They are not moved by saving."
+  wizard: "%plans% plan(s) now use another inbound. %count% existing service(s) of these plans stay on their old inbound. See the admin guide, \"Changing a plan's inbound\"."
+  service: "This service is on inbound \"%current%\"; its plan now sells \"%planInbound%\". It is not moved automatically."
+  regenerate: "The panel still serves this service on inbound \"%current%\" (its plan now uses \"%planInbound%\"): the links shown are that inbound's. Regenerating does not move a service."
+  breakdown_item: "%count% on \"%inbound%\""
+  breakdown_separator: ", "
+  no_inbound: "(deleted)"
+  badge: "⚠ %count% on old inbound"
+  badge_title: "Existing services of this plan that are on another inbound than the one it now sells. Saving the plan does not move them."
 
 service_inbounds:
   attempts: "%count% attempt(s)"

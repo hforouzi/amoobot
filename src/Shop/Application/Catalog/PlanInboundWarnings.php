@@ -44,4 +44,25 @@ final class PlanInboundWarnings
 
         return $warnings;
     }
+
+    /**
+     * After a plan's (or trial plan's) inbounds changed: its existing services that stay on another inbound
+     * (PlanInboundDrift, docs/design/plan-inbound-change.md 3.3 (a)). Saving never moves them; this says so. Nothing
+     * when there are none.
+     *
+     * @return list<array{key: string, parameters: array<string, string|int>}>
+     */
+    public static function drift(string $planTitle, string $newInbound, PlanInboundDriftCount $drift, string $breakdown, string $key = 'plan_inbound_drift.plan_saved'): array
+    {
+        if ($drift->total <= 0) {
+            return [];
+        }
+
+        return [['key' => $key, 'parameters' => [
+            '%plan%' => $planTitle,
+            '%new%' => $newInbound,
+            '%count%' => $drift->total,
+            '%breakdown%' => $breakdown,
+        ]]];
+    }
 }
