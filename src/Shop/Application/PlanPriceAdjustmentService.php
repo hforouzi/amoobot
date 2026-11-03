@@ -66,8 +66,13 @@ final class PlanPriceAdjustmentService
     public function apply(array $changes): int
     {
         $applied = 0;
+        // preview() never offers a backing plan; a list built elsewhere still cannot price one.
+        $backing = $this->trialBacking->backingAmong(array_values(array_unique(array_map(static fn (array $change): int => (int) $change['plan']->getId(), $changes))));
         foreach ($changes as $change) {
             $plan = $change['plan'];
+            if (in_array((int) $plan->getId(), $backing, true)) {
+                continue;
+            }
             $this->writeField($plan, (string) $change['field'], (int) $change['after']);
             $plan->setUpdatedAt(new \DateTimeImmutable());
             ++$applied;

@@ -70,9 +70,10 @@ final class TrialPlanCrudController extends AbstractCrudController
             IntegerField::new('cooldownHours')
                 ->setHelp('help.trial_plan.cooldown_hours')
                 ->hideOnIndex(),
-            AssociationField::new('backingPlan')
-                ->hideOnForm()
-                ->hideOnIndex(),
+            // Its hidden plan, as text: it has no page in the Plans area (TrialBackingPlans).
+            TextField::new('backingPlan')
+                ->onlyOnDetail()
+                ->setHelp('help.trial_plan.backing_plan'),
             DateTimeField::new('createdAt')->setLabel('common.created_at')->hideOnForm(),
             DateTimeField::new('updatedAt')->setLabel('common.updated_at')->hideOnForm(),
         ];

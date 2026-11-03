@@ -75,6 +75,54 @@ final class MiniAppAdminTrialBackingTest extends IntegrationTestCase
         self::assertListsSalesPlansOnly(implode("\n", $page->filter('[data-plan-choices] label')->each(static fn (Crawler $l): string => $l->text())), 'Mini App bulk price page');
     }
 
+    public function testABackingPlansUrlSaysWhereItBelongsInsteadOfTheForm(): void
+    {
+        $page = new Crawler($this->appGet('/app/admin/plans/'.$this->backing->getId().'?lang=en', $this->session));
+
+        self::assertSame(200, $this->httpStatus());
+        self::assertCount(0, $page->filter('form#plan-form'), 'no form');
+        self::assertStringContainsString('"[Trial] Gift" is the hidden plan of the trial plan "Gift"', $page->filter('[data-trial-backing]')->text());
+        self::assertSame('/app/admin/trial-plans/'.$this->trial->getId(), $page->filter('[data-trial-link]')->attr('href'));
+
+        $orphan = new Crawler($this->appGet('/app/admin/plans/'.$this->orphan->getId().'?lang=en', $this->session));
+        self::assertStringContainsString('is the hidden plan of a trial plan deleted earlier', $orphan->filter('[data-trial-backing]')->text());
+        self::assertSame('/app/admin/trial-plans', $orphan->filter('[data-trial-link]')->attr('href'));
+    }
+
+    public function testEveryCallOnABackingPlanIsRefusedWithTheMessageAndChangesNothing(): void
+    {
+        $before = $this->row('plan', (int) $this->backing->getId());
+        $id = $this->backing->getId();
+        $calls = [
+            "/app/api/admin/plans/$id/activate" => [],
+            "/app/api/admin/plans/$id/deactivate" => [],
+            "/app/api/admin/plans/$id/delete" => [],
+            "/app/api/admin/plans/$id/duplicate" => [],
+            "/app/api/admin/plans/$id" => ['title' => 'Free!', 'durationDays' => '30', 'price' => '1', 'isActive' => '1'],
+            '/app/api/admin/plans/check' => ['id' => (string) $id, 'title' => 'x', 'durationDays' => '1', 'price' => '1'],
+        ];
+        foreach ($calls as $path => $body) {
+            $answer = $this->appPostJson($path.'?lang=en', $this->session, $body, self::newKey());
+            self::assertSame(409, $this->httpStatus(), $path.': '.json_encode($answer));
+            self::assertSame('trial_backing_plan', $answer['error'] ?? null, $path);
+            self::assertStringContainsString('is the hidden plan of the trial plan "Gift"', (string) ($answer['message'] ?? ''), $path);
+        }
+        self::assertSame($before, $this->row('plan', (int) $id));
+        self::assertSame(1, (int) $this->em->getConnection()->fetchOne('SELECT COUNT(*) FROM plan WHERE title LIKE ?', ['%Gift%']), 'no copy made');
+        self::assertSame([], array_column($this->auditRows(), 'action'), 'nothing audited: nothing happened');
+    }
+
+    public function testANormalPlanCalledTrialIsManagedAsBefore(): void
+    {
+        $page = new Crawler($this->appGet('/app/admin/plans/'.$this->lookalike->getId().'?lang=en', $this->session));
+        self::assertCount(1, $page->filter('form#plan-form'));
+
+        $this->confirmedPost('/app/api/admin/plans/'.$this->lookalike->getId().'/deactivate', $this->session);
+
+        self::assertSame(200, $this->httpStatus());
+        self::assertSame(0, (int) $this->em->getConnection()->fetchOne('SELECT is_active FROM plan WHERE id = ?', [$this->lookalike->getId()]));
+    }
+
     public function testThePanelPlanCountsLeaveThemOut(): void
     {
         $panelId = $this->trialInbound->getPanel()->getId();

@@ -63,6 +63,7 @@ final class AdminBotTexts
             'admin.plans.price_done' => $m('Admin plan price changed', '✅ قیمت پلن «{{ title }}» از {{ old }} به {{ new }} تومان تغییر کرد.', ['title', 'old', 'new']),
             'admin.plans.bulk_prompt' => $m('Admin bulk price prompt', 'درصد تغییر همه قیمت‌ها (قیمت، قیمت هر گیگ و هر روز) را بفرستید؛ مثلاً 10 برای افزایش یا -5 برای کاهش (بین {{ min }} و {{ max }}):', ['min', 'max']),
             'admin.plans.confirm_bulk' => $m('Admin confirm bulk price', 'تغییر {{ percent }}٪ قیمت‌ها: {{ changes }} قیمت در {{ plans }} پلن تغییر می‌کند.', ['percent', 'changes', 'plans']),
+            'admin.plans.trial_backing' => $m('Admin plan belongs to a trial plan', "این پلن («{{ title }}») پلنِ پنهانِ پلن تست «{{ trial }}» است: فقط از بخش پلن‌های تست مدیریت می‌شود و هیچ‌وقت فروخته نمی‌شود.", ['title', 'trial']),
             'admin.plans.bulk_none' => $m('Admin bulk price no change', 'با این درصد هیچ قیمتی تغییر نمی‌کند.'),
             'admin.plans.bulk_done' => $m('Admin bulk price done', '✅ {{ changes }} قیمت تغییر کرد.', ['changes']),
             'admin.trial_claims.title' => $m('Admin trial claims list', '🎁 درخواست‌های تست — {{ page_info }}', ['page_info']),

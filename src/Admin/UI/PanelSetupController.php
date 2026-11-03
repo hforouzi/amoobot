@@ -195,8 +195,13 @@ final class PanelSetupController extends AbstractController
                 $byId[(int) $inbound->getId()] = $inbound;
             }
             $changed = 0;
+            // Only the plans listed (a backing plan id sent anyway is ignored: it follows its trial plan's inbound).
+            $listed = [];
+            foreach ($plans as $listedPlan) {
+                $listed[(int) $listedPlan->getId()] = $listedPlan;
+            }
             foreach ($request->request->all('plan') as $planId => $inboundId) {
-                $plan = $this->entityManager->find(Plan::class, (int) $planId);
+                $plan = $listed[(int) $planId] ?? null;
                 $inbound = $byId[(int) $inboundId] ?? null;
                 if ($plan instanceof Plan && null !== $inbound && $plan->getInbound()?->getId() !== $inbound->getId()) {
                     $plan->setInbound($inbound);
