@@ -314,6 +314,59 @@ newest first). The M2b timer (`amoobot-job-attach-inbounds`) is installed by a *
 `post-deploy-check` show it as **NEW** (a warning: "first run pending") until its first run, not as a failure; if it has
 still not succeeded after its max age (95 minutes) it becomes NEVER.
 
+## Changing a plan's inbound
+
+You can give a plan another inbound at any time (plan form, Mini App plan form, or the panel setup wizard's "Map
+plans" step). Here is what that does and does not do.
+
+**What changes**
+
+- New sales of the plan get the new inbound. That includes an order the customer started before your change and paid
+  after it.
+
+**What does not change**
+
+- Services already sold stay on the inbound they were created on. Nothing moves them: not saving the plan, not
+  "Regenerate config", not the customer pressing "update" in their app.
+- Their links are the old inbound's. That is correct: the panel really serves those services on the old inbound, and
+  the bot only shows the links the panel gives.
+- So keep the old inbound running on the panel while services use it. If you disable or delete it there, those
+  customers lose their connection.
+
+**Where the bot tells you**
+
+- After saving the plan: a yellow message with how many existing services stay on another inbound, and on which.
+- On the plan's edit page, under the inbound field. In the plan list: a "⚠ N on old inbound" badge.
+- In the panel setup wizard: after "Map plans", the total for the plans you changed (shown on the next admin page).
+- In the Mini App plan form: before you save, with the other warnings.
+- On a service's page (web and Mini App), and after "Regenerate config", when the service is not on its plan's inbound.
+- Trial plans: the same, for the trial's own services.
+
+The counts include active, suspended and expired services (not deleted ones), and services sold by resellers or claimed
+by customers. They never show a customer, a reseller or a link.
+
+**Moving an existing service by hand (modern 3x-ui panels only)**
+
+Until the bot can move services itself, you can move one service like this:
+
+1. In 3x-ui, open the client. Its email is on the service page in the admin panel.
+2. **Add** the new inbound to the client first, then **remove** the old inbound. In that order, the client is never
+   left without an inbound.
+3. In the admin panel, open the service and press **Regenerate config**. The links now come from the new inbound.
+4. Ask the customer to update the subscription in their app. Single configs they copied before stop working.
+
+Limits of the manual move:
+
+- The service page and the bot still name the old inbound (its country and protocol), because the bot's own record of
+  the service is not changed.
+- For a plan with several inbounds: after you move a client by hand, the scheduled re-attach no longer checks that
+  service.
+- Not possible on a legacy panel, or to an inbound on another panel (that would be a new client: new subscription,
+  usage counted from zero).
+
+A built-in "Apply to existing services" is planned; it is not available yet. Design:
+[plan-inbound-change.md](../design/plan-inbound-change.md).
+
 ## Branding (customer pages)
 
 `Settings -> Branding` (needs the *Manage settings* permission) sets what customers see on the payment result pages
