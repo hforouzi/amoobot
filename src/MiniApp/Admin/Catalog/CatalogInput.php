@@ -9,6 +9,7 @@ use App\Entity\Plan;
 use App\Entity\TrialPlan;
 use App\Entity\VpnInbound;
 use App\MiniApp\Admin\AdminText;
+use App\Shop\Application\Catalog\TrialBackingPlans;
 use Doctrine\ORM\EntityManagerInterface;
 
 /**
@@ -37,8 +38,10 @@ final class CatalogInput
     /** The price fields: a change to them is confirmed (old -> new) and audited with its values. */
     public const PRICE_FIELDS = ['price', 'pricePerGb', 'pricePerDay'];
 
-    public function __construct(private readonly EntityManagerInterface $entityManager)
-    {
+    public function __construct(
+        private readonly EntityManagerInterface $entityManager,
+        private readonly TrialBackingPlans $trialBacking,
+    ) {
     }
 
     /**
@@ -147,7 +150,8 @@ final class CatalogInput
                 case 'inbound':
                 case 'plan':
                     $related = ctype_digit($text) ? $this->entityManager->find('inbound' === $type ? VpnInbound::class : Plan::class, (int) $text) : null;
-                    if (null === $related) {
+                    // A trial's backing plan is not a choice (TrialBackingPlans), unless the record already has it.
+                    if (null === $related || ($related instanceof Plan && $related !== self::read($entity, $field) && $this->trialBacking->isBacking($related))) {
                         $errors[$field] = 'admin.form.choice';
                         break;
                     }

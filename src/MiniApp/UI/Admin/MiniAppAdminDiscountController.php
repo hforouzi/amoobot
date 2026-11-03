@@ -7,6 +7,7 @@ namespace App\MiniApp\UI\Admin;
 use App\Entity\DiscountCode;
 use App\Entity\DiscountUsage;
 use App\Entity\Plan;
+use App\Shop\Application\Catalog\TrialBackingPlans;
 use App\MiniApp\Admin\AdminActions;
 use App\MiniApp\Admin\AdminLists;
 use App\MiniApp\Admin\Catalog\CatalogEditor;
@@ -244,7 +245,8 @@ final class MiniAppAdminDiscountController extends AbstractController
         return $this->fragments->render($request, 'miniapp/admin/catalog/discount.html.twig', [
             'code' => $code,
             'values' => CatalogInput::snapshot($code, null === $code->getId() ? array_diff_key(CatalogInput::DISCOUNT_FIELDS, ['code' => 1]) : CatalogInput::DISCOUNT_FIELDS),
-            'plans' => $this->entityManager->getRepository(Plan::class)->findBy([], ['id' => 'ASC']),
+            // Never a trial's backing plan, except the one the code already is limited to (TrialBackingPlans).
+            'plans' => TrialBackingPlans::excludeKeeping($this->entityManager->createQueryBuilder()->select('p')->from(Plan::class, 'p')->orderBy('p.id', 'ASC'), 'p', $code->getPlan()?->getId())->getQuery()->getResult(),
             'usageCount' => null === $code->getId() ? 0 : $this->discounts->usageCount($code),
             'used' => null !== $code->getId() && $this->used($code),
             'types' => DiscountCode::allowedTypes(),

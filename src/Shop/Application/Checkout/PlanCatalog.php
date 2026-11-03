@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Shop\Application\Checkout;
 
 use App\Entity\Plan;
+use App\Shop\Application\Catalog\TrialBackingPlans;
 use Doctrine\ORM\EntityManagerInterface;
 
 /**
@@ -27,14 +28,15 @@ final class PlanCatalog
      */
     public function forSale(): array
     {
-        /** @var list<Plan> $plans */
-        $plans = $this->entityManager->createQueryBuilder()
+        $qb = $this->entityManager->createQueryBuilder()
             ->select('p', 'i', 'pn', 'a', 'ai', 'apn')->from(Plan::class, 'p')
             ->leftJoin('p.inbound', 'i')->leftJoin('i.panel', 'pn')->leftJoin('p.additionalInbounds', 'a')
             ->leftJoin('a.inbound', 'ai')->leftJoin('ai.panel', 'apn')
             ->where('p.isActive = true')
-            ->orderBy('p.id', 'ASC')
-            ->getQuery()->getResult();
+            ->orderBy('p.id', 'ASC');
+        // Never a trial's backing plan, even one activated by hand (TrialBackingPlans; PlanSaleRule checks it again).
+        /** @var list<Plan> $plans */
+        $plans = TrialBackingPlans::exclude($qb, 'p')->getQuery()->getResult();
 
         return $this->saleRule->sellable($plans);
     }

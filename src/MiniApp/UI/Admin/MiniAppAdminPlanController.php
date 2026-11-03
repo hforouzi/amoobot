@@ -16,6 +16,7 @@ use App\MiniApp\UI\MiniAppLocale;
 use App\Security\AdminAuditLogger;
 use App\Shop\Application\Catalog\PlanAdminService;
 use App\Shop\Application\Catalog\PlanInUse;
+use App\Shop\Application\Catalog\TrialBackingPlans;
 use App\Shop\Application\PlanPriceSanityChecker;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
@@ -62,6 +63,8 @@ final class MiniAppAdminPlanController extends AbstractController
             ->leftJoin('p.inbound', 'i')->leftJoin('i.panel', 'panel')
             // As the web list and the bot: in creation order.
             ->orderBy('p.id', 'ASC');
+        // The sales plans: a trial's backing plan is managed from its trial plan (TrialBackingPlans).
+        TrialBackingPlans::exclude($qb, 'p');
         if ('all' !== $tab) {
             $qb->andWhere('p.isActive = :active')->setParameter('active', 'active' === $tab);
         }
@@ -71,7 +74,8 @@ final class MiniAppAdminPlanController extends AbstractController
         /** @var list<Plan> $plans */
         $plans = $qb->getQuery()->getResult();
         $counts = ['all' => 0, 'active' => 0, 'inactive' => 0];
-        foreach ($this->entityManager->createQueryBuilder()->select('p.isActive AS active', 'COUNT(p.id) AS n')->from(Plan::class, 'p')->groupBy('p.isActive')->getQuery()->getArrayResult() as $row) {
+        $countQuery = TrialBackingPlans::exclude($this->entityManager->createQueryBuilder()->select('p.isActive AS active', 'COUNT(p.id) AS n')->from(Plan::class, 'p')->groupBy('p.isActive'), 'p');
+        foreach ($countQuery->getQuery()->getArrayResult() as $row) {
             $counts[$row['active'] ? 'active' : 'inactive'] = (int) $row['n'];
             $counts['all'] += (int) $row['n'];
         }

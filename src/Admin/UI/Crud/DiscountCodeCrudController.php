@@ -8,7 +8,9 @@ use App\Admin\UI\DashboardController;
 use App\Admin\UI\Support\AdminFormat;
 use App\Entity\DiscountCode;
 use App\Shop\Application\Catalog\DiscountAdminService;
+use App\Shop\Application\Catalog\TrialBackingPlans;
 use Doctrine\ORM\EntityManagerInterface;
+use Doctrine\ORM\QueryBuilder;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Action;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Actions;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Crud;
@@ -45,6 +47,13 @@ final class DiscountCodeCrudController extends AbstractCrudController
     public function deleteEntity(EntityManagerInterface $entityManager, object $entityInstance): void
     {
         $entityInstance instanceof DiscountCode ? $this->discounts->delete($entityInstance) : parent::deleteEntity($entityManager, $entityInstance);
+    }
+
+    private function currentPlanId(): ?int
+    {
+        $code = $this->getContext()?->getEntity()->getInstance();
+
+        return $code instanceof DiscountCode ? $code->getPlan()?->getId() : null;
     }
 
     public static function getEntityFqcn(): string
@@ -106,7 +115,9 @@ final class DiscountCodeCrudController extends AbstractCrudController
                     'order.type.add_traffic' => 'add_traffic',
                 ])
                 ->hideOnIndex(),
-            AssociationField::new('plan')->setRequired(false)->hideOnIndex(),
+            // Never a trial's backing plan (TrialBackingPlans), except the one a code already is limited to.
+            AssociationField::new('plan')->setRequired(false)->hideOnIndex()
+                ->setQueryBuilder(fn (QueryBuilder $qb): QueryBuilder => TrialBackingPlans::excludeKeeping($qb, 'entity', $this->currentPlanId())),
             IntegerField::new('minAmount')->setRequired(false)->hideOnIndex(),
             DateTimeField::new('createdAt')->hideOnForm()->hideOnIndex(),
             DateTimeField::new('updatedAt')->hideOnForm()->hideOnIndex(),

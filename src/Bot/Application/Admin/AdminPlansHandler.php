@@ -8,6 +8,7 @@ use App\Entity\Plan;
 use App\Entity\TrialClaim;
 use App\Security\AdminPermission;
 use App\Shop\Application\Catalog\PlanAdminService;
+use App\Shop\Application\Catalog\TrialBackingPlans;
 use App\Shop\Application\PlanPriceAdjustmentService;
 use App\Shop\Application\PlanPriceSanityChecker;
 use Doctrine\ORM\EntityManagerInterface;
@@ -28,6 +29,7 @@ final class AdminPlansHandler implements AdminArea
         private readonly PlanPriceAdjustmentService $priceAdjustment,
         private readonly PlanAdminService $plans,
         private readonly AdminScreen $screen,
+        private readonly TrialBackingPlans $trialBacking,
     ) {
     }
 
@@ -108,10 +110,9 @@ final class AdminPlansHandler implements AdminArea
 
     private function list(AdminRequest $request, int $page): void
     {
-        $repository = $this->entityManager->getRepository(Plan::class);
-        [$page, $pages] = $this->screen->page($page, $repository->count([]));
-        /** @var list<Plan> $plans */
-        $plans = $repository->findBy([], ['id' => 'ASC'], AdminScreen::PAGE_SIZE, $page * AdminScreen::PAGE_SIZE);
+        // The sales plans: a trial's backing plan is managed from its trial plan (TrialBackingPlans).
+        [$page, $pages] = $this->screen->page($page, $this->trialBacking->countSalesPlans());
+        $plans = $this->trialBacking->salesPlans([], ['id' => 'ASC'], AdminScreen::PAGE_SIZE, $page * AdminScreen::PAGE_SIZE);
 
         $lines = [$this->screen->text('admin.plans.title', ['page_info' => $this->screen->pageInfo($page, $pages)])];
         $buttons = [];

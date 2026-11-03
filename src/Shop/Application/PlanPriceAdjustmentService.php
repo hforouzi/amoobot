@@ -5,12 +5,14 @@ declare(strict_types=1);
 namespace App\Shop\Application;
 
 use App\Entity\Plan;
+use App\Shop\Application\Catalog\TrialBackingPlans;
 use Doctrine\ORM\EntityManagerInterface;
 
 final class PlanPriceAdjustmentService
 {
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
+        private readonly TrialBackingPlans $trialBacking,
     ) {
     }
 
@@ -27,7 +29,8 @@ final class PlanPriceAdjustmentService
             $criteria['id'] = [] === $scope->planIds ? [0] : $scope->planIds;
         }
         /** @var list<Plan> $plans */
-        $plans = $this->entityManager->getRepository(Plan::class)->findBy($criteria, ['id' => 'ASC']);
+        // Never a trial's backing plan (TrialBackingPlans): its price stays 0.
+        $plans = $this->trialBacking->salesPlans($criteria, ['id' => 'ASC']);
         $fields = 'all' === $field ? ['price', 'pricePerGb', 'pricePerDay'] : [$field];
         $changes = [];
 
