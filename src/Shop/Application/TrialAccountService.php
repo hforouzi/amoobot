@@ -16,6 +16,17 @@ use App\Shop\Domain\OrderStatus;
 use App\Shop\Domain\OrderType;
 use Doctrine\ORM\EntityManagerInterface;
 
+/**
+ * Claiming a trial: the limits, the backing plan (syncBackingPlan(), docs/design/trial-backing-plans.md), a trial order
+ * and claim, then provisioning.
+ *
+ * Lock order of the trial area: the trial_plan row (FOR UPDATE), then its backing plan row, then the new order and
+ * claim. The checks, the backing plan and the order are one transaction under the trial_plan lock, so claims of one
+ * trial plan are serialized (its limits hold) and a delete of the trial plan (TrialPlanAdminService::delete(), same
+ * order) either comes first (the claim finds no trial plan: nothing is created) or sees this claim's order (the
+ * backing plan is kept). Provisioning (a panel call) runs after the commit, outside the lock: a trial plan deleted
+ * meanwhile takes its claim row along (ON DELETE CASCADE, as before) and the customer still gets the service.
+ */
 final class TrialAccountService
 {
     public function __construct(
@@ -32,44 +43,11 @@ final class TrialAccountService
             return new TrialClaimResult(TrialClaimResult::STATUS_INACTIVE, 'در حال حاضر اکانت تست فعالی وجود ندارد.');
         }
 
-        $validation = $this->validateClaimLimits($telegramAccount, $trialPlan);
-        if ($validation instanceof TrialClaimResult) {
-            return $validation;
+        $created = $this->entityManager->wrapInTransaction(fn (): TrialClaimResult|array => $this->createClaim($telegramAccount, $trialPlan));
+        if ($created instanceof TrialClaimResult) {
+            return $created;
         }
-
-        $now = new \DateTimeImmutable();
-        $backingPlan = $this->syncBackingPlan($trialPlan);
-        if (!$this->saleRule->acceptsTrial($backingPlan)) {
-            // Trial plans keep one inbound (M2d B5): never provisioned with additional ones.
-            return new TrialClaimResult(TrialClaimResult::STATUS_INACTIVE, 'در حال حاضر اکانت تست فعالی وجود ندارد.');
-        }
-        $order = (new Order())
-            ->setUser($telegramAccount->getUser())
-            ->setPlan($backingPlan)
-            ->setAmount(0)
-            ->setType(OrderType::TRIAL)
-            ->setStatus(OrderStatus::PAID)
-            ->setPaidAt($now)
-            ->setMetadata([
-                'trial' => true,
-                'trialPlanId' => $trialPlan->getId(),
-                'trialPlanTitle' => $trialPlan->getTitle(),
-                'trafficGb' => $trialPlan->getTrafficGb(),
-                'durationDays' => $trialPlan->getDurationDays(),
-                'unlimitedDuration' => false,
-            ]);
-        $this->orderTrackingCodeService->assignIfMissing($order);
-
-        $claim = (new TrialClaim())
-            ->setTelegramAccount($telegramAccount)
-            ->setTrialPlan($trialPlan)
-            ->setOrder($order)
-            ->setStatus(TrialClaim::STATUS_PENDING);
-
-        $this->entityManager->persist($backingPlan);
-        $this->entityManager->persist($order);
-        $this->entityManager->persist($claim);
-        $this->entityManager->flush();
+        [$order, $claim] = $created;
 
         try {
             $vpnService = $this->vpnProvisioningService->provisionOrder($order, [
@@ -105,6 +83,73 @@ final class TrialAccountService
             $order,
             $vpnService
         );
+    }
+
+    /**
+     * Under the trial_plan row's lock (see the class comment): the trial plan as it is now, its limits, the backing
+     * plan, the order and the pending claim, flushed. A refusal is returned as the result, with nothing written.
+     *
+     * @return TrialClaimResult|array{Order, TrialClaim}
+     */
+    private function createClaim(TelegramAccount $telegramAccount, TrialPlan $trialPlan): TrialClaimResult|array
+    {
+        if (false === $this->entityManager->getConnection()->fetchOne('SELECT id FROM trial_plan WHERE id = ? FOR UPDATE', [$trialPlan->getId()])) {
+            // Deleted meanwhile.
+            return new TrialClaimResult(TrialClaimResult::STATUS_INACTIVE, 'در حال حاضر اکانت تست فعالی وجود ندارد.');
+        }
+        // Deactivated or changed meanwhile: read again under the lock.
+        $this->entityManager->refresh($trialPlan);
+        if (!$trialPlan->isActive()) {
+            return new TrialClaimResult(TrialClaimResult::STATUS_INACTIVE, 'در حال حاضر اکانت تست فعالی وجود ندارد.');
+        }
+
+        $validation = $this->validateClaimLimits($telegramAccount, $trialPlan);
+        if ($validation instanceof TrialClaimResult) {
+            return $validation;
+        }
+
+        $now = new \DateTimeImmutable();
+        $backingPlan = $this->syncBackingPlan($trialPlan);
+        if (!$this->saleRule->acceptsTrial($backingPlan)) {
+            // Trial plans keep one inbound (M2d B5): never provisioned with additional ones. Nothing is written: the
+            // synced fields are taken back (a later flush must not store them).
+            if (null === $backingPlan->getId()) {
+                $trialPlan->setBackingPlan(null);
+            } else {
+                $this->entityManager->refresh($backingPlan);
+            }
+
+            return new TrialClaimResult(TrialClaimResult::STATUS_INACTIVE, 'در حال حاضر اکانت تست فعالی وجود ندارد.');
+        }
+        $order = (new Order())
+            ->setUser($telegramAccount->getUser())
+            ->setPlan($backingPlan)
+            ->setAmount(0)
+            ->setType(OrderType::TRIAL)
+            ->setStatus(OrderStatus::PAID)
+            ->setPaidAt($now)
+            ->setMetadata([
+                'trial' => true,
+                'trialPlanId' => $trialPlan->getId(),
+                'trialPlanTitle' => $trialPlan->getTitle(),
+                'trafficGb' => $trialPlan->getTrafficGb(),
+                'durationDays' => $trialPlan->getDurationDays(),
+                'unlimitedDuration' => false,
+            ]);
+        $this->orderTrackingCodeService->assignIfMissing($order);
+
+        $claim = (new TrialClaim())
+            ->setTelegramAccount($telegramAccount)
+            ->setTrialPlan($trialPlan)
+            ->setOrder($order)
+            ->setStatus(TrialClaim::STATUS_PENDING);
+
+        $this->entityManager->persist($backingPlan);
+        $this->entityManager->persist($order);
+        $this->entityManager->persist($claim);
+        $this->entityManager->flush();
+
+        return [$order, $claim];
     }
 
     private function validateClaimLimits(TelegramAccount $telegramAccount, TrialPlan $trialPlan): ?TrialClaimResult

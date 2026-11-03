@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Tests\MiniApp\Admin;
 
+use App\Entity\TrialPlan;
+use App\Entity\VpnInbound;
 use App\Tests\Support\BotAdminTestTrait;
 use App\Tests\Support\IntegrationTestCase;
 use App\Tests\Support\MiniAppAdminFixtures;
@@ -13,7 +15,8 @@ use Symfony\Component\DomCrawler\Crawler;
 
 /**
  * The Mini App admin never shows a trial's backing plan on the sales side (docs/design/trial-backing-plans.md): the
- * plan list (tabs, counts, search), the discount form's plan picker, the bulk price page and the panel plan counts.
+ * plan list (tabs, counts, search), the discount form's plan picker, the bulk price page and the panel plan counts;
+ * and deleting a trial plan there does what the web does (TrialPlanAdminService::delete()).
  */
 final class MiniAppAdminTrialBackingTest extends IntegrationTestCase
 {
@@ -133,5 +136,40 @@ final class MiniAppAdminTrialBackingTest extends IntegrationTestCase
         self::assertSame('2', trim($list->filter('[data-panel-id="'.$panelId.'"] [data-plan-count]')->text()), 'Gold and the lookalike');
         $panel = new Crawler($this->appGet('/app/admin/panels/'.$panelId.'?lang=en', $this->session));
         self::assertSame(['2'], $panel->filter('[data-plan-count]')->each(static fn (Crawler $c): string => trim($c->text())));
+    }
+
+    public function testDeletingATrialPlanFromTheMiniAppDoesWhatTheWebDoes(): void
+    {
+        $backingId = (int) $this->backing->getId();
+        $page = new Crawler($this->appGet('/app/admin/trial-plans/'.$this->trial->getId().'?lang=en', $this->session));
+        self::assertCount(1, $page->filter('[data-group="delete"] [data-admin-action="delete"]'));
+
+        // Claimed: the backing plan stays, inactive and hidden, and the admin is told why.
+        $answer = $this->confirmedPost('/app/api/admin/trial-plans/'.$this->trial->getId().'/delete', $this->session);
+        self::assertSame(200, $this->httpStatus(), json_encode($answer, JSON_UNESCAPED_UNICODE));
+        self::assertStringContainsString('[Trial] Gift', (string) ($answer['message'] ?? ''));
+        self::assertSame(0, (int) $this->em->getConnection()->fetchOne('SELECT COUNT(*) FROM trial_plan'));
+        self::assertSame(['is_active' => 0, 'price' => 0], array_map('intval', $this->em->getConnection()->fetchAssociative('SELECT is_active, price FROM plan WHERE id = ?', [$backingId]) ?: []));
+        $audit = $this->auditRows();
+        self::assertSame(['trial_plan.delete'], array_column($audit, 'action'));
+        self::assertStringContainsString('backing_kept', (string) $audit[0]['details']);
+        $list = new Crawler($this->appGet('/app/admin/plans?tab=inactive&lang=en', $this->session));
+        self::assertCount(0, $list->filter('[data-plan-id]'), 'still hidden from the plans');
+
+        // Nothing refers to it: it goes too.
+        $inbound = $this->em->find(VpnInbound::class, $this->trialInbound->getId()) ?? self::fail('inbound');
+        $plan = $this->createPlan(0, $inbound)->setTitle('[Trial] Unused')->setIsActive(false);
+        $unused = (new TrialPlan())->setTitle('Unused')->setIsActive(true)->setDurationDays(1)->setTrafficGb(1)->setInbound($inbound)->setBackingPlan($plan);
+        $this->em->persist($unused);
+        $this->em->flush();
+        $planId = (int) $plan->getId();
+        $this->confirmedPost('/app/api/admin/trial-plans/'.$unused->getId().'/delete', $this->session);
+        self::assertSame(200, $this->httpStatus());
+        self::assertFalse($this->em->getConnection()->fetchOne('SELECT id FROM plan WHERE id = ?', [$planId]));
+
+        // Support may not.
+        $support = $this->authenticate(self::SUPPORT);
+        $this->appPostJson('/app/api/admin/trial-plans/'.$this->trial->getId().'/delete', $support, [], self::newKey());
+        self::assertSame(403, $this->httpStatus());
     }
 }
