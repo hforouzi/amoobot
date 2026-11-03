@@ -28,6 +28,7 @@
             <div><dt>{{ 'admin.service.expires'|trans }}</dt><dd>{% if s.expiresAt %}{{ s.expiresAt|sub_date(lang) }} <span class="muted">({{ 'admin.service.days_left'|trans({'%days%': s.daysLeft}) }})</span>{% else %}{{ 'admin.service.no_expiry'|trans }}{% endif %}</dd></div>
             {% if s.lastSync %}<div><dt>{{ 'admin.service.last_sync'|trans }}</dt><dd>{{ s.lastSync|sub_date(lang) }} {{ s.lastSync|date('H:i') }}</dd></div>{% endif %}
         </dl>
+        {% if s.inboundNotice %}<p class="muted" data-inbound-notice>⚠ {{ s.inboundNotice }}</p>{% endif %}
     </section>
 
     <section class="card">

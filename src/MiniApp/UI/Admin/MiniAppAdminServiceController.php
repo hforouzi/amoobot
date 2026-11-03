@@ -21,6 +21,7 @@ use App\Provisioning\Application\ServiceConfigRegenerator;
 use App\Provisioning\Application\ServiceUsageSyncService;
 use App\Provisioning\Domain\VpnServiceStatus;
 use App\Security\AdminAuditLogger;
+use App\Shop\Application\Catalog\PlanInboundDrift;
 use App\Subscription\Application\SubscriptionPageUrl;
 use Doctrine\ORM\EntityManagerInterface;
 use Psr\Clock\ClockInterface;
@@ -68,6 +69,7 @@ final class MiniAppAdminServiceController extends AbstractController
         private readonly MiniAppFragments $fragments,
         private readonly TranslatorInterface $translator,
         private readonly ClockInterface $clock,
+        private readonly PlanInboundDrift $inboundDrift,
     ) {
     }
 
@@ -93,7 +95,7 @@ final class MiniAppAdminServiceController extends AbstractController
         $service = $this->service($id);
 
         return $this->fragments->render($request, 'miniapp/admin/service.html.twig', [
-            's' => $this->view($service),
+            's' => $this->view($service, MiniAppLocale::fromRequest($request)),
             'can' => $this->access->map($user, [...self::ASSIST, ...self::MANAGE, self::DELETE, 'miniapp_admin_customer', 'miniapp_admin_order']),
             'extendPresets' => self::EXTEND_PRESETS,
             'trafficPresets' => self::TRAFFIC_PRESETS,
@@ -187,9 +189,15 @@ final class MiniAppAdminServiceController extends AbstractController
         return $this->actions->run($request, $user, $id, $confirm, function () use ($request, $user, $service, $id): array {
             $result = $this->regenerator->regenerate($service, 'miniapp_admin_regenerate_config');
             $this->audit($user, 'service.regenerate_config', $id, ['outcome' => $result->outcome, 'links' => $result->linkCount]);
-
-            return $this->answer($request, 'service.regenerate.'.$result->outcome, $result->succeeded() ? Response::HTTP_OK : (ServiceConfigRegeneration::NO_IDENTITY === $result->outcome ? Response::HTTP_CONFLICT : Response::HTTP_BAD_GATEWAY), ['%count%' => $result->linkCount, '%previous%' => $result->previousLinkCount ?? $result->linkCount])
+            $answer = $this->answer($request, 'service.regenerate.'.$result->outcome, $result->succeeded() ? Response::HTTP_OK : (ServiceConfigRegeneration::NO_IDENTITY === $result->outcome ? Response::HTTP_CONFLICT : Response::HTTP_BAD_GATEWAY), ['%count%' => $result->linkCount, '%previous%' => $result->previousLinkCount ?? $result->linkCount])
                 + ['detail' => AdminText::safe($result->error)];
+            // Why the links are still the old inbound's: the service was not moved (plan-inbound-change 3.3 (e)).
+            $suffix = $result->succeeded() ? $this->inboundNotice($service, 'plan_inbound_drift.regenerate', MiniAppLocale::fromRequest($request)) : null;
+            if (null !== $suffix) {
+                $answer['message'] .= ' '.$suffix;
+            }
+
+            return $answer;
         });
     }
 
@@ -290,7 +298,7 @@ final class MiniAppAdminServiceController extends AbstractController
      *
      * @return array<string, mixed>
      */
-    private function view(VpnService $service): array
+    private function view(VpnService $service, string $locale): array
     {
         $limit = $service->getTrafficLimitBytes();
         $used = $service->getTrafficUsedBytes() ?? 0;
@@ -306,6 +314,8 @@ final class MiniAppAdminServiceController extends AbstractController
             'orderId' => $service->getOrder()?->getId(),
             'panel' => $service->getPanel()?->getTitle(),
             'inbound' => $service->getInbound()?->getTitle(),
+            // Its plan now sells another inbound: the service stays where it is (plan-inbound-change 3.3 (d)).
+            'inboundNotice' => $this->inboundNotice($service, 'plan_inbound_drift.service', $locale),
             'expiresAt' => $expires,
             'daysLeft' => null === $expires ? null : (int) floor(($expires->getTimestamp() - $now->getTimestamp()) / 86400),
             'used' => $used,
@@ -315,5 +325,16 @@ final class MiniAppAdminServiceController extends AbstractController
             'pageUrl' => VpnServiceStatus::DELETED === $service->getStatus() ? null : $this->pageUrl->forService($service),
             'customer' => AdminCustomerView::summary($service->getUser()),
         ];
+    }
+
+    /**
+     * The service is not on the inbound its plan now sells: text (d) for the page or (e) for the regenerate result,
+     * in the admin's language (inbound titles only: no link, no customer). Null otherwise.
+     */
+    private function inboundNotice(VpnService $service, string $key, string $locale): ?string
+    {
+        $notice = $this->inboundDrift->ofService($service);
+
+        return null === $notice ? null : $this->inboundDrift->serviceText($key, $notice, $locale);
     }
 }
