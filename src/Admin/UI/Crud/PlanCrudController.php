@@ -12,6 +12,7 @@ use App\Entity\TrialPlan;
 use App\Entity\VpnInbound;
 use App\Shop\Application\Catalog\InvalidCatalogEntry;
 use App\Shop\Application\Catalog\PlanAdminService;
+use App\Shop\Application\Catalog\PlanInboundDrift;
 use App\Shop\Application\Catalog\PlanInboundUsage;
 use App\Shop\Application\Catalog\PlanInboundWarnings;
 use App\Shop\Application\Catalog\PlanInUse;
@@ -61,6 +62,7 @@ class PlanCrudController extends AbstractCrudController
         private readonly PlanInboundUsage $inboundUsage,
         private readonly EntityManagerInterface $entityManager,
         private readonly TrialBackingPlans $trialBacking,
+        private readonly PlanInboundDrift $inboundDrift,
     ) {
     }
 
@@ -172,7 +174,8 @@ class PlanCrudController extends AbstractCrudController
             IntegerField::new('ipLimit')->hideOnIndex()->setHelp('help.plan.ip_limit'),
             // The price, flagged when it looks like the wrong unit (PlanPriceSanityChecker).
             IntegerField::new('price')->setHelp(self::TOMAN_HELP)->setTemplatePath(AdminFormat::TEMPLATE)->formatValue(fn (mixed $v, ?Plan $plan): string => $f->money($v).($plan instanceof Plan ? $this->unitWarningBadge($plan) : '')),
-            AssociationField::new('inbound'),
+            $this->inboundField($pageName),
+            ...$this->driftFields($pageName),
             ...$this->multiInboundFields($pageName),
             BooleanField::new('isActive'),
 
@@ -236,6 +239,7 @@ class PlanCrudController extends AbstractCrudController
 
             return;
         }
+        $isNew = null === $plan->getId();
         try {
             $this->plans->save($plan);
         } catch (TrialBackingPlanLocked) {
@@ -257,6 +261,60 @@ class PlanCrudController extends AbstractCrudController
         foreach (PlanInboundWarnings::of($plan, $this->multiInbound->enabled()) as $warning) {
             $this->flash('warning', $warning['key'], $warning['parameters']);
         }
+        // Saving never moves existing services: said when the inbounds changed and some stay on another one (P1).
+        $primary = $plan->getInbound();
+        if (!$isNew && null !== $primary && ($plan->primaryInboundChanged() || $plan->additionalInboundsChanged())) {
+            $drift = $this->inboundDrift->ofPlan($plan);
+            foreach (PlanInboundWarnings::drift($plan->getTitle(), $primary->getTitle(), $drift, $this->inboundDrift->breakdown($drift)) as $warning) {
+                $this->flash('warning', $warning['key'], $warning['parameters']);
+            }
+        }
+    }
+
+    /**
+     * The primary inbound; on the edit page of a plan whose existing services are on another inbound, with the help
+     * text that saving does not move them (docs/design/plan-inbound-change.md 3.3 (b)).
+     */
+    private function inboundField(string $pageName): AssociationField
+    {
+        $field = AssociationField::new('inbound');
+        $plan = Crud::PAGE_EDIT === $pageName ? $this->getContext()?->getEntity()->getInstance() : null;
+        if (!$plan instanceof Plan || null === $plan->getId()) {
+            return $field;
+        }
+        $drift = $this->inboundDrift->ofPlan($plan);
+        if ($drift->total <= 0) {
+            return $field;
+        }
+        $text = $this->translator->trans('plan_inbound_drift.form', ['%count%' => $drift->total, '%breakdown%' => $this->inboundDrift->breakdown($drift)], 'admin');
+
+        // EasyAdmin renders help as HTML: the text (inbound titles are admin-entered) is escaped here.
+        return $field->setHelp(sprintf('<span data-inbound-drift="%d">%s</span>', $drift->total, AdminFormat::e($text)));
+    }
+
+    /**
+     * The list's "N on old inbound" badge, only while some plan has services on another inbound than the one it sells
+     * (one grouped query for the whole page: PlanInboundDrift::totalOf()).
+     *
+     * @return list<TextField>
+     */
+    private function driftFields(string $pageName): array
+    {
+        if (Crud::PAGE_INDEX !== $pageName || !$this->inboundDrift->anyPlan()) {
+            return [];
+        }
+        $t = fn (string $key, array $parameters = []): string => AdminFormat::e($this->translator->trans($key, $parameters, 'admin'));
+
+        // Bound to title: EasyAdmin formats only fields bound to a readable property.
+        return [TextField::new('title', 'field.inbound_notice')
+            ->onlyOnIndex()
+            ->setSortable(false)
+            ->setTemplatePath(AdminFormat::TEMPLATE)
+            ->formatValue(function (mixed $v, ?Plan $plan) use ($t): string {
+                $count = null === $plan?->getId() ? 0 : $this->inboundDrift->totalOf((int) $plan->getId());
+
+                return 0 === $count ? '' : sprintf('<span class="badge badge-warning" data-inbound-drift="%d" title="%s">%s</span>', $count, $t('plan_inbound_drift.badge_title'), $t('plan_inbound_drift.badge', ['%count%' => $count]));
+            })];
     }
 
     /**

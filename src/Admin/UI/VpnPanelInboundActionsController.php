@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Admin\UI;
 
+use App\Admin\UI\Support\AdminFormat;
 use App\Entity\VpnInbound;
 use App\Entity\VpnPanel;
 use App\Entity\VpnService;
@@ -20,11 +21,13 @@ use App\Provisioning\Domain\Dto\CreateVpnServiceRequest;
 use App\Provisioning\Domain\VpnServiceStatus;
 use App\Provisioning\Infrastructure\VpnPanelDriverRegistry;
 use App\Shared\Infrastructure\SafeErrorLog;
+use App\Shop\Application\Catalog\PlanInboundDrift;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\RedirectResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\Routing\Attribute\Route;
+use Symfony\Contracts\Translation\TranslatorInterface;
 
 #[Route('/admin')]
 final class VpnPanelInboundActionsController extends AbstractController
@@ -260,9 +263,20 @@ final class VpnPanelInboundActionsController extends AbstractController
     }
 
     #[Route('/vpn-service/{id}/regenerate-config', name: 'admin_vpn_service_regenerate_config', methods: ['GET'])]
-    public function regenerateServiceConfig(VpnService $service, ServiceConfigRegenerator $regenerator): RedirectResponse
+    public function regenerateServiceConfig(VpnService $service, ServiceConfigRegenerator $regenerator, PlanInboundDrift $inboundDrift, TranslatorInterface $translator): RedirectResponse
     {
         $result = $regenerator->regenerate($service, 'admin_service_regenerate_config');
+        // The service is not on the inbound its plan now sells: the message says why the links are still that inbound's
+        // (docs/design/plan-inbound-change.md 3.3 (e)). Otherwise the messages are exactly as before.
+        $notice = $result->succeeded() ? $inboundDrift->ofService($service) : null;
+        if (null !== $notice) {
+            $parameters = ['%id%' => $service->getId() ?? 0, '%count%' => $result->linkCount, '%previous%' => $result->previousLinkCount ?? $result->linkCount];
+            $key = ServiceConfigRegeneration::REFRESHED_FROM_PANEL === $result->outcome ? 'flash.service.refreshed_from_panel' : 'flash.service.regenerated';
+            // EasyAdmin renders flash messages as HTML: escaped (inbound titles are admin-entered).
+            $this->addFlash('success', AdminFormat::e($translator->trans($key, $parameters, 'admin')).' '.AdminFormat::e($inboundDrift->serviceText('plan_inbound_drift.regenerate', $notice)));
+
+            return $this->redirectToServices();
+        }
         match ($result->outcome) {
             ServiceConfigRegeneration::NO_IDENTITY => $this->flash('danger', 'flash.service.no_uuid'),
             ServiceConfigRegeneration::REFRESHED_FROM_PANEL => $this->flash('success', 'flash.service.refreshed_from_panel', ['%id%' => $service->getId() ?? 0, '%count%' => $result->linkCount, '%previous%' => $result->previousLinkCount ?? $result->linkCount]),

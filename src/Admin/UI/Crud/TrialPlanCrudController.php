@@ -6,7 +6,10 @@ namespace App\Admin\UI\Crud;
 
 use App\Admin\UI\TranslatedFlashes;
 use App\Entity\TrialPlan;
+use App\Entity\VpnInbound;
 use App\Security\AdminAuditLogger;
+use App\Shop\Application\Catalog\PlanInboundDrift;
+use App\Shop\Application\Catalog\PlanInboundWarnings;
 use App\Shop\Application\Catalog\TrialPlanAdminService;
 use App\Shop\Application\Catalog\TrialPlanDeletion;
 use Doctrine\ORM\EntityManagerInterface;
@@ -27,6 +30,7 @@ final class TrialPlanCrudController extends AbstractCrudController
     public function __construct(
         private readonly TrialPlanAdminService $trialPlans,
         private readonly AdminAuditLogger $auditLogger,
+        private readonly PlanInboundDrift $inboundDrift,
     ) {
     }
 
@@ -38,7 +42,31 @@ final class TrialPlanCrudController extends AbstractCrudController
 
     public function updateEntity(EntityManagerInterface $entityManager, object $entityInstance): void
     {
-        $entityInstance instanceof TrialPlan ? $this->trialPlans->save($entityInstance) : parent::updateEntity($entityManager, $entityInstance);
+        if (!$entityInstance instanceof TrialPlan) {
+            parent::updateEntity($entityManager, $entityInstance);
+
+            return;
+        }
+        $before = $entityManager->getUnitOfWork()->getOriginalEntityData($entityInstance)['inbound'] ?? null;
+        $this->trialPlans->save($entityInstance);
+        $this->flashDrift($entityInstance, $before instanceof VpnInbound ? $before->getId() : null);
+    }
+
+    /**
+     * The trial's inbound changed: its existing services stay on the old one (design plan-inbound-change 3.3 (a),
+     * trial wording). They belong to the trial's hidden backing plan; new trials get the trial plan's inbound.
+     */
+    private function flashDrift(TrialPlan $trial, ?int $inboundBefore): void
+    {
+        $inbound = $trial->getInbound();
+        $backing = $trial->getBackingPlan();
+        if (null === $inbound || null === $backing || $inbound->getId() === $inboundBefore) {
+            return;
+        }
+        $drift = $this->inboundDrift->ofPlan($backing, $inbound);
+        foreach (PlanInboundWarnings::drift($trial->getTitle(), $inbound->getTitle(), $drift, $this->inboundDrift->breakdown($drift), 'plan_inbound_drift.trial_plan_saved') as $warning) {
+            $this->flash('warning', $warning['key'], $warning['parameters']);
+        }
     }
 
     /**

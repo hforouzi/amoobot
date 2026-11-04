@@ -26,7 +26,11 @@ trait LinkChangeOutput
         return (bool) $input->getOption('apply');
     }
 
-    private function printChange(SymfonyStyle $io, int $serviceId, ServiceLinkChange $change, bool $apply): void
+    /**
+     * @param string|null $inboundNotice why the links are still the old inbound's: the service is not on the inbound
+     *                                   its plan now sells (docs/design/plan-inbound-change.md 3.3 (e))
+     */
+    private function printChange(SymfonyStyle $io, int $serviceId, ServiceLinkChange $change, bool $apply, ?string $inboundNotice = null): void
     {
         $verb = match ($change->outcome) {
             ServiceLinkChange::UPDATED => $apply ? 'updated' : 'would update',
@@ -39,6 +43,9 @@ trait LinkChangeOutput
         $io->writeln(sprintf('  service #%d [%s] %s: %d -> %d links%s', $serviceId, $change->source, $verb, count($change->before), count($change->outcome === ServiceLinkChange::UPDATED || $change->outcome === ServiceLinkChange::UNCHANGED ? $change->after : $change->before), null !== $change->error ? ' ('.$change->error.')' : ''));
         if ($change->changedMeanwhile && ServiceLinkChange::CHANGED !== $change->outcome) {
             $io->writeln('      ! credentials changed meanwhile (a link reset?): the links read first were discarded and read again');
+        }
+        if (null !== $inboundNotice && in_array($change->outcome, [ServiceLinkChange::UPDATED, ServiceLinkChange::UNCHANGED], true)) {
+            $io->writeln('      ! '.$inboundNotice);
         }
         if (ServiceLinkChange::UPDATED !== $change->outcome) {
             return;

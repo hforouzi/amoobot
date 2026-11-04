@@ -10,6 +10,11 @@
           data-submit="{{ isNew ? path('miniapp_admin_trial_plan_create') : path('miniapp_admin_trial_plan_update', {id: trial.id}) }}"
           data-check-url="{{ path('miniapp_admin_trial_plan_check') }}" data-dirty-guard="{{ 'admin.form.leave_unsaved'|trans }}"{% if not isNew %} data-reload{% endif %}>
         {% if not isNew %}<input type="hidden" name="id" value="{{ trial.id }}">{% endif %}
+        {# Filled by the live check: another inbound leaves the trial's existing services where they are (plan-inbound-change 3.3). #}
+        <section class="card warnings" data-warnings hidden>
+            <h2>⚠ {{ 'admin.plan.check_warnings'|trans }}</h2>
+            <ul data-warning-list></ul>
+        </section>
         {{ f.section('basics', true) }}{{ 'admin.plan.section.basics'|trans }}</summary>
             {{ f.text('title', values.title ?? '', true, null, 'maxlength="255"') }}
             {{ f.textarea('description', values.description ?? null, null) }}

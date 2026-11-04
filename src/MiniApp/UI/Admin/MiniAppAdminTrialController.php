@@ -16,6 +16,8 @@ use App\MiniApp\Security\MiniAppUser;
 use App\MiniApp\UI\MiniAppFragments;
 use App\MiniApp\UI\MiniAppLocale;
 use App\Security\AdminAuditLogger;
+use App\Shop\Application\Catalog\PlanInboundDrift;
+use App\Shop\Application\Catalog\PlanInboundWarnings;
 use App\Shop\Application\Catalog\TrialPlanAdminService;
 use App\Shop\Application\Catalog\TrialPlanDeletion;
 use Doctrine\ORM\EntityManagerInterface;
@@ -48,6 +50,7 @@ final class MiniAppAdminTrialController extends AbstractController
         private readonly AdminAuditLogger $auditLogger,
         private readonly MiniAppFragments $fragments,
         private readonly TranslatorInterface $translator,
+        private readonly PlanInboundDrift $inboundDrift,
     ) {
     }
 
@@ -120,13 +123,33 @@ final class MiniAppAdminTrialController extends AbstractController
         $body = AdminForms::body($request);
         $id = (int) ($body['id'] ?? 0);
         $trial = $id > 0 ? $this->trialPlan($id) : new TrialPlan();
+        $storedInbound = $trial->getInbound()?->getId();
 
         return $this->editor->check(
             $request, $id > 0 ? $trial : null,
             fn (): array => $this->input->toTrialPlan($trial, $body),
             fn (): array => $this->trialPlans->violations($trial),
-            static fn (): array => [],
+            fn (): array => $this->inboundChangeWarnings($request, $trial, $storedInbound),
         );
+    }
+
+    /**
+     * Before saving another inbound: the trial's existing services (on its hidden backing plan) stay where they are,
+     * design plan-inbound-change 3.3 (a) in the trial wording. Nothing for a new trial plan or an unchanged inbound.
+     *
+     * @return list<string>
+     */
+    private function inboundChangeWarnings(Request $request, TrialPlan $trial, ?int $storedInbound): array
+    {
+        $submitted = $trial->getInbound();
+        $backing = $trial->getBackingPlan();
+        if (null === $trial->getId() || null === $submitted || null === $backing || $submitted->getId() === $storedInbound) {
+            return [];
+        }
+        $locale = MiniAppLocale::fromRequest($request);
+        $drift = $this->inboundDrift->ofPlan($backing, $submitted);
+
+        return array_map(fn (array $w): string => $this->translator->trans($w['key'], $w['parameters'], 'admin', $locale), PlanInboundWarnings::drift($trial->getTitle(), $submitted->getTitle(), $drift, $this->inboundDrift->breakdown($drift, $locale), 'plan_inbound_drift.trial_plan_saved'));
     }
 
     #[Route('/app/api/admin/trial-plans/{id}/activate', name: 'miniapp_admin_trial_plan_activate', requirements: ['id' => '\d+'], defaults: ['_miniapp_section' => 'admin.plans'], methods: ['POST'])]

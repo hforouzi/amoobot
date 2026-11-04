@@ -14,7 +14,7 @@
           data-check-url="{{ path('miniapp_admin_plan_check') }}" data-dirty-guard="{{ 'admin.form.leave_unsaved'|trans }}"{% if not isNew %} data-reload{% endif %}>
         {% if not isNew %}<input type="hidden" name="id" value="{{ plan.id }}">{% endif %}
         <section class="card warnings{{ warnings is empty ? '' : ' show' }}" data-warnings{% if warnings is empty %} hidden{% endif %}>
-            <h2>⚠ {{ 'admin.plan.check_price'|trans }}</h2>
+            <h2>⚠ {{ 'admin.plan.check_warnings'|trans }}</h2>
             <ul data-warning-list>{% for w in warnings %}<li>{{ w }}</li>{% endfor %}</ul>
         </section>
 

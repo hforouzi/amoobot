@@ -8,6 +8,7 @@ use App\Entity\VpnService;
 use App\Provisioning\Application\ServiceLinkChange;
 use App\Provisioning\Application\ServiceLinkRegenerator;
 use App\Provisioning\Infrastructure\Sanaei3xui\Sanaei3xuiRemoteIdParser;
+use App\Shop\Application\Catalog\PlanInboundDrift;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
@@ -26,6 +27,7 @@ final class ServiceRegenerateConfigCommand extends Command
         private readonly EntityManagerInterface $entityManager,
         private readonly Sanaei3xuiRemoteIdParser $remoteIdParser,
         private readonly ServiceLinkRegenerator $linkRegenerator,
+        private readonly PlanInboundDrift $inboundDrift,
     ) {
         parent::__construct();
     }
@@ -90,7 +92,8 @@ final class ServiceRegenerateConfigCommand extends Command
         }
 
         $change = $this->linkRegenerator->run($service, 'console_service_regenerate_config', $apply);
-        $this->printChange($io, $serviceId, $change, $apply);
+        $notice = $this->inboundDrift->ofService($service);
+        $this->printChange($io, $serviceId, $change, $apply, null === $notice ? null : $this->inboundDrift->serviceText('plan_inbound_drift.regenerate', $notice, 'en'));
 
         if (in_array($change->outcome, [ServiceLinkChange::FAILED, ServiceLinkChange::KEPT, ServiceLinkChange::SKIPPED, ServiceLinkChange::CHANGED], true)) {
             $io->error(sprintf('Service #%d: links not changed (%s).', $serviceId, $change->error ?? $change->outcome));

@@ -15,6 +15,8 @@ use App\MiniApp\UI\MiniAppFragments;
 use App\MiniApp\UI\MiniAppLocale;
 use App\Security\AdminAuditLogger;
 use App\Shop\Application\Catalog\PlanAdminService;
+use App\Shop\Application\Catalog\PlanInboundDrift;
+use App\Shop\Application\Catalog\PlanInboundWarnings;
 use App\Shop\Application\Catalog\PlanInUse;
 use App\Shop\Application\Catalog\TrialBackingPlans;
 use App\Shop\Application\PlanPriceSanityChecker;
@@ -55,6 +57,7 @@ final class MiniAppAdminPlanController extends AbstractController
         private readonly MiniAppFragments $fragments,
         private readonly TranslatorInterface $translator,
         private readonly TrialBackingPlans $trialBacking,
+        private readonly PlanInboundDrift $inboundDrift,
     ) {
     }
 
@@ -172,12 +175,13 @@ final class MiniAppAdminPlanController extends AbstractController
         if (null !== $refused = $this->trialBackingRefusal($request, $plan)) {
             return $refused;
         }
+        $storedInbound = $plan->getInbound()?->getId();
 
         return $this->editor->check(
             $request, $id > 0 ? $plan : null,
             fn (): array => $this->input->toPlan($plan, $body),
             fn (): array => $this->plans->violations($plan),
-            fn (): array => $this->warnings($request, $plan),
+            fn (): array => [...$this->warnings($request, $plan), ...$this->inboundChangeWarnings($request, $plan, $storedInbound)],
         );
     }
 
@@ -276,7 +280,44 @@ final class MiniAppAdminPlanController extends AbstractController
             return null;
         }
 
-        return implode("\n", [...$lines, ...$this->warnings($request, $plan)]);
+        $inboundBefore = $before['inbound'] ?? null;
+
+        return implode("\n", [...$lines, ...$this->warnings($request, $plan), ...$this->inboundChangeWarnings($request, $plan, is_int($inboundBefore) ? $inboundBefore : null)]);
+    }
+
+    /**
+     * Before saving another inbound: the plan's existing services that stay where they are (saving never moves them),
+     * as warning kind existing_services_other_inbound, docs/design/plan-inbound-change.md 3.3 (a). Nothing for a new
+     * plan, an unchanged inbound or when every service is on the submitted one.
+     *
+     * @return list<string>
+     */
+    private function inboundChangeWarnings(Request $request, Plan $plan, ?int $storedInbound): array
+    {
+        $submitted = $plan->getInbound();
+        if (null === $plan->getId() || null === $submitted || $submitted->getId() === $storedInbound) {
+            return [];
+        }
+        $locale = MiniAppLocale::fromRequest($request);
+        $drift = $this->inboundDrift->ofPlan($plan, $submitted);
+
+        return array_map(fn (array $w): string => $this->translator->trans($w['key'], $w['parameters'], 'admin', $locale), PlanInboundWarnings::drift($plan->getTitle(), $submitted->getTitle(), $drift, $this->inboundDrift->breakdown($drift, $locale)));
+    }
+
+    /**
+     * On the edit page: the stored plan's services that are not on its inbound (3.3 (b)).
+     *
+     * @return list<string>
+     */
+    private function driftWarnings(Request $request, Plan $plan): array
+    {
+        $drift = $this->inboundDrift->ofPlan($plan);
+        if ($drift->total <= 0) {
+            return [];
+        }
+        $locale = MiniAppLocale::fromRequest($request);
+
+        return [$this->translator->trans('plan_inbound_drift.form', ['%count%' => $drift->total, '%breakdown%' => $this->inboundDrift->breakdown($drift, $locale)], 'admin', $locale)];
     }
 
     /**
@@ -307,7 +348,7 @@ final class MiniAppAdminPlanController extends AbstractController
             'plan' => $plan,
             'values' => CatalogInput::snapshot($plan, null === $plan->getId() ? array_diff_key(CatalogInput::PLAN_FIELDS, ['title' => 1, 'durationDays' => 1, 'price' => 1]) : CatalogInput::PLAN_FIELDS),
             'inbounds' => AdminForms::inboundChoices($inbounds),
-            'warnings' => null === $plan->getId() ? [] : $this->warnings($request, $plan),
+            'warnings' => null === $plan->getId() ? [] : [...$this->warnings($request, $plan), ...$this->driftWarnings($request, $plan)],
             'orderCount' => $this->plans->orderCount($plan),
         ]);
     }
