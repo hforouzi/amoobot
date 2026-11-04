@@ -394,7 +394,7 @@ by customers. They never show a customer, a reseller or a link.
 
 **Moving an existing service by hand (modern 3x-ui panels only)**
 
-Until the bot can move services itself, you can move one service like this:
+You can also move one service by hand, like this:
 
 1. In 3x-ui, open the client. Its email is on the service page in the admin panel.
 2. **Add** the new inbound to the client first, then **remove** the old inbound. In that order, the client is never
@@ -411,20 +411,68 @@ Limits of the manual move:
 - Not possible on a legacy panel, or to an inbound on another panel (that would be a new client: new subscription,
   usage counted from zero).
 
-A built-in "Apply to existing services" is planned; it is not available yet. Design:
-[plan-inbound-change.md](../design/plan-inbound-change.md).
+**Moving existing services with the command (phase 1, command line only)**
 
-**Settings for moving services (not active yet)**
+`app:plan:apply-inbounds` moves a plan's existing services to the plan's current inbound, on modern 3x-ui panels.
+There is no button for it yet, and nothing runs it on a timer: you run it on the server.
 
-`Settings → Plans → Moving existing services to a new inbound` (SETTINGS_MANAGE) shows:
+What phase 1 does, per service (one at a time, in batches):
 
-- `plans.inbound_move_enabled`, off;
-- `plans.inbound_move_detach_grace_hours` (24, 0–168): how long a moved service would keep the old inbound;
-- `plans.inbound_move_batch_size` (20, 1–100): services per pass;
-- `plans.inbound_move_pause_seconds` (2, 0–60): the pause between passes.
+1. It adds the plan's inbound to the service's client on the panel (the same client: same UUID, email, subId, expiry,
+   traffic limit and usage), and reads the client back to confirm.
+2. It switches the bot's record of the service to the new inbound (its page, the bot and the Mini App name the new
+   one).
+3. It refreshes the service's links from the panel.
 
-**These do nothing in this release.** They are stored and validated, but nothing reads them, and turning the switch on
-moves no service. The move itself will reuse the retry settings above (`plans.attach_*`).
+What phase 1 does **not** do:
+
+- **The old inbound stays attached to every moved client.** Customers keep working on both until a later release
+  removes the old one after a grace period. Do not disable or delete the old inbound on the panel yet.
+- No message to customers. A customer sees the new inbound's configs after updating the subscription in their app
+  (the subscription URL does not change). Single configs copied before keep working, on the old inbound.
+- No undo, cancel or pause button, no admin page, no timer.
+- Services on a legacy panel, on another panel or on a test (dummy) panel are listed as skipped, with the reason.
+  Deleted services are never moved. Adding or removing a plan's additional inbounds on existing services is not part
+  of it (a moved service keeps its additional inbounds, and the old inbound becomes one of them when the plan still
+  lists it).
+
+How to use it:
+
+1. **Dry run first** (it changes nothing, and works with the switch off):
+   `php bin/console app:plan:apply-inbounds <planId>`. It lists each service with its current inbound, the target, and
+   "move" or "skip" with the reason. It only reads the panel. `--json` gives the same as JSON.
+2. Turn on `Settings → Plans → Moving existing services` (`plans.inbound_move_enabled`); `--apply` refuses without it.
+3. **Test ONE service first**: `php bin/console app:plan:apply-inbounds <planId> --service=<serviceId> --apply`. Check
+   it on the panel (on both inbounds, same UUID and usage), update the subscription in a test phone, connect.
+4. Then the rest: `php bin/console app:plan:apply-inbounds <planId> --apply`. By default only active services;
+   `--include-suspended`, `--include-expired`, `--include-trials` add those. `--from-inbound=<id>`, `--limit=<n>` and
+   `--after-id=<serviceId>` narrow it; `--batch-size` and `--pause` override the settings below for this run.
+5. Read the summary. If some failed (exit code 1), they keep their old inbound and links; they are retried with the
+   attach retry settings (`plans.attach_max_attempts`, `plans.attach_retry_delay_minutes`) when you run
+   `php bin/console app:plan:apply-inbounds <planId> --resume=<runId>` later. An admin alert is sent when a service's
+   attempts are used up, and once when the run finishes with failures.
+6. If the panel does not answer 5 times in a row, the run **pauses itself** (one admin alert). Nothing changed for the
+   services not moved yet. When the panel is back: `--resume=<runId>`.
+
+Each plan has at most one open run; a second `--apply` is refused and names the open run (continue it with
+`--resume`). The run's target and scope are fixed when it is created. A service sold while a run is open gets the
+plan's current inbound and is not part of the run. Exit codes: 0 done, 1 some failed or the run paused, 2 could not
+start (a clear message says why). The output and the logs show ids and titles only: never a customer, a link, a UUID
+or a token.
+
+Skip reasons you may see: other panel, panel not in modern mode, not a real panel, suspended / expired / trial (not
+included), in another run, moved too often (3 moves within 24 hours), protocol mix (e.g. Shadowsocks inbounds with
+different methods: move it by hand), and an inactive target inbound refuses the whole run.
+
+The settings, under `Settings → Plans → Moving existing services to a new inbound` (SETTINGS_MANAGE):
+
+- `plans.inbound_move_enabled` (off): needed for `--apply` and `--resume`;
+- `plans.inbound_move_batch_size` (20, 1–100): services per batch;
+- `plans.inbound_move_pause_seconds` (2, 0–60): the pause between batches;
+- `plans.inbound_move_detach_grace_hours` (24, 0–168): not used yet (phase 1 never removes the old inbound).
+
+The command has been tested against a simulated panel only, not against a real 3x-ui panel: try one service first.
+Design: [plan-inbound-change.md](../design/plan-inbound-change.md).
 
 ## Branding (customer pages)
 

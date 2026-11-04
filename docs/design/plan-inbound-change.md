@@ -1,8 +1,15 @@
 # A plan's inbound changes: reaching existing services — design
 
-Status: **design for review**; **P1, P2, P3 as built** (section 9.1): the notices, the panel's detach primitive (not
-called), and the schema and switch (nothing reads them). No service is moved yet: the runner (P4) is not built, and
-the switch has no effect. Persian summary:
+Status: **design for review**; **P1, P2, P3, P4 as built** (section 9.1). Built so far:
+
+- the notices;
+- the panel's detach primitive (not called yet);
+- the schema and the switch;
+- **phase 1 of the move, from the command line only** (`app:plan:apply-inbounds`): attach B, switch the service,
+  refresh its links. The old inbound A stays attached.
+
+Not built yet (P5-P10): detach, undo, the timer, the pages, the display guard and the customer message. The move has
+been tested against the fake 3x-ui only, not against a real panel. Persian summary:
 [docs/fa/design/plan-inbound-change.md](../fa/design/plan-inbound-change.md). This document continues
 [multi-inbound-plans.md](multi-inbound-plans.md) section 4 ("Changing inbounds after sales") and phases M3/M4, which
 were planned there and never built. Where they disagree, this document overrides section 4 and M3/M4. Everything
@@ -569,7 +576,7 @@ and M2e suites):
     the move notices and finishes without error.
 12. Panel down (stop the panel) during a run of several services: the run pauses after 5 failures, one alert, nothing
     changed for customers; start the panel, resume: finishes.
-13. Note the answers for U1–U6 below and update this document.
+13. Note the answers for U1–U8 below and update this document.
 
 [unverified] list:
 
@@ -579,7 +586,11 @@ and M2e suites):
 - U4: `del?keepTraffic=1` then `add` of the same email re-links the kept counters (only relevant if (b) is ever
   chosen);
 - U5: attach and detach work on a disabled (suspended) client and a disabled inbound;
-- U6: legacy panels refuse a duplicate email across inbounds (4.5).
+- U6: legacy panels refuse a duplicate email across inbounds (4.5);
+- U7 (P4): `POST clients/{email}/attach` keeps the client's UUID, subId, expiry, limits and traffic counters. The fake
+  and phase 1 assume so (checklist step 4);
+- U8 (P4): after the attach, `clients/subLinks/{subId}` lists the configs of both A and B, and the subscription URL is
+  unchanged. Phase 1 stores what the panel gives (checklist step 5).
 
 ## 9. Part 8: PRs (each small, reviewable, revertible)
 
@@ -601,7 +612,7 @@ Order: P1 → P2 → P3 → P4 → P5 → P6 → P7 → P8 → P9 → (P10, P11)
 no customer-visible behaviour while the switch is off. Each PR follows the repository's process: phpunit and phpstan
 green; a fresh independent review; the pushed head tested from a clean checkout (M2c process rule).
 
-### 9.1 P1, P2, P3 as built
+### 9.1 P1, P2, P3, P4 as built
 
 **P1** (visibility, #94): `PlanInboundDrift` and the texts of 3.3 on every surface of 3.2; the admin guide (en/fa)
 "Changing a plan's inbound" with the manual move. No write, no panel call.
@@ -660,6 +671,76 @@ inbound; it sends only the ids still listed; it reports done only when a read af
   - the display guard (P5);
   - the pages (P7, P9);
   - the customer-notice claim of 6.3 (P10).
+
+**P4** (runner, command line only, phase 1). Admin guide (en/fa) "Changing a plan's inbound": dry run, one service
+first, what phase 1 does and does not do.
+
+- `app:plan:apply-inbounds <planId>` (`src/Command/PlanApplyInboundsCommand.php`):
+  - a dry run unless `--apply`: per service its inbound, the target, "move" or "skip" with the reason (table or
+    `--json`). It makes only budgeted GETs (one client read per service, `inbounds/options` once per panel when 4.4
+    needs it) and stops reading after 5 failed reads in a row. Nothing is written, and it works with the switch off;
+  - `--apply` needs `plans.inbound_move_enabled` (otherwise exit 2 with the reason). `--service`, `--from-inbound`,
+    `--include-suspended`, `--include-expired`, `--include-trials`, `--limit` and `--after-id` make the scope (deleted
+    services never); `--batch-size` and `--pause` override the settings for this pass;
+  - `--resume=<runId>` continues an open run of the plan (paused, interrupted, or with failed services due again). It
+    takes no scope option: the target and the scope are frozen in the run row (`target_inbound_id`, `scope` JSON);
+  - one open run per plan: a second `--apply` is refused and names the open run (the P3 unique key turns a race into
+    the same refusal);
+  - exit codes 0 / 1 (some failed, or the run paused) / 2 (could not start). The output holds ids and titles only.
+- `InboundMovePlanner`:
+  - the scope and the skip reasons of 6.2 and 4.4: other panel, not modern, not a real panel, remote id not
+    structured, in another unfinished run, moved 3 times within 24 h, protocol mix, already on the target;
+  - run creation: `keep_old = 1` forced, `grace_hours` stored but unused, kind=primary only; an inactive target
+    refuses the run. It writes the audit entry `plan.inbounds_apply_started` (counts only).
+- `InboundMoveRunner::process()`: the states planned → attaching → switched, plus failed and skipped (`done` belongs to
+  phase 2, P6). Per service, 4.3 steps 1-4:
+  1. Claim: a READ COMMITTED transaction locks `vpn_service` → `vpn_service_inbound` → `service_inbound_move` by
+     primary key, re-checks every condition under the locks, and sets `claimed_at` and `attempts + 1`. The order type
+     (trial) is a plain read: no order, payment, wallet, user or reseller row is ever locked or written.
+  2. Panel step, with no transaction open: `InboundMoveDriverInterface::attachForMove()` (new, in
+     `Sanaei3xuiModernDriver`). It reads the client (GET), refuses with nothing sent when the client is on neither A
+     nor B, attaches B only if it is missing, and reads again (GET) to confirm. With the link refresh that is at most 4
+     calls per service, inside `PanelCallBudget` 30 s, with `recordHealth=false`.
+  3. Write: a transaction with the same lock order and the identity check (inbound, UUID, subId, remote id). It:
+     - sets `inbound_id = B`;
+     - rewrites only the `inbound=` / `remoteInbound=` parts of the remote id
+       (`Sanaei3xuiRemoteIdParser::withInbound()`);
+     - sets `inbound_changed_at`;
+     - deletes B's additional row;
+     - adds an additional row for A when the plan still lists A (attached when the read listed it, otherwise failed and
+       due).
+
+     An identity change writes nothing: the move goes back to planned and is picked again once in the same pass.
+  4. `PanelLinkSnapshot::refresh()`, with its rules (identity check; an empty answer keeps the links). A switched
+     service whose links were not refreshed is refreshed on the next pass, and the run stays open meanwhile.
+- Retries and alerts:
+  - failures back off with the `plans.attach_*` settings; when the attempts are used up the move is given up, with
+    one `moveGaveUp` alert per service;
+  - a claim older than `ServiceInboundAttacher::STALE_CLAIM` is taken over;
+  - 5 failed panel reads in a row pause the run, with one `moveRunEnded` alert; only `--resume` restarts it;
+  - a run is done when nothing in it can still change. Then it writes the audit entry `plan.inbounds_apply_finished`
+    (counts) and, if some failed, sends one alert;
+  - all alerts go through `InboundAttachAlerts`.
+- Errors that are shown, logged, stored or alerted pass through `SafeText`: `ServiceErrorText` / `SecretRedactor`, the
+  client email masked, and the panel's token and password removed (read through `PanelCredentials`).
+- Found and fixed while testing: an exception in the panel step that was not a panel answer left the move "attaching"
+  and stopped the pass. It is now a masked failure with back-off.
+- Left as is (outside P4): the existing per-request log `sanaei_modern_request` of `ModernPanelHttpClient` names the
+  request path. That path holds the client email; its Telegram id is masked by `RedactingLogger`.
+- Tests in `tests/Shop/InboundMove/`, on the fake 3x-ui (run locally on MariaDB 11.4.5; CI uses 10.11):
+  - T3, T4 (phase 1), T6 and T11: `InboundMovePhaseOneTest`;
+  - T5, with a sale during an open run: `InboundMoveGuardsTest`;
+  - T7: `InboundMoveRetryTest`;
+  - T9: `InboundMoveMultiInboundTest`;
+  - redaction with `zend.exception_ignore_args` 0 and 1: `InboundMoveRedactionTest`;
+  - sales, settlement, regenerate and plan save unchanged with the switch on: `InboundMoveSwitchHasNoEffectTest`;
+  - the driver step: `tests/Provisioning/Sanaei/ModernInboundMoveAttachDriverTest.php`;
+  - two processes, through `tests/Support/bin/inbound-move.php` (`Fake3xuiPanel::$onRequest` stops a helper at an
+    exact request, outside the fake's lock):
+    - P-1 … P-5, and P-6 for the phase-1 steps: `InboundMoveParallelTest`;
+    - P-7, in the `real-time` group: `InboundMoveLockHoldTest`;
+    - P-6 for the detach steps belongs to P6, and P-8 to P8.
+- Not tested: a real 3x-ui panel. U7 and U8 were added to 8.3.
 
 ## 10. Open questions for the owner
 

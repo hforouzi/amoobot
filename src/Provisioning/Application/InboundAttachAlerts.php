@@ -28,6 +28,11 @@ use Psr\Log\LoggerInterface;
  * overlapping runs never alert twice; nothing is claimed while no admin chat exists (the next run tries again). The text
  * names the service, user, plan and inbounds by local id and title and quotes the stored error, which is safe already
  * (ServiceErrorText: no UUID, subscription id, link or panel address), with the client email masked too.
+ *
+ * The inbound move (docs/design/plan-inbound-change.md 5.4, P4) sends its alerts only through this class, to the same
+ * admins, with ids and titles only (no user, owner or link: D5):
+ * - moveRunEnded(): once per run, by the process whose conditional UPDATE paused it or finished it with failures;
+ * - moveGaveUp(): once per service whose move attempts are used up, claimed on service_inbound_move.alert_state.
  */
 class InboundAttachAlerts
 {
