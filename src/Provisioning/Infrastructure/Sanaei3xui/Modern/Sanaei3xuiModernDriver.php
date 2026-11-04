@@ -12,6 +12,7 @@ use App\Provisioning\Domain\Dto\CreatedVpnService;
 use App\Provisioning\Domain\Dto\CreateVpnServiceRequest;
 use App\Provisioning\Domain\Dto\InboundAttachment;
 use App\Provisioning\Domain\Dto\InboundDetachResult;
+use App\Provisioning\Domain\Dto\InboundMoveAttachResult;
 use App\Provisioning\Domain\Dto\RenewVpnServiceRequest;
 use App\Provisioning\Domain\Dto\VpnUsage;
 use App\Provisioning\Domain\ClientOwnerComment;
@@ -24,6 +25,7 @@ use App\Provisioning\Domain\Dto\RotatedCredentials;
 use App\Provisioning\Domain\ExistingClientAwareDriverInterface;
 use App\Provisioning\Domain\InboundAttachDriverInterface;
 use App\Provisioning\Domain\InboundDetachDriverInterface;
+use App\Provisioning\Domain\InboundMoveDriverInterface;
 use App\Provisioning\Domain\PanelLinkSourceDriverInterface;
 use App\Provisioning\Domain\ServiceActivationDriverInterface;
 use App\Provisioning\Domain\TrafficLimitDriverInterface;
@@ -55,7 +57,7 @@ use Symfony\Component\Uid\Uuid;
  *   thrown: the primary alone makes a working service. Without additional inbounds the requests are exactly the
  *   single-inbound ones.
  */
-final class Sanaei3xuiModernDriver implements VpnPanelDriverInterface, ExistingClientAwareDriverInterface, TrafficLimitDriverInterface, ServiceActivationDriverInterface, BatchUsageDriverInterface, ClientOwnerDriverInterface, CredentialRotationDriverInterface, PanelLinkSourceDriverInterface, InboundAttachDriverInterface, InboundDetachDriverInterface
+final class Sanaei3xuiModernDriver implements VpnPanelDriverInterface, ExistingClientAwareDriverInterface, TrafficLimitDriverInterface, ServiceActivationDriverInterface, BatchUsageDriverInterface, ClientOwnerDriverInterface, CredentialRotationDriverInterface, PanelLinkSourceDriverInterface, InboundAttachDriverInterface, InboundDetachDriverInterface, InboundMoveDriverInterface
 {
     public const BYTES_PER_GB = 1073741824;
     /**
@@ -308,6 +310,112 @@ final class Sanaei3xuiModernDriver implements VpnPanelDriverInterface, ExistingC
         }
 
         return InboundDetachResult::done($toDetach, $already, $after['inboundIds']);
+    }
+
+    /**
+     * docs/design/plan-inbound-change.md 4.3 step 2 (P4): put the client on the target B before the service is switched.
+     * In this order:
+     * 1. without any request: refuse a panel that is not modern, a remote id that cannot be read, has no numeric inbound
+     *    or names another panel, and a target of another panel or with an invalid remote id;
+     * 2. GET the client. Unreadable, missing, without an inbound list or a UUID, or another client (UUID): nothing sent;
+     * 3. B listed: done, nothing sent. On neither A (the inbound the remote id records) nor B: failed, nothing sent;
+     * 4. one attach call with B only, then a GET: done only when that read lists B. A lost or garbled answer is read
+     *    back the same way; a refused call (nothing applied) is failed without a read.
+     */
+    public function attachForMove(string $remoteId, VpnInbound $target, ?VpnPanel $panel = null, bool $recordHealth = true): InboundMoveAttachResult
+    {
+        if (!$this->supports($panel)) {
+            return InboundMoveAttachResult::refused(InboundMoveAttachResult::REFUSED_NOT_MODERN, InboundAttachDriverInterface::MODERN_PANEL_REQUIRED);
+        }
+        \assert($panel instanceof VpnPanel);
+        $ref = $this->remoteIdParser->parse($remoteId);
+        if (null === $ref || !ctype_digit(trim($ref->inboundId)) || ((int) $ref->panelId > 0 && null !== $panel->getId() && $ref->panelId !== $panel->getId())) {
+            return InboundMoveAttachResult::refused(InboundMoveAttachResult::REFUSED_INVALID_SERVICE, 'The service\'s remote id cannot be read or names another panel: nothing sent.');
+        }
+        $targetPanel = $target->getPanel();
+        $rawTarget = trim($target->getRemoteInboundId());
+        if (($targetPanel !== $panel && (null === $targetPanel->getId() || $targetPanel->getId() !== $panel->getId())) || !ctype_digit($rawTarget) || (int) $rawTarget <= 0) {
+            return InboundMoveAttachResult::refused(InboundMoveAttachResult::REFUSED_INVALID_TARGET, 'The target inbound is on another panel or has an invalid remote inbound id: nothing sent.');
+        }
+        $from = (int) trim($ref->inboundId);
+        $to = (int) $rawTarget;
+
+        $before = $this->readForMove($panel, $ref->email, $ref->clientId, $recordHealth, false);
+        if ($before instanceof InboundMoveAttachResult) {
+            return $before;
+        }
+        if (in_array($to, $before, true)) {
+            return InboundMoveAttachResult::alreadyOnTarget($before);
+        }
+        if (!in_array($from, $before, true)) {
+            $this->logger->warning('sanaei_modern_move_not_on_expected', ['panel_id' => $panel->getId()]);
+
+            return InboundMoveAttachResult::failed(InboundMoveAttachResult::FAILED_NOT_ON_EXPECTED, 'Not moved: '.InboundMoveAttachResult::NOT_ON_EXPECTED_TEXT, $before);
+        }
+
+        $sendError = null;
+        try {
+            $this->api->attach($panel, $ref->email, [$to], $recordHealth);
+        } catch (PanelApiException $e) {
+            $sendError = $e;
+            if (self::detachNotApplied($e)) {
+                // The same "certainly not applied" kinds as for a detach: refused, auth, wrong URL, not reached.
+                $this->logger->warning('sanaei_modern_move_attach_failed', ['panel_id' => $panel->getId(), 'failure' => $e->failure->value]);
+
+                return InboundMoveAttachResult::failed(InboundMoveAttachResult::FAILED_NOT_ATTACHED, self::moveError($e, 'The panel did not attach the new inbound', $ref->email), $before);
+            }
+        }
+
+        $after = $this->readForMove($panel, $ref->email, $ref->clientId, $recordHealth, true);
+        if ($after instanceof InboundMoveAttachResult) {
+            return $after;
+        }
+        if (!in_array($to, $after, true)) {
+            $this->logger->warning('sanaei_modern_move_attach_not_applied', ['panel_id' => $panel->getId(), 'failure' => $sendError?->failure->value]);
+
+            return InboundMoveAttachResult::failed(InboundMoveAttachResult::FAILED_NOT_ATTACHED, sprintf('The panel does not list inbound %d after the attach%s', $to, null === $sendError ? '.' : ': '.self::moveError($sendError, 'the call failed', $ref->email)), $after);
+        }
+
+        return InboundMoveAttachResult::attached($after);
+    }
+
+    /**
+     * GET the client for a move: its inbound ids, or the failure (a partial answer is never trusted; another UUID under
+     * the same email is not this service's client). After the attach, every failure means "not confirmed".
+     *
+     * @return list<int>|InboundMoveAttachResult
+     */
+    private function readForMove(VpnPanel $panel, string $email, string $uuid, bool $recordHealth, bool $afterAttach): array|InboundMoveAttachResult
+    {
+        $suffix = $afterAttach ? ' after the attach: not confirmed.' : ': nothing sent.';
+        $reason = static fn (string $before): string => $afterAttach ? InboundMoveAttachResult::FAILED_NOT_CONFIRMED : $before;
+        try {
+            $client = $this->api->getClient($panel, $email, $recordHealth);
+        } catch (PanelApiException $e) {
+            $this->logger->warning('sanaei_modern_move_read_failed', ['panel_id' => $panel->getId(), 'after_attach' => $afterAttach, 'failure' => $e->failure->value]);
+
+            return InboundMoveAttachResult::failed($reason(InboundMoveAttachResult::FAILED_UNREADABLE), self::moveError($e, 'The client could not be read', $email).$suffix, null, true);
+        }
+        if (null === $client) {
+            return InboundMoveAttachResult::failed($reason(InboundMoveAttachResult::FAILED_CLIENT_MISSING), 'The panel has no such client'.$suffix);
+        }
+        if (!isset($client['inboundIds']) || !is_array($client['inboundIds']) || '' === (string) ($client['id'] ?? '')) {
+            return InboundMoveAttachResult::failed($reason(InboundMoveAttachResult::FAILED_NOT_LISTED), 'The panel did not list the client\'s inbounds or UUID'.$suffix);
+        }
+        $ids = array_values(array_unique(array_map('intval', $client['inboundIds'])));
+        if (0 !== strcasecmp((string) $client['id'], $uuid)) {
+            return InboundMoveAttachResult::failed($reason(InboundMoveAttachResult::FAILED_NOT_THIS_CLIENT), 'The panel\'s client under this email has another UUID (not this service\'s)'.$suffix, $ids);
+        }
+
+        return $ids;
+    }
+
+    /** A panel failure as a safe, short text: no access data, and neither the client's email nor its request path. */
+    private static function moveError(PanelApiException $e, string $what, string $email): string
+    {
+        $text = (string) preg_replace('#clients/[^/\s]+/#', 'clients/***/', self::safeError($e, $what));
+
+        return '' === trim($email) ? $text : str_ireplace([$email, rawurlencode($email)], '***', $text);
     }
 
     /**

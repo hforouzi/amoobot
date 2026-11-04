@@ -300,9 +300,9 @@ class ModernClientsApi
      *
      * @return list<array{id: int, remark: string, tag: string, protocol: string, port: int, enable: bool, tlsFlowCapable: bool, ssMethod: string, nodeId: int}>
      */
-    public function inboundOptions(VpnPanel $panel): array
+    public function inboundOptions(VpnPanel $panel, bool $recordHealth = true): array
     {
-        $response = $this->http->get($panel, 'panel/api/inbounds/options');
+        $response = $this->http->get($panel, 'panel/api/inbounds/options', [], null, null, $recordHealth);
         if (!is_array($response->obj) || !array_is_list($response->obj)) {
             throw new PanelApiException(PanelFailure::UNEXPECTED_RESPONSE, 'GET panel/api/inbounds/options: obj is not a list.', $response->httpStatus);
         }

@@ -24,6 +24,31 @@ final class Sanaei3xuiRemoteIdParser
         return sprintf('%s|subId=%s', $base, rawurlencode(trim($subId)));
     }
 
+    /**
+     * The remote id with its inbound changed to another inbound of the same panel (docs/design/plan-inbound-change.md
+     * 4.3 step 3): only the "inbound=" and "remoteInbound=" parts are replaced; every other part (panel, uuid, email,
+     * subId, anything unknown) and their order stay byte-identical. Null when $remoteId is not the structured form with
+     * exactly one of each of those two parts (nothing can be rewritten safely).
+     */
+    public function withInbound(string $remoteId, int $localInboundId, string $remoteInboundId): ?string
+    {
+        if (!str_starts_with($remoteId, 'sanaei_3xui|') || null === $this->parse($remoteId) || '' === trim($remoteInboundId)) {
+            return null;
+        }
+        $parts = explode('|', $remoteId);
+        $seen = ['inbound' => 0, 'remoteInbound' => 0];
+        foreach ($parts as $i => $part) {
+            $key = explode('=', $part, 2)[0];
+            if (0 === $i || !str_contains($part, '=') || !isset($seen[$key])) {
+                continue;
+            }
+            ++$seen[$key];
+            $parts[$i] = 'inbound' === $key ? 'inbound='.$localInboundId : 'remoteInbound='.rawurlencode(trim($remoteInboundId));
+        }
+
+        return 1 === $seen['inbound'] && 1 === $seen['remoteInbound'] ? implode('|', $parts) : null;
+    }
+
     public function parse(string $remoteId): ?Sanaei3xuiRemoteClientRef
     {
         $trimmed = trim($remoteId);
