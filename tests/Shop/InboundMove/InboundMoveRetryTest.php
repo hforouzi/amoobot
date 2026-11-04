@@ -120,9 +120,14 @@ final class InboundMoveRetryTest extends IntegrationTestCase
         $this->em->getConnection()->executeStatement("UPDATE service_inbound_move SET next_attempt_at = '2000-01-01 00:00:00' WHERE state = 'failed' AND next_attempt_at IS NOT NULL");
     }
 
-    /** @return list<string> admin alerts sent since $from, of one kind when $title is given */
+    /**
+     * Admin alerts sent since $from, of one kind when $title is given: each alert once, however many admin chats it
+     * was delivered to (an earlier test may leave a linked admin behind).
+     *
+     * @return list<string>
+     */
     private function alerts(int $from, ?string $title = null): array
     {
-        return array_values(array_filter(array_slice($this->http->telegramTexts(), $from), static fn (string $text): bool => null === $title ? 1 === preg_match('/Run ID: \d+/', $text) : str_starts_with($text, $title)));
+        return array_values(array_unique(array_filter(array_slice($this->http->telegramTexts(), $from), static fn (string $text): bool => null === $title ? 1 === preg_match('/Run ID: \d+/', $text) : str_starts_with($text, $title))));
     }
 }

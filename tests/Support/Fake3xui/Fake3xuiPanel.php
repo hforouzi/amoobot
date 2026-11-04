@@ -56,6 +56,13 @@ final class Fake3xuiPanel
     public ?string $stateFile = null;
     /** @var array<string, int> "METHOD path" (regex, without delimiters) => milliseconds to wait before answering (outside the lock) */
     public array $delays = [];
+    /**
+     * Called with ('before' | 'after', method, path) around each request, outside the shared state's lock: a helper
+     * process can stop at an exact point of a multi-call step there (and be killed there) without holding the panel.
+     *
+     * @var (\Closure(string, string, string): void)|null
+     */
+    public ?\Closure $onRequest = null;
 
     /** @var list<array{method: ?string, path: ?string, response: MockResponse|\Closure, times: int, afterHandling: bool}> */
     private array $scripts = [];
@@ -152,6 +159,24 @@ final class Fake3xuiPanel
         $body = $this->decodeBody($options);
 
         $path = str_starts_with($fullPath, $this->basePath.'/') ? substr($fullPath, strlen($this->basePath) + 1) : null;
+        if (null !== $this->onRequest) {
+            ($this->onRequest)('before', $method, $path ?? $fullPath);
+            $response = $this->respond($method, $url, $options, $origin, $path, $fullPath, $query, $headers, $body);
+            ($this->onRequest)('after', $method, $path ?? $fullPath);
+
+            return $response;
+        }
+
+        return $this->respond($method, $url, $options, $origin, $path, $fullPath, $query, $headers, $body);
+    }
+
+    /**
+     * @param array<string, mixed>        $options
+     * @param array<string, string>       $query
+     * @param array<string, list<string>> $headers
+     */
+    private function respond(string $method, string $url, array $options, string $origin, ?string $path, string $fullPath, array $query, array $headers, mixed $body): ResponseInterface
+    {
         foreach ($this->delays as $pattern => $ms) {
             if (1 === preg_match('#^'.$pattern.'$#', $method.' '.($path ?? $fullPath))) {
                 // As curl does: a request whose max_duration ends before the answer times out then, unanswered.
