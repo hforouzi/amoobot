@@ -186,6 +186,20 @@ class ModernClientsApi
     }
 
     /**
+     * POST panel/api/clients/{email}/detach {inboundIds} (3x-ui v3.11.0 DetachByEmailMany, docs/design/plan-inbound-change.md
+     * section 1): an inbound the client is not on is skipped; an inbound it is on that the panel cannot load (deleted
+     * there) fails the whole call before anything is written; the client's record (UUID, subId, expiry, totalGB, limitIp,
+     * enable) and its traffic stay (keepTraffic=true). The panel does NOT refuse to leave a client on zero inbounds: the
+     * caller's guards do (Sanaei3xuiModernDriver::detachInbounds()). obj of the answer is not trusted: callers read back.
+     *
+     * @param list<int> $inboundIds
+     */
+    public function detach(VpnPanel $panel, string $email, array $inboundIds, bool $recordHealth = true): void
+    {
+        $this->http->post($panel, 'panel/api/clients/'.rawurlencode($email).'/detach', ['inboundIds' => $inboundIds], [], $recordHealth);
+    }
+
+    /**
      * GET panel/api/clients/traffic/{email}: up, down, total, expiryTime, enable, lastOnline, subId, uuid.
      *
      * @return array<string, mixed>|null null when there is no such client

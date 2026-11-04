@@ -334,7 +334,8 @@ final class Fake3xuiPanel
                 'POST' === $method && 'update' === $action => null === $key ? $notFound() : $this->update($key, $body),
                 'POST' === $method && 'resetTraffic' === $action => null === $key ? $notFound() : $this->resetTraffic($key),
                 'POST' === $method && 'updateTraffic' === $action => null === $key ? $notFound() : $this->setTraffic($key, (int) ($body['upload'] ?? 0), (int) ($body['download'] ?? 0)),
-                'POST' === $method && in_array($action, ['attach', 'detach'], true) => null === $key ? $notFound() : $this->attach($key, (array) ($body['inboundIds'] ?? []), 'attach' === $action),
+                'POST' === $method && 'attach' === $action => null === $key ? $notFound() : $this->attach($key, (array) ($body['inboundIds'] ?? []), true),
+                'POST' === $method && 'detach' === $action => null === $key ? $notFound() : $this->detach($key, (array) ($body['inboundIds'] ?? [])),
                 default => self::notFoundPage(),
             };
         }
@@ -521,6 +522,39 @@ final class Fake3xuiPanel
         }
         $current = $this->clients[$key]['inboundIds'];
         $this->clients[$key]['inboundIds'] = array_values($attach ? array_unique([...$current, ...$ids]) : array_diff($current, $ids));
+
+        return self::envelope(true);
+    }
+
+    /**
+     * POST clients/{email}/detach with the semantics of 3x-ui v3.11.0 (ClientService.Detach / DetachByEmailMany, read in
+     * its source; docs/design/plan-inbound-change.md section 1 and 8.2), so later PRs test our guards, not the panel's:
+     * - an inbound the client is not on is skipped (checked before the inbound is loaded: a deleted one is skipped too);
+     * - an inbound the client is on that the panel cannot load (deleted there) fails the whole call before anything is
+     *   written ("inbound N: ..."). The error text is [unverified]: the source wraps gorm's error, the fake says
+     *   "record not found";
+     * - the removal keeps the client's traffic (DelInboundClientByEmail keepTraffic=true) and the record (UUID, subId,
+     *   expiry, totalGB, limitIp, enable) is untouched;
+     * - zero inbounds left is ALLOWED (3x-ui has no guard);
+     * - a disabled inbound or a disabled client is detached like any other: [unverified] U5;
+     * - an empty or absent inboundIds detaches nothing and succeeds: [unverified] (our driver never sends one).
+     *
+     * @param array<mixed> $ids
+     */
+    private function detach(string $key, array $ids): MockResponse
+    {
+        $current = array_map('intval', $this->clients[$key]['inboundIds']);
+        $remove = [];
+        foreach (array_map('intval', $ids) as $id) {
+            if (!in_array($id, $current, true)) {
+                continue;
+            }
+            if (!isset($this->inbounds[$id])) {
+                return self::envelope(false, null, sprintf('inbound %d: record not found', $id));
+            }
+            $remove[] = $id;
+        }
+        $this->clients[$key]['inboundIds'] = array_values(array_diff($current, $remove));
 
         return self::envelope(true);
     }
