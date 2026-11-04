@@ -20,10 +20,10 @@ use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Component\DomCrawler\Field\ChoiceFormField;
 
 /**
- * PR P3 adds tables, a column and settings that nothing reads yet (docs/design/plan-inbound-change.md 9): sales,
- * settlement, regenerate and saving a plan behave exactly the same with plans.inbound_move_enabled on (and every
- * limit changed) as with the defaults, on the fake modern 3x-ui panel. Neither run writes a run, a move or
- * vpn_service.inbound_changed_at.
+ * PR P3 added tables, a column and settings; PR P4 lets only the move runner and its command read them
+ * (docs/design/plan-inbound-change.md 5.7, 9). Sales, settlement, regenerate and saving a plan behave exactly the same
+ * with plans.inbound_move_enabled on (and every limit changed) as with the defaults, on the fake modern 3x-ui panel.
+ * Neither run writes a run, a move or vpn_service.inbound_changed_at: only app:plan:apply-inbounds --apply does.
  */
 final class InboundMoveSwitchHasNoEffectTest extends IntegrationTestCase
 {
@@ -67,11 +67,17 @@ final class InboundMoveSwitchHasNoEffectTest extends IntegrationTestCase
 
         self::assertSame([
             'Admin/Application/SettingsAdministration.php',
+            'Command/PlanApplyInboundsCommand.php',
             'Entity/InboundMoveRun.php',
             'Entity/ServiceInboundMove.php',
             'Entity/VpnService.php',
+            'Provisioning/Application/InboundAttachAlerts.php',
+            'Provisioning/Application/InboundMovePass.php',
+            'Provisioning/Application/InboundMovePlanner.php',
+            'Provisioning/Application/InboundMoveRunner.php',
+            'Provisioning/Application/InboundMoveScope.php',
             'Shop/Application/InboundMoveSettings.php',
-        ], $readers, 'P3 is schema and switch only: no runner, command, timer, panel call or display guard reads them');
+        ], $readers, 'P4: only the CLI runner (and its alerts) reads them; no sale, settlement, regenerate, plan save, timer (P8) or display guard (P5) does');
     }
 
     /**

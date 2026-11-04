@@ -1,0 +1,37 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Provisioning\Application;
+
+use App\Entity\VpnService;
+use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http\SecretRedactor;
+
+/**
+ * An error text of the inbound move (docs/design/plan-inbound-change.md 5.4, 6.3) as the console, the logs, the move
+ * row and the admin alert may carry it: SecretRedactor::redactAccess() (links, URLs, UUIDs, subId/password pairs, the
+ * Telegram id in a client email), with a known service's own subId, UUID and panel base path removed first
+ * (ServiceErrorText), and then the client email and the request path that names it (clients/<email>/...) masked too.
+ */
+final class SafeText
+{
+    public static function of(string $text, string $email = '', int $maxLength = 255): string
+    {
+        return self::withoutClient(SecretRedactor::redactAccess($text, 2000), $email, $maxLength);
+    }
+
+    public static function forService(VpnService $service, string $text, int $maxLength = 255): string
+    {
+        return self::withoutClient(ServiceErrorText::redact($service, $text, 2000), (string) $service->getClientEmail(), $maxLength);
+    }
+
+    private static function withoutClient(string $text, string $email, int $maxLength): string
+    {
+        $text = (string) preg_replace('#clients/(?!\*\*\*/)[^/\s]+/#', 'clients/***/', $text);
+        if ('' !== trim($email)) {
+            $text = str_ireplace([$email, rawurlencode($email)], '***', $text);
+        }
+
+        return mb_substr($text, 0, $maxLength);
+    }
+}

@@ -35,6 +35,9 @@ class InboundAttachAlerts
     public const EXHAUSTED_TITLE = '🚨 تلاش‌های اتصال اینباند اضافهٔ سرویس تمام شد';
     public const RECOVERED_TITLE = '✅ اینباند اضافهٔ سرویس دوباره وصل شد';
     public const MISSING_TITLE = '⚠️ اینباند اضافهٔ پلن پیش از ساخت سرویس حذف شده بود';
+    public const MOVE_PAUSED_TITLE = '⏸ انتقال سرویس‌های پلن به اینباند جدید متوقف شد';
+    public const MOVE_FINISHED_FAILED_TITLE = '⚠️ انتقال سرویس‌های پلن به اینباند جدید با خطا تمام شد';
+    public const MOVE_GAVE_UP_TITLE = '🚨 تلاش‌های انتقال سرویس به اینباند جدید تمام شد';
 
     private const KIND_FAILED = 'failed';
     private const KIND_EXHAUSTED = 'exhausted';
@@ -130,6 +133,87 @@ class InboundAttachAlerts
             'Deleted inbound id(s): '.implode(', ', array_map(static fn (mixed $id): string => '#'.(int) $id, $missing)),
             'The service was delivered without them; they cannot be attached. Add the servers to the customer by hand if needed.',
         ]));
+    }
+
+    /**
+     * A move run (docs/design/plan-inbound-change.md 5.4) paused itself ($pauseReason) or finished with failed moves:
+     * one alert per run, sent by the process whose conditional UPDATE made that transition. Run, plan and counts only:
+     * no service owner, link or credential (D5).
+     *
+     * @param array<string, int> $counts planned, done, failed, skipped, remaining
+     *
+     * @return bool whether it was delivered to at least one admin chat
+     */
+    public function moveRunEnded(int $runId, int $planId, array $counts, ?string $pauseReason): bool
+    {
+        $chats = $this->accessPolicy->telegramRecipients(AdminPermission::SERVICES_MANAGE);
+        if ([] === $chats) {
+            $this->logger->warning('Inbound move alert not sent: no admin chat.', ['run_id' => $runId]);
+
+            return false;
+        }
+        $plan = $this->entityManager->getConnection()->fetchOne('SELECT title FROM plan WHERE id = ?', [$planId]);
+        $lines = [
+            null === $pauseReason ? self::MOVE_FINISHED_FAILED_TITLE : self::MOVE_PAUSED_TITLE,
+            sprintf('Run ID: %d', $runId),
+            sprintf('Plan: %s (#%d)', mb_substr((string) $plan, 0, 80), $planId),
+            sprintf('Moved: %d, failed: %d, skipped: %d, remaining: %d (of %d)', $counts['done'] ?? 0, $counts['failed'] ?? 0, $counts['skipped'] ?? 0, $counts['remaining'] ?? 0, $counts['planned'] ?? 0),
+        ];
+        $lines[] = null === $pauseReason
+            ? sprintf('Some services were not moved; they keep their old inbound and links. See: php bin/console app:plan:apply-inbounds %d (dry run).', $planId)
+            : sprintf('Paused: %s. Nothing changed for the customers not moved yet. When the panel answers again: php bin/console app:plan:apply-inbounds %d --resume=%d', mb_substr($pauseReason, 0, 120), $planId, $runId);
+        $this->deliver($chats, implode("\n", $lines));
+
+        return true;
+    }
+
+    /**
+     * A service's move whose attempts are used up (MultiInboundSettings::maxAttempts()): one alert per move, claimed on
+     * service_inbound_move.alert_state by a conditional UPDATE (never twice; nothing claimed while no admin chat exists).
+     * Service, run, plan and inbounds by id and title; the stored error masked; no owner (D5).
+     */
+    public function moveGaveUp(int $moveId): bool
+    {
+        $chats = $this->accessPolicy->telegramRecipients(AdminPermission::SERVICES_MANAGE);
+        if ([] === $chats) {
+            $this->logger->warning('Inbound move alert not sent: no admin chat.', ['move_id' => $moveId]);
+
+            return false;
+        }
+        $connection = $this->entityManager->getConnection();
+        $claimed = $connection->executeStatement(
+            "UPDATE service_inbound_move SET alert_state = ?, alerted_at = ? WHERE id = ? AND state = 'failed' AND next_attempt_at IS NULL AND alert_state IS NULL",
+            [VpnServiceInbound::ALERT_EXHAUSTED, (new \DateTimeImmutable())->format('Y-m-d H:i:s'), $moveId],
+        );
+        if (1 !== $claimed) {
+            return false;
+        }
+        $row = $connection->fetchAssociative(
+            'SELECT m.run_id, m.service_id, m.attempts, m.last_error, m.from_inbound_id, m.to_inbound_id, fi.title AS from_title, ti.title AS to_title, p.id AS plan_id, p.title AS plan_title, s.client_email
+             FROM service_inbound_move m
+             JOIN inbound_move_run r ON r.id = m.run_id
+             JOIN plan p ON p.id = r.plan_id
+             JOIN vpn_service s ON s.id = m.service_id
+             LEFT JOIN vpn_inbound fi ON fi.id = m.from_inbound_id
+             LEFT JOIN vpn_inbound ti ON ti.id = m.to_inbound_id
+             WHERE m.id = ?',
+            [$moveId],
+        );
+        if (false === $row) {
+            return false;
+        }
+        $inbound = static fn (mixed $id, mixed $title): string => null === $id ? '(deleted)' : sprintf('"%s" (#%d)', mb_substr((string) $title, 0, 60), (int) $id);
+        $this->deliver($chats, implode("\n", [
+            self::MOVE_GAVE_UP_TITLE,
+            sprintf('Service ID: %d', (int) $row['service_id']),
+            sprintf('Run ID: %d', (int) $row['run_id']),
+            sprintf('Plan: %s (#%d)', mb_substr((string) $row['plan_title'], 0, 80), (int) $row['plan_id']),
+            sprintf('From %s to %s', $inbound($row['from_inbound_id'], $row['from_title']), $inbound($row['to_inbound_id'], $row['to_title'])),
+            'Last error: '.mb_substr(self::withoutClient(VpnServiceInbound::safeError((string) ($row['last_error'] ?? '-')), (string) ($row['client_email'] ?? '')), 0, 200),
+            sprintf('Gave up after %d attempt(s). The service keeps its old inbound and links. Fix the panel, then check it with: php bin/console app:plan:apply-inbounds %d --service=%d', (int) $row['attempts'], (int) $row['plan_id'], (int) $row['service_id']),
+        ]));
+
+        return true;
     }
 
     /** One row, only if it is still in the state this alert is about: two runs never both get it. */

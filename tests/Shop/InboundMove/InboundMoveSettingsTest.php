@@ -16,7 +16,7 @@ use Symfony\Component\DomCrawler\Field\ChoiceFormField;
 
 /**
  * The inbound move switch and limits (docs/design/plan-inbound-change.md 8.1, PR P3): off, 24 h, 20, 2 s by default;
- * on the web settings page's "plans" tab with a note that nothing uses them yet; saved and audited with the tab;
+ * on the web settings page's "plans" tab with a note that only the command uses them (P4); saved and audited with the tab;
  * out-of-range or non-integer input refused with nothing saved; a stored value that is not valid reads as the default
  * (fail closed). Retries keep MultiInboundSettings' keys (no new retry key), and the sales form never touches them.
  */
@@ -92,7 +92,8 @@ final class InboundMoveSettingsTest extends IntegrationTestCase
             $input = $crawler->filter('input[name="'.$name.'"]');
             self::assertSame([$value, $min, $max], [$input->attr('value'), $input->attr('min'), $input->attr('max')], $name);
         }
-        self::assertStringContainsString('Not active in this release', $crawler->filter('.admin-section')->last()->text());
+        self::assertStringContainsString('Command line only in this release', $crawler->filter('.admin-section')->last()->text());
+        self::assertStringContainsString('the old inbound stays attached', $crawler->filter('.admin-section')->last()->text());
 
         $audits = $this->planAudits();
         $form = $crawler->filter('form.admin-settings-form')->form();
