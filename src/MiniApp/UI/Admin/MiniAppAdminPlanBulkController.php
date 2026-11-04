@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\MiniApp\UI\Admin;
 
 use App\Entity\Plan;
+use App\Shop\Application\Catalog\TrialBackingPlans;
 use App\MiniApp\Admin\AdminActions;
 use App\MiniApp\Admin\AdminText;
 use App\MiniApp\Admin\Catalog\CatalogEditor;
@@ -14,7 +15,6 @@ use App\MiniApp\UI\MiniAppLocale;
 use App\Security\AdminAuditLogger;
 use App\Shop\Application\PlanPriceAdjustmentService;
 use App\Shop\Application\PlanScope;
-use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -38,13 +38,13 @@ final class MiniAppAdminPlanBulkController extends AbstractController
     private const SAMPLE = 5;
 
     public function __construct(
-        private readonly EntityManagerInterface $entityManager,
         private readonly PlanPriceAdjustmentService $adjustment,
         private readonly AdminActions $actions,
         private readonly CatalogEditor $editor,
         private readonly AdminAuditLogger $auditLogger,
         private readonly MiniAppFragments $fragments,
         private readonly TranslatorInterface $translator,
+        private readonly TrialBackingPlans $trialBacking,
     ) {
     }
 
@@ -52,7 +52,7 @@ final class MiniAppAdminPlanBulkController extends AbstractController
     public function page(Request $request): Response
     {
         return $this->fragments->render($request, 'miniapp/admin/catalog/bulk.html.twig', [
-            'plans' => $this->entityManager->getRepository(Plan::class)->findBy([], ['id' => 'ASC']),
+            'plans' => $this->trialBacking->salesPlans([], ['id' => 'ASC']),
             'fields' => self::FIELDS,
             'range' => self::RANGE,
         ]);

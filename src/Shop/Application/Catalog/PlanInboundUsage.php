@@ -88,7 +88,8 @@ final class PlanInboundUsage implements ResetInterface
         if (null === $this->plansByInbound) {
             $this->plansByInbound = [];
             $rows = $this->entityManager->getConnection()->fetchAllAssociative(
-                "SELECT p.inbound_id AS inbound_id, p.id AS plan_id, p.title, 'primary' AS role FROM plan p WHERE p.inbound_id IS NOT NULL
+                // The plans on sale: a trial's backing plan follows its trial plan's inbound (TrialBackingPlans).
+                "SELECT p.inbound_id AS inbound_id, p.id AS plan_id, p.title, 'primary' AS role FROM plan p WHERE p.inbound_id IS NOT NULL AND ".TrialBackingPlans::notBackingSql('p')."
                  UNION ALL
                  SELECT a.inbound_id, p.id, p.title, 'additional' FROM plan_additional_inbound a JOIN plan p ON p.id = a.plan_id
                  ORDER BY inbound_id, role DESC, plan_id",

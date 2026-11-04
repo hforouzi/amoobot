@@ -19,6 +19,7 @@ use App\Security\AdminAuditLogger;
 use App\Shop\Application\Catalog\PlanInboundDrift;
 use App\Shop\Application\Catalog\PlanInboundWarnings;
 use App\Shop\Application\Catalog\TrialPlanAdminService;
+use App\Shop\Application\Catalog\TrialPlanDeletion;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -32,8 +33,9 @@ use Symfony\Contracts\Translation\TranslatorInterface;
 
 /**
  * Trial plans in the Mini App admin (PLANS_MANAGE, as on the web): the list in the web's order (sort order, then
- * creation), the web form's fields, create, edit, activate / deactivate; and the claims, read only, searchable by
- * customer (Telegram id, @username or name). Writes go through TrialPlanAdminService; the rules are the entity's.
+ * creation), the web form's fields, create, edit, activate / deactivate, delete (with its backing plan when nothing
+ * refers to it: TrialPlanAdminService::delete(), as on the web); and the claims, read only, searchable by customer
+ * (Telegram id, @username or name). Writes go through TrialPlanAdminService; the rules are the entity's.
  */
 #[IsGranted(MiniAppUser::ROLE)]
 final class MiniAppAdminTrialController extends AbstractController
@@ -160,6 +162,37 @@ final class MiniAppAdminTrialController extends AbstractController
     public function deactivate(Request $request, #[CurrentUser] MiniAppUser $user, int $id): JsonResponse
     {
         return $this->toggle($request, $user, $id, false);
+    }
+
+    /**
+     * Deletes the trial plan (confirmed first) and says what happened to its backing plan: deleted too, or kept hidden
+     * because orders refer to it (TrialPlanAdminService::delete(), the web's implementation).
+     */
+    #[Route('/app/api/admin/trial-plans/{id}/delete', name: 'miniapp_admin_trial_plan_delete', requirements: ['id' => '\d+'], defaults: ['_miniapp_section' => 'admin.plans'], methods: ['POST'])]
+    public function delete(Request $request, #[CurrentUser] MiniAppUser $user, int $id): JsonResponse
+    {
+        $trial = $this->trialPlan($id);
+        $confirm = $this->message($request, 'admin.trial.confirm.delete', ['%title%' => $trial->getTitle()]);
+
+        return $this->actions->run($request, $user, $id, $confirm, function () use ($request, $user, $trial, $id): array {
+            $title = $trial->getTitle();
+            $deletion = $this->trialPlans->delete($trial);
+            if (TrialPlanDeletion::ALREADY_GONE === $deletion->outcome) {
+                return ['message' => $this->message($request, 'admin.trial.deleted.already_gone'), 'redirect' => $this->generateUrl('miniapp_admin_trial_plans')];
+            }
+            $this->auditLogger->record('trial_plan.delete', 'TrialPlan', $id, ['title' => $title] + $deletion->auditDetails(), $user->admin);
+            $message = $this->message($request, 'admin.trial.deleted.'.$deletion->outcome, [
+                '%trial%' => $title,
+                '%plan%' => (string) $deletion->backingPlanTitle,
+                '%orders%' => $deletion->orders,
+                '%services%' => $deletion->services,
+            ]);
+            if ([] !== $deletion->deactivatedDiscountCodes) {
+                $message .= ' '.$this->message($request, 'admin.trial.deleted.codes_deactivated', ['%codes%' => implode(', ', $deletion->deactivatedDiscountCodes)]);
+            }
+
+            return ['message' => $message, 'redirect' => $this->generateUrl('miniapp_admin_trial_plans')];
+        });
     }
 
     /** Read only, newest first; searchable by the customer's Telegram id, @username or name. */

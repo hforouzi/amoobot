@@ -7,6 +7,7 @@ namespace App\Admin\UI;
 use App\Admin\Form\PanelConnectionType;
 use App\Admin\UI\Crud\VpnPanelCrudController;
 use App\Entity\Plan;
+use App\Shop\Application\Catalog\TrialBackingPlans;
 use App\Entity\VpnInbound;
 use App\Entity\VpnPanel;
 use App\Provisioning\Application\ModernModeGuard;
@@ -45,6 +46,7 @@ final class PanelSetupController extends AbstractController
         private readonly ModernClientsApi $clientsApi,
         private readonly PanelCredentials $credentials,
         private readonly TranslatorInterface $translator,
+        private readonly TrialBackingPlans $trialBacking,
     ) {
     }
 
@@ -180,7 +182,8 @@ final class PanelSetupController extends AbstractController
     public function plans(VpnPanel $panel, Request $request, AdminAuditLogger $auditLogger, PlanInboundDrift $inboundDrift): Response
     {
         $inbounds = $this->entityManager->getRepository(VpnInbound::class)->findBy(['panel' => $panel, 'isActive' => true], ['id' => 'ASC']);
-        $plans = $this->entityManager->getRepository(Plan::class)->findBy([], ['isActive' => 'DESC', 'id' => 'ASC']);
+        // The sales plans: a trial's backing plan follows its trial plan's inbound (TrialBackingPlans).
+        $plans = $this->trialBacking->salesPlans([], ['isActive' => 'DESC', 'id' => 'ASC']);
 
         if ($request->isMethod('POST')) {
             if (!$this->isCsrfTokenValid('panel_plans_'.$panel->getId(), (string) $request->request->get('_token'))) {
@@ -194,8 +197,13 @@ final class PanelSetupController extends AbstractController
             }
             $changed = 0;
             $changedIds = [];
+            // Only the plans listed (a backing plan id sent anyway is ignored: it follows its trial plan's inbound).
+            $listed = [];
+            foreach ($plans as $listedPlan) {
+                $listed[(int) $listedPlan->getId()] = $listedPlan;
+            }
             foreach ($request->request->all('plan') as $planId => $inboundId) {
-                $plan = $this->entityManager->find(Plan::class, (int) $planId);
+                $plan = $listed[(int) $planId] ?? null;
                 $inbound = $byId[(int) $inboundId] ?? null;
                 if ($plan instanceof Plan && null !== $inbound && $plan->getInbound()?->getId() !== $inbound->getId()) {
                     $plan->setInbound($inbound);

@@ -43,5 +43,11 @@
                 <button type="button" class="btn secondary small" data-action="{{ path('miniapp_admin_trial_plan_activate', {id: trial.id}) }}" data-reload data-admin-action="activate">▶️ {{ 'admin.plan.activate'|trans }}</button>
             {% endif %}
         </section>
+        {# Its hidden plan goes with it when nothing refers to it; otherwise it stays hidden (TrialPlanAdminService). #}
+        <section class="card danger-zone" data-group="delete">
+            <h2>{{ 'admin.trial.delete'|trans }}</h2>
+            <p class="muted">{{ 'admin.trial.delete_hint'|trans }}</p>
+            <button type="button" class="btn small danger-solid" data-action="{{ path('miniapp_admin_trial_plan_delete', {id: trial.id}) }}" data-admin-action="delete">🗑 {{ 'admin.trial.delete'|trans }}</button>
+        </section>
     {% endif %}
 {% endblock %}

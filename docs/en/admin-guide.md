@@ -95,6 +95,52 @@ platform's official install page (Apps -> Client apps -> Add):
   template, the service pages show the one-tap button; the guide only points there.
 - A **Download** linked to the record (same platform) takes precedence over the store URL, and is counted.
 
+## Trial plans (test & gift)
+
+Trial plans live only under **Catalog → Trial plans** (web) and **Trial plans** in the Mini App admin. They are never
+sold, and nothing about them is managed under Plans.
+
+- **The hidden plan.** The first time a trial plan is claimed, the bot creates a hidden plan for it, called
+  "[Trial] <title>". Every trial order and service hangs off this plan. It always copies the trial plan (inbound,
+  traffic, duration), stays **inactive at price 0**, and belongs to that trial plan only.
+- **Where it does not show up.** It is left out of everything on the sales side:
+  - the plan list, its counts and search (web, Mini App, bot);
+  - the discount-code plan picker, wholesale (reseller) prices, the bulk price page;
+  - panel plan counts and inbound "Used by plans";
+  - the customer catalog.
+
+  The hidden plan is recognised by its link to the trial plan, or by its trial orders, never by its title. A normal
+  plan you name "[Trial] …" stays an ordinary sales plan.
+- **It cannot be changed from the sales side.** Activating, pricing, editing, duplicating, deleting or giving it a
+  wholesale price is refused. A direct link to it (web or Mini App) says "this plan belongs to the trial plan …" and
+  leads to that trial plan. The checkout refuses it even if it was made active by hand in the database.
+- **Deactivating** a trial plan stops offering it to customers at once (bot and Mini App). Existing trial services
+  keep running.
+- **Deleting** a trial plan (web or Mini App, which use the same code) also deletes its claims, and decides about the
+  hidden plan. The message says which of these happened:
+  - **Nothing refers to the hidden plan** (no orders, so no services or claims): it is deleted too. Its wholesale rules
+    are removed. Discount codes limited to it are **deactivated**, not widened to every plan.
+  - **Orders refer to it** (every claim made one): it is **kept**, inactive, at price 0 and still hidden, and the
+    message gives the number of orders and services. The trial services stay valid, and their history and reports
+    still point to a plan.
+
+  A delete and a claim running at the same moment are serialized: either the claim comes first, so the hidden plan
+  is kept, or the claim finds the trial plan gone, so nothing is created.
+- **Checking existing data:** `php bin/console app:trial-plans:backing-audit` lists every hidden plan, including those
+  of trial plans deleted earlier, with its trial plan, orders, services, discount codes and any problems. It is a
+  **dry run**: it changes nothing. `php bin/console app:trial-plans:backing-audit --apply` fixes the problems:
+  - an active hidden plan is deactivated;
+  - a priced or customizable one is set to price 0 and not customizable;
+  - its wholesale rules are removed.
+
+  Each fix is audited. It deletes no plan, order or service, and running it again finds nothing to fix.
+- **Existing "[Trial] …" rows:**
+  - "[Trial] …" plans that are a trial's hidden plan disappear from Plans by themselves. Run the command once,
+    first without `--apply`, to see whether any of them was made active or priced; then with `--apply`.
+  - Plans whose title merely starts with "[Trial]" but are no trial's hidden plan (no trial plan and no trial order
+    refers to them) are listed by the command as a note and left alone. Such a plan is an ordinary sales plan;
+    rename, deactivate or delete it under Plans if it is a leftover.
+
 ## Plans with several inbounds (preview)
 
 A plan can name **additional inbounds** of the same panel: a buyer's one client (one email, one UUID, one subscription)
@@ -175,8 +221,9 @@ carries every attached inbound.
   primary or additional.
 - **Deleting** an inbound that a plan uses as an additional inbound, or a panel with such an inbound, is refused and the
   plans are named. Deleting a plan's primary inbound works as before (the plan then has no inbound).
-- **Trial plans keep one inbound:** a trial's hidden plan ("[Trial] …" in the plan list) refuses additional inbounds on
-  save, and a trial is not given out while its hidden plan has any (from before this rule).
+- **Trial plans keep one inbound:** a trial's hidden plan (see "Trial plans" above; it is not in the plan list and
+  cannot be edited there) only ever has the trial plan's inbound, and a trial is not given out while its hidden plan has
+  additional inbounds (from before this rule).
 
 ### Scheduled retry and alerts
 
