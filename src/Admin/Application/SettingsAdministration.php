@@ -14,6 +14,7 @@ use App\Provisioning\Application\RenewalSettingsProvider;
 use App\Provisioning\Application\TrafficAddonSettingsProvider;
 use App\Reseller\Application\ResellerAdministration;
 use App\Reseller\Application\ResellerSettings;
+use App\Shop\Application\InboundMoveSettings;
 use App\Shop\Application\IncompleteOrderSettingsProvider;
 use App\Shop\Application\MultiInboundSettings;
 use App\Shop\Application\SalesSettingsProvider;
@@ -84,6 +85,10 @@ final class SettingsAdministration
         'plans_attach_retry_enabled' => MultiInboundSettings::ATTACH_RETRY_ENABLED,
         'plans_attach_max_attempts' => MultiInboundSettings::ATTACH_MAX_ATTEMPTS,
         'plans_attach_retry_delay_minutes' => MultiInboundSettings::ATTACH_RETRY_DELAY_MINUTES,
+        'plans_inbound_move_enabled' => InboundMoveSettings::ENABLED,
+        'plans_inbound_move_detach_grace_hours' => InboundMoveSettings::DETACH_GRACE_HOURS,
+        'plans_inbound_move_batch_size' => InboundMoveSettings::BATCH_SIZE,
+        'plans_inbound_move_pause_seconds' => InboundMoveSettings::PAUSE_SECONDS,
     ];
 
     public function __construct(
@@ -96,6 +101,7 @@ final class SettingsAdministration
         private readonly WalletSettings $walletSettings,
         private readonly ResellerSettings $resellerSettings,
         private readonly MultiInboundSettings $multiInboundSettings,
+        private readonly InboundMoveSettings $inboundMoveSettings,
         private readonly BrandingSettings $brandingSettings,
         private readonly BrandLogoStorage $logoStorage,
         private readonly SupportLinkSettings $supportLink,
@@ -204,7 +210,7 @@ final class SettingsAdministration
     }
 
     /**
-     * @return array{plans_multi_inbound_enabled: bool, plans_attach_retry_enabled: bool, plans_attach_max_attempts: int, plans_attach_retry_delay_minutes: int}
+     * @return array{plans_multi_inbound_enabled: bool, plans_attach_retry_enabled: bool, plans_attach_max_attempts: int, plans_attach_retry_delay_minutes: int, plans_inbound_move_enabled: bool, plans_inbound_move_detach_grace_hours: int, plans_inbound_move_batch_size: int, plans_inbound_move_pause_seconds: int}
      */
     public function plansValues(): array
     {
@@ -213,6 +219,10 @@ final class SettingsAdministration
             'plans_attach_retry_enabled' => $this->multiInboundSettings->attachRetryEnabled(),
             'plans_attach_max_attempts' => $this->multiInboundSettings->maxAttempts(),
             'plans_attach_retry_delay_minutes' => $this->multiInboundSettings->retryDelayMinutes(),
+            'plans_inbound_move_enabled' => $this->inboundMoveSettings->enabled(),
+            'plans_inbound_move_detach_grace_hours' => $this->inboundMoveSettings->detachGraceHours(),
+            'plans_inbound_move_batch_size' => $this->inboundMoveSettings->batchSize(),
+            'plans_inbound_move_pause_seconds' => $this->inboundMoveSettings->pauseSeconds(),
         ];
     }
 
@@ -225,10 +235,14 @@ final class SettingsAdministration
     {
         $attempts = self::text($form, 'plans_attach_max_attempts', (string) MultiInboundSettings::DEFAULT_MAX_ATTEMPTS);
         $delay = self::text($form, 'plans_attach_retry_delay_minutes', (string) MultiInboundSettings::DEFAULT_RETRY_DELAY_MINUTES);
+        [$grace, $batch, $pause] = self::inboundMoveFields($form);
 
         return match (true) {
             1 !== preg_match('/^\d{1,3}$/D', $attempts) || (int) $attempts < 1 || (int) $attempts > MultiInboundSettings::MAX_MAX_ATTEMPTS => ['field' => 'plans_attach_max_attempts', 'message' => 'flash.settings.plans_attach_max_attempts'],
             1 !== preg_match('/^\d{1,4}$/D', $delay) || (int) $delay < 1 || (int) $delay > MultiInboundSettings::MAX_RETRY_DELAY_MINUTES => ['field' => 'plans_attach_retry_delay_minutes', 'message' => 'flash.settings.plans_attach_retry_delay'],
+            !InboundMoveSettings::valid($grace, InboundMoveSettings::MIN_DETACH_GRACE_HOURS, InboundMoveSettings::MAX_DETACH_GRACE_HOURS) => ['field' => 'plans_inbound_move_detach_grace_hours', 'message' => 'flash.settings.plans_inbound_move_detach_grace_hours'],
+            !InboundMoveSettings::valid($batch, InboundMoveSettings::MIN_BATCH_SIZE, InboundMoveSettings::MAX_BATCH_SIZE) => ['field' => 'plans_inbound_move_batch_size', 'message' => 'flash.settings.plans_inbound_move_batch_size'],
+            !InboundMoveSettings::valid($pause, InboundMoveSettings::MIN_PAUSE_SECONDS, InboundMoveSettings::MAX_PAUSE_SECONDS) => ['field' => 'plans_inbound_move_pause_seconds', 'message' => 'flash.settings.plans_inbound_move_pause_seconds'],
             default => null,
         };
     }
@@ -249,9 +263,30 @@ final class SettingsAdministration
         $this->set(MultiInboundSettings::ATTACH_RETRY_ENABLED, self::checked($form, 'plans_attach_retry_enabled'), 'boolean');
         $this->set(MultiInboundSettings::ATTACH_MAX_ATTEMPTS, (string) (int) self::text($form, 'plans_attach_max_attempts', ''), 'number');
         $this->set(MultiInboundSettings::ATTACH_RETRY_DELAY_MINUTES, (string) (int) self::text($form, 'plans_attach_retry_delay_minutes', ''), 'number');
+        [$grace, $batch, $pause] = self::inboundMoveFields($form);
+        $this->set(InboundMoveSettings::ENABLED, self::checked($form, 'plans_inbound_move_enabled'), 'boolean');
+        $this->set(InboundMoveSettings::DETACH_GRACE_HOURS, (string) (int) $grace, 'number');
+        $this->set(InboundMoveSettings::BATCH_SIZE, (string) (int) $batch, 'number');
+        $this->set(InboundMoveSettings::PAUSE_SECONDS, (string) (int) $pause, 'number');
         $this->entityManager->flush();
 
         return null;
+    }
+
+    /**
+     * The inbound move limits as typed; a field the form did not send counts as its default.
+     *
+     * @param array<string, mixed> $form
+     *
+     * @return array{string, string, string} grace hours, batch size, pause seconds
+     */
+    private static function inboundMoveFields(array $form): array
+    {
+        return [
+            self::text($form, 'plans_inbound_move_detach_grace_hours', (string) InboundMoveSettings::DEFAULT_DETACH_GRACE_HOURS),
+            self::text($form, 'plans_inbound_move_batch_size', (string) InboundMoveSettings::DEFAULT_BATCH_SIZE),
+            self::text($form, 'plans_inbound_move_pause_seconds', (string) InboundMoveSettings::DEFAULT_PAUSE_SECONDS),
+        ];
     }
 
     /**
