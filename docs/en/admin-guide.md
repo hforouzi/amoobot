@@ -414,6 +414,18 @@ Limits of the manual move:
 A built-in "Apply to existing services" is planned; it is not available yet. Design:
 [plan-inbound-change.md](../design/plan-inbound-change.md).
 
+**Settings for moving services (not active yet)**
+
+`Settings → Plans → Moving existing services to a new inbound` (SETTINGS_MANAGE) shows:
+
+- `plans.inbound_move_enabled`, off;
+- `plans.inbound_move_detach_grace_hours` (24, 0–168): how long a moved service would keep the old inbound;
+- `plans.inbound_move_batch_size` (20, 1–100): services per pass;
+- `plans.inbound_move_pause_seconds` (2, 0–60): the pause between passes.
+
+**These do nothing in this release.** They are stored and validated, but nothing reads them, and turning the switch on
+moves no service. The move itself will reuse the retry settings above (`plans.attach_*`).
+
 ## Branding (customer pages)
 
 `Settings -> Branding` (needs the *Manage settings* permission) sets what customers see on the payment result pages
