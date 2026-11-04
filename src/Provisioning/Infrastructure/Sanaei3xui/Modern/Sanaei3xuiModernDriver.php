@@ -11,6 +11,7 @@ use App\Provisioning\Domain\Dto\AdoptedVpnService;
 use App\Provisioning\Domain\Dto\CreatedVpnService;
 use App\Provisioning\Domain\Dto\CreateVpnServiceRequest;
 use App\Provisioning\Domain\Dto\InboundAttachment;
+use App\Provisioning\Domain\Dto\InboundDetachResult;
 use App\Provisioning\Domain\Dto\RenewVpnServiceRequest;
 use App\Provisioning\Domain\Dto\VpnUsage;
 use App\Provisioning\Domain\ClientOwnerComment;
@@ -22,6 +23,7 @@ use App\Provisioning\Domain\Dto\PanelLinks;
 use App\Provisioning\Domain\Dto\RotatedCredentials;
 use App\Provisioning\Domain\ExistingClientAwareDriverInterface;
 use App\Provisioning\Domain\InboundAttachDriverInterface;
+use App\Provisioning\Domain\InboundDetachDriverInterface;
 use App\Provisioning\Domain\PanelLinkSourceDriverInterface;
 use App\Provisioning\Domain\ServiceActivationDriverInterface;
 use App\Provisioning\Domain\TrafficLimitDriverInterface;
@@ -53,7 +55,7 @@ use Symfony\Component\Uid\Uuid;
  *   thrown: the primary alone makes a working service. Without additional inbounds the requests are exactly the
  *   single-inbound ones.
  */
-final class Sanaei3xuiModernDriver implements VpnPanelDriverInterface, ExistingClientAwareDriverInterface, TrafficLimitDriverInterface, ServiceActivationDriverInterface, BatchUsageDriverInterface, ClientOwnerDriverInterface, CredentialRotationDriverInterface, PanelLinkSourceDriverInterface, InboundAttachDriverInterface
+final class Sanaei3xuiModernDriver implements VpnPanelDriverInterface, ExistingClientAwareDriverInterface, TrafficLimitDriverInterface, ServiceActivationDriverInterface, BatchUsageDriverInterface, ClientOwnerDriverInterface, CredentialRotationDriverInterface, PanelLinkSourceDriverInterface, InboundAttachDriverInterface, InboundDetachDriverInterface
 {
     public const BYTES_PER_GB = 1073741824;
     /**
@@ -218,6 +220,212 @@ final class Sanaei3xuiModernDriver implements VpnPanelDriverInterface, ExistingC
         }
 
         return array_values(array_map('intval', $client['inboundIds']));
+    }
+
+    /**
+     * docs/design/plan-inbound-change.md 4.3 step 5 and 4.4 (P2: not called by anything yet). In this order:
+     * 1. without any request: refuse a panel that is not modern, a remote id that cannot be read or names another panel,
+     *    an empty list, an inbound of another panel, and any inbound that is the service's primary (local or as the
+     *    remote id records it);
+     * 2. GET the client. Unreadable, missing, without an inbound list or a UUID, or another client (UUID): nothing is sent;
+     * 3. on that read: leaving no inbound at all is refused; a client not on its primary (a hand edit) is failed; none of
+     *    the inbounds listed is "already detached" (nothing sent);
+     * 4. one detach call with the listed ids only, then a GET: done only when that read lists none of them and still the
+     *    primary. A lost or garbled answer is read back the same way; a refused or unreachable call is failed.
+     */
+    public function detachInbounds(string $remoteId, ?VpnInbound $localPrimary, array $inbounds, ?VpnPanel $panel = null, bool $recordHealth = true): InboundDetachResult
+    {
+        if (!$this->supports($panel)) {
+            return InboundDetachResult::refused(InboundDetachResult::REFUSED_NOT_MODERN, InboundAttachDriverInterface::MODERN_PANEL_REQUIRED);
+        }
+        \assert($panel instanceof VpnPanel);
+        $ref = $this->remoteIdParser->parse($remoteId);
+        // panel=0 in a remote id means "not known" (Sanaei3xuiRemoteIdParser::format()).
+        if (null === $ref || !ctype_digit(trim($ref->inboundId)) || ((int) $ref->panelId > 0 && null !== $panel->getId() && $ref->panelId !== $panel->getId())) {
+            return InboundDetachResult::refused(InboundDetachResult::REFUSED_INVALID_SERVICE, 'The service\'s remote id cannot be read or names another panel: nothing sent.');
+        }
+        $primaryRemoteId = (int) trim($ref->inboundId);
+        $requested = $this->detachTargets($inbounds, $panel);
+        if (is_string($requested)) {
+            return InboundDetachResult::refused(InboundDetachResult::REFUSED_INVALID_INBOUND, $requested);
+        }
+        foreach ($requested as $remote => $inbound) {
+            if ($remote === $primaryRemoteId || self::isLocalPrimary($inbound, $localPrimary, $ref->localInboundId, $panel)) {
+                return InboundDetachResult::refused(InboundDetachResult::REFUSED_PRIMARY, sprintf('Inbound %d is the service\'s primary inbound: it is never detached (nothing sent).', $remote));
+            }
+        }
+        $ids = array_keys($requested);
+
+        // Never a detach before a read confirms the client's current inbounds (3x-ui has no guard of its own).
+        $before = $this->readForDetach($panel, $ref->email, $ref->clientId, $recordHealth, false);
+        if ($before instanceof InboundDetachResult) {
+            return $before;
+        }
+        $listed = $before['inboundIds'];
+        $toDetach = array_values(array_intersect($ids, $listed));
+        $already = array_values(array_diff($ids, $listed));
+        if ([] !== $toDetach && [] === array_diff($listed, $toDetach)) {
+            return InboundDetachResult::refused(InboundDetachResult::REFUSED_LAST_INBOUND, 'The client would be left on no inbound at all: nothing sent.', $listed);
+        }
+        if (!in_array($primaryRemoteId, $listed, true)) {
+            return InboundDetachResult::failed(InboundDetachResult::FAILED_NOT_ON_PRIMARY, sprintf('The client is not on the service\'s primary inbound %d on the panel (changed by hand?): nothing sent.', $primaryRemoteId), $listed);
+        }
+        if ([] === $toDetach) {
+            return InboundDetachResult::alreadyDetached($already, $listed);
+        }
+
+        $sendError = null;
+        try {
+            $this->api->detach($panel, $ref->email, $toDetach, $recordHealth);
+        } catch (PanelApiException $e) {
+            $sendError = $e;
+            if (self::detachNotApplied($e)) {
+                $this->logDetach('sanaei_modern_detach_failed', $panel, InboundDetachResult::FAILED_PANEL, $e);
+
+                return InboundDetachResult::failed(InboundDetachResult::FAILED_PANEL, self::safeError($e, 'The panel did not detach the inbound'), $listed);
+            }
+            // A timeout, an HTTP error or a garbled answer: the panel may have applied it. Only a read decides.
+        }
+
+        $after = $this->readForDetach($panel, $ref->email, $ref->clientId, $recordHealth, true, $sendError);
+        if ($after instanceof InboundDetachResult) {
+            return $after;
+        }
+        $stillListed = array_values(array_intersect($toDetach, $after['inboundIds']));
+        if ([] !== $stillListed || !in_array($primaryRemoteId, $after['inboundIds'], true)) {
+            $this->logDetach('sanaei_modern_detach_not_applied', $panel, InboundDetachResult::FAILED_STILL_LISTED, $sendError);
+
+            return InboundDetachResult::failed(
+                InboundDetachResult::FAILED_STILL_LISTED,
+                [] !== $stillListed
+                    ? sprintf('The panel still lists inbound(s) %s after the detach%s', implode(', ', $stillListed), null === $sendError ? '.' : ': '.self::safeError($sendError, 'the call failed'))
+                    : sprintf('The client is no longer on the primary inbound %d after the detach: check it on the panel.', $primaryRemoteId),
+                $after['inboundIds'],
+            );
+        }
+        if (null !== $sendError) {
+            $this->logger->warning('sanaei_modern_detach_confirmed_after_lost_answer', ['panel_id' => $panel->getId(), 'failure' => $sendError->failure->value]);
+        }
+
+        return InboundDetachResult::done($toDetach, $already, $after['inboundIds']);
+    }
+
+    /**
+     * The inbounds to detach by remote id (repeats dropped), or why the list is refused.
+     *
+     * @param list<VpnInbound> $inbounds
+     *
+     * @return array<int, VpnInbound>|string
+     */
+    private function detachTargets(array $inbounds, VpnPanel $panel): array|string
+    {
+        if ([] === $inbounds) {
+            return 'No inbound to detach was given: nothing sent.';
+        }
+        $byRemoteId = [];
+        foreach ($inbounds as $inbound) {
+            $other = $inbound->getPanel();
+            if ($other !== $panel && (null === $other->getId() || $other->getId() !== $panel->getId())) {
+                return 'An inbound to detach does not belong to the service\'s panel: nothing sent.';
+            }
+            $raw = trim($inbound->getRemoteInboundId());
+            if (!ctype_digit($raw) || (int) $raw <= 0) {
+                return 'An inbound to detach has an invalid remote inbound id: nothing sent.';
+            }
+            $byRemoteId[(int) $raw] ??= $inbound;
+        }
+
+        return $byRemoteId;
+    }
+
+    /** Whether $inbound is the service's local primary: the same entity or id, or the same remote inbound on its panel. */
+    private static function isLocalPrimary(VpnInbound $inbound, ?VpnInbound $localPrimary, ?int $localPrimaryId, VpnPanel $panel): bool
+    {
+        if (null !== $inbound->getId() && $inbound->getId() === $localPrimaryId) {
+            return true;
+        }
+        if (null === $localPrimary) {
+            return false;
+        }
+        if ($inbound === $localPrimary || (null !== $inbound->getId() && $inbound->getId() === $localPrimary->getId())) {
+            return true;
+        }
+        $primaryPanel = $localPrimary->getPanel();
+        $samePanel = $primaryPanel === $panel || (null !== $primaryPanel->getId() && $primaryPanel->getId() === $panel->getId());
+
+        return $samePanel && trim($localPrimary->getRemoteInboundId()) === trim($inbound->getRemoteInboundId());
+    }
+
+    /**
+     * GET the client for a detach: its inbound list as the panel gives it, or the failure (a partial answer, without the
+     * list or the UUID, is never trusted; another UUID under the same email is not this service's client).
+     *
+     * @return array{inboundIds: list<int>}|InboundDetachResult
+     */
+    private function readForDetach(VpnPanel $panel, string $email, string $uuid, bool $recordHealth, bool $afterDetach, ?PanelApiException $sendError = null): array|InboundDetachResult
+    {
+        // Before the detach every failure means "nothing sent"; after it, "not confirmed" (the panel may have applied it).
+        $fail = function (string $beforeReason, string $what, ?array $ids = null, ?PanelApiException $e = null) use ($panel, $afterDetach, $sendError): InboundDetachResult {
+            $reason = $afterDetach ? InboundDetachResult::FAILED_NOT_CONFIRMED : $beforeReason;
+            $this->logDetach($afterDetach ? 'sanaei_modern_detach_not_confirmed' : 'sanaei_modern_detach_read_failed', $panel, $reason, $e ?? $sendError);
+            $text = $afterDetach
+                ? $what.' after the detach: not confirmed'.(null === $sendError ? '' : ' ('.self::safeError($sendError, 'the detach call').')').'.'
+                : $what.': nothing sent.';
+
+            return InboundDetachResult::failed($reason, $text, $ids);
+        };
+        try {
+            $client = $this->api->getClient($panel, $email, $recordHealth);
+        } catch (PanelApiException $e) {
+            return $fail(InboundDetachResult::FAILED_UNREADABLE, self::safeError($e, 'The client could not be read'), null, $e);
+        }
+        if (null === $client) {
+            return $afterDetach
+                ? $fail(InboundDetachResult::FAILED_CLIENT_MISSING, 'The panel has no such client')
+                : InboundDetachResult::failed(InboundDetachResult::FAILED_CLIENT_MISSING, 'The panel has no such client: nothing sent.');
+        }
+        if (!isset($client['inboundIds']) || !is_array($client['inboundIds'])) {
+            return $fail(InboundDetachResult::FAILED_NOT_LISTED, 'The panel did not list the client\'s inbounds');
+        }
+        $id = (string) ($client['id'] ?? '');
+        if ('' === $id) {
+            return $fail(InboundDetachResult::FAILED_NOT_LISTED, 'The panel did not give the client\'s UUID');
+        }
+        $ids = array_values(array_unique(array_map('intval', $client['inboundIds'])));
+        if (0 !== strcasecmp($id, $uuid)) {
+            return $afterDetach
+                ? $fail(InboundDetachResult::FAILED_NOT_CONFIRMED, 'The panel\'s client under this email has another UUID', $ids)
+                : InboundDetachResult::refused(InboundDetachResult::REFUSED_NOT_THIS_CLIENT, 'The panel\'s client under this email has another UUID (not this service\'s): nothing sent.', $ids);
+        }
+
+        return ['inboundIds' => $ids];
+    }
+
+    /**
+     * A detach call that certainly changed nothing: never sent or not reachable (no answer can be lost), refused by
+     * auth or a wrong URL, or refused by the panel (3x-ui v3.11.0 loads every inbound before it writes anything, so
+     * success:false means nothing was written: [3x-ui] source, not yet checked on a real panel). A timeout, an HTTP
+     * error or a garbled answer may hide an applied detach: read back.
+     */
+    private static function detachNotApplied(PanelApiException $e): bool
+    {
+        return PanelFailure::NOT_CONFIGURED === $e->failure
+            || PanelFailure::AUTH_REJECTED === $e->failure
+            || PanelFailure::WRONG_URL === $e->failure
+            || PanelFailure::PANEL_REJECTED === $e->failure
+            || ($e->failure->isUnreachable() && PanelFailure::NETWORK_TIMEOUT !== $e->failure);
+    }
+
+    /** A panel failure as a safe, short text (PanelApiException messages are redacted already; this removes access data too). */
+    private static function safeError(PanelApiException $e, string $what): string
+    {
+        return SecretRedactor::redactAccess(sprintf('%s: %s: %s', $what, $e->failure->value, $e->getMessage()), 300);
+    }
+
+    private function logDetach(string $event, VpnPanel $panel, string $reason, ?PanelApiException $e = null): void
+    {
+        // Ids and failure kinds only: no email, UUID, subscription id or panel message (they stay in the result's safe text).
+        $this->logger->warning($event, ['panel_id' => $panel->getId(), 'reason' => $reason, 'failure' => $e?->failure->value]);
     }
 
     /**
