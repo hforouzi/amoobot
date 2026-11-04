@@ -1,6 +1,8 @@
 # A plan's inbound changes: reaching existing services — design
 
-Status: **design for review**. Nothing here is built. No code, no migration and no switch exists yet. Persian summary:
+Status: **design for review**; **P1, P2, P3 as built** (section 9.1): the notices, the panel's detach primitive (not
+called), and the schema and switch (nothing reads them). No service is moved yet: the runner (P4) is not built, and
+the switch has no effect. Persian summary:
 [docs/fa/design/plan-inbound-change.md](../fa/design/plan-inbound-change.md). This document continues
 [multi-inbound-plans.md](multi-inbound-plans.md) section 4 ("Changing inbounds after sales") and phases M3/M4, which
 were planned there and never built. Where they disagree, this document overrides section 4 and M3/M4. Everything
@@ -598,6 +600,66 @@ and M2e suites):
 Order: P1 → P2 → P3 → P4 → P5 → P6 → P7 → P8 → P9 → (P10, P11). P1 is independent and can ship at once. P2–P6 change
 no customer-visible behaviour while the switch is off. Each PR follows the repository's process: phpunit and phpstan
 green; a fresh independent review; the pushed head tested from a clean checkout (M2c process rule).
+
+### 9.1 P1, P2, P3 as built
+
+**P1** (visibility, #94): `PlanInboundDrift` and the texts of 3.3 on every surface of 3.2; the admin guide (en/fa)
+"Changing a plan's inbound" with the manual move. No write, no panel call.
+
+**P2** (panel primitive, #95): `ModernClientsApi::detach()`; a new `InboundDetachDriverInterface` (the attach
+interface is unchanged), implemented by `Sanaei3xuiModernDriver::detachInbounds()` with its result
+`InboundDetachResult`. It refuses before any request on a non-modern panel, another panel, no inbound, or the primary
+(local or as the remote id records it). It reads the client first (GET); it refuses a detach that would leave no
+inbound; it sends only the ids still listed; it reports done only when a read afterwards confirms. The fake panel's
+`detach` has the v3.11.0 semantics. Nothing calls it yet.
+
+**P3** (schema and switch). Nothing reads or writes any of it yet; every existing behaviour is unchanged.
+
+- Migration `Version20261104090000` (additive; online-safe; the new column starts NULL):
+  - `inbound_move_run` (5.1):
+    - `plan_id` (CASCADE);
+    - `kind` (`primary|add|remove`);
+    - `target_inbound_id` (SET NULL; one target per run);
+    - `scope` (JSON);
+    - `status` (`planned|running|paused|done|cancelled`), `pause_reason`;
+    - `grace_hours`, `keep_old`;
+    - `requested_by` (admin user id, no foreign key, as the audit log);
+    - `created_at`, `started_at`, `finished_at`;
+    - the cached counters `planned_count`, `done_count`, `failed_count`, `skipped_count`, `remaining_count`.
+  - **One open run per plan** is enforced by the database. `open_plan_id` is the plan's id while the status is open,
+    NULL otherwise, under a unique index. A CHECK constraint keeps it in step with the status for every writer. A
+    second open run fails on the unique index; the runner (P4) turns that into "refused, open run #N".
+  - `service_inbound_move` (the table 4.3 refers to as "4.7"; this is its definition):
+    - `run_id` (CASCADE), `service_id` (CASCADE), with a unique key on (`run_id`, `service_id`): one move per service
+      per run;
+    - `from_inbound_id` and `to_inbound_id` (SET NULL), with `from_remote_inbound_id` and `to_remote_inbound_id`. These
+      keep the panel's inbound ids, so A can still be named after a local delete (4.4, 6.2). They hold the inbound id
+      only, never the service's remote id string;
+    - `state` (the 4.3 states), `skip_reason`;
+    - the retry columns of `vpn_service_inbound` (5.4): `attempts`, `next_attempt_at`, `alert_state`, `alerted_at`;
+    - `claimed_at`, `detach_after` (NULL with keep-old), `detached_at`, `last_error` (masked);
+    - `created_at`, `updated_at`;
+    - indexes for the due items, (`state`, `next_attempt_at`) and (`state`, `detach_after`).
+  - Rows are claimed and locked by primary key (5.3). Inbound references are SET NULL, so a run or a move never
+    blocks deleting an inbound.
+  - `vpn_service.inbound_changed_at` (5.5), NULL.
+  - `down()` refuses, and changes nothing, while either table has a row or any service has `inbound_changed_at` set.
+- Entities `InboundMoveRun` and `ServiceInboundMove` (constants for the kinds, statuses and states);
+  `VpnService::getInboundChangedAt()` / `setInboundChangedAt()`, never called.
+- `InboundMoveSettings` (8.1), on the plans settings tab. Each key is validated on save, and a stored value that is
+  not a whole number in range reads as the default:
+  - `plans.inbound_move_enabled` (off);
+  - `plans.inbound_move_detach_grace_hours` (24, 0–168);
+  - `plans.inbound_move_batch_size` (20, 1–100);
+  - `plans.inbound_move_pause_seconds` (2, 0–60).
+
+  The tab says that they are not active in this release. Retries will reuse the `plans.attach_*` keys of
+  `MultiInboundSettings`.
+- Not in P3, as planned:
+  - the runner, CLI, timer and panel calls (P4, P6, P8);
+  - the display guard (P5);
+  - the pages (P7, P9);
+  - the customer-notice claim of 6.3 (P10).
 
 ## 10. Open questions for the owner
 

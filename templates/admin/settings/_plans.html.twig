@@ -33,6 +33,34 @@
             </div>
         </div>
 
+        {# docs/design/plan-inbound-change.md 8.1. P3: the keys only; nothing reads them yet. #}
+        <div class="admin-section">
+            <h2>{{ 'plan_settings.sections.inbound_move'|trans }}</h2>
+            <div class="alert alert-info" role="note">{{ 'plan_settings.help.inbound_move_not_active'|trans }}</div>
+            <div class="admin-checkbox-row">
+                <input type="checkbox" id="plans_inbound_move_enabled" name="plans_inbound_move_enabled" {% if values.plans_inbound_move_enabled %}checked{% endif %}>
+                <label for="plans_inbound_move_enabled">{{ 'plan_settings.fields.inbound_move_enabled'|trans }}</label>
+            </div>
+            <div class="form-text">{{ 'plan_settings.help.inbound_move_enabled'|trans }}</div>
+            <div class="admin-form-grid">
+                <div class="admin-form-row">
+                    <label class="form-label" for="plans_inbound_move_detach_grace_hours">{{ 'plan_settings.fields.inbound_move_detach_grace_hours'|trans }}</label>
+                    <input class="form-control" type="number" min="{{ constant('App\\Shop\\Application\\InboundMoveSettings::MIN_DETACH_GRACE_HOURS') }}" max="{{ constant('App\\Shop\\Application\\InboundMoveSettings::MAX_DETACH_GRACE_HOURS') }}" step="1" dir="ltr" id="plans_inbound_move_detach_grace_hours" name="plans_inbound_move_detach_grace_hours" value="{{ values.plans_inbound_move_detach_grace_hours }}">
+                    <div class="form-text">{{ 'plan_settings.help.inbound_move_detach_grace_hours'|trans }}</div>
+                </div>
+                <div class="admin-form-row">
+                    <label class="form-label" for="plans_inbound_move_batch_size">{{ 'plan_settings.fields.inbound_move_batch_size'|trans }}</label>
+                    <input class="form-control" type="number" min="{{ constant('App\\Shop\\Application\\InboundMoveSettings::MIN_BATCH_SIZE') }}" max="{{ constant('App\\Shop\\Application\\InboundMoveSettings::MAX_BATCH_SIZE') }}" step="1" dir="ltr" id="plans_inbound_move_batch_size" name="plans_inbound_move_batch_size" value="{{ values.plans_inbound_move_batch_size }}">
+                    <div class="form-text">{{ 'plan_settings.help.inbound_move_batch_size'|trans }}</div>
+                </div>
+                <div class="admin-form-row">
+                    <label class="form-label" for="plans_inbound_move_pause_seconds">{{ 'plan_settings.fields.inbound_move_pause_seconds'|trans }}</label>
+                    <input class="form-control" type="number" min="{{ constant('App\\Shop\\Application\\InboundMoveSettings::MIN_PAUSE_SECONDS') }}" max="{{ constant('App\\Shop\\Application\\InboundMoveSettings::MAX_PAUSE_SECONDS') }}" step="1" dir="ltr" id="plans_inbound_move_pause_seconds" name="plans_inbound_move_pause_seconds" value="{{ values.plans_inbound_move_pause_seconds }}">
+                    <div class="form-text">{{ 'plan_settings.help.inbound_move_pause_seconds'|trans }}</div>
+                </div>
+            </div>
+        </div>
+
         <div class="admin-actions">
             <button type="submit" class="btn btn-primary">{{ 'common.save'|trans }}</button>
         </div>

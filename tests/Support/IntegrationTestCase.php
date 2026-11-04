@@ -46,6 +46,9 @@ abstract class IntegrationTestCase extends KernelTestCase
         // Plans with several inbounds (M1) point at plan, vpn_service and vpn_inbound (keys are off: nothing cascades).
         'plan_additional_inbound',
         'vpn_service_inbound',
+        // Inbound move runs and their rows (plan inbound change, P3) point at plan, vpn_service and vpn_inbound.
+        'service_inbound_move',
+        'inbound_move_run',
         // Claim links (S2) point at vpn_service and user.
         'service_ownership_event',
         'service_claim',

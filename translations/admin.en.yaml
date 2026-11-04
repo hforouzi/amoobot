@@ -972,6 +972,9 @@ flash:
   settings.plans_still_multi_inbound: "These plans keep their additional inbounds and are not sold while the switch is off: %plans%. Turn it on again, or remove the additional inbounds (switch on, edit the plan), to sell them again."
   settings.plans_attach_max_attempts: "Attempts per inbound must be a whole number between 1 and 100."
   settings.plans_attach_retry_delay: "The first retry delay must be a whole number of minutes between 1 and 1440."
+  settings.plans_inbound_move_detach_grace_hours: "The time before the old inbound is removed must be a whole number of hours between 0 and 168."
+  settings.plans_inbound_move_batch_size: "Services per pass must be a whole number between 1 and 100."
+  settings.plans_inbound_move_pause_seconds: "The pause between passes must be a whole number of seconds between 0 and 60."
   settings.reseller_floor: "The floor must be a percent between 0 and 100, with at most two decimals."
   settings.reseller_rounding: "The rounding must be a whole number of Toman between 1 and 1,000,000."
   settings.reseller_claim_ttl: "The claim link lifetime must be a whole number of hours between 1 and 720."
@@ -1262,16 +1265,26 @@ plan_settings:
   sections:
     multi_inbound: Several inbounds per plan
     attach_retry: Retrying inbounds that were not attached
+    inbound_move: Moving existing services to a new inbound
   fields:
     multi_inbound_enabled: Allow additional inbounds on plans
     attach_retry_enabled: Retry them automatically (every 30 minutes)
     attach_max_attempts: Attempts per inbound
     attach_retry_delay_minutes: First retry after (minutes)
+    inbound_move_enabled: Allow moving a plan's existing services to its new inbound
+    inbound_move_detach_grace_hours: Remove the old inbound after (hours)
+    inbound_move_batch_size: Services per pass
+    inbound_move_pause_seconds: Pause between passes (seconds)
   help:
     multi_inbound_enabled: "Shows the \"Additional inbounds\" field on the plan form (modern panels only) and lets such plans be sold. With it off, a plan with additional inbounds is not sold at all, and nothing retries their attachments."
     attach_retry_enabled: "When an additional inbound could not be attached to a service's client, the scheduled job tries again and checks the panel every 6 hours (an inbound removed by hand is attached again). Runs only with the switch above on. \"Retry attach\" on the service page works either way."
     attach_max_attempts: "In all, the attempt at the sale included (1 to 100). Then the job stops and the admins are told; \"Retry attach\" still works."
     attach_retry_delay_minutes: "Doubled after each failed attempt, at most 6 hours (1 to 1440)."
+    inbound_move_not_active: "Not active in this release: these settings are stored, but nothing uses them yet. Turning the switch on changes nothing; existing services keep their inbound and links."
+    inbound_move_enabled: "Meant for when a plan's inbound is changed: it will let the plan's existing services be moved to the new inbound once that part is released. Off by default."
+    inbound_move_detach_grace_hours: "How long a moved service keeps the old inbound as well, so links already handed out keep working for a while (0 to 168)."
+    inbound_move_batch_size: "How many services one pass handles before it pauses (1 to 100)."
+    inbound_move_pause_seconds: "The wait between two passes (0 to 60). Retries will use the attempt settings above."
 
 branding_settings:
   subtitle: "The name, logo and colour customers see on the payment result pages. Nothing is required: without them the pages show no header and use the default green."

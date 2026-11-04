@@ -60,6 +60,13 @@ class VpnService
     #[ORM\Column(nullable: true)]
     private ?\DateTimeImmutable $lastAccessInfoSyncedAt = null;
 
+    /**
+     * When the service's primary inbound was last changed by an inbound move (docs/design/plan-inbound-change.md 4.3
+     * step 3, 5.5). NULL until then; PR P3 adds the column only: nothing sets or reads it yet.
+     */
+    #[ORM\Column(nullable: true)]
+    private ?\DateTimeImmutable $inboundChangedAt = null;
+
     #[ORM\Column(type: 'text', nullable: true)]
     private ?string $configText = null;
 
@@ -301,6 +308,18 @@ class VpnService
     public function setLastAccessInfoSyncedAt(?\DateTimeImmutable $lastAccessInfoSyncedAt): self
     {
         $this->lastAccessInfoSyncedAt = $lastAccessInfoSyncedAt;
+
+        return $this;
+    }
+
+    public function getInboundChangedAt(): ?\DateTimeImmutable
+    {
+        return $this->inboundChangedAt;
+    }
+
+    public function setInboundChangedAt(?\DateTimeImmutable $inboundChangedAt): self
+    {
+        $this->inboundChangedAt = $inboundChangedAt;
 
         return $this;
     }
