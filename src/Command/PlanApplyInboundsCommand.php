@@ -103,7 +103,7 @@ final class PlanApplyInboundsCommand extends Command
         try {
             return $this->runCommand($input, $io, $json, $output);
         } catch (\Throwable $e) {
-            $text = SafeText::of($e->getMessage());
+            $text = SafeText::of($e->getMessage(), '', 255, $this->planner->panelSecrets());
             $this->logger->error('inbound_move_command_failed', ['error' => $text, 'class' => $e::class]);
             $this->fail($io, $output, $json, 'Stopped: '.$text, self::EXIT_FAILED);
 

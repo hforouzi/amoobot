@@ -25,6 +25,7 @@ use App\Shop\Domain\OrderType;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
 use Doctrine\ORM\EntityManagerInterface;
+use App\Provisioning\Infrastructure\PanelCredentials;
 use Psr\Log\LoggerInterface;
 
 /**
@@ -81,8 +82,30 @@ final class InboundMovePlanner
         private readonly PanelCallBudget $budget,
         private readonly AdminAuditLogger $auditLogger,
         private readonly LoggerInterface $logger,
+        private readonly PanelCredentials $credentials,
         private readonly Sanaei3xuiRemoteIdParser $remoteIdParser = new Sanaei3xuiRemoteIdParser(),
     ) {
+    }
+
+    /**
+     * The panel's token and password (all panels' when none is given), only to remove them from an error text
+     * (SafeText): never shown, stored or logged.
+     *
+     * @return list<string>
+     */
+    public function panelSecrets(?VpnPanel $panel = null): array
+    {
+        $secrets = [];
+        try {
+            foreach (null === $panel ? $this->entityManager->getRepository(VpnPanel::class)->findAll() : [$panel] as $one) {
+                $secrets[] = (string) $this->credentials->apiToken($one);
+                $secrets[] = (string) $this->credentials->password($one);
+            }
+        } catch (\Throwable) {
+            // Unreadable (a key problem, the database gone): the pattern rules of SecretRedactor still apply.
+        }
+
+        return array_values(array_filter($secrets, static fn (string $s): bool => '' !== $s));
     }
 
     /** The fixed text of a skip reason (console, run page). Never carries a credential. */
@@ -461,7 +484,7 @@ final class InboundMovePlanner
                 }
                 $this->options[$key] = $byId;
             } catch (\Throwable $e) {
-                $this->logger->warning('inbound_move_options_unreadable', ['panel_id' => $key, 'error' => SafeText::of($e->getMessage())]);
+                $this->logger->warning('inbound_move_options_unreadable', ['panel_id' => $key, 'error' => SafeText::of($e->getMessage(), '', 255, $this->panelSecrets($panel))]);
                 $this->options[$key] = null;
             }
         }
@@ -489,9 +512,10 @@ final class InboundMovePlanner
         try {
             $ids = $this->budget->within(self::STEP_BUDGET_SECONDS, fn (): ?array => $driver->clientInboundIds((string) $row['remote_id'], $panel, false));
         } catch (\Throwable $e) {
-            $this->logger->warning('inbound_move_dry_run_read_failed', ['service_id' => (int) $row['id'], 'error' => SafeText::of($e->getMessage(), (string) ($row['client_email'] ?? ''))]);
+            $secrets = $this->panelSecrets($panel);
+            $this->logger->warning('inbound_move_dry_run_read_failed', ['service_id' => (int) $row['id'], 'error' => SafeText::of($e->getMessage(), (string) ($row['client_email'] ?? ''), 255, $secrets)]);
 
-            return ['panel not read: '.SafeText::of($e->getMessage(), (string) ($row['client_email'] ?? ''), 120), true];
+            return ['panel not read: '.SafeText::of($e->getMessage(), (string) ($row['client_email'] ?? ''), 120, $secrets), true];
         }
         if (null === $ids) {
             return ['no such client on the panel: would fail', false];

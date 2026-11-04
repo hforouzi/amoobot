@@ -178,7 +178,12 @@ final class InboundMoveRunner
         $this->entityManager->refresh($service);
 
         // 4.4 protocol mix: after the claim, outside the transaction (it may read inbounds/options).
-        $mix = $this->planner->protocolMix($serviceId, $plan, $target, null === $move['from_inbound_id'] ? null : (int) $move['from_inbound_id']);
+        try {
+            $mix = $this->planner->protocolMix($serviceId, $plan, $target, null === $move['from_inbound_id'] ? null : (int) $move['from_inbound_id']);
+        } catch (\Throwable) {
+            // Unreadable options, whatever the reason: not moved yet (below).
+            $mix = null;
+        }
         if (true === $mix) {
             $this->settleClaim($serviceId, $moveId, $claim['claimedAt'], ServiceInboundMove::STATE_SKIPPED, InboundMovePlanner::SKIP_PROTOCOL_MIX);
 
@@ -214,7 +219,16 @@ final class InboundMoveRunner
             throw new \LogicException('An inbound move step must not run inside a transaction.');
         }
 
-        $attach = $driver->attachForMove((string) $service->getRemoteId(), $target, $service->getPanel(), false);
+        try {
+            $attach = $driver->attachForMove((string) $service->getRemoteId(), $target, $service->getPanel(), false);
+        } catch (\Throwable $e) {
+            // Not a panel answer (the driver turns those into a result): stored masked, retried like any failure, and
+            // the pass goes on with the next service. Whether an attach was sent is unknown: the next try reads first.
+            $text = $this->fail($serviceId, $moveId, $claim['claimedAt'], $claim['attempts'], SafeText::forService($service, 'Panel step failed: '.$e->getMessage(), 255, $this->planner->panelSecrets($service->getPanel())));
+            $this->logger->warning('inbound_move_panel_step_failed', ['run_id' => (int) $move['run_id'], 'service_id' => $serviceId, 'error' => $text]);
+
+            return new InboundMoveItem($moveId, $serviceId, $from, $to, InboundMoveItem::FAILED, $text, false);
+        }
         $sent = InboundMoveAttachResult::ATTACHED === $attach->outcome
             || (InboundMoveAttachResult::FAILED === $attach->outcome && in_array($attach->reason, [InboundMoveAttachResult::FAILED_NOT_ATTACHED, InboundMoveAttachResult::FAILED_NOT_CONFIRMED], true));
         if (InboundMoveAttachResult::REFUSED === $attach->outcome) {
@@ -228,7 +242,7 @@ final class InboundMoveRunner
             return new InboundMoveItem($moveId, $serviceId, $from, $to, InboundMoveItem::SKIPPED, InboundMovePlanner::skipText($reason));
         }
         if (!$attach->onTarget()) {
-            $text = $this->fail($serviceId, $moveId, $claim['claimedAt'], $claim['attempts'], SafeText::forService($service, (string) $attach->message));
+            $text = $this->fail($serviceId, $moveId, $claim['claimedAt'], $claim['attempts'], SafeText::forService($service, (string) $attach->message, 255, $this->planner->panelSecrets($service->getPanel())));
             $this->logger->warning('inbound_move_attach_failed', ['run_id' => (int) $move['run_id'], 'service_id' => $serviceId, 'reason' => $attach->reason]);
 
             return new InboundMoveItem($moveId, $serviceId, $from, $to, InboundMoveItem::FAILED, $text, !$attach->panelUnreadable, $sent);
