@@ -12,10 +12,11 @@ use Doctrine\ORM\EntityManagerInterface;
 use Psr\Log\LoggerInterface;
 
 /**
- * The run controls of docs/design/plan-inbound-change.md 5.4 that need no panel (PR P6, command line only): pause,
- * cancel, "retire now". Each is one or two conditional autocommit UPDATEs on the run and its move rows: no service row
- * is locked, no panel is called, and a runner working on the run notices the change between two services (it finishes
- * the one in hand). Undo calls the panel and is InboundMoveRunner::undo().
+ * The run controls of docs/design/plan-inbound-change.md 5.4 that need no panel: pause, cancel, "retire now" (PR P6,
+ * command line), and resume and "retry failed now" (PR P7, the web page: the scheduled task of P8 then does the work).
+ * Each is one or two conditional autocommit UPDATEs on the run and its move rows: no service row is locked, no panel is
+ * called, and a runner working on the run notices the change between two services (it finishes the one in hand). Undo
+ * calls the panel and is InboundMoveRunner::undo().
  *
  * Every result text is fixed, with ids and counts only.
  */
@@ -23,6 +24,9 @@ final class InboundMoveControls
 {
     public const PAUSED_BY_ADMIN = 'paused by an admin (--pause-run)';
     public const REOPENED = 'reopened for --retire-now: continue with --resume';
+
+    /** A move that is not finished (InboundMovePlanner's rule, on alias o): its service is held by that run meanwhile. */
+    private const UNFINISHED_SQL = "(o.state IN ('planned', 'attaching', 'detaching') OR (o.state = 'switched' AND o.detach_after IS NOT NULL) OR (o.state = 'failed' AND o.next_attempt_at IS NOT NULL))";
 
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
@@ -158,6 +162,103 @@ final class InboundMoveControls
         $this->logger->info('inbound_move_retire_now', ['run_id' => $runId, 'service_id' => $serviceId, 'due' => $due, 'reopened' => $reopen]);
 
         return ['ok' => true, 'message' => sprintf('%d moved service(s) of run #%d are due for the removal of their old inbound now%s.', $due, $runId, $reopen ? ' (the finished run was reopened, paused)' : ''), 'due' => $due];
+    }
+
+    /**
+     * paused → running, without a pass (the web's "Resume", PR P7): the scheduled task continues the run at its next
+     * pass. The command line's --resume makes the pass itself (InboundMoveRunner::process()), which sets the same
+     * status. Refused while the switch is off, as --resume.
+     *
+     * @return array{ok: bool, message: string}
+     */
+    public function resume(int $runId, bool $enabled): array
+    {
+        $run = $this->run($runId);
+        if (null === $run) {
+            return ['ok' => false, 'message' => sprintf('There is no run #%d.', $runId)];
+        }
+        if (!$enabled) {
+            return ['ok' => false, 'message' => 'Moving services is switched off: the run is not continued.'];
+        }
+        $resumed = $this->db()->executeStatement(
+            'UPDATE inbound_move_run SET status = ?, pause_reason = NULL, started_at = COALESCE(started_at, ?) WHERE id = ? AND status = ?',
+            [InboundMoveRun::STATUS_RUNNING, (new \DateTimeImmutable())->format('Y-m-d H:i:s'), $runId, InboundMoveRun::STATUS_PAUSED],
+        );
+        if (1 !== $resumed) {
+            return ['ok' => false, 'message' => sprintf('Run #%d is %s: only a paused run can be resumed.', $runId, $run['status'])];
+        }
+        $this->logger->info('inbound_move_run_resumed', ['run_id' => $runId, 'plan_id' => $run['plan_id']]);
+
+        return ['ok' => true, 'message' => sprintf('Run #%d continues at the next pass of the scheduled task.', $runId)];
+    }
+
+    /**
+     * "Retry failed now" (5.6, the web's run and service buttons, PR P7): the run's failed moves (one service's, or
+     * all) are due at once, their attempts from zero and their alert reset, as --retire-now does for a failed retire.
+     * The next pass (the scheduled task, or --resume) tries them; no panel is called here. A move whose service is in an
+     * unfinished move of another run, or was moved again by a later run, is left alone. A done run is reopened as
+     * running unless the plan has another open run; a cancelled run is not retried (it was stopped on purpose); a
+     * paused run stays paused.
+     *
+     * @return array{ok: bool, message: string, due: int, reopened: bool}
+     */
+    public function retryFailed(int $runId, bool $enabled, ?int $serviceId = null): array
+    {
+        $run = $this->run($runId);
+        if (null === $run) {
+            return ['ok' => false, 'message' => sprintf('There is no run #%d.', $runId), 'due' => 0, 'reopened' => false];
+        }
+        if (!$enabled) {
+            return ['ok' => false, 'message' => 'Moving services is switched off: nothing is retried.', 'due' => 0, 'reopened' => false];
+        }
+        if (InboundMoveRun::STATUS_CANCELLED === $run['status']) {
+            return ['ok' => false, 'message' => sprintf('Run #%d is cancelled: its failed services are not retried.', $runId), 'due' => 0, 'reopened' => false];
+        }
+        $reopen = InboundMoveRun::STATUS_DONE === $run['status'];
+        if ($reopen && null !== ($open = $this->planner->openRunId($run['plan_id']))) {
+            return ['ok' => false, 'message' => sprintf('Run #%d is done and the plan has another open run (#%d): finish or cancel that one first.', $runId, $open), 'due' => 0, 'reopened' => false];
+        }
+        $ids = array_map('intval', $this->db()->fetchFirstColumn(
+            'SELECT m.id FROM service_inbound_move m WHERE m.run_id = ? AND m.state = ?'.(null === $serviceId ? '' : ' AND m.service_id = '.(int) $serviceId).'
+               AND NOT EXISTS (SELECT 1 FROM service_inbound_move o WHERE o.service_id = m.service_id AND o.id <> m.id AND (o.id > m.id OR '.self::UNFINISHED_SQL.'))
+             ORDER BY m.id',
+            [$runId, ServiceInboundMove::STATE_FAILED],
+        ));
+        if ([] === $ids) {
+            return ['ok' => false, 'message' => sprintf('Run #%d has no failed service%s to retry.', $runId, null === $serviceId ? '' : ' #'.$serviceId), 'due' => 0, 'reopened' => false];
+        }
+        $now = (new \DateTimeImmutable())->format('Y-m-d H:i:s');
+        $due = (int) $this->db()->executeStatement(
+            sprintf('UPDATE service_inbound_move SET attempts = 0, next_attempt_at = ?, alert_state = NULL, alerted_at = NULL, updated_at = ? WHERE state = ? AND id IN (%s)', implode(', ', $ids)),
+            [$now, $now, ServiceInboundMove::STATE_FAILED],
+        );
+        $reopened = false;
+        if ($reopen && $due > 0) {
+            try {
+                $reopened = 1 === $this->db()->executeStatement(
+                    'UPDATE inbound_move_run SET status = ?, open_plan_id = plan_id, pause_reason = NULL, finished_at = NULL WHERE id = ? AND status = ?',
+                    [InboundMoveRun::STATUS_RUNNING, $runId, InboundMoveRun::STATUS_DONE],
+                );
+            } catch (UniqueConstraintViolationException) {
+                return ['ok' => false, 'message' => sprintf('Run #%d could not be reopened: the plan has another open run meanwhile.', $runId), 'due' => $due, 'reopened' => false];
+            }
+        }
+        $this->planner->refreshCounts($runId);
+        $this->logger->info('inbound_move_retry_now', ['run_id' => $runId, 'service_id' => $serviceId, 'due' => $due, 'reopened' => $reopened]);
+
+        return ['ok' => true, 'message' => sprintf('%d failed service(s) of run #%d are due again now.', $due, $runId), 'due' => $due, 'reopened' => $reopened];
+    }
+
+    /**
+     * What an undo says about the moves whose old inbound was already removed (5.4: undo cannot put them back): one
+     * text for the command line and the web page.
+     */
+    public static function alreadyRetiredText(int $count, int $planId): string
+    {
+        return sprintf(
+            'The old inbound was already removed from %d services: undo cannot put them back. That needs a new run from the new inbound back to the old one for these %d service(s): set the plan\'s inbound back to the old one, then run app:plan:apply-inbounds %d (dry run first). The old inbound must exist and be active.',
+            $count, $count, $planId,
+        );
     }
 
     /** @return array{plan_id: int, status: string}|null */

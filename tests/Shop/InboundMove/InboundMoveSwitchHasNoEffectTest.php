@@ -67,6 +67,12 @@ final class InboundMoveSwitchHasNoEffectTest extends IntegrationTestCase
 
         self::assertSame([
             'Admin/Application/SettingsAdministration.php',
+            // P7: the web pages of the move (the plan's run block, the service's move line, the list filter, the
+            // Apply page and its buttons). They read, or call the same planner and controls as the command.
+            'Admin/UI/Crud/PlanCrudController.php',
+            'Admin/UI/Crud/VpnServiceCrudController.php',
+            'Admin/UI/InboundMoveAdminController.php',
+            'Admin/UI/ServiceInboundsController.php',
             'Command/AutomationRunCommand.php',
             'Command/PlanApplyInboundsCommand.php',
             'Entity/InboundMoveRun.php',
@@ -77,13 +83,15 @@ final class InboundMoveSwitchHasNoEffectTest extends IntegrationTestCase
             'Provisioning/Application/InboundAttachAlerts.php',
             // P6: the run controls of the command (pause, cancel, retire now).
             'Provisioning/Application/InboundMoveControls.php',
+            // P7: what the pages show (read only).
+            'Provisioning/Application/InboundMoveOverview.php',
             'Provisioning/Application/InboundMovePass.php',
             'Provisioning/Application/InboundMovePlanner.php',
             'Provisioning/Application/InboundMoveRunner.php',
             'Provisioning/Application/InboundMoveScheduler.php',
             'Provisioning/Application/InboundMoveScope.php',
             'Shop/Application/InboundMoveSettings.php',
-        ], $readers, 'P4-P6: only the CLI runner (its alerts and controls) and the display guard read them; no sale, settlement, regenerate, plan save or timer (P8) does');
+        ], $readers, 'P4-P8: only the runner (its alerts and controls, the command, the scheduled task), the display guard and the web pages of P7 read them; no sale, settlement, regenerate or plan save does');
     }
 
     /**

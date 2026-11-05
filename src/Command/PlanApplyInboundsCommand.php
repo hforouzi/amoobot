@@ -422,10 +422,7 @@ final class PlanApplyInboundsCommand extends Command
         if (InboundMovePass::RAN !== $pass->outcome) {
             return $this->fail($io, $output, $json, (string) $pass->message);
         }
-        $retiredText = 0 === $pass->alreadyRetired ? null : sprintf(
-            'The old inbound was already removed from %d services: undo cannot put them back. That needs a new run from the new inbound back to the old one for these %d service(s): set the plan\'s inbound back to the old one, then run app:plan:apply-inbounds %d (dry run first). The old inbound must exist and be active.',
-            $pass->alreadyRetired, $pass->alreadyRetired, (int) $plan->getId(),
-        );
+        $retiredText = 0 === $pass->alreadyRetired ? null : InboundMoveControls::alreadyRetiredText($pass->alreadyRetired, (int) $plan->getId());
         $incomplete = $pass->failed > 0 || $pass->busy > 0 || $pass->alreadyRetired > 0;
         if ($json) {
             $output->writeln((string) json_encode([

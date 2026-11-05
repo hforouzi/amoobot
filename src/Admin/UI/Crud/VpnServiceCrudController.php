@@ -9,11 +9,14 @@ use App\Admin\UI\ServiceInboundsController;
 use App\Admin\UI\SubscriptionPageLinkController;
 use App\Admin\UI\Support\AdminFormat;
 use App\Entity\VpnService;
+use App\Entity\ServiceInboundMove;
 use App\Entity\VpnServiceInbound;
 use App\Provisioning\Application\FinalConfigLinkProvider;
+use App\Provisioning\Application\InboundMoveOverview;
 use App\Provisioning\Application\ServiceInboundCounts;
 use App\Security\AdminPermission;
 use App\Shop\Application\Catalog\PlanInboundDrift;
+use App\Shop\Application\InboundMoveSettings;
 use App\Shop\Application\MultiInboundSettings;
 use App\Subscription\Application\SubscriptionPageUrl;
 use Doctrine\ORM\EntityManagerInterface;
@@ -62,11 +65,15 @@ class VpnServiceCrudController extends AbstractCrudController
         private readonly TranslatorInterface $translator,
         private readonly ServiceInboundCounts $inboundCounts,
         private readonly PlanInboundDrift $inboundDrift,
+        private readonly InboundMoveOverview $moveOverview,
+        private readonly InboundMoveSettings $moveSettings,
     ) {
     }
 
     /** ?inbounds=not_connected: only services with an additional inbound not attached (switch on). */
     public const FILTER_NOT_CONNECTED = 'not_connected';
+    /** ?moves=moving|failed: services whose latest inbound move is on its way, or failed (docs/design/plan-inbound-change.md 5.6). */
+    public const FILTER_MOVES = ['moving' => 'service.tabs.moves_moving', 'failed' => 'service.tabs.moves_failed'];
 
     /** @var array{int, array<int, int>}|null the current request's id and ServiceInboundCounts::notConnectedByService() */
     private ?array $notConnected = null;
@@ -90,8 +97,16 @@ class VpnServiceCrudController extends AbstractCrudController
             $active = $this->currentTab();
             $tabs = [];
             $notConnected = $this->notConnectedFilter();
+            $moves = $this->movesFilter();
             foreach (self::TABS as $tab) {
-                $tabs[] = ['key' => $tab, 'label' => 'service.tabs.'.$tab, 'url' => $this->generateUrl('admin_vpn_service_index', 'all' === $tab ? [] : ['tab' => $tab]), 'active' => !$notConnected && $tab === $active, 'count' => $counts[$tab]];
+                $tabs[] = ['key' => $tab, 'label' => 'service.tabs.'.$tab, 'url' => $this->generateUrl('admin_vpn_service_index', 'all' === $tab ? [] : ['tab' => $tab]), 'active' => !$notConnected && null === $moves && $tab === $active, 'count' => $counts[$tab]];
+            }
+            // Inbound moves (switch on, or a filter link followed): one query for both counts.
+            if ($this->moveSettings->enabled() || null !== $moves) {
+                $moveCounts = $this->moveOverview->listCounts();
+                foreach (self::FILTER_MOVES as $filter => $label) {
+                    $tabs[] = ['key' => 'moves_'.$filter, 'label' => $label, 'url' => $this->generateUrl('admin_vpn_service_index', ['moves' => $filter]), 'active' => $filter === $moves, 'count' => $moveCounts[$filter]];
+                }
             }
             if ($this->multiInbound->enabled()) {
                 $tabs[] = ['key' => 'inbounds_not_connected', 'label' => 'service.tabs.inbounds_not_connected', 'url' => $this->generateUrl('admin_vpn_service_index', ['inbounds' => self::FILTER_NOT_CONNECTED]), 'active' => $notConnected, 'count' => count($this->notConnectedServices())];
@@ -180,6 +195,7 @@ class VpnServiceCrudController extends AbstractCrudController
             AssociationField::new('panel'),
             AssociationField::new('inbound')->hideOnIndex(),
             ...$this->inboundNoticeField($pageName),
+            ...$this->inboundMoveField($pageName),
             ...$this->inboundRowsField(),
             TextField::new('status')->setTemplatePath(AdminFormat::TEMPLATE)->formatValue(fn (mixed $v, ?VpnService $s = null): string => $f->status($v).$this->notConnectedBadge($s)),
             DateTimeField::new('expiresAt')->setTemplatePath(AdminFormat::TEMPLATE)->formatValue(fn (mixed $v): string => $f->expiry($v)),
@@ -234,8 +250,19 @@ class VpnServiceCrudController extends AbstractCrudController
                 ->andWhere(sprintf('EXISTS (SELECT listInbound.id FROM %s listInbound WHERE listInbound.service = entity AND listInbound.status IN (:listInboundStatuses))', VpnServiceInbound::class))
                 ->setParameter('listInboundStatuses', ServiceInboundCounts::NOT_CONNECTED);
         }
+        $moves = $this->movesFilter();
+        if (null !== $moves) {
+            // In the list's own query (one query per page): the service's latest move, on its way or failed.
+            $queryBuilder->andWhere(sprintf(
+                'EXISTS (SELECT listMove.id FROM %1$s listMove WHERE listMove.service = entity AND %2$s AND listMove.id = (SELECT MAX(listLatest.id) FROM %1$s listLatest WHERE listLatest.service = entity))',
+                ServiceInboundMove::class,
+                'failed' === $moves
+                    ? "listMove.state = 'failed'"
+                    : "(listMove.state IN ('planned', 'attaching', 'detaching') OR (listMove.state = 'switched' AND listMove.detachAfter IS NOT NULL) OR (listMove.state = 'undone' AND listMove.nextAttemptAt IS NOT NULL))",
+            ));
+        }
 
-        return ServiceTabs::apply($queryBuilder, 'entity', $this->notConnectedFilter() ? 'all' : $this->currentTab(), $this->clock->now());
+        return ServiceTabs::apply($queryBuilder, 'entity', $this->notConnectedFilter() || null !== $moves ? 'all' : $this->currentTab(), $this->clock->now());
     }
 
     /**
@@ -251,10 +278,64 @@ class VpnServiceCrudController extends AbstractCrudController
         if (null === $notice) {
             return [];
         }
-        $text = $this->inboundDrift->serviceText('plan_inbound_drift.service', $notice);
+        $text = $this->inboundDrift->serviceText('plan_inbound_drift.service_apply', $notice);
 
         // Not a mapped property (EasyAdmin would replace the field by its own association field, unformatted); escaped.
         return [AdminFormat::field('inboundNotice', static fn (): string => '<span class="text-warning" data-inbound-notice>⚠ '.AdminFormat::e($text).'</span>', 'field.inbound_notice')->onlyOnDetail()];
+    }
+
+    /**
+     * "Inbound move #run: A → B, state, attempts, next try, last error (masked), old inbound removed at / due at" on the
+     * detail page of a service that was in a move (docs/design/plan-inbound-change.md 5.6, P7), with "Retry now" for a
+     * failed move (SERVICES_MANAGE, ServiceInboundsController). One query; nothing shown otherwise. Escaped.
+     *
+     * @return list<Field>
+     */
+    private function inboundMoveField(string $pageName): array
+    {
+        $service = Crud::PAGE_DETAIL === $pageName ? $this->getContext()?->getEntity()->getInstance() : null;
+        $move = $service instanceof VpnService && null !== $service->getId() ? $this->moveOverview->serviceMove((int) $service->getId()) : null;
+        if (null === $move) {
+            return [];
+        }
+        $t = fn (string $key, array $parameters = []): string => AdminFormat::e($this->translator->trans($key, $parameters, 'admin'));
+        $id = (int) $service->getId();
+        $html = sprintf(
+            '<div data-inbound-move="%d" data-move-state="%s"><strong>%s</strong> <bdi>%s</bdi> → <bdi>%s</bdi> · %s · %s',
+            $move['run_id'],
+            AdminFormat::e($move['state']),
+            $t('inbound_move.service.title', ['%run%' => $move['run_id']]),
+            AdminFormat::e($move['from']),
+            AdminFormat::e($move['to']),
+            $t('inbound_move.state.'.$move['state']),
+            $t('service_inbounds.attempts', ['%count%' => $move['attempts']]),
+        );
+        if (null !== $move['skip_reason']) {
+            $html .= ' · '.$t('inbound_move.skip.'.$move['skip_reason']);
+        }
+        if ('failed' === $move['state']) {
+            $html .= ' · <span data-move-next>'.($move['given_up'] ? $t('inbound_move.service.given_up') : $t('inbound_move.service.next_try', ['%at%' => (string) $move['next_attempt_at']])).'</span>';
+        }
+        if (null !== $move['last_error']) {
+            $html .= ' · <span dir="ltr" data-move-error>'.AdminFormat::e($move['last_error']).'</span>';
+        }
+        if (null !== $move['detached_at']) {
+            $html .= ' · '.$t('inbound_move.service.removed_at', ['%at%' => $move['detached_at']]);
+        } elseif (null !== $move['detach_after'] && in_array($move['state'], ['switched', 'detaching', 'failed'], true)) {
+            $html .= ' · '.$t('inbound_move.service.due_at', ['%at%' => $move['detach_after']]);
+        } elseif ('switched' === $move['state']) {
+            $html .= ' · '.$t('inbound_move.service.kept');
+        }
+        if ('failed' === $move['state'] && 'cancelled' !== $move['run_status'] && $this->moveSettings->enabled() && $this->isGranted(AdminPermission::SERVICES_MANAGE->value)) {
+            $html .= sprintf(
+                '<form method="post" action="%s" class="d-inline ms-2" data-move-retry><input type="hidden" name="_token" value="%s"><button type="submit" class="btn btn-sm btn-warning">%s</button></form>',
+                AdminFormat::e($this->generateUrl('admin_vpn_service_retry_move', ['id' => $id])),
+                AdminFormat::e($this->csrfTokenManager->getToken(ServiceInboundsController::CSRF_MOVE.'-'.$id)->getValue()),
+                $t('inbound_move.service.retry'),
+            );
+        }
+
+        return [AdminFormat::field('inboundMove', static fn (): string => $html.'</div>', 'field.inbound_move')->onlyOnDetail()];
     }
 
     /**
@@ -332,6 +413,14 @@ class VpnServiceCrudController extends AbstractCrudController
         }
 
         return $this->notConnected[1];
+    }
+
+    /** The ?moves= filter of the list (moving|failed), or null. */
+    private function movesFilter(): ?string
+    {
+        $moves = (string) $this->requestStack->getCurrentRequest()?->query->get('moves', '');
+
+        return array_key_exists($moves, self::FILTER_MOVES) ? $moves : null;
     }
 
     private function notConnectedFilter(): bool

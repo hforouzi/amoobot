@@ -10,6 +10,8 @@ use App\Admin\UI\DashboardController;
 use App\Entity\Plan;
 use App\Entity\TrialPlan;
 use App\Entity\VpnInbound;
+use App\Provisioning\Application\InboundMoveOverview;
+use App\Shop\Application\InboundMoveSettings;
 use App\Shop\Application\Catalog\InvalidCatalogEntry;
 use App\Shop\Application\Catalog\PlanAdminService;
 use App\Shop\Application\Catalog\PlanInboundDrift;
@@ -45,6 +47,7 @@ use Symfony\Bridge\Doctrine\Form\Type\EntityType;
 use Symfony\Component\HttpFoundation\RedirectResponse;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Contracts\Translation\TranslatorInterface;
+use Twig\Environment;
 
 class PlanCrudController extends AbstractCrudController
 {
@@ -63,6 +66,9 @@ class PlanCrudController extends AbstractCrudController
         private readonly EntityManagerInterface $entityManager,
         private readonly TrialBackingPlans $trialBacking,
         private readonly PlanInboundDrift $inboundDrift,
+        private readonly InboundMoveOverview $moveOverview,
+        private readonly InboundMoveSettings $moveSettings,
+        private readonly Environment $twig,
     ) {
     }
 
@@ -178,6 +184,8 @@ class PlanCrudController extends AbstractCrudController
             ...$this->driftFields($pageName),
             ...$this->multiInboundFields($pageName),
             BooleanField::new('isActive'),
+            // "Apply to existing services" and the plan's open or last run (docs/design/plan-inbound-change.md 5.6, P7).
+            AdminFormat::field('inboundMove', fn (mixed $v, ?Plan $plan): string => $plan instanceof Plan ? $this->inboundMoveBlock($plan) : '', 'field.inbound_move')->onlyOnDetail(),
 
             // Detail page and form.
             // EasyAdmin only formats fields bound to a readable property, so the price check is bound to title.
@@ -265,7 +273,7 @@ class PlanCrudController extends AbstractCrudController
         $primary = $plan->getInbound();
         if (!$isNew && null !== $primary && ($plan->primaryInboundChanged() || $plan->additionalInboundsChanged())) {
             $drift = $this->inboundDrift->ofPlan($plan);
-            foreach (PlanInboundWarnings::drift($plan->getTitle(), $primary->getTitle(), $drift, $this->inboundDrift->breakdown($drift)) as $warning) {
+            foreach (PlanInboundWarnings::drift($plan->getTitle(), $primary->getTitle(), $drift, $this->inboundDrift->breakdown($drift), 'plan_inbound_drift.plan_saved_apply') as $warning) {
                 $this->flash('warning', $warning['key'], $warning['parameters']);
             }
         }
@@ -286,7 +294,7 @@ class PlanCrudController extends AbstractCrudController
         if ($drift->total <= 0) {
             return $field;
         }
-        $text = $this->translator->trans('plan_inbound_drift.form', ['%count%' => $drift->total, '%breakdown%' => $this->inboundDrift->breakdown($drift)], 'admin');
+        $text = $this->translator->trans('plan_inbound_drift.form_apply', ['%count%' => $drift->total, '%breakdown%' => $this->inboundDrift->breakdown($drift)], 'admin');
 
         // EasyAdmin renders help as HTML: the text (inbound titles are admin-entered) is escaped here.
         return $field->setHelp(sprintf('<span data-inbound-drift="%d">%s</span>', $drift->total, AdminFormat::e($text)));
@@ -395,6 +403,22 @@ class PlanCrudController extends AbstractCrudController
         }
 
         return $cell;
+    }
+
+    /**
+     * The run block (templates/admin/inbound_move/_run.html.twig): read only, a few queries, no panel call. Twig escapes
+     * every value.
+     */
+    private function inboundMoveBlock(Plan $plan): string
+    {
+        $planId = (int) $plan->getId();
+
+        return $this->twig->render('admin/inbound_move/_run.html.twig', [
+            'plan' => $plan,
+            'run' => $this->moveOverview->planRun($planId, null === $plan->getInbound() ? null : (int) $plan->getInbound()->getId()),
+            'problems' => $this->moveOverview->problems(null, $planId),
+            'enabled' => $this->moveSettings->enabled(),
+        ]);
     }
 
     /** A plan that orders refer to stays (PlanInUse): a message instead of the database's refusal. */

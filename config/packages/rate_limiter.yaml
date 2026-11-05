@@ -34,6 +34,11 @@ framework:
             policy: sliding_window
             limit: 5
             interval: '10 minutes'
+        # "Retry now" of a service's inbound move, per service (ServiceInboundsController), like admin_service_attach.
+        admin_service_move:
+            policy: sliding_window
+            limit: 5
+            interval: '10 minutes'
         # Mini App admin actions (approve, suspend, ...), per admin (AdminActions).
         miniapp_admin_action:
             policy: sliding_window

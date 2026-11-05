@@ -1,0 +1,129 @@
+{# InboundMoveAdminController::apply: "Apply to existing services" of a plan (docs/design/plan-inbound-change.md 5.2,
+   6.2, 8.1; PR P7). Step 1 is the dry run (counts computed locally, no panel call), step 2 (?step=confirm) the
+   confirmation whose POST creates the run, planned. Service ids, statuses and inbound titles only (D5). #}
+{% extends '@EasyAdmin/page/content.html.twig' %}
+{% trans_default_domain 'admin' %}
+
+{% block content_title %}{{ 'inbound_move.apply.title'|trans({'%plan%': plan.title}) }}{% endblock %}
+
+{% block main %}
+    <div class="admin-custom-page admin-inbound-move-page" data-plan-id="{{ plan.id }}" data-step="{{ confirm ? 'confirm' : 'dry_run' }}">
+        <p class="form-text">{{ 'inbound_move.apply.intro'|trans }}</p>
+        {% if not enabled %}
+            <p class="alert alert-warning" data-switch-off>{{ 'inbound_move.apply.switch_off'|trans }}</p>
+        {% endif %}
+        {% if targetProblem %}
+            <p class="alert alert-danger" data-target-problem="{{ targetProblem }}">{{ ('inbound_move.apply.' ~ targetProblem)|trans({'%inbound%': target ? target.title : ''}) }}</p>
+        {% endif %}
+        {% if openRun %}
+            <p class="alert alert-info" data-open-run="{{ openRun }}">{{ 'inbound_move.apply.open_run'|trans({'%run%': openRun}) }}</p>
+        {% endif %}
+
+        <div class="admin-form-card">
+            <h2>{{ 'inbound_move.run.heading'|trans }}</h2>
+            {% include 'admin/inbound_move/_run.html.twig' with {show_apply_link: false} %}
+        </div>
+
+        {% if not confirm %}
+            <form method="get" action="{{ path('admin_plan_apply_inbounds', {id: plan.id}) }}" class="admin-form-card" data-scope-form>
+                <h2>{{ 'inbound_move.apply.scope'|trans }}</h2>
+                <div class="admin-form-row">
+                    <label class="form-label" for="im-service">{{ 'inbound_move.apply.service'|trans }}</label>
+                    <input class="form-control" type="number" min="1" id="im-service" name="service" value="{{ form.service }}" inputmode="numeric">
+                    <div class="form-text">{{ 'inbound_move.apply.service_help'|trans }}</div>
+                </div>
+                <div class="admin-form-row">
+                    <label class="form-label" for="im-from">{{ 'inbound_move.apply.from_inbound'|trans }}</label>
+                    <select class="form-select" id="im-from" name="from_inbound">
+                        <option value="">{{ 'inbound_move.apply.from_any'|trans }}</option>
+                        {% for inbound in fromInbounds %}
+                            <option value="{{ inbound.id }}"{% if form.fromInbound == inbound.id %} selected{% endif %}>{{ inbound.title }} (#{{ inbound.id }})</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                {% for flag in ['include_suspended', 'include_expired', 'include_trials'] %}
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="im-{{ flag }}" name="{{ flag }}" value="1"{% if attribute(form, {include_suspended: 'includeSuspended', include_expired: 'includeExpired', include_trials: 'includeTrials'}[flag]) %} checked{% endif %}>
+                        <label class="form-check-label" for="im-{{ flag }}">{{ ('inbound_move.apply.' ~ flag)|trans }}</label>
+                    </div>
+                {% endfor %}
+                <div class="form-check mt-2">
+                    <input class="form-check-input" type="checkbox" id="im-keep-old" name="keep_old" value="1"{% if form.keepOld %} checked{% endif %}>
+                    <label class="form-check-label" for="im-keep-old">{{ 'inbound_move.apply.keep_old'|trans }}</label>
+                </div>
+                <div class="admin-form-row">
+                    <label class="form-label" for="im-grace">{{ 'inbound_move.apply.grace_hours'|trans }}</label>
+                    <input class="form-control" type="number" min="0" max="168" id="im-grace" name="grace_hours" value="{{ form.graceHours }}" inputmode="numeric">
+                    <div class="form-text">{{ 'inbound_move.apply.grace_help'|trans({'%default%': defaultGrace}) }}</div>
+                </div>
+                <div class="admin-actions"><button type="submit" class="btn btn-secondary">{{ 'inbound_move.apply.show'|trans }}</button></div>
+            </form>
+        {% endif %}
+
+        {% for error in errors %}
+            <p class="alert alert-danger" data-scope-error>{{ error|trans }}</p>
+        {% endfor %}
+
+        {% if summary is not null %}
+            <div class="admin-form-card" data-dry-run>
+                <h2>{{ (confirm ? 'inbound_move.confirm.title' : 'inbound_move.apply.dry_run')|trans }}</h2>
+                <p data-target="{{ target.id }}">{{ 'inbound_move.apply.target'|trans }} <strong><bdi>{{ target.title }}</bdi></strong> (#{{ target.id }})</p>
+                <ul class="list-unstyled" data-summary>
+                    <li data-total="{{ summary.total }}">{{ 'inbound_move.apply.total'|trans({'%count%': summary.total}) }}</li>
+                    <li data-would-move="{{ summary.move }}"><strong>{{ 'inbound_move.apply.would_move'|trans({'%count%': summary.move}) }}</strong></li>
+                    <li data-skipped="{{ summary.skipped }}">{{ 'inbound_move.apply.skipped'|trans({'%count%': summary.skipped}) }}</li>
+                    {% for reason, n in summary.byReason %}
+                        <li class="ms-3" data-skip-reason="{{ reason }}" data-skip-count="{{ n }}">{{ ('inbound_move.skip.' ~ reason)|trans }}: {{ n }}</li>
+                    {% endfor %}
+                </ul>
+                {% if summary.unchecked > 0 %}<p class="form-text" data-unchecked="{{ summary.unchecked }}">{{ 'inbound_move.apply.unchecked'|trans({'%count%': summary.unchecked}) }}</p>{% endif %}
+                <p class="form-text">{{ 'inbound_move.apply.local_only'|trans }}</p>
+
+                {% if confirm %}
+                    <div class="alert alert-info" data-phases>
+                        <p class="mb-1"><strong>{{ 'inbound_move.confirm.phase1_title'|trans }}</strong> {{ 'inbound_move.confirm.phase1'|trans({'%inbound%': target.title}) }}</p>
+                        <p class="mb-1"><strong>{{ 'inbound_move.confirm.phase2_title'|trans }}</strong> {{ form.keepOld ? 'inbound_move.confirm.phase2_keep_old'|trans : 'inbound_move.confirm.phase2'|trans({'%hours%': form.graceHours}) }}</p>
+                        <p class="mb-0">{{ 'inbound_move.confirm.task'|trans }}</p>
+                    </div>
+                    {% if form.service is null %}<p class="alert alert-warning" data-one-first>{{ 'inbound_move.confirm.one_first'|trans }}</p>{% endif %}
+                    {% if enabled and not openRun and not targetProblem %}
+                        <form method="post" action="{{ path('admin_plan_apply_inbounds_create', {id: plan.id}) }}" data-create-form>
+                            <input type="hidden" name="_token" value="{{ csrf_token('inbound-move-create-' ~ plan.id) }}">
+                            {% for name, value in form.query %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endfor %}
+                            <div class="d-flex flex-wrap gap-2">
+                                <button type="submit" class="btn btn-danger">{{ 'inbound_move.confirm.submit'|trans({'%count%': summary.move}) }}</button>
+                                <a class="btn btn-secondary" href="{{ path('admin_plan_apply_inbounds', {id: plan.id}|merge(form.query)) }}">{{ 'inbound_move.confirm.back'|trans }}</a>
+                            </div>
+                        </form>
+                    {% endif %}
+                {% elseif enabled and not openRun and not targetProblem and summary.move > 0 %}
+                    <a class="btn btn-primary" href="{{ path('admin_plan_apply_inbounds', {id: plan.id, step: 'confirm'}|merge(form.query)) }}" data-continue>{{ 'inbound_move.apply.continue'|trans }}</a>
+                {% endif %}
+            </div>
+
+            {% for list in [{key: 'moving', rows: summary.moving, count: summary.move}, {key: 'skipped', rows: summary.skippedList, count: summary.skipped}] %}
+                {% if list.rows is not empty %}
+                    <div class="admin-form-card" data-list="{{ list.key }}">
+                        <h2>{{ ('inbound_move.apply.list_' ~ list.key)|trans({'%count%': list.count}) }}</h2>
+                        {% if list.count > listLimit %}<p class="form-text">{{ 'inbound_move.apply.list_limited'|trans({'%count%': listLimit}) }}</p>{% endif %}
+                        <div class="table-responsive">
+                            <table class="table datagrid">
+                                <thead><tr><th>{{ 'inbound_move.apply.col_service'|trans }}</th><th>{{ 'inbound_move.apply.col_status'|trans }}</th><th>{{ 'inbound_move.apply.col_inbound'|trans }}</th>{% if list.key == 'skipped' %}<th>{{ 'inbound_move.apply.col_reason'|trans }}</th>{% endif %}</tr></thead>
+                                <tbody>
+                                {% for c in list.rows %}
+                                    <tr data-service-id="{{ c.serviceId }}">
+                                        <td><a href="{{ path('admin_vpn_service_detail', {entityId: c.serviceId}) }}">#{{ c.serviceId }}</a></td>
+                                        <td>{{ ('status.' ~ c.status)|trans }}</td>
+                                        <td><bdi>{{ c.fromTitle }}</bdi></td>
+                                        {% if list.key == 'skipped' %}<td>{{ ('inbound_move.skip.' ~ c.skipReason)|trans }}</td>{% endif %}
+                                    </tr>
+                                {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                {% endif %}
+            {% endfor %}
+        {% endif %}
+    </div>
+{% endblock %}

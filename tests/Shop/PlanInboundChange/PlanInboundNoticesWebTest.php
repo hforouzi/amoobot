@@ -50,12 +50,12 @@ final class PlanInboundNoticesWebTest extends IntegrationTestCase
 
         $this->saveForm($this->gold, ['inbound' => (string) $this->nl->getId()]);
 
-        $expected = $this->notice('plan_inbound_drift.plan_saved', ['%plan%' => 'Gold', '%new%' => 'NL-2', '%count%' => 2, '%breakdown%' => '2 on "DE-1"']);
+        $expected = $this->notice('plan_inbound_drift.plan_saved_apply', ['%plan%' => 'Gold', '%new%' => 'NL-2', '%count%' => 2, '%breakdown%' => '2 on "DE-1"']);
         self::assertStringContainsString($expected, $this->page(), 'text (a): the two services on DE-1; the deleted one is not counted');
         self::assertStringContainsString('2 existing service(s) of this plan are on another inbound (2 on "DE-1")', $this->page());
         $form = $this->client->request('GET', '/admin/plan/'.$this->gold->getId().'/edit');
         self::assertSame(
-            $this->notice('plan_inbound_drift.form', ['%count%' => 2, '%breakdown%' => '2 on "DE-1"']),
+            $this->notice('plan_inbound_drift.form_apply', ['%count%' => 2, '%breakdown%' => '2 on "DE-1"']),
             html_entity_decode($form->filter('[data-inbound-drift]')->text()),
             'text (b) under the inbound field',
         );
@@ -211,7 +211,7 @@ final class PlanInboundNoticesWebTest extends IntegrationTestCase
         $before = $this->checksums();
 
         $page = $this->client->request('GET', '/admin/vpn-service/'.$service->getId());
-        self::assertSame($this->notice('plan_inbound_drift.service', ['%current%' => 'DE-1', '%planInbound%' => 'NL-2']), trim(html_entity_decode($page->filter('[data-inbound-notice]')->text()), '⚠ '));
+        self::assertSame($this->notice('plan_inbound_drift.service_apply', ['%current%' => 'DE-1', '%planInbound%' => 'NL-2']), trim(html_entity_decode($page->filter('[data-inbound-notice]')->text()), '⚠ '));
         $this->client->request('GET', '/admin/vpn-service/'.$onNew->getId());
         self::assertStringNotContainsString('data-inbound-notice', (string) $this->client->getResponse()->getContent());
         self::assertSame($before, $this->checksums(), 'pages write nothing');

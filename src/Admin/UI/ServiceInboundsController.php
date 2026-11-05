@@ -6,7 +6,10 @@ namespace App\Admin\UI;
 
 use App\Entity\VpnService;
 use App\Provisioning\Application\InboundAttachRetry;
+use App\Provisioning\Application\InboundMoveControls;
+use App\Provisioning\Application\InboundMoveOverview;
 use App\Provisioning\Application\ServiceInboundAttacher;
+use App\Shop\Application\InboundMoveSettings;
 use App\Security\AdminAuditLogger;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
@@ -21,6 +24,11 @@ use Symfony\Component\Routing\Attribute\Route;
  * inbounds are attached to its existing client (ServiceInboundAttacher: never a second client; two clicks at once send
  * one attach). A POST with a CSRF token, a few per service per 10 minutes (rate limiter admin_service_attach), audited
  * with the counts only.
+ *
+ * "Retry now" of a service's failed inbound move (docs/design/plan-inbound-change.md 5.6, PR P7): its move is due again
+ * at once, attempts from zero (InboundMoveControls::retryFailed(), as the run's "Retry failed now"); the next pass of the
+ * scheduled task tries it. No panel call here. A POST with a CSRF token, rate limited per service (admin_service_move).
+ * No audit row per service (5.6: the move row is the record).
  */
 #[Route('/admin')]
 final class ServiceInboundsController extends AbstractController
@@ -28,6 +36,7 @@ final class ServiceInboundsController extends AbstractController
     use TranslatedFlashes;
 
     public const CSRF_ID = 'retry-attach';
+    public const CSRF_MOVE = 'retry-move';
 
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
@@ -35,7 +44,48 @@ final class ServiceInboundsController extends AbstractController
         private readonly AdminAuditLogger $auditLogger,
         #[Autowire(service: 'limiter.admin_service_attach')]
         private readonly RateLimiterFactory $limiter,
+        private readonly InboundMoveControls $moveControls,
+        private readonly InboundMoveOverview $moveOverview,
+        private readonly InboundMoveSettings $moveSettings,
+        #[Autowire(service: 'limiter.admin_service_move')]
+        private readonly RateLimiterFactory $moveLimiter,
     ) {
+    }
+
+    #[Route('/vpn-service/{id}/retry-move', name: 'admin_vpn_service_retry_move', requirements: ['id' => '\d+'], methods: ['POST'])]
+    public function retryMove(Request $request, int $id): RedirectResponse
+    {
+        if (null === $this->entityManager->find(VpnService::class, $id)) {
+            throw $this->createNotFoundException();
+        }
+        $back = $this->redirectToRoute('admin_vpn_service_detail', ['entityId' => $id]);
+        if (!$this->isCsrfTokenValid(self::CSRF_MOVE.'-'.$id, (string) $request->request->get('_token'))) {
+            $this->flash('danger', 'flash.csrf_expired');
+
+            return $back;
+        }
+        if (!$this->moveSettings->enabled()) {
+            $this->flash('danger', 'inbound_move.flash.switched_off');
+
+            return $back;
+        }
+        $move = $this->moveOverview->serviceMove($id);
+        if (null === $move || 'failed' !== $move['state']) {
+            $this->flash('info', 'inbound_move.flash.service_nothing');
+
+            return $back;
+        }
+        if (!$this->moveLimiter->create('service-'.$id)->consume()->isAccepted()) {
+            $this->flash('warning', 'inbound_move.flash.service_rate_limited');
+
+            return $back;
+        }
+        $result = $this->moveControls->retryFailed($move['run_id'], true, $id);
+        $result['ok']
+            ? $this->flash('success', 'inbound_move.flash.service_retried', ['%run%' => $move['run_id']])
+            : $this->flash('warning', 'inbound_move.flash.refused', ['%reason%' => $result['message']]);
+
+        return $back;
     }
 
     #[Route('/vpn-service/{id}/retry-attach', name: 'admin_vpn_service_retry_attach', requirements: ['id' => '\d+'], methods: ['POST'])]
