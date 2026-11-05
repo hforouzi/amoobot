@@ -529,7 +529,7 @@ final class InboundMoveRunner
                 return InboundMoveItem::SKIPPED;
             }
             $db->executeStatement(
-                'UPDATE vpn_service SET inbound_id = ?, remote_id = ?, inbound_changed_at = ? WHERE id = ?',
+                'UPDATE vpn_service SET inbound_id = ?, remote_id = ?, inbound_changed_at = ?, last_access_info_synced_at = NULL WHERE id = ?',
                 [$target->getId(), $remoteId, $now, $serviceId],
             );
             // B is the primary now: never an additional row of its own.
@@ -749,8 +749,10 @@ final class InboundMoveRunner
                 'UPDATE service_inbound_move SET state = ?, detached_at = ?, claimed_at = NULL, next_attempt_at = NULL, last_error = NULL, updated_at = ? WHERE id = ?',
                 [ServiceInboundMove::STATE_DONE, $now, $now, $moveId],
             );
-            // The stored links still hold A's: hidden by the display guard (5.5) until the refresh below succeeds.
-            $db->executeStatement('UPDATE vpn_service SET inbound_changed_at = ? WHERE id = ?', [$now, $serviceId]);
+            // The stored links still hold A's: hidden by the display guard (5.5) until the refresh below succeeds. Both
+            // stamps have one-second precision, so the synced one is cleared: a refresh in this same second must not read
+            // as already done after a crash here.
+            $db->executeStatement('UPDATE vpn_service SET inbound_changed_at = ?, last_access_info_synced_at = NULL WHERE id = ?', [$now, $serviceId]);
 
             return true;
         });
@@ -967,7 +969,7 @@ final class InboundMoveRunner
 
                 return 'the service\'s remote id cannot be rewritten (not the structured form)';
             }
-            $db->executeStatement('UPDATE vpn_service SET inbound_id = ?, remote_id = ?, inbound_changed_at = ? WHERE id = ?', [$old->getId(), $remoteId, $now, $serviceId]);
+            $db->executeStatement('UPDATE vpn_service SET inbound_id = ?, remote_id = ?, inbound_changed_at = ?, last_access_info_synced_at = NULL WHERE id = ?', [$old->getId(), $remoteId, $now, $serviceId]);
             // A is the primary again: never an additional row of its own.
             $db->executeStatement('DELETE FROM vpn_service_inbound WHERE service_id = ? AND inbound_id = ?', [$serviceId, $old->getId()]);
             $hasNew = [] !== array_filter($rows, static fn (array $r): bool => (int) $r['inbound_id'] === $toId);
@@ -1229,7 +1231,11 @@ final class InboundMoveRunner
         ));
     }
 
-    /** A moved service whose links were not refreshed since (the display guard's condition, 5.5). */
+    /**
+     * A moved service whose links were not refreshed since (the display guard's condition, 5.5). The stamps have one-second
+     * precision: every write of inbound_changed_at here also clears last_access_info_synced_at, so that "same second" can
+     * never read as "already refreshed".
+     */
     private const LINKS_PENDING_SQL = 's.inbound_changed_at IS NOT NULL AND (s.last_access_info_synced_at IS NULL OR s.last_access_info_synced_at < s.inbound_changed_at)';
 
     /** Counters, the given-up alerts (one per service) and what is pending, after a pass. */

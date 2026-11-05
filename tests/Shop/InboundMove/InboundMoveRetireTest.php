@@ -371,6 +371,39 @@ final class InboundMoveRetireTest extends IntegrationTestCase
         }
     }
 
+    /**
+     * The stamps have one-second precision: a refresh in the same second as the retire must not read as "already refreshed"
+     * when the refresh of the retire itself fails (or the process dies before it): A's link would stay stored, shown, and
+     * the run would close. The test pins the synced stamp at or after the retire, so it does not depend on the clock.
+     */
+    public function testARetireInTheSameSecondAsTheLastRefreshStillWaitsForItsOwnRefresh(): void
+    {
+        $service = $this->movableService(1);
+        [$code, $output] = $this->command(['--apply' => true]);
+        self::assertSame(0, $code, $output);
+        $runId = (int) $this->runs()[0]['id'];
+        $this->em->getConnection()->executeStatement("UPDATE vpn_service SET last_access_info_synced_at = '2099-01-01 00:00:00' WHERE id = ?", [$service->getId()]);
+        $this->em->getConnection()->executeStatement("UPDATE service_inbound_move SET detach_after = '2000-01-01 00:00:00' WHERE state = 'switched'");
+        $this->em->clear();
+        $this->fake->script('GET', 'panel/api/clients/subLinks/'.$service->getSubId(), Fake3xuiPanel::networkError('connection refused'), 5);
+
+        [$code, $output] = $this->command(['--resume' => (string) $runId]);
+
+        self::assertSame(0, $code, $output);
+        self::assertSame('done', $this->moves()[0]['state']);
+        self::assertNull($this->serviceRow((int) $service->getId())['last_access_info_synced_at'], 'pending: the display guard hides the old link');
+        self::assertSame('running', $this->runs()[0]['status'], 'the run waits for the refresh');
+
+        $this->fake->clearScripts();
+        [$code, $output] = $this->command(['--resume' => (string) $runId]);
+
+        self::assertSame(0, $code, $output);
+        self::assertSame('done', $this->runs()[0]['status']);
+        $row = $this->serviceRow((int) $service->getId());
+        self::assertNotNull($row['last_access_info_synced_at']);
+        self::assertCount(1, json_decode((string) $row['config_links'], true), 'B only');
+    }
+
     public function testTheGraceSettingIsTheDefault(): void
     {
         $this->setting(InboundMoveSettings::DETACH_GRACE_HOURS, '2', 'number');
