@@ -128,7 +128,7 @@ final class PlanApplyInboundsCommand extends Command
 
                 --apply needs plans.inbound_move_enabled on (Settings -> Plans). One run per plan is open at a time;
                 a second --apply is refused and names it. Failed services are retried with the attach retry settings
-                (plans.attach_max_attempts, plans.attach_retry_delay_minutes) on the next --resume.
+                (plans.attach_max_attempts, plans.attach_retry_delay_minutes) by the scheduled task or the next --resume.
 
                 Scope: active services only unless --include-suspended / --include-expired / --include-trials;
                 deleted ones never. Skipped, with the reason: services on another panel, on a legacy (not modern)

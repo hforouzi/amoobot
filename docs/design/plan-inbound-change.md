@@ -1,6 +1,6 @@
 # A plan's inbound changes: reaching existing services — design
 
-Status: **design for review**; **P1, P2, P3, P4, P5, P6 as built** (section 9.1). Built so far:
+Status: **design for review**; **P1, P2, P3, P4, P5, P6, P8 as built** (section 9.1). Built so far:
 
 - the notices;
 - the panel's detach primitive;
@@ -10,9 +10,10 @@ Status: **design for review**; **P1, P2, P3, P4, P5, P6 as built** (section 9.1)
 - **the display guard** (5.5): while a moved service's links were not refreshed after the change, no customer surface
   shows its stored single configs. The subscription URL is shown with "Your links are being updated";
 - **phase 2 and the run controls, from the command line only**: the old inbound A is removed after the grace period
-  (or at once with `--retire-now`), and `--pause-run`, `--resume`, `--cancel`, `--undo`.
+  (or at once with `--retire-now`), and `--pause-run`, `--resume`, `--cancel`, `--undo`;
+- **the scheduled task** `inbound-moves`: it continues open runs (P8, built before P7).
 
-Not built yet (P7-P10): the pages, the timer and the customer message. The move has
+Not built yet (P7, P9, P10): the pages and the customer message. The move has
 been tested against the fake 3x-ui only, not against a real panel. Persian summary:
 [docs/fa/design/plan-inbound-change.md](../fa/design/plan-inbound-change.md). This document continues
 [multi-inbound-plans.md](multi-inbound-plans.md) section 4 ("Changing inbounds after sales") and phases M3/M4, which
@@ -312,8 +313,8 @@ One open run (`planned|running|paused`) per plan. A second one is refused with t
   - processes open runs in id order, and items whose `next_attempt_at` or `detach_after` is due;
   - needs a **full** `deploy.sh`.
 
-  The foreground CLI takes the same Symfony lock name. It refuses with "a scheduled run is in progress" instead of
-  waiting.
+  The foreground CLI takes the same lock name (a MariaDB named lock, see P8 in 9.1). It refuses with "a scheduled run
+  is in progress" instead of waiting.
 
 ### 5.3 Transactions and locks
 
@@ -621,7 +622,7 @@ Order: P1 → P2 → P3 → P4 → P5 → P6 → P7 → P8 → P9 → (P10, P11)
 no customer-visible behaviour while the switch is off. Each PR follows the repository's process: phpunit and phpstan
 green; a fresh independent review; the pushed head tested from a clean checkout (M2c process rule).
 
-### 9.1 P1, P2, P3, P4, P5, P6 as built
+### 9.1 P1, P2, P3, P4, P5, P6, P8 as built
 
 **P1** (visibility, #94): `PlanInboundDrift` and the texts of 3.3 on every surface of 3.2; the admin guide (en/fa)
 "Changing a plan's inbound" with the manual move. No write, no panel call.
@@ -748,7 +749,7 @@ first, what phase 1 does and does not do.
     exact request, outside the fake's lock):
     - P-1 … P-5, and P-6 for the phase-1 steps: `InboundMoveParallelTest`;
     - P-7, in the `real-time` group: `InboundMoveLockHoldTest`;
-    - P-6 for the detach steps: `InboundMoveRetireParallelTest` (P6), and P-8 belongs to P8.
+    - P-6 for the detach steps: `InboundMoveRetireParallelTest` (P6), and P-8: `InboundMoveScheduledParallelTest` (P8).
 - Not tested: a real 3x-ui panel. U7 and U8 were added to 8.3.
 
 **P5** (display guard 5.5, no panel call, no schema change, no switch). Admin guide (en/fa) "What customers see during
@@ -814,7 +815,7 @@ a move".
 - `detach_after` = now + the run's `grace_hours` (`--grace-hours`, or `plans.inbound_move_detach_grace_hours`, default
   24, 0-168). `--keep-old` at creation: NULL, never retired automatically. With grace 0 the retire happens in the same
   pass.
-- Due retirements from the command line: there is no timer until P8. `--resume=<runId>` handles phase 1 and due
+- Due retirements from the command line (P8 added the timer). `--resume=<runId>` handles phase 1 and due
   retirements in one pass, idempotently. `--apply` does the same for the run it creates; **while a run is open a second
   `--apply` stays refused** (5.1, one open run), and names the run to resume.
 - `--retire-now[=<runId>]` (default: the plan's latest run; `--service=<id>` for one) sets the moves due. It does not
@@ -832,7 +833,7 @@ a move".
   "the old inbound was already removed from N services". Exit code 1 when anything was left. A service whose A was
   deleted locally fails: it cannot be put back.
 - **Undo has no per-service back-off or give-up alert** (a deviation from "the same retries"): it is a foreground admin
-  action, retried by running `--undo` again, and there is no timer to retry it. The 5-in-a-row pause, the one run alert
+  action, retried by running `--undo` again, and the task of P8 does not retry it. The 5-in-a-row pause, the one run alert
   and the masked errors do apply.
 - Audit: `plan.inbounds_apply_paused` (`by`: `admin` or `automatic`), `plan.inbounds_apply_undone`, counts only.
 - **Second-precision stamps.** `inbound_changed_at` and `last_access_info_synced_at` are stored in whole seconds, so a
@@ -860,6 +861,43 @@ a move".
   - `InboundMoveRedactionTest`: masked errors with `zend.exception_ignore_args` 0 and 1, and D5 for reseller-sold and
     claimed services through both phases and the undo.
 - Not tested: a real 3x-ui panel. U9 and U10 were added to 8.3.
+
+**P8** (the scheduled task, built before P7 so that a run created from the web has something to process it; no schema
+change, no change to what a pass does to a service). Admin guide (en/fa), `docs/*/automation.md`.
+
+- `InboundMoveScheduler`, `app:automation:run --only=inbound-moves` (also part of `--only=all`): the runs in `planned` or
+  `running`, of `kind=primary`, in order of id. All the work is `InboundMoveRunner::process()`, so a due item is the
+  runner's own rule (phase 1 leftovers, retries past `next_attempt_at`, retirements past `detach_after`, links to
+  refresh), with `plans.inbound_move_batch_size`, `plans.inbound_move_pause_seconds`, `PanelCallBudget`, the 5-in-a-row
+  pause and the `plans.attach_*` rules. `--limit` does not apply. `--dry-run` counts what is due; no lock, no panel, no write.
+- `process()` gained two arguments whose defaults change nothing for P4 and P6: `leavePaused` (a paused run is not
+  resumed, also when the pause arrives between the task's query and the runner's first write) and `stopAt`.
+- With the switch off: nothing at all, not even the lock; success.
+- **Time budget:** `TIME_BUDGET_SECONDS` = 420 s, for a job timeout of 600 s. No service starts after it, the pause between
+  batches is cut to what is left, and the service in hand may take about 120 s more (two steps with their refreshes). The
+  rest stays due. `tests/ops/scheduled-jobs.test.sh` ties the constant to the manifest.
+- **The lock is not a Symfony lock, as 5.2 first said.** `symfony/lock` is not a dependency. `InboundMoveLock` is a
+  MariaDB `GET_LOCK` with timeout 0, on a connection of its own, named after a hash of the database name (a named lock
+  is server-wide). The server releases it when the connection ends, so a killed process leaves no lock, and there is no
+  file shared between the www-data jobs and an admin's shell. If that connection is dropped by the server during a pass
+  the lock is lost silently; the claims of the moves still keep one item to one runner.
+- The command takes the lock for `--apply`, `--resume`, `--retire-now` and `--undo`, and refuses with "a scheduled run is in
+  progress, try again in a minute" (exit 2). The check comes after the option checks and before the run checks. Two
+  commands now refuse each other too. `--pause-run`, `--cancel` and the dry run do not take it.
+- The task skips with one log line (`inbound_move_task_skipped`) and exit 0. A panel that does not answer pauses the run: an
+  alert, not a failed job. Only a run that throws fails the job (logged masked), and the next run still goes.
+- A run that `--cancel` left open (moved services waiting for their retire) stays `running` (P6), so the task finishes those
+  retires.
+- Deploy: `inbound-moves|lifecycle|*:20/30|600|1800`, on the allowlist, max age 6000 s, `NEW` until the first run. It
+  needs a **full** deploy.
+- **:20 and :50 are also `expiry`'s minutes** in the lifecycle group (`*:5/15`). The group lock serialises them, so they
+  never overlap: the later one waits up to 120 s, then skips one slot. A long pass can make the next lifecycle jobs skip
+  a slot too, at any offset. The free offset nearest to :20 is `*:21/30` (no timer of any group on :21 or :51).
+- Tests: `InboundMoveScheduledTest`, `InboundMoveScheduledParallelTest` (P-8 with real processes: both directions, a
+  simultaneous start, a pause during a pass, kill -9 after the attach, before the snapshot, after the detach), and the
+  ops tests in `tests/ops/scheduled-jobs.test.sh`. Tests of two runners on one item now call the runner directly
+  (helper mode `runner`), since two commands refuse each other.
+- Not tested: a real 3x-ui panel, a real server or systemd timer, or a real `deploy.sh` run.
 
 ## 10. Open questions for the owner
 

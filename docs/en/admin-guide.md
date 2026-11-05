@@ -414,7 +414,8 @@ Limits of the manual move:
 **Moving existing services with the command (command line only)**
 
 `app:plan:apply-inbounds` moves a plan's existing services to the plan's current inbound, on modern 3x-ui panels.
-There is no button for it yet, and nothing runs it on a timer: you run it on the server.
+There is no button for it yet: you start a move on the server. The scheduled task `inbound-moves` then continues it
+(a timer every 30 minutes, installed by a **full** `deploy.sh`, not `--app-only`).
 
 A move has two phases:
 
@@ -450,7 +451,7 @@ What the move does **not** do:
   both until the retire.
 - No message to customers. A customer sees the new inbound's configs after updating the subscription in their app
   (the subscription URL does not change). Single configs copied before keep working, on the old inbound, until phase 2.
-- No admin page and no timer: everything here is run from the command line.
+- No admin page: a move is started and controlled from the command line.
 - Services on a legacy panel, on another panel or on a test (dummy) panel are listed as skipped, with the reason.
   Deleted services are never moved. Adding or removing a plan's additional inbounds on existing services is not part
   of it (a moved service keeps its additional inbounds, and the old inbound becomes one of them when the plan still
@@ -484,7 +485,8 @@ How to use it:
    `--after-id=<serviceId>` narrow it; `--batch-size` and `--pause` override the settings below for this run.
 5. Read the summary. If some failed (exit code 1), they keep their old inbound and links; they are retried with the
    attach retry settings (`plans.attach_max_attempts`, `plans.attach_retry_delay_minutes`) when you run
-   `php bin/console app:plan:apply-inbounds <planId> --resume=<runId>` later. An admin alert is sent when a service's
+   `php bin/console app:plan:apply-inbounds <planId> --resume=<runId>` later, or when the scheduled task reaches them.
+   An admin alert is sent when a service's
    attempts are used up, and once when the run finishes with failures.
 6. If the panel does not answer 5 times in a row, the run **pauses itself** (one admin alert). Nothing changed for the
    services not moved yet. When the panel is back: `--resume=<runId>`.
@@ -495,13 +497,14 @@ plan's current inbound and is not part of the run. Exit codes: 0 done, 1 some fa
 start (a clear message says why); an undo that left services behind also exits with 1. The output and the logs show ids and titles only: never a customer, a link, a UUID
 or a token.
 
-**Removing the old inbound (phase 2).** Nothing runs on a timer yet, so you start it:
+**Removing the old inbound (phase 2).** The scheduled task does this for you, or you start it yourself:
 
 - Choose the grace period when you create the run: `--grace-hours=N` (0–168), otherwise the setting below. With 0 the
   old inbound is removed in the same pass. With `--keep-old` it is never removed automatically, only with
   `--retire-now`.
-- **After the grace period**, run `php bin/console app:plan:apply-inbounds <planId> --resume=<runId>`. One pass handles
-  what is left of phase 1 **and** every removal that is due. Running it twice does nothing twice. A run that is open
+- **After the grace period**, the scheduled task's next pass removes it (`amoobot-job-inbound-moves`, at :20 and :50). To
+  do it at once: `php bin/console app:plan:apply-inbounds <planId> --resume=<runId>`. Either way one pass handles what
+  is left of phase 1 **and** every removal that is due, and running it twice does nothing twice. A run that is open
   refuses a second `--apply`: use `--resume`.
 - **Without waiting**: `--retire-now=<runId> --resume=<runId>` for the whole run, adding `--service=<id>` for one
   service. `--retire-now` alone (without a run id it takes the plan's latest run) only marks the services as due; the
@@ -509,6 +512,15 @@ or a token.
 
 Failed removals are retried with the same attach settings, an alert is sent when a service's attempts are used up, and
 the run pauses itself after 5 failed panel reads in a row, as in phase 1.
+
+**What the scheduled task does.** Every pass goes through the planned and running runs in order of id and handles what is
+due: services not moved yet, retries whose back-off is over, old inbounds whose grace period is over, and links still to
+refresh. It uses the same code, limits and alerts as `--resume`. It does nothing while `plans.inbound_move_enabled` is off
+(no panel request). It never touches a **paused** run: after the panel is back, or after your own pause, only `--resume`
+continues it. A cancelled run with moved services stays open until their old inbound is removed, and the task finishes
+that part. It starts no new service after 7 minutes; the next pass picks up the rest. A skip because a command is working
+is not an error (one line in the log). Output: `/var/log/amoobot/inbound-moves.log`; by hand:
+`php bin/console app:automation:run --only=inbound-moves [--dry-run]`.
 
 **Pause, resume, cancel, undo.** Each takes the run id from the output:
 
@@ -526,6 +538,11 @@ many services that concerns ("the old inbound was already removed from N service
 new run from the new inbound back to the old one: set the plan's inbound back to the old one and run the command again,
 dry run first. The old inbound must still exist and be active. If you may want to go back, use a long grace period or
 `--keep-old`. A failed undo is not retried by itself: run `--undo` again.
+
+Only one pass runs at a time. `--apply`, `--resume`, `--retire-now` and `--undo` take the same lock as the scheduled task
+and refuse at once with "a scheduled run is in progress, try again in a minute" (exit code 2, nothing changed). A pass of
+the task can take up to about 9 minutes. `--pause-run` and `--cancel` do not need the lock, so you can stop a pass while it
+works; the dry run does not need it either.
 
 Skip reasons you may see: other panel, panel not in modern mode, not a real panel, suspended / expired / trial (not
 included), in another run, moved too often (3 moves within 24 hours), protocol mix (e.g. Shadowsocks inbounds with
