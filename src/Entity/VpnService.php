@@ -62,7 +62,8 @@ class VpnService
 
     /**
      * When the service's primary inbound was last changed by an inbound move (docs/design/plan-inbound-change.md 4.3
-     * step 3, 5.5). NULL until then; PR P3 adds the column only: nothing sets or reads it yet.
+     * step 3, 5.5). NULL until then. Set by InboundMoveRunner (P4); read by the display guard
+     * FinalConfigLinkProvider::linksPending() (P5).
      */
     #[ORM\Column(nullable: true)]
     private ?\DateTimeImmutable $inboundChangedAt = null;

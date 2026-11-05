@@ -51,7 +51,12 @@
             </div>
             {% if redirectEnabled %}
                 <p class="help">تا چند ثانیه دیگر به لینک اشتراک منتقل می‌شوید.</p>
+            {% endif %}{% if linksUpdating|default(false) %}
+            <p class="help" data-links-updating>{{ 'link.updating'|trans({}, 'subscription', 'fa') }}</p>
             {% endif %}
+        {% elseif linksUpdating|default(false) %}
+            {# The display guard (plan-inbound-change.md 5.5) with no subscription URL: the shared text only. #}
+            <p class="lead" data-links-updating>{{ 'link.updating'|trans({}, 'subscription', 'fa') }}</p>
         {% elseif configText %}
             <p class="lead">لینک اشتراک برای این سرویس ثبت نشده است. کانفیگ سرویس:</p>
             <pre tabindex="0">{{ configText }}</pre>

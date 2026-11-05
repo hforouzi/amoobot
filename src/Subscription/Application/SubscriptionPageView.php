@@ -23,6 +23,9 @@ final class SubscriptionPageView
      * @param list<string>           $configLinks
      * @param list<ClientAppView>    $apps        matching the visitor's platform first
      * @param list<AppDownloadView>  $downloads   for the visitor's platform first
+     * @param bool                   $linksUpdating the single configs are withheld because the service's inbound changed
+     *                                              after its links were last read (FinalConfigLinkProvider::linksPending()):
+     *                                              the page says LinksUpdatingNotice instead, next to the subscription URL
      */
     public function __construct(
         public readonly string $status,
@@ -40,6 +43,7 @@ final class SubscriptionPageView
         public readonly ?ClientPlatform $platform,
         public readonly array $apps = [],
         public readonly array $downloads = [],
+        public readonly bool $linksUpdating = false,
     ) {
     }
 

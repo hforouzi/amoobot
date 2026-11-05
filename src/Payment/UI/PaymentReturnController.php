@@ -12,6 +12,7 @@ use App\Payment\Domain\PaymentGatewayType;
 use App\Payment\Domain\PaymentReturnUrl;
 use App\Payment\Infrastructure\PaymentGatewayRegistry;
 use App\Provisioning\Application\CustomerAccessGuard;
+use App\Provisioning\Application\FinalConfigLinkProvider;
 use App\Shop\Application\OrderServiceAccess;
 use Doctrine\ORM\EntityManagerInterface;
 use Psr\Log\LoggerInterface;
@@ -46,6 +47,7 @@ final class PaymentReturnController extends AbstractController
         private readonly LoggerInterface $logger,
         private readonly CustomerAccessGuard $accessGuard,
         private readonly OrderServiceAccess $orderServices,
+        private readonly FinalConfigLinkProvider $finalConfigLinkProvider,
     ) {
     }
 
@@ -70,8 +72,10 @@ final class PaymentReturnController extends AbstractController
         $service = $ownedElsewhere ? null : $orderService;
         // Only what a client can reach (never the panel's 127.0.0.1 / private address).
         $subscriptionUrl = null !== $service ? (string) $this->accessGuard->subscriptionUrl($service) : '';
-        $configText = null !== $service ? implode("\n", $this->accessGuard->configLinks($service, array_values(array_filter(array_map('trim', explode("\n", (string) $service->getConfigText())), static fn (string $line): bool => '' !== $line)))) : '';
-        $accessWithheld = null !== $service && (('' === $subscriptionUrl && '' !== trim((string) $service->getSubscriptionUrl())) || ('' === $configText && '' !== trim((string) $service->getConfigText())));
+        // The display guard (plan-inbound-change.md 5.5): no stored config while it may name an inbound the service left.
+        $linksUpdating = null !== $service && $this->finalConfigLinkProvider->linksPending($service);
+        $configText = null !== $service && !$linksUpdating ? implode("\n", $this->accessGuard->configLinks($service, array_values(array_filter(array_map('trim', explode("\n", (string) $service->getConfigText())), static fn (string $line): bool => '' !== $line)))) : '';
+        $accessWithheld = null !== $service && (('' === $subscriptionUrl && '' !== trim((string) $service->getSubscriptionUrl())) || (!$linksUpdating && '' === $configText && '' !== trim((string) $service->getConfigText())));
 
         $this->logger->info('Payment return page.', ['payment_id' => $payment->getId(), 'status' => $payment->getStatus(), 'state' => $state]);
 
@@ -83,6 +87,7 @@ final class PaymentReturnController extends AbstractController
             'subscriptionUrl' => '' !== $subscriptionUrl ? $subscriptionUrl : null,
             'configText' => '' !== $configText ? $configText : null,
             'accessWithheld' => $accessWithheld,
+            'linksUpdating' => $linksUpdating,
             'ownedElsewhere' => $ownedElsewhere,
             'redirectEnabled' => 'paid' === $state && '' !== $subscriptionUrl,
             'refreshSeconds' => 'pending' === $state ? self::REFRESH_SECONDS : null,

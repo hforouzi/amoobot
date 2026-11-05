@@ -71,13 +71,15 @@ final class InboundMoveSwitchHasNoEffectTest extends IntegrationTestCase
             'Entity/InboundMoveRun.php',
             'Entity/ServiceInboundMove.php',
             'Entity/VpnService.php',
+            // P5: the display guard reads inbound_changed_at (linksPending()), no setting and no move row.
+            'Provisioning/Application/FinalConfigLinkProvider.php',
             'Provisioning/Application/InboundAttachAlerts.php',
             'Provisioning/Application/InboundMovePass.php',
             'Provisioning/Application/InboundMovePlanner.php',
             'Provisioning/Application/InboundMoveRunner.php',
             'Provisioning/Application/InboundMoveScope.php',
             'Shop/Application/InboundMoveSettings.php',
-        ], $readers, 'P4: only the CLI runner (and its alerts) reads them; no sale, settlement, regenerate, plan save, timer (P8) or display guard (P5) does');
+        ], $readers, 'P4/P5: only the CLI runner (and its alerts) and the display guard read them; no sale, settlement, regenerate, plan save or timer (P8) does');
     }
 
     /**

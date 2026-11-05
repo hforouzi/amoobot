@@ -23,8 +23,24 @@ final class FinalConfigLinkProvider
         return $this->getFinalLinkSetForService($service, $sourceFlow)->finalLinks;
     }
 
+    /**
+     * The single config links a customer may be shown. While linksPending() holds, none: the stored snapshot may still
+     * name the inbound the service left (docs/design/plan-inbound-change.md 5.5), so the result is empty with
+     * linksPending set, and the callers show the subscription URL (live, served by the panel) with LinksUpdatingNotice.
+     * Read from the stored row only: no panel call (rule 9.1).
+     */
     public function getFinalLinkSetForService(VpnService $service, string $sourceFlow = 'unknown'): VpnConfigLinkSetResult
     {
+        if ($this->linksPending($service)) {
+            SafeErrorLog::write(sprintf(
+                '[FinalConfigLinkProvider] links_pending service_id=%d source_flow="%s" final_count=0',
+                (int) ($service->getId() ?? 0),
+                $sourceFlow
+            ));
+
+            return new VpnConfigLinkSetResult(0, 0, [], 0, true);
+        }
+
         $rawLinks = $this->withFallbackFragments($this->storedLinks($service), (string) ($service->getUsername() ?? ''));
         $formattedLinks = [];
 
@@ -49,6 +65,30 @@ final class FinalConfigLinkProvider
         $this->logResult($service, $sourceFlow, count($rawLinks), count($formattedLinks), $result);
 
         return $result;
+    }
+
+    /**
+     * The display guard of docs/design/plan-inbound-change.md 5.5: a modern 3x-ui service whose primary inbound was
+     * changed by an inbound move (vpn_service.inbound_changed_at) after its links were last read from the panel
+     * (last_access_info_synced_at, written by every successful PanelLinkSnapshot store). Its stored single links may
+     * still be the old inbound's, so they are withheld until the next successful refresh, which clears this by itself.
+     * Compared in whole seconds, as the columns store them (the runner's own test, InboundMoveRunner::LINKS_PENDING_SQL).
+     * Never for a service without inbound_changed_at (every service until a move), a legacy panel (its links are rebuilt
+     * from the panel before each bot delivery) or another panel type.
+     */
+    public function linksPending(VpnService $service): bool
+    {
+        $changedAt = $service->getInboundChangedAt();
+        if (null === $changedAt) {
+            return false;
+        }
+        $panel = $service->getPanel();
+        if (null === $panel || 'sanaei_3xui' !== strtolower(trim((string) $panel->getType())) || !$panel->isModern()) {
+            return false;
+        }
+        $syncedAt = $service->getLastAccessInfoSyncedAt();
+
+        return null === $syncedAt || $changedAt->getTimestamp() > $syncedAt->getTimestamp();
     }
 
     /**

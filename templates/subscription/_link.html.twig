@@ -7,9 +7,15 @@
         {% if view.qrDataUri %}
             <img class="qr" src="{{ view.qrDataUri }}" alt="{{ 'link.qr_alt'|trans }}" width="280" height="280">
             <p class="muted" style="text-align:center">{{ 'link.qr_hint'|trans }}</p>
+        {% endif %}{% if view.linksUpdating %}
+        <p class="muted" data-links-updating>{{ 'link.updating'|trans }}</p>
         {% endif %}
     {% elseif view.accessWithheld %}
-        <p>{{ 'link.withheld'|trans }}</p>
+        {% if view.linksUpdating %}<p data-links-updating>{{ 'link.updating'|trans }}</p>
+        {% endif %}<p>{{ 'link.withheld'|trans }}</p>
+    {% elseif view.linksUpdating %}
+        {# The display guard (plan-inbound-change.md 5.5) with no subscription URL: the text only, never an empty card. #}
+        <p data-links-updating>{{ 'link.updating'|trans }}</p>
     {% else %}
         <p class="muted">{{ 'link.missing'|trans }}</p>
     {% endif %}

@@ -436,6 +436,21 @@ What phase 1 does **not** do:
   of it (a moved service keeps its additional inbounds, and the old inbound becomes one of them when the plan still
   lists it).
 
+**What customers see during a move.** Normally nothing changes: the move refreshes a service's links right after
+switching it, and the customer's subscription URL stays the same. If that refresh fails (the panel did not answer or
+answered with no links), the bot still holds the old inbound's single configs. Until the links are refreshed:
+
+- the bot (service details, "Subscription link", "Resend config", "Subscription QR", renewal and add-traffic confirmations), the subscription
+  page, the Mini App and the payment return page show the subscription URL with "Your links are being updated; use
+  the subscription link or try again in a few minutes." The single configs are not shown or sent;
+- a service with no subscription URL shows that text only;
+- nothing asks the panel when a customer opens a page or presses a button.
+
+The links come back by themselves with the next successful refresh: run the command again with `--resume=<runId>`
+(the summary says how many moved services still wait for their links), or use "Regenerate config" on the service.
+Services that were not moved, and services on legacy or other panels, are never affected. The admin service page and
+`app:service:debug-links` still show what is stored.
+
 How to use it:
 
 1. **Dry run first** (it changes nothing, and works with the switch off):

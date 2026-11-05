@@ -7,6 +7,7 @@ namespace App\Bot\Application;
 use App\Entity\VpnService;
 use App\Provisioning\Application\CustomerAccessGuard;
 use App\Provisioning\Application\FinalConfigLinkProvider;
+use App\Subscription\Application\LinksUpdatingNotice;
 
 final class VpnAccessMessageFormatter
 {
@@ -15,6 +16,7 @@ final class VpnAccessMessageFormatter
     public function __construct(
         private readonly FinalConfigLinkProvider $finalConfigLinkProvider,
         private readonly CustomerAccessGuard $accessGuard,
+        private readonly LinksUpdatingNotice $linksUpdatingNotice,
     ) {
     }
 
@@ -25,9 +27,17 @@ final class VpnAccessMessageFormatter
     {
         $subscriptionUrl = (string) $this->accessGuard->subscriptionUrl($service);
         $subscriptionWithheld = '' === $subscriptionUrl && '' !== trim((string) ($service->getSubscriptionUrl() ?? ''));
-        $configLinks = $this->accessGuard->configLinks($service, $this->finalConfigLinkProvider->getFinalLinksForService($service, $sourceFlow));
+        $linkSet = $this->finalConfigLinkProvider->getFinalLinkSetForService($service, $sourceFlow);
+        $configLinks = $this->accessGuard->configLinks($service, $linkSet->finalLinks);
+        // The display guard (plan-inbound-change.md 5.5): the single configs are withheld while they may name an inbound
+        // the service left; the customer is told so, next to the subscription URL when there is one.
+        $updating = $linkSet->linksPending ? $this->html($this->linksUpdatingNotice->text()) : null;
 
         if ('' === $subscriptionUrl && [] === $configLinks) {
+            if (null !== $updating) {
+                return [$subscriptionWithheld ? CustomerAccessGuard::SUPPORT_NOTICE."\n\n⏳ ".$updating : '⏳ '.$updating];
+            }
+
             return [$subscriptionWithheld ? CustomerAccessGuard::SUPPORT_NOTICE : 'سرویس ساخته شد، اما لینک دسترسی پیدا نشد. لطفاً با پشتیبانی تماس بگیرید.'];
         }
 
@@ -48,6 +58,10 @@ final class VpnAccessMessageFormatter
         } elseif ($subscriptionWithheld) {
             $header[] = '';
             $header[] = '⚠️ '.$this->html(CustomerAccessGuard::SUPPORT_NOTICE);
+        }
+        if (null !== $updating) {
+            $header[] = '';
+            $header[] = '⏳ '.$updating;
         }
 
         if ([] === $configLinks) {
