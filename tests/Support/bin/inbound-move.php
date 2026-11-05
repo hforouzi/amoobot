@@ -9,6 +9,10 @@ declare(strict_types=1);
  * Usage: php inbound-move.php <mode> <id> <stateFile> <dir> <block> <delayMs> [startAt]
  * Modes:
  * - resume <runId>        app:plan:apply-inbounds <its plan> --resume=<runId>; prints "exit=<code>" and the output
+ * - runner <runId>        InboundMoveRunner::process() itself, without the command's lock (a second runner on one item:
+ *                         only the claims stand in its way); prints each outcome, then "exit=0" and the run's status
+ * - task <runId>          app:automation:run --only=inbound-moves; prints "exit=<code>" and the output (the id only
+ *                         names the service a <block> probes)
  * - suspend <serviceId>   ServiceAdministration::suspend(); prints the outcome
  * - renew <serviceId>     ServiceRenewalService::renew() for 30 days and 50 GB (an unsaved renewal order), then flush;
  *                         prints "renewed"
@@ -22,6 +26,8 @@ declare(strict_types=1);
 
 use App\Entity\Order;
 use App\Entity\VpnService;
+use App\Provisioning\Application\InboundMoveItem;
+use App\Provisioning\Application\InboundMoveRunner;
 use App\Provisioning\Application\ServiceAdministration;
 use App\Provisioning\Application\ServiceRenewalService;
 use App\Tests\Support\Fake3xui\Fake3xuiPanel;
@@ -45,7 +51,7 @@ if ((int) $delayMs > 0) {
 if ('-' !== $block && '' !== $block) {
     [$when, $pattern, $nth] = explode('|', $block) + ['', '', '1'];
     $seen = 0;
-    $serviceId = 'resume' === $mode
+    $serviceId = in_array($mode, ['resume', 'runner', 'task'], true)
         ? (int) $own->fetchOne('SELECT service_id FROM service_inbound_move WHERE run_id = ? ORDER BY id LIMIT 1', [(int) $id])
         : (int) $id;
     $fake->onRequest = static function (string $phase, string $method, string $path) use ($when, $pattern, $nth, &$seen, $dir, $own, $serviceId): void {
@@ -88,6 +94,26 @@ if ('resume' === $mode) {
     $application->setAutoExit(false);
     $output = new BufferedOutput();
     $code = $application->run(new ArrayInput(['command' => 'app:plan:apply-inbounds', 'planId' => (string) $planId, '--resume' => (string) $id]), $output);
+    echo 'exit='.$code."\n".$output->fetch();
+
+    return;
+}
+
+if ('runner' === $mode) {
+    $pass = $container->get(InboundMoveRunner::class)->process((int) $id, onItem: static function (InboundMoveItem $item): void {
+        printf("Service #%d: %s: \n", $item->serviceId, $item->outcome);
+    });
+    echo 'exit=0 '.$pass->runStatus."\n";
+
+    return;
+}
+if ('task' === $mode) {
+    putenv('SHELL_VERBOSITY=0');
+    $_ENV['SHELL_VERBOSITY'] = $_SERVER['SHELL_VERBOSITY'] = 0;
+    $application = new Application($container->get('kernel'));
+    $application->setAutoExit(false);
+    $output = new BufferedOutput();
+    $code = $application->run(new ArrayInput(['command' => 'app:automation:run', '--only' => 'inbound-moves']), $output);
     echo 'exit='.$code."\n".$output->fetch();
 
     return;

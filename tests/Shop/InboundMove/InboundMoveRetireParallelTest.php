@@ -125,12 +125,12 @@ final class InboundMoveRetireParallelTest extends IntegrationTestCase
         array_map(fn (int $n) => $this->movableService($n), range(1, 3));
         $runId = $this->movedRun();
 
-        $runners = [$this->helper('resume', $runId, '-', 200, $this->startAt()), $this->helper('resume', $runId, '-', 200, $this->startAt())];
+        $runners = [$this->helper('runner', $runId, '-', 200, $this->startAt()), $this->helper('runner', $runId, '-', 200, $this->startAt())];
         array_map(static fn (Process $p) => $p->start(), $runners);
         $this->releaseStart($runners);
         foreach ($runners as $runner) {
             $runner->wait();
-            self::assertStringStartsWith('exit=0', self::assertSubprocessClean($runner, 'runner'));
+            self::assertStringContainsString('exit=0', self::assertSubprocessClean($runner, 'runner'));
         }
 
         self::assertSame(['done', 'done', 'done'], array_column($this->moves(), 'state'));

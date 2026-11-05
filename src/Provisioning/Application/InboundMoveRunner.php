@@ -107,9 +107,13 @@ final class InboundMoveRunner
      * One pass over the run's due moves (phase 1 and due retirements), in order of move id, in batches with a pause
      * between them.
      *
-     * @param \Closure(InboundMoveItem): void|null $onItem called after each service (console)
+     * @param \Closure(InboundMoveItem): void|null $onItem      called after each service (console)
+     * @param bool                                 $leavePaused the scheduled task: a paused run is not resumed (only an
+     *                                                          admin's --resume does that, the default)
+     * @param float|null                           $stopAt      the scheduled task: microtime(true) after which no other
+     *                                                          service is started; the run stays as it is
      */
-    public function process(int $runId, ?int $batchSize = null, ?int $pauseSeconds = null, ?\Closure $onItem = null): InboundMovePass
+    public function process(int $runId, ?int $batchSize = null, ?int $pauseSeconds = null, ?\Closure $onItem = null, bool $leavePaused = false, ?float $stopAt = null): InboundMovePass
     {
         if (!$this->settings->enabled()) {
             return new InboundMovePass(InboundMovePass::SWITCHED_OFF, sprintf('Moving services is switched off (%s): nothing was done.', InboundMoveSettings::ENABLED));
@@ -118,14 +122,15 @@ final class InboundMoveRunner
             return new InboundMovePass(InboundMovePass::REFUSED, 'Refused inside a transaction: panel calls are never made under someone\'s locks.');
         }
         $run = $this->db()->fetchAssociative('SELECT id, plan_id, kind, status, target_inbound_id, keep_old, grace_hours FROM inbound_move_run WHERE id = ?', [$runId]);
-        if (false === $run || !in_array($run['status'], InboundMoveRun::OPEN_STATUSES, true) || InboundMoveRun::KIND_PRIMARY !== $run['kind']) {
+        $startable = $leavePaused ? [InboundMoveRun::STATUS_PLANNED, InboundMoveRun::STATUS_RUNNING] : InboundMoveRun::OPEN_STATUSES;
+        if (false === $run || !in_array($run['status'], $startable, true) || InboundMoveRun::KIND_PRIMARY !== $run['kind']) {
             return new InboundMovePass(InboundMovePass::NOT_OPEN, false === $run ? sprintf('There is no run #%d.', $runId) : sprintf('Run #%d is %s: nothing to do.', $runId, (string) $run['status']));
         }
         $planId = (int) $run['plan_id'];
         $graceHours = 1 === (int) $run['keep_old'] ? null : max(0, (int) $run['grace_hours']);
         $this->db()->executeStatement(
-            'UPDATE inbound_move_run SET status = ?, open_plan_id = plan_id, pause_reason = NULL, started_at = COALESCE(started_at, ?) WHERE id = ? AND status IN (?, ?, ?)',
-            [InboundMoveRun::STATUS_RUNNING, self::now(), $runId, ...InboundMoveRun::OPEN_STATUSES],
+            sprintf('UPDATE inbound_move_run SET status = ?, open_plan_id = plan_id, pause_reason = NULL, started_at = COALESCE(started_at, ?) WHERE id = ? AND status IN (%s)', implode(', ', array_fill(0, count($startable), '?'))),
+            [InboundMoveRun::STATUS_RUNNING, self::now(), $runId, ...$startable],
         );
         $batchSize = max(1, min(InboundMoveSettings::MAX_BATCH_SIZE, $batchSize ?? $this->settings->batchSize()));
         $pauseSeconds = max(0, min(InboundMoveSettings::MAX_PAUSE_SECONDS, $pauseSeconds ?? $this->settings->pauseSeconds()));
@@ -143,6 +148,12 @@ final class InboundMoveRunner
             foreach ($ids as $moveId) {
                 if (!$this->stillRunning($runId)) {
                     // Paused or cancelled meanwhile (--pause-run, --cancel, --undo): the item in hand was finished.
+                    $this->finishPass($runId, $pass);
+
+                    return $pass;
+                }
+                if (null !== $stopAt && microtime(true) >= $stopAt) {
+                    $pass->outOfTime = true;
                     $this->finishPass($runId, $pass);
 
                     return $pass;
@@ -177,6 +188,7 @@ final class InboundMoveRunner
                 }
                 if ($readFailures >= self::MAX_READ_FAILURES_IN_A_ROW) {
                     $this->pause($runId, $planId, sprintf(self::PAUSE_PANEL, $readFailures), $pass);
+                    $pass->paused = true;
                     $this->finishPass($runId, $pass);
 
                     return $pass;
@@ -185,13 +197,19 @@ final class InboundMoveRunner
             // Every service was written on its own; the next batch reads fresh rows.
             $this->entityManager->clear();
             if (count($ids) === $batchSize && $pauseSeconds > 0) {
-                sleep($pauseSeconds);
+                sleep(null === $stopAt ? $pauseSeconds : min($pauseSeconds, max(0, (int) ceil($stopAt - microtime(true)))));
             }
         }
         $this->finishPass($runId, $pass);
         $this->finishRun($runId, $planId, $pass);
 
         return $pass;
+    }
+
+    /** The moves of a run that a pass would look at now (--dry-run of the scheduled task; at most 1000). */
+    public function dueCount(int $runId): int
+    {
+        return count($this->dueMoveIds($runId, 0, 1000));
     }
 
     /**

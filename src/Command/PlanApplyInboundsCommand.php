@@ -8,6 +8,8 @@ use App\Entity\Plan;
 use App\Entity\VpnInbound;
 use App\Provisioning\Application\InboundMoveCandidate;
 use App\Provisioning\Application\InboundMoveControls;
+use App\Provisioning\Application\InboundMoveHeldLock;
+use App\Provisioning\Application\InboundMoveLock;
 use App\Provisioning\Application\InboundMoveItem;
 use App\Provisioning\Application\InboundMovePass;
 use App\Provisioning\Application\InboundMovePlanner;
@@ -39,6 +41,9 @@ final class PlanApplyInboundsCommand extends Command
     private const EXIT_FAILED = 1;
     private const EXIT_NOT_STARTED = 2;
 
+    /** Held for the whole of a pass; --pause-run and --cancel never take it, they must work during one. */
+    private ?InboundMoveHeldLock $held = null;
+
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
         private readonly InboundMovePlanner $planner,
@@ -46,6 +51,7 @@ final class PlanApplyInboundsCommand extends Command
         private readonly InboundMoveControls $controls,
         private readonly InboundMoveSettings $settings,
         private readonly LoggerInterface $logger,
+        private readonly InboundMoveLock $lock,
     ) {
         parent::__construct();
     }
@@ -88,9 +94,10 @@ final class PlanApplyInboundsCommand extends Command
                 the grace period a customer whose app has not fetched the subscription yet keeps working on the old
                 inbound. --keep-old at --apply: the old inbound is never removed automatically (--retire-now only).
 
-                How the removals happen from the command line: there is no timer yet. Running the command again with
-                --resume=<runId> processes, in one pass, what is left of phase 1 AND every removal that is due; run it
-                after the grace period (running it twice does nothing twice). To remove the old inbound without
+                How the removals happen: the scheduled task inbound-moves (app:automation:run --only=inbound-moves, every
+                30 minutes) continues every planned or running run: what is left of phase 1, retries, and every removal
+                that is due. It never touches a paused run. Running the command again with --resume=<runId> does the
+                same at once, in one pass (running it twice does nothing twice). To remove the old inbound without
                 waiting: --retire-now (the plan's latest run, or --retire-now=<runId>; --service=<id> for one service),
                 then --resume=<runId>, or both in one command: --retire-now=<runId> --resume=<runId>.
 
@@ -102,7 +109,11 @@ final class PlanApplyInboundsCommand extends Command
                   php bin/console app:plan:apply-inbounds <plan> --service=<id> --apply (ONE service first)
                   check that service (panel, links, the customer's app), then
                   php bin/console app:plan:apply-inbounds <plan> --apply                (the rest)
-                  after the grace period: php bin/console app:plan:apply-inbounds <plan> --resume=<runId>
+                  after the grace period: the scheduled task, or php bin/console app:plan:apply-inbounds <plan> --resume=<runId>
+
+                Only one pass runs at a time: --apply, --resume, --retire-now and --undo take the same lock as the
+                scheduled task and refuse at once ("a scheduled run is in progress, try again in a minute"). --pause-run,
+                --cancel and the dry run do not need it, so a pass can be paused while it works.
 
                 Run controls (each takes the run id the output names):
                   --pause-run=<runId>  pause: a pass working on the run finishes the service in hand, takes no other;
@@ -142,6 +153,9 @@ final class PlanApplyInboundsCommand extends Command
             $this->fail($io, $output, $json, 'Stopped: '.$text, self::EXIT_FAILED);
 
             return self::EXIT_FAILED;
+        } finally {
+            $this->held?->release();
+            $this->held = null;
         }
     }
 
@@ -201,6 +215,13 @@ final class PlanApplyInboundsCommand extends Command
 
         $scoped = array_merge(array_filter(['service', 'from-inbound', 'limit', 'after-id'], static fn (string $o): bool => null !== $ints[$o]),
             array_filter(['include-suspended', 'include-expired', 'include-trials'], static fn (string $o): bool => (bool) $input->getOption($o)));
+        // The same lock as the scheduled task (5.2): never two passes at once, and no waiting.
+        if ($apply || $retire || null !== $ints['resume'] || null !== $ints['undo']) {
+            $this->held = $this->lock->acquire();
+            if (null === $this->held) {
+                return $this->fail($io, $output, $json, 'Refused: a scheduled run is in progress, try again in a minute (another app:plan:apply-inbounds pass takes the same lock). Nothing was changed.');
+            }
+        }
         if ([] !== $controls) {
             if ([] !== $scoped) {
                 return $this->fail($io, $output, $json, sprintf('--%s acts on a whole run: it takes no scope option (--%s).', $controls[0], implode(', --', $scoped)));
