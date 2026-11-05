@@ -411,10 +411,17 @@ Limits of the manual move:
 - Not possible on a legacy panel, or to an inbound on another panel (that would be a new client: new subscription,
   usage counted from zero).
 
-**Moving existing services with the command (phase 1, command line only)**
+**Moving existing services with the command (command line only)**
 
 `app:plan:apply-inbounds` moves a plan's existing services to the plan's current inbound, on modern 3x-ui panels.
 There is no button for it yet, and nothing runs it on a timer: you run it on the server.
+
+A move has two phases:
+
+- **Phase 1, "switch"**: the service moves to the new inbound while the old one stays attached.
+- **Phase 2, "retire"**: after a **grace period** (24 hours by default) the old inbound is removed from the client.
+
+The grace period lets a customer whose app has not fetched the subscription yet keep working on the old inbound.
 
 What phase 1 does, per service (one at a time, in batches):
 
@@ -424,20 +431,33 @@ What phase 1 does, per service (one at a time, in batches):
    one).
 3. It refreshes the service's links from the panel.
 
-What phase 1 does **not** do:
+What phase 2 does, per service, when its grace period is over:
 
-- **The old inbound stays attached to every moved client.** Customers keep working on both until a later release
-  removes the old one after a grace period. Do not disable or delete the old inbound on the panel yet.
+1. It reads the client on the panel. If the new inbound is missing there, it attaches it again **first**: the old
+   inbound is never removed from a client that is not on the new one.
+2. It removes the old inbound, then reads the client back to confirm.
+3. It refreshes the service's links from the panel: they now hold the new inbound only.
+
+It refuses, and the service is reported as failed, when the old inbound is the only inbound the client is on, when the
+old inbound is still the service's main inbound in the bot, or when the client is on neither inbound (nothing is sent to
+the panel then). If you already removed the old inbound by hand, or deleted it on the panel, the step counts as done
+(a deleted inbound only after the panel's inbound list confirms it). UUID, email, subId, expiry, limits and usage do not
+change. A customer's old single configs stop working now; the subscription URL keeps working.
+
+What the move does **not** do:
+
+- **While a service is in its grace period, do not disable or delete the old inbound on the panel.** Customers work on
+  both until the retire.
 - No message to customers. A customer sees the new inbound's configs after updating the subscription in their app
-  (the subscription URL does not change). Single configs copied before keep working, on the old inbound.
-- No undo, cancel or pause button, no admin page, no timer.
+  (the subscription URL does not change). Single configs copied before keep working, on the old inbound, until phase 2.
+- No admin page and no timer: everything here is run from the command line.
 - Services on a legacy panel, on another panel or on a test (dummy) panel are listed as skipped, with the reason.
   Deleted services are never moved. Adding or removing a plan's additional inbounds on existing services is not part
   of it (a moved service keeps its additional inbounds, and the old inbound becomes one of them when the plan still
   lists it).
 
 **What customers see during a move.** Normally nothing changes: the move refreshes a service's links right after
-switching it, and the customer's subscription URL stays the same. If that refresh fails (the panel did not answer or
+switching it and again after removing the old inbound, and the customer's subscription URL stays the same. If that refresh fails (the panel did not answer or
 answered with no links), the bot still holds the old inbound's single configs. Until the links are refreshed:
 
 - the bot (service details, "Subscription link", "Resend config", "Subscription QR", renewal and add-traffic confirmations), the subscription
@@ -472,8 +492,40 @@ How to use it:
 Each plan has at most one open run; a second `--apply` is refused and names the open run (continue it with
 `--resume`). The run's target and scope are fixed when it is created. A service sold while a run is open gets the
 plan's current inbound and is not part of the run. Exit codes: 0 done, 1 some failed or the run paused, 2 could not
-start (a clear message says why). The output and the logs show ids and titles only: never a customer, a link, a UUID
+start (a clear message says why); an undo that left services behind also exits with 1. The output and the logs show ids and titles only: never a customer, a link, a UUID
 or a token.
+
+**Removing the old inbound (phase 2).** Nothing runs on a timer yet, so you start it:
+
+- Choose the grace period when you create the run: `--grace-hours=N` (0–168), otherwise the setting below. With 0 the
+  old inbound is removed in the same pass. With `--keep-old` it is never removed automatically, only with
+  `--retire-now`.
+- **After the grace period**, run `php bin/console app:plan:apply-inbounds <planId> --resume=<runId>`. One pass handles
+  what is left of phase 1 **and** every removal that is due. Running it twice does nothing twice. A run that is open
+  refuses a second `--apply`: use `--resume`.
+- **Without waiting**: `--retire-now=<runId> --resume=<runId>` for the whole run, adding `--service=<id>` for one
+  service. `--retire-now` alone (without a run id it takes the plan's latest run) only marks the services as due; the
+  next `--resume` removes the old inbound. It also gives failed removals a new set of attempts.
+
+Failed removals are retried with the same attach settings, an alert is sent when a service's attempts are used up, and
+the run pauses itself after 5 failed panel reads in a row, as in phase 1.
+
+**Pause, resume, cancel, undo.** Each takes the run id from the output:
+
+- `--pause-run=<runId>`: a pass working on the run finishes the service in hand and takes no other.
+- `--resume=<runId>`: continues a run, also one that paused itself.
+- `--cancel=<runId>`: services not moved yet will not be moved, including failed ones waiting for a retry. A service in
+  the middle of a step finishes that step. Services already moved are still waiting for phase 2, so the run stays open
+  until they are done.
+- `--undo=<runId>`: moved services whose old inbound is **still attached** go back to it: the new inbound is removed
+  (unless it is one of the plan's additional inbounds), the bot's record returns to the old inbound, and the links are
+  refreshed. Services not moved yet are cancelled.
+
+**What undo cannot do.** Once the old inbound was removed from a service, `--undo` does not put it back. It prints how
+many services that concerns ("the old inbound was already removed from N services") and exits with code 1. Those need a
+new run from the new inbound back to the old one: set the plan's inbound back to the old one and run the command again,
+dry run first. The old inbound must still exist and be active. If you may want to go back, use a long grace period or
+`--keep-old`. A failed undo is not retried by itself: run `--undo` again.
 
 Skip reasons you may see: other panel, panel not in modern mode, not a real panel, suspended / expired / trial (not
 included), in another run, moved too often (3 moves within 24 hours), protocol mix (e.g. Shadowsocks inbounds with
@@ -481,10 +533,11 @@ different methods: move it by hand), and an inactive target inbound refuses the 
 
 The settings, under `Settings → Plans → Moving existing services to a new inbound` (SETTINGS_MANAGE):
 
-- `plans.inbound_move_enabled` (off): needed for `--apply` and `--resume`;
+- `plans.inbound_move_enabled` (off): needed for `--apply`, `--resume` and `--undo`;
 - `plans.inbound_move_batch_size` (20, 1–100): services per batch;
 - `plans.inbound_move_pause_seconds` (2, 0–60): the pause between batches;
-- `plans.inbound_move_detach_grace_hours` (24, 0–168): not used yet (phase 1 never removes the old inbound).
+- `plans.inbound_move_detach_grace_hours` (24, 0–168): the grace period of a new run; a run keeps the value it was
+  created with.
 
 The command has been tested against a simulated panel only, not against a real 3x-ui panel: try one service first.
 Design: [plan-inbound-change.md](../design/plan-inbound-change.md).
