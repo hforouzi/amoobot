@@ -136,6 +136,8 @@ final class MiniAppAdminInboundMoveTest extends IntegrationTestCase
         $block = $this->screen('?lang=en');
         self::assertSame('running', $block->filter('[data-run-status]')->attr('data-run-status'));
         self::assertSame('2', $block->filter('[data-count-done]')->attr('data-count-done'));
+        // The labels stay: a leading "Word:" with a %count% parameter would be taken for a plural form and cut.
+        self::assertSame(['Moved: 2 of 2', 'Failed: 0 (0 with no automatic retry left)', 'Skipped: 0'], array_map(static fn (string $t): string => trim($t), $block->filter('[data-count-done], [data-count-failed], [data-count-skipped]')->each(static fn (Crawler $p): string => $p->text())));
         self::assertSame('admin@example.test', trim($block->filter('[data-started-by]')->text()));
     }
 

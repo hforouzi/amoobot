@@ -119,6 +119,10 @@ final class InboundMoveWebTest extends IntegrationTestCase
         self::assertSame('running', $block->filter('[data-run-status]')->attr('data-run-status'));
         self::assertSame('2', $block->filter('[data-count-done]')->attr('data-count-done'));
         self::assertSame('2', $block->filter('[data-run-counts] [data-count-done]')->attr('data-count-done'));
+        // The labels stay: a leading "Word:" with a %count% parameter would be taken for a plural form and cut.
+        self::assertSame('Moved: 2 of 2', trim($block->filter('[data-count-done]')->text()));
+        self::assertStringStartsWith('Failed: 0', trim($block->filter('[data-count-failed]')->text()));
+        self::assertStringStartsWith('Skipped: 0', trim($block->filter('[data-count-skipped]')->text()));
     }
 
     public function testARunMadeOnThePageEqualsOneMadeByTheCommandWithTheSameOptions(): void

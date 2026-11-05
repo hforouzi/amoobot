@@ -25,9 +25,9 @@
             {% if run.finished_at %}<div><dt>{{ 'inbound_move.run.finished_at'|trans }}</dt><dd><bdi dir="ltr">{{ run.finished_at }}</bdi></dd></div>{% endif %}
         </dl>
         <div class="counts" data-run-counts>
-            <p class="small-print" data-count-done="{{ run.counts.done }}">{{ 'inbound_move.count.done'|trans({'%count%': run.counts.done, '%planned%': run.counts.planned}) }}</p>
-            <p class="small-print" data-count-failed="{{ run.counts.failed }}">{{ 'inbound_move.count.failed'|trans({'%count%': run.counts.failed, '%given_up%': run.given_up}) }}</p>
-            <p class="small-print" data-count-skipped="{{ run.counts.skipped }}">{{ 'inbound_move.count.skipped'|trans({'%count%': run.counts.skipped}) }}{% if run.skipped_by_reason is not empty %}:
+            <p class="small-print" data-count-done="{{ run.counts.done }}">{{ 'inbound_move.count.done'|trans({'%n%': run.counts.done, '%planned%': run.counts.planned}) }}</p>
+            <p class="small-print" data-count-failed="{{ run.counts.failed }}">{{ 'inbound_move.count.failed'|trans({'%n%': run.counts.failed, '%given_up%': run.given_up}) }}</p>
+            <p class="small-print" data-count-skipped="{{ run.counts.skipped }}">{{ 'inbound_move.count.skipped'|trans({'%n%': run.counts.skipped}) }}{% if run.skipped_by_reason is not empty %}:
                 {% for reason, n in run.skipped_by_reason %}<span data-skip-reason="{{ reason }}">{{ ('inbound_move.skip.' ~ reason)|trans }} ({{ n }})</span>{{ not loop.last ? 'inbound_move.separator'|trans : '' }}{% endfor %}{% endif %}</p>
             <p class="small-print" data-count-remaining="{{ run.counts.remaining }}">{{ 'inbound_move.count.remaining'|trans({'%count%': run.counts.remaining}) }}</p>
             <p class="small-print" data-count-retired="{{ run.retired }}">{{ 'inbound_move.count.retired'|trans({'%count%': run.retired}) }}{% if run.waiting_retire > 0 %} · {{ 'inbound_move.count.waiting_retire'|trans({'%count%': run.waiting_retire, '%at%': run.next_retire_at}) }}{% endif %}</p>
