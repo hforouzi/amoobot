@@ -9,6 +9,7 @@ use App\Entity\VpnPanel;
 use App\Provisioning\Application\PanelConnectionReport;
 use App\Provisioning\Application\PanelConnectionTester;
 use App\Provisioning\Application\PanelSubscriptionUrlCheck;
+use App\Provisioning\Application\InboundMoveOverview;
 use App\Provisioning\Application\ServiceInboundCounts;
 use App\Provisioning\Domain\Dto\CreateVpnServiceRequest;
 use App\Provisioning\Domain\Dto\RenewVpnServiceRequest;
@@ -49,6 +50,7 @@ final class PanelDoctorCommand extends Command
         private readonly PanelCredentials $credentials,
         private readonly TranslatorInterface $translator,
         private readonly ServiceInboundCounts $inboundCounts,
+        private readonly InboundMoveOverview $moveOverview,
     ) {
         parent::__construct();
     }
@@ -122,6 +124,11 @@ final class PanelDoctorCommand extends Command
         $problems = $this->inboundCounts->problems((int) $panel->getId());
         if (null !== $problems) {
             $output->writeln(sprintf('  attachments     %d failed (%d with retries used up), %d being attached (additional inbounds of active services)', $problems['failed'], $problems['givenUp'], $problems['pending']));
+        }
+        // Inbound moves (docs/design/plan-inbound-change.md 5.6): only when some failed; from the database.
+        $moves = $this->moveOverview->problems((int) $panel->getId());
+        if ($moves['failed'] > 0) {
+            $output->writeln(sprintf('  inbound moves   %d failed (%d given up: no automatic retry left; the plan page has "Retry failed now")', $moves['failed'], $moves['given_up']));
         }
         if (null !== $report->failure) {
             $key = 'panel_connection.failure.'.$report->failure->value;

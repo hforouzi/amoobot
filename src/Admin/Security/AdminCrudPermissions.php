@@ -45,6 +45,8 @@ final class AdminCrudPermissions
         'admin_claims_create' => AdminPermission::SERVICES_MANAGE,
         'admin_claim_revoke' => AdminPermission::SERVICES_MANAGE,
         'admin_claims_return' => AdminPermission::SERVICES_MANAGE,
+        // "Retry now" of a service's inbound move (ServiceInboundsController): a service action, not a plan action.
+        'admin_vpn_service_retry_move' => AdminPermission::SERVICES_MANAGE,
     ];
 
     /** Dashboard, login/logout, locale switch: any admin (access_control ^/admin). */
@@ -69,6 +71,8 @@ final class AdminCrudPermissions
             Crud\DiscountCodeCrudController::class => $p(AdminPermission::DISCOUNTS_MANAGE),
             Crud\DiscountUsageCrudController::class => $p(AdminPermission::DISCOUNTS_MANAGE),
             Crud\PlanCrudController::class => $p(AdminPermission::PLANS_MANAGE),
+            // "Apply to existing services" of a plan and its run's buttons (inbound moves, P7).
+            \App\Admin\UI\InboundMoveAdminController::class => $p(AdminPermission::PLANS_MANAGE),
             // Apps page: downloads and client apps (two tabs, AdminTabs).
             Crud\AppDownloadCrudController::class => $p(AdminPermission::APPS_MANAGE),
             Crud\ClientAppCrudController::class => $p(AdminPermission::APPS_MANAGE),

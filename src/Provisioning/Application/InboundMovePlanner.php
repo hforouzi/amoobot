@@ -160,11 +160,15 @@ final class InboundMovePlanner
      *
      * @param bool                                          $readPanel dry run: GET each movable service's client (budgeted, read only)
      * @param \Closure(InboundMoveCandidate): void|null    $onEach    called per service (console progress)
+     * @param bool                                          $localOnly no panel call at all (the web dry-run page, PR P7): the
+     *                                                                 protocol rules that need inbounds/options are not checked
+     *                                                                 (a note says so); the run's creation checks them
      *
      * @return list<InboundMoveCandidate>
      */
-    public function candidates(Plan $plan, VpnInbound $target, InboundMoveScope $scope, bool $readPanel = false, ?\Closure $onEach = null): array
+    public function candidates(Plan $plan, VpnInbound $target, InboundMoveScope $scope, bool $readPanel = false, ?\Closure $onEach = null, bool $localOnly = false): array
     {
+        $readPanel = $readPanel && !$localOnly;
         $candidates = [];
         $readFailures = 0;
         foreach ($this->serviceRows($plan, $target, $scope) as $row) {
@@ -178,7 +182,7 @@ final class InboundMovePlanner
             );
             [$reason, $otherRun] = $this->skipReason($row, $target, $scope, null);
             if (null === $reason) {
-                $mix = $this->protocolMix((int) $row['id'], $plan, $target, self::fromInboundOf($row));
+                $mix = $this->protocolMix((int) $row['id'], $plan, $target, self::fromInboundOf($row), !$localOnly);
                 if (true === $mix) {
                     $reason = self::SKIP_PROTOCOL_MIX;
                 } elseif (null === $mix) {
@@ -402,9 +406,11 @@ final class InboundMovePlanner
      * primary only with flow-capable VLESS additional inbounds. The last two read the panel's inbounds/options once per
      * panel (GET, budgeted, recordHealth=false), only when they matter. Never call it inside a transaction.
      *
+     * @param bool $readPanel false: never read the panel; null when the answer would need it (the web dry run)
+     *
      * @return bool|null true: the mix breaks a rule (skip); false: fine; null: the panel could not be read
      */
-    public function protocolMix(int $serviceId, Plan $plan, VpnInbound $target, ?int $fromInboundId): ?bool
+    public function protocolMix(int $serviceId, Plan $plan, VpnInbound $target, ?int $fromInboundId, bool $readPanel = true): ?bool
     {
         $ids = array_map('intval', $this->connection()->fetchFirstColumn(
             'SELECT inbound_id FROM vpn_service_inbound WHERE service_id = ? AND status <> ? ORDER BY id',
@@ -436,7 +442,7 @@ final class InboundMovePlanner
         if (count($shadowsocks) < 2 && (!$vision || [] === $vless)) {
             return false;
         }
-        $options = $this->panelOptions($target->getPanel());
+        $options = $readPanel ? $this->panelOptions($target->getPanel()) : null;
         if (null === $options) {
             return null;
         }

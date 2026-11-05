@@ -11,6 +11,7 @@ use App\Admin\UI\Support\PanelHealth;
 use App\Admin\UI\TranslatedFlashes;
 use App\Entity\VpnInbound;
 use App\Entity\VpnPanel;
+use App\Provisioning\Application\InboundMoveOverview;
 use App\Provisioning\Application\ServiceInboundCounts;
 use App\Provisioning\Domain\SanaeiIntegrationMode;
 use App\Shop\Application\Catalog\PlanInboundUsage;
@@ -43,6 +44,7 @@ class VpnPanelCrudController extends AbstractCrudController
         private readonly TranslatorInterface $translator,
         private readonly PlanInboundUsage $inboundUsage,
         private readonly ServiceInboundCounts $inboundCounts,
+        private readonly InboundMoveOverview $moveOverview,
     ) {
     }
 
@@ -152,6 +154,12 @@ class VpnPanelCrudController extends AbstractCrudController
 
                 return null === $problems ? AdminFormat::NONE : sprintf('<span data-inbound-attachments="%d/%d">%s</span>', $problems['failed'], $problems['pending'], AdminFormat::e($this->translator->trans('service_inbounds.doctor', ['%failed%' => $problems['failed'], '%given_up%' => $problems['givenUp'], '%pending%' => $problems['pending']], 'admin')));
             }, 'field.inbound_attachments')->onlyOnDetail(),
+            // Inbound moves (docs/design/plan-inbound-change.md 5.6): failed and given-up moves of this panel's services.
+            AdminFormat::field('inboundMoves', function (mixed $v, ?VpnPanel $panel): string {
+                $moves = null === $panel ? null : $this->moveOverview->problems((int) $panel->getId());
+
+                return null === $moves || 0 === $moves['failed'] ? AdminFormat::NONE : sprintf('<span data-inbound-moves="%d/%d">%s</span>', $moves['failed'], $moves['given_up'], AdminFormat::e($this->translator->trans('inbound_move.problems', ['%failed%' => $moves['failed'], '%given_up%' => $moves['given_up']], 'admin')));
+            }, 'field.inbound_moves')->onlyOnDetail(),
             BooleanField::new('isActive'),
             AdminFormat::field('probedAt', static fn (mixed $v): string => $f->relative($v), 'field.last_check'),
             AdminFormat::field('host', static fn (mixed $v, ?VpnPanel $panel): string => $f->host($panel?->getBaseUrl())),
