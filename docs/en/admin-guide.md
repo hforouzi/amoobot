@@ -411,7 +411,7 @@ Limits of the manual move:
 - Not possible on a legacy panel, or to an inbound on another panel (that would be a new client: new subscription,
   usage counted from zero).
 
-**Moving existing services (admin panel or command line)**
+**Moving existing services (admin panel, Mini App or command line)**
 
 `app:plan:apply-inbounds` moves a plan's existing services to the plan's current inbound, on modern 3x-ui panels. You
 start a move from the plan's page in the admin panel ("Apply to existing services", below) or on the server with the
@@ -452,7 +452,7 @@ What the move does **not** do:
   both until the retire.
 - No message to customers. A customer sees the new inbound's configs after updating the subscription in their app
   (the subscription URL does not change). Single configs copied before keep working, on the old inbound, until phase 2.
-- Not in the Mini App yet: a move is started and controlled from the admin panel or the command line.
+- A move is started and controlled from the admin panel, the Mini App admin or the command line.
 - Services on a legacy panel, on another panel or on a test (dummy) panel are listed as skipped, with the reason.
   Deleted services are never moved. Adding or removing a plan's additional inbounds on existing services is not part
   of it (a moved service keeps its additional inbounds, and the old inbound becomes one of them when the plan still
@@ -533,6 +533,25 @@ automatic retry left) are shown on the panel's page and by `app:panel:doctor`. A
 attempts, next try, the last error (masked) and when the old inbound was or will be removed. A failed move has
 **Retry now** (permission to manage services; at most 5 times in 10 minutes per service): the scheduled task retries it
 at its next pass. The services list has the tabs **Being moved** and **Move failed**.
+
+**In the Mini App admin.** The same, in Telegram (needs the same permissions: managing plans for the plan's screens and
+buttons, managing services for "Retry now"):
+
+- **Plans → a plan**: the block **Moving existing services** (the open or last run, its counts, "started by", the
+  target, "the plan's inbound changed since this run was created") with the buttons valid in its state, and the link
+  **Apply to existing services**. A run started by the bot's main admin (`TELEGRAM_ADMIN_CHAT_ID`, without an admin
+  account) or from the command line shows "not recorded" as its starter; the audit log names the admin.
+- **Apply to existing services**: the same dry run (counted from the database, no panel request), the same options
+  (Persian digits are accepted), **Continue** for the confirmation, then **Create the run**. Tapping it twice creates
+  one run; with an open run, or with the switch off, there is no create button.
+- **Cancel** and **Undo** ask for Telegram's confirmation first. **Resume** and **Retry failed now** only make the moves
+  due: the scheduled task works on them at its next pass (the screen says so).
+- **Services → a service**: the block "Inbound move #run" with the same details and **Retry now** (the same limit as
+  the web: 5 per 10 minutes per service, both together). **Services** has the chips **Being moved** and **Move failed**
+  while the switch is on.
+
+A run created in the Mini App is the same as one created on the web or with the command (same options, same checks,
+same audit entries).
 
 How to use it from the command line:
 
