@@ -51,8 +51,8 @@ final class InboundMoveGuardsTest extends IntegrationTestCase
         [$code, $output] = $this->command(['--apply' => true]);
 
         self::assertSame(0, $code, $output);
-        self::assertStringContainsString(sprintf('Service #%d (active, on DE-1): skipped: %s', $onOther->getId(), InboundMovePlanner::skipText(InboundMovePlanner::SKIP_OTHER_PANEL)), $output);
-        self::assertStringContainsString(sprintf('Service #%d (active, on DE-1): skipped: not a real panel', $onDummy->getId()), $output);
+        self::assertConsoleContains(sprintf('Service #%d (active, on DE-1): skipped: %s', $onOther->getId(), InboundMovePlanner::skipText(InboundMovePlanner::SKIP_OTHER_PANEL)), $output);
+        self::assertConsoleContains(sprintf('Service #%d (active, on DE-1): skipped: not a real panel', $onDummy->getId()), $output);
         self::assertSame([], $this->fake->requests, 'zero requests');
         self::assertSame([], $this->http->requests('panel2.example.test'));
         self::assertSame([['skipped', 'other_panel'], ['skipped', 'not_real_panel']], array_map(static fn (array $m): array => [$m['state'], $m['skip_reason']], $this->moves()));
@@ -65,7 +65,7 @@ final class InboundMoveGuardsTest extends IntegrationTestCase
         $this->fake->requests = [];
         [$code, $output] = $this->command(['--apply' => true, '--service' => (string) $onLegacy->getId()]);
         self::assertSame(0, $code, $output);
-        self::assertStringContainsString('skipped: the panel is not in modern mode (Panels → test connection)', $output);
+        self::assertConsoleContains('skipped: the panel is not in modern mode (Panels → test connection)', $output);
         self::assertSame([], $this->fake->requests);
         self::assertSame('legacy', $legacy->getIntegrationMode()->value);
     }
@@ -80,7 +80,7 @@ final class InboundMoveGuardsTest extends IntegrationTestCase
 
         self::assertSame(1, $code, $output);
         self::assertSame(['GET panel/api/clients/get/tg_p1_1'], $this->fake->requestLines(), 'a read only');
-        self::assertStringContainsString('failed: Not moved: the client is not on the expected inbound', $output);
+        self::assertConsoleContains('failed: Not moved: the client is not on the expected inbound', $output);
         $move = $this->moves()[0];
         self::assertSame(['failed', '1'], [$move['state'], (string) $move['attempts']]);
         self::assertNotNull($move['next_attempt_at'], 'backed off');
@@ -132,8 +132,8 @@ final class InboundMoveGuardsTest extends IntegrationTestCase
         [$code, $output] = $this->command(['--apply' => true]);
 
         self::assertSame(0, $code, $output);
-        self::assertStringContainsString(sprintf('Service #%d (active, on DE-1): skipped: in run #%d', $busy->getId(), $old), $output);
-        self::assertStringContainsString(sprintf('Service #%d (active, on DE-1): skipped: moved too often (3 moves within 24 hours)', $flapping->getId()), $output);
+        self::assertConsoleContains(sprintf('Service #%d (active, on DE-1): skipped: in run #%d', $busy->getId(), $old), $output);
+        self::assertConsoleContains(sprintf('Service #%d (active, on DE-1): skipped: moved too often (3 moves within 24 hours)', $flapping->getId()), $output);
         self::assertSame([], $this->fake->requests);
     }
 
@@ -146,7 +146,7 @@ final class InboundMoveGuardsTest extends IntegrationTestCase
         $this->em->getConnection()->insert('vpn_service_inbound', ['service_id' => $service->getId(), 'inbound_id' => $wireguard->getId(), 'remote_inbound_id' => '3', 'status' => 'attached', 'attempts' => 1, 'updated_at' => '2026-01-01 00:00:00', 'reattach_count' => 0]);
 
         [, $output] = $this->command([]);
-        self::assertStringContainsString('protocol mix', $output);
+        self::assertConsoleContains('protocol mix', $output);
 
         // Two Shadowsocks inbounds with different methods (inbounds/options): a mix too, read with one GET.
         $this->em->getConnection()->executeStatement('DELETE FROM vpn_service_inbound');
@@ -167,7 +167,7 @@ final class InboundMoveGuardsTest extends IntegrationTestCase
         $this->em->flush();
         [$code, $output] = $this->command(['--apply' => true]);
         self::assertSame(2, $code);
-        self::assertStringContainsString('is inactive: no run is created', $output);
+        self::assertConsoleContains('is inactive: no run is created', $output);
         self::assertSame([], $this->runs());
     }
 

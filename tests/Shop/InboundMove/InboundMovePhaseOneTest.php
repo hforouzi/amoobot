@@ -43,16 +43,16 @@ final class InboundMovePhaseOneTest extends IntegrationTestCase
         [$code, $output] = $this->command([]);
 
         self::assertSame(0, $code, $output);
-        self::assertStringContainsString('dry run', $output);
-        self::assertMatchesRegularExpression('/#'.$one->getId().'\s.*DE-1.*NL-2.*attach \+ switch.*on the old inbound: would attach the target/', $output);
-        self::assertMatchesRegularExpression('/#'.$two->getId().'\s.*already on the target on the panel: no attach needed/', $output);
-        self::assertStringContainsString('2 service(s): 2 would be moved, 0 skipped. Nothing was changed.', $output);
-        self::assertStringContainsString('plans.inbound_move_enabled is off: --apply would be refused', $output);
+        self::assertConsoleContains('dry run', $output);
+        self::assertMatchesRegularExpression('/#'.$one->getId().'\s.*DE-1.*NL-2.*attach \+ switch.*on the old inbound: would attach the target/', self::collapseWhitespace($output));
+        self::assertMatchesRegularExpression('/#'.$two->getId().'\s.*already on the target on the panel: no attach needed/', self::collapseWhitespace($output));
+        self::assertConsoleContains('2 service(s): 2 would be moved, 0 skipped. Nothing was changed.', $output);
+        self::assertConsoleContains('plans.inbound_move_enabled is off: --apply would be refused', $output);
         self::assertSame($before, $this->checksums() + ['moves' => $this->moves(), 'runs' => $this->runs()], 'nothing written');
         self::assertNotSame([], $this->fake->requestLines());
         self::assertSame([], $this->panelWrites(), 'the request log of a dry run holds GETs only');
         foreach ([...$this->secretsOf($one), ...$this->secretsOf($two)] as $secret) {
-            self::assertStringNotContainsString($secret, $output);
+            self::assertConsoleNotContains($secret, $output);
         }
 
         [$code, $json] = $this->command(['--json' => true]);
@@ -76,7 +76,7 @@ final class InboundMovePhaseOneTest extends IntegrationTestCase
         [$code, $output] = $this->command(['--apply' => true, '--service' => (string) $service->getId()]);
 
         self::assertSame(0, $code, $output);
-        self::assertStringContainsString(sprintf('Service #%d: "DE-1" (#%d) → "NL-2" (#%d): switched: attached and switched; links refreshed from the panel (2 link(s))', $service->getId(), $this->de->getId(), $this->nl->getId()), $output);
+        self::assertConsoleContains(sprintf('Service #%d: "DE-1" (#%d) → "NL-2" (#%d): switched: attached and switched; links refreshed from the panel (2 link(s))', $service->getId(), $this->de->getId(), $this->nl->getId()), $output);
         self::assertSame([
             'GET panel/api/clients/get/tg_p1_1',
             'POST panel/api/clients/tg_p1_1/attach',
@@ -120,7 +120,7 @@ final class InboundMovePhaseOneTest extends IntegrationTestCase
         self::assertSame(['run_id' => (int) $runs[0]['id'], 'kind' => 'primary', 'target_inbound_id' => $this->nl->getId(), 'services' => 1, 'planned' => 1, 'skipped' => 0, 'keep_old' => true], $this->audits()[0]['details']);
         self::assertSame(['run_id' => (int) $runs[0]['id'], 'planned' => 1, 'done' => 1, 'failed' => 0, 'skipped' => 0, 'remaining' => 0], $this->audits()[1]['details']);
         foreach ($this->secretsOf($service) as $secret) {
-            self::assertStringNotContainsString($secret, $output);
+            self::assertConsoleNotContains($secret, $output);
             self::assertStringNotContainsString($secret, (string) json_encode($this->audits()));
         }
     }
@@ -136,7 +136,7 @@ final class InboundMovePhaseOneTest extends IntegrationTestCase
 
         self::assertSame(0, $code, $output);
         self::assertSame(['POST panel/api/clients/tg_p1_1/attach'], $this->attachCalls(), 'B already attached by hand: no attach call for it');
-        self::assertStringContainsString(sprintf('Service #%d: "DE-1" (#%d) → "NL-2" (#%d): switched: already on the target: switched without an attach', $byHand->getId(), $this->de->getId(), $this->nl->getId()), $output);
+        self::assertConsoleContains(sprintf('Service #%d: "DE-1" (#%d) → "NL-2" (#%d): switched: already on the target: switched without an attach', $byHand->getId(), $this->de->getId(), $this->nl->getId()), $output);
         self::assertSame((string) $this->nl->getId(), (string) $this->serviceRow((int) $byHand->getId())['inbound_id']);
         self::assertSame((string) $this->nl->getId(), (string) $this->serviceRow((int) $service->getId())['inbound_id']);
 
@@ -166,7 +166,7 @@ final class InboundMovePhaseOneTest extends IntegrationTestCase
         [$code, $output] = $this->command(['--apply' => true]);
 
         self::assertSame(2, $code, $output);
-        self::assertStringContainsString('switched off (plans.inbound_move_enabled)', $output);
+        self::assertConsoleContains('switched off (plans.inbound_move_enabled)', $output);
         self::assertSame($before, $this->checksums() + ['moves' => $this->moves(), 'runs' => $this->runs()]);
         self::assertSame([], $this->fake->requests);
 
@@ -198,17 +198,17 @@ final class InboundMovePhaseOneTest extends IntegrationTestCase
 
         [$code, $output] = $this->command(['--apply' => true]);
         self::assertSame(2, $code);
-        self::assertStringContainsString(sprintf('open run (#%d)', $open), $output);
-        self::assertStringContainsString(sprintf('--resume=%d', $open), $output);
+        self::assertConsoleContains(sprintf('open run (#%d)', $open), $output);
+        self::assertConsoleContains(sprintf('--resume=%d', $open), $output);
         self::assertCount(1, $this->runs());
         self::assertSame([], $this->fake->requests);
 
         [$code, $output] = $this->command(['--resume' => (string) $open, '--service' => (string) $service->getId()]);
         self::assertSame(2, $code);
-        self::assertStringContainsString('--resume takes no scope option (--service)', $output);
+        self::assertConsoleContains('--resume takes no scope option (--service)', $output);
         [$code, $output] = $this->command(['--service' => '999999']);
         self::assertSame(2, $code);
-        self::assertStringContainsString('is not a service of plan', $output);
+        self::assertConsoleContains('is not a service of plan', $output);
         [$code] = $this->command(['--batch-size' => '0']);
         self::assertSame(2, $code);
         [$code, $output] = $this->runAgainst(999999);

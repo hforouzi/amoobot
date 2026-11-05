@@ -9,6 +9,7 @@ use App\Entity\Plan;
 use App\Entity\TrialPlan;
 use App\Provisioning\Domain\VpnServiceStatus;
 use App\Shop\Domain\OrderType;
+use App\Tests\Support\ConsoleOutputAssertions;
 use App\Tests\Support\IntegrationTestCase;
 use App\Tests\Support\QueryCounter;
 use Symfony\Bundle\FrameworkBundle\Console\Application;
@@ -27,6 +28,7 @@ use Symfony\Component\Translation\TranslatableMessage;
  */
 final class PlanInboundNoticesWebTest extends IntegrationTestCase
 {
+    use ConsoleOutputAssertions;
     use PlanInboundChangeFixtures;
 
     private KernelBrowser $client;
@@ -236,12 +238,12 @@ final class PlanInboundNoticesWebTest extends IntegrationTestCase
         $suffix = $this->notice('plan_inbound_drift.regenerate', ['%current%' => 'DE-1', '%planInbound%' => 'NL-2']);
 
         $one = $this->command('app:service:regenerate-config', ['serviceId' => (string) $service->getId()]);
-        self::assertStringContainsString('! '.$suffix, $one);
+        self::assertConsoleContains('! '.$suffix, $one);
         $bulk = $this->command('app:inbound:regenerate-service-configs', ['inboundId' => (string) $this->de->getId()]);
-        self::assertSame(2, substr_count($bulk, $suffix), 'one line per service, read with one query per batch');
+        self::assertSame(2, self::consoleCount($bulk, $suffix), 'one line per service, read with one query per batch');
 
         $this->sellOn($this->gold, $this->de);
-        self::assertStringNotContainsString('still serves', $this->command('app:service:regenerate-config', ['serviceId' => (string) $service->getId()]));
+        self::assertConsoleNotContains('still serves', $this->command('app:service:regenerate-config', ['serviceId' => (string) $service->getId()]));
     }
 
     public function testPermissionsAreUnchanged(): void

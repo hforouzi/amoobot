@@ -7,6 +7,7 @@ namespace App\Tests\Shop\InboundMove;
 use App\Entity\VpnService;
 use App\Shop\Application\InboundMoveSettings;
 use App\Tests\Shop\PlanInboundChange\PlanInboundChangeFixtures;
+use App\Tests\Support\ConsoleOutputAssertions;
 use App\Tests\Support\Fake3xui\Fake3xuiPanel;
 use Symfony\Bundle\FrameworkBundle\Console\Application;
 use Symfony\Component\Console\Tester\CommandTester;
@@ -14,12 +15,15 @@ use Symfony\Component\Console\Tester\CommandTester;
 /**
  * The owner's situation of docs/design/plan-inbound-change.md 2 on the fake modern 3x-ui (PlanInboundChangeFixtures):
  * plan "Gold" sold DE-1 (remote 1), its services' clients are on DE-1 only, and the plan now sells NL-2 (remote 2).
- * Plus the command and the reads the P4 tests share.
+ * Plus the command and the reads the P4 tests share. Console text is checked with ConsoleOutputAssertions: a fixed
+ * wide terminal (also for the helper processes) and whitespace collapsed, since SymfonyStyle wraps its blocks at the
+ * terminal width.
  *
  * @mixin \App\Tests\Support\IntegrationTestCase
  */
 trait InboundMoveFixtures
 {
+    use ConsoleOutputAssertions;
     use PlanInboundChangeFixtures;
 
     private function setUpMove(bool $switchOn = true): void

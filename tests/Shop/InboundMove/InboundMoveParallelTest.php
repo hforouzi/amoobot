@@ -69,7 +69,7 @@ final class InboundMoveParallelTest extends IntegrationTestCase
         foreach ($outputs as $output) {
             self::assertStringStartsWith('exit=0', $output);
         }
-        self::assertSame(4, substr_count(implode("\n", $outputs), ': switched: '), 'four switches in all: '.implode("\n---\n", $outputs));
+        self::assertSame(4, self::consoleCount(implode("\n", $outputs), ': switched: '), 'four switches in all: '.implode("\n---\n", $outputs));
         self::assertSame(array_fill(0, 4, ['switched', 1]), array_map(static fn (array $m): array => [$m['state'], (int) $m['attempts']], $this->moves()));
         $this->fake->loadState();
         foreach ($services as $n => $service) {
@@ -145,7 +145,7 @@ final class InboundMoveParallelTest extends IntegrationTestCase
 
         $output = self::assertSubprocessClean($runner, 'runner');
         self::assertStringStartsWith('exit=0', $output);
-        self::assertStringContainsString(': switched: already on the target', $output, 're-picked with the new credentials');
+        self::assertConsoleContains(': switched: already on the target', $output, 're-picked with the new credentials');
         self::assertSame('row-free no-tx', trim((string) file_get_contents($this->dir.'/probe')), 'no lock, no transaction during the panel step');
         $row = $this->serviceRow((int) $service->getId());
         self::assertSame([(string) $this->nl->getId(), self::NEW_UUID, self::NEW_SUB], [(string) $row['inbound_id'], $row['client_uuid'], $row['sub_id']]);

@@ -41,7 +41,7 @@ final class InboundMoveRetryTest extends IntegrationTestCase
         self::assertLessThanOrEqual(5 * 60 + 5, $delay);
         self::assertSame('running', $this->runs()[0]['status']);
         self::assertSame([], $this->alerts($before), 'no alert while an attempt is left');
-        self::assertStringContainsString(sprintf('--resume=%d', $runId), $output);
+        self::assertConsoleContains(sprintf('--resume=%d', $runId), $output);
 
         // Not due yet: --resume reads nothing.
         $this->fake->requests = [];
@@ -100,7 +100,7 @@ final class InboundMoveRetryTest extends IntegrationTestCase
         // A new --apply is refused while it is open; a dry run still works.
         [$code, $output] = $this->command(['--apply' => true]);
         self::assertSame(2, $code);
-        self::assertStringContainsString(sprintf('open run (#%d)', $run['id']), $output);
+        self::assertConsoleContains(sprintf('open run (#%d)', $run['id']), $output);
 
         // The panel answers again: --resume continues it (the failed ones once due).
         $this->fake->clearScripts();
