@@ -40,6 +40,10 @@ final class InboundMovePass
     public int $busy = 0;
     /** --undo / --cancel: services not moved yet that will not be moved any more. */
     public int $cancelled = 0;
+    /** The runner paused the run in this pass (5 failed panel reads in a row). */
+    public bool $paused = false;
+    /** The caller's time limit ended the pass (the scheduled task): the rest stays due for the next pass. */
+    public bool $outOfTime = false;
     public string $runStatus = '';
     public ?string $pauseReason = null;
     /** @var array{planned: int, done: int, failed: int, skipped: int, remaining: int} */
@@ -75,6 +79,7 @@ final class InboundMovePass
             'already_retired' => $this->alreadyRetired,
             'busy' => $this->busy,
             'cancelled' => $this->cancelled,
+            'out_of_time' => $this->outOfTime,
             'counts' => $this->counts,
         ];
     }

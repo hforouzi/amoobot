@@ -9,6 +9,7 @@ use App\Payment\Application\MissingDeliveryResender;
 use App\Payment\Application\StuckPaymentReminder;
 use App\Provisioning\Application\AutomationSettingsProvider;
 use App\Provisioning\Application\InboundAttachScheduler;
+use App\Provisioning\Application\InboundMoveScheduler;
 use App\Provisioning\Application\ServiceAutoSuspendService;
 use App\Provisioning\Application\ServiceExpiryChecker;
 use App\Provisioning\Application\ServiceNotificationService;
@@ -41,6 +42,7 @@ final class AutomationRunCommand extends Command
         private readonly InboundAttachScheduler $inboundAttachScheduler,
         private readonly MissingDeliveryResender $missingDeliveryResender,
         private readonly TransactionRollback $transactionRollback,
+        private readonly InboundMoveScheduler $inboundMoveScheduler,
     ) {
         parent::__construct();
     }
@@ -50,7 +52,7 @@ final class AutomationRunCommand extends Command
         $this
             ->addOption('dry-run', null, InputOption::VALUE_NONE, 'Show automation results without saving/sending')
             ->addOption('limit', null, InputOption::VALUE_REQUIRED, 'Max services to process per task; falls back to automation.batch_limit', null)
-            ->addOption('only', null, InputOption::VALUE_REQUIRED, 'Run only orders|sync|expiry|notifications|suspend|broadcasts|claims|attach-inbounds|all', 'all');
+            ->addOption('only', null, InputOption::VALUE_REQUIRED, 'Run only orders|sync|expiry|notifications|suspend|broadcasts|claims|attach-inbounds|inbound-moves|all', 'all');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
@@ -58,10 +60,10 @@ final class AutomationRunCommand extends Command
         $io = new SymfonyStyle($input, $output);
         $dryRun = (bool) $input->getOption('dry-run');
         $only = strtolower(trim((string) $input->getOption('only')));
-        $onlyOptions = ['orders', 'sync', 'expiry', 'notifications', 'suspend', 'broadcasts', 'claims', 'attach-inbounds', 'all'];
+        $onlyOptions = ['orders', 'sync', 'expiry', 'notifications', 'suspend', 'broadcasts', 'claims', 'attach-inbounds', 'inbound-moves', 'all'];
 
         if (!in_array($only, $onlyOptions, true)) {
-            $io->error('--only option must be one of: orders, sync, expiry, notifications, suspend, broadcasts, claims, attach-inbounds, all.');
+            $io->error('--only option must be one of: orders, sync, expiry, notifications, suspend, broadcasts, claims, attach-inbounds, inbound-moves, all.');
 
             return Command::FAILURE;
         }
@@ -224,6 +226,24 @@ final class AutomationRunCommand extends Command
             } catch (\Throwable $e) {
                 ++$failed;
                 $this->logger->error('automation_task_failed', ['task' => 'attach_inbounds', 'error' => $e->getMessage()]);
+            }
+        }
+
+        // Moving existing services to a plan's new inbound (app:plan:apply-inbounds): the open runs' due moves, retries and
+        // retirements. Gated by plans.inbound_move_enabled (nothing at all while off), not by an automation toggle.
+        // --limit does not apply: plans.inbound_move_batch_size and the task's time budget do.
+        if ($this->shouldRun($only, 'inbound-moves')) {
+            try {
+                $run = $this->inboundMoveScheduler->run($dryRun);
+                $checked += $dryRun ? $run->due : $run->moved + $run->retired + $run->failed + $run->skipped;
+                $updated += $run->moved + $run->retired;
+                $notified += $run->alertsSent;
+                $skipped += $run->skipped;
+                $failed += $run->errors;
+                $this->logger->info('automation_task_completed', ['task' => 'inbound_moves', 'summary' => $run->toArray()]);
+            } catch (\Throwable $e) {
+                ++$failed;
+                $this->logger->error('automation_task_failed', ['task' => 'inbound_moves', 'class' => $e::class]);
             }
         }
 

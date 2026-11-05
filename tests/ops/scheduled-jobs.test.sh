@@ -178,6 +178,21 @@ if [[ -e "$ROOT/bin/check-scheduled-jobs.sh" ]]; then
   rm -f "$WORK/state/newjob.last-run" "$WORK/state/newjob.installed"
   out="$(bash "$CHECK" 2>&1)"; rc=$?
   check "  ...without the installed stamp (older deploys) -> NEVER as before" bash -c '[[ $1 -eq 2 ]] && grep -qE "^NEVER +newjob" <<< "$2"' _ "$rc" "$out"
+  # The same for the job of the real manifest line: NEW after a full deploy, OK once it ran, STALE when it stops.
+  printf 'inbound-moves 6000 *:20/30\n' > "$WORK/manifest"
+  rm -rf "$WORK/state"; mkdir -p "$WORK/state"; touch "$WORK/state/inbound-moves.installed"
+  out="$(bash "$CHECK" 2>&1)"; rc=$?
+  check "inbound-moves just installed -> NEW, exit 0" bash -c '[[ $1 -eq 0 ]] && grep -qE "^NEW +inbound-moves +- .*schedule \*:20/30; installed [0-9]+s ago, first run pending" <<< "$2"' _ "$rc" "$out"
+  touch "$WORK/state/inbound-moves.last-success"
+  out="$(bash "$CHECK" 2>&1)"; rc=$?
+  check "inbound-moves after its first run -> OK, exit 0" bash -c '[[ $1 -eq 0 ]] && grep -qE "^OK +inbound-moves" <<< "$2"' _ "$rc" "$out"
+  touch -d '101 minutes ago' "$WORK/state/inbound-moves.last-success"
+  out="$(bash "$CHECK" 2>&1)"; rc=$?
+  check "inbound-moves last success older than 6000 s -> STALE, exit 2" bash -c '[[ $1 -eq 2 ]] && grep -qE "^STALE +inbound-moves" <<< "$2"' _ "$rc" "$out"
+  touch -d '99 minutes ago' "$WORK/state/inbound-moves.last-success"
+  out="$(bash "$CHECK" 2>&1)"; rc=$?
+  check "  ...within 6000 s it is still OK: one skipped run tolerated" bash -c '[[ $1 -eq 0 ]] && grep -qE "^OK +inbound-moves" <<< "$2"' _ "$rc" "$out"
+  rm -rf "$WORK/state"; mkdir -p "$WORK/state"; touch "$WORK/state/fresh.last-success"
   printf '# comment\n\nfresh 600 *:0/2\nstale 600 *:0/2\nnever 600 *:0/2\nbroken 600 *:0/2\n' > "$WORK/manifest"
   printf '# empty manifest\n' > "$WORK/manifest"
   bash "$CHECK" > /dev/null 2>&1; rc=$?
@@ -232,6 +247,23 @@ echo "== job max ages and first-install stamp (deploy.sh)"
   done
   (( ok ))
 ) && pass "attach-inbounds max age is 5700 s (3 x 1800 + 300): one skipped run tolerated" || fail "job max ages"
+check "manifest line of inbound-moves, in the lifecycle group" grep -qxF '  "inbound-moves|lifecycle|*:20/30|600|1800|app:automation:run --only=inbound-moves"' "$ROOT/deploy.sh"
+check "inbound-moves is on the allowlist" grep -qF "'app:automation:run --only=inbound-moves') ;;" "$ROOT/deploy.sh"
+check "the allowlist message counts nine tasks" grep -qF 'only the nine reviewed automation tasks' "$ROOT/deploy.sh"
+(
+  eval "$(sed -n '/^SCHEDULED_JOBS=(/,/^)/p' "$ROOT/deploy.sh")"
+  eval "$(sed -n '/^parse_job()/,/^}/p' "$ROOT/deploy.sh")"
+  for entry in "${SCHEDULED_JOBS[@]}"; do
+    parse_job "$entry"
+    [[ "$JOB_NAME" == inbound-moves ]] || continue
+    [[ "$JOB_GROUP" == lifecycle && "$JOB_TIMEOUT" == 600 && "$JOB_INTERVAL" == 1800 && $((3 * JOB_INTERVAL + JOB_TIMEOUT)) == 6000 ]] || exit 1
+    # The task's time budget, plus the 120 s a service in hand may still take, stays inside the job's timeout.
+    budget="$(sed -n 's/.*TIME_BUDGET_SECONDS = \([0-9]*\);.*/\1/p' "$ROOT/src/Provisioning/Application/InboundMoveScheduler.php")"
+    [[ "$budget" =~ ^[0-9]+$ ]] && (( budget + 120 < JOB_TIMEOUT )) || exit 1
+    exit 0
+  done
+  exit 1
+) && pass "inbound-moves: max age 6000 s, time budget inside the 600 s timeout" || fail "inbound-moves limits"
 check "manifest max age is 3 x interval + timeout" grep -qF 'manifest+=$'"'"'\n'"'"'"${JOB_NAME} $((3 * JOB_INTERVAL + JOB_TIMEOUT)) ${JOB_CALENDAR}"' "$ROOT/deploy.sh"
 check "deploy writes <job>.installed only for a job never run and never stamped" grep -qF 'if [[ ! -e "${JOBS_STATE_DIR}/${JOB_NAME}.last-success" && ! -e "${JOBS_STATE_DIR}/${JOB_NAME}.installed" ]]; then' "$ROOT/deploy.sh"
 
@@ -250,10 +282,11 @@ if have systemd-analyze; then
     out="$(systemd-analyze calendar "$JOB_CALENDAR" 2>&1)"
     check "OnCalendar '${JOB_CALENDAR}' (${JOB_NAME}) is valid" grep -q 'Next elapse' <<< "$out"
   done
-  check "8 jobs rendered" test "$(ls "$units"/*.timer | wc -l)" -eq 8
+  check "9 jobs rendered" test "$(ls "$units"/*.timer | wc -l)" -eq 9
+  check "inbound-moves timer and service" bash -c 'grep -qxF "OnCalendar=*:20/30" "$1/amoobot-job-inbound-moves.timer" && grep -qxF "TimeoutStartSec=600" "$1/amoobot-job-inbound-moves.service" && grep -q "scheduled-job.sh inbound-moves lifecycle -- .*app:automation:run --only=inbound-moves " "$1/amoobot-job-inbound-moves.service"' _ "$units"
   check "no job schedules repair-stuck" bash -c '! grep -l repair-stuck "$1"/*.service' _ "$units"
-  check "every job runs as www-data" bash -c '[[ $(grep -l "^User=www-data$" "$1"/*.service | wc -l) -eq 8 ]]' _ "$units"
-  check "every job has OnFailure alert" bash -c '[[ $(grep -l "^OnFailure=amoobot-job-alert@%N.service$" "$1"/*.service | wc -l) -eq 8 ]]' _ "$units"
+  check "every job runs as www-data" bash -c '[[ $(grep -l "^User=www-data$" "$1"/*.service | wc -l) -eq 9 ]]' _ "$units"
+  check "every job has OnFailure alert" bash -c '[[ $(grep -l "^OnFailure=amoobot-job-alert@%N.service$" "$1"/*.service | wc -l) -eq 9 ]]' _ "$units"
   # verify: only diagnostics about our units count (the host's own units may warn), and complaints about
   # binaries/paths that exist on the server but not here are ignored.
   verify="$(cd "$units" && systemd-analyze verify --man=no ./*.timer ./*.service 2>&1 | grep 'amoobot-job' \
@@ -297,8 +330,10 @@ EOF
   check "dry-run shows the alert unit and logrotate" bash -c 'grep -q "amoobot-job-alert@.service" <<< "$1" && grep -q "+     rotate 14" <<< "$1"' _ "$jobs_part"
   check "dry-run shows the manifest" grep -q '+ sync 4200 \*:0/15' <<< "$jobs_part"
   check "dry-run manifest: attach-inbounds max age 5700" grep -q '+ attach-inbounds 5700 \*:25/30' <<< "$jobs_part"
-  check "dry-run stamps every first-installed job" test "$(grep -c '\[dry-run\] install -m 644 -o www-data -g www-data /dev/null .*/jobs/.*\.installed' <<< "$jobs_part")" -eq 8
-  check "dry-run would enable every timer" test "$(grep -c 'systemctl enable --now amoobot-job-' <<< "$jobs_part")" -eq 8
+  check "inbound-moves is in the dry-run job table" grep -qE '^  inbound-moves +\*:20/30 +lifecycle +600s +app:automation:run --only=inbound-moves$' <<< "$jobs_part"
+  check "dry-run manifest: inbound-moves max age 6000" grep -q '+ inbound-moves 6000 \*:20/30' <<< "$jobs_part"
+  check "dry-run stamps every first-installed job" test "$(grep -c '\[dry-run\] install -m 644 -o www-data -g www-data /dev/null .*/jobs/.*\.installed' <<< "$jobs_part")" -eq 9
+  check "dry-run would enable every timer" test "$(grep -c 'systemctl enable --now amoobot-job-' <<< "$jobs_part")" -eq 9
   check "dry-run pauses jobs before the checkout" grep -q 'pause scheduled jobs' <<< "$out"
   leak=0
   while IFS='=' read -r k v; do
@@ -310,7 +345,7 @@ EOF
   check "preflight refuses to schedule repair-stuck" bash -c '[[ $1 -ne 0 ]] && grep -q "must never be scheduled" <<< "$2"' _ "$rc" "$out"
   sed 's/app:payments:repair-stuck --apply/app:plans:adjust-prices --percent=50/' "$WORK/deploy-bad.sh" > "$WORK/deploy-destructive.sh"
   out="$(dry_run "$WORK/deploy-destructive.sh" "$WORK/prod.env")"; rc=$?
-  check "preflight refuses other unreviewed commands" bash -c '[[ $1 -ne 0 ]] && grep -q "only the eight reviewed automation tasks" <<< "$2"' _ "$rc" "$out"
+  check "preflight refuses other unreviewed commands" bash -c '[[ $1 -ne 0 ]] && grep -q "only the nine reviewed automation tasks" <<< "$2"' _ "$rc" "$out"
 
   # write_file for real (as the current user): new -> changed, same content -> unchanged, edit -> changed.
   eval "$(sed -n '/^FILE_CHANGED=0$/,/^}/p' "$ROOT/deploy.sh")"

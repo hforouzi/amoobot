@@ -67,6 +67,7 @@ final class InboundMoveSwitchHasNoEffectTest extends IntegrationTestCase
 
         self::assertSame([
             'Admin/Application/SettingsAdministration.php',
+            'Command/AutomationRunCommand.php',
             'Command/PlanApplyInboundsCommand.php',
             'Entity/InboundMoveRun.php',
             'Entity/ServiceInboundMove.php',
@@ -79,6 +80,7 @@ final class InboundMoveSwitchHasNoEffectTest extends IntegrationTestCase
             'Provisioning/Application/InboundMovePass.php',
             'Provisioning/Application/InboundMovePlanner.php',
             'Provisioning/Application/InboundMoveRunner.php',
+            'Provisioning/Application/InboundMoveScheduler.php',
             'Provisioning/Application/InboundMoveScope.php',
             'Shop/Application/InboundMoveSettings.php',
         ], $readers, 'P4-P6: only the CLI runner (its alerts and controls) and the display guard read them; no sale, settlement, regenerate, plan save or timer (P8) does');

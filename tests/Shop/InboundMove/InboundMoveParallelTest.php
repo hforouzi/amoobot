@@ -61,13 +61,13 @@ final class InboundMoveParallelTest extends IntegrationTestCase
         $services = array_map(fn (int $n) => $this->movableService($n), range(1, 4));
         $runId = $this->share()->createRun();
 
-        $runners = [$this->helper('resume', $runId, '-', 200, $this->startAt()), $this->helper('resume', $runId, '-', 200, $this->startAt())];
+        $runners = [$this->helper('runner', $runId, '-', 200, $this->startAt()), $this->helper('runner', $runId, '-', 200, $this->startAt())];
         array_map(static fn (Process $p) => $p->start(), $runners);
         $this->releaseStart($runners);
         $outputs = array_map(function (Process $p): string { $p->wait(); return self::assertSubprocessClean($p, 'runner'); }, $runners);
 
         foreach ($outputs as $output) {
-            self::assertStringStartsWith('exit=0', $output);
+            self::assertStringContainsString('exit=0', $output);
         }
         self::assertSame(4, self::consoleCount(implode("\n", $outputs), ': switched: '), 'four switches in all: '.implode("\n---\n", $outputs));
         self::assertSame(array_fill(0, 4, ['switched', 1]), array_map(static fn (array $m): array => [$m['state'], (int) $m['attempts']], $this->moves()));
