@@ -93,7 +93,7 @@ final class InboundMoveSettingsTest extends IntegrationTestCase
             self::assertSame([$value, $min, $max], [$input->attr('value'), $input->attr('min'), $input->attr('max')], $name);
         }
         self::assertStringContainsString('Command line only in this release', $crawler->filter('.admin-section')->last()->text());
-        self::assertStringContainsString('the old inbound stays attached', $crawler->filter('.admin-section')->last()->text());
+        self::assertStringContainsString('the old inbound is removed after the grace period below, unless --keep-old', $crawler->filter('.admin-section')->last()->text());
 
         $audits = $this->planAudits();
         $form = $crawler->filter('form.admin-settings-form')->form();

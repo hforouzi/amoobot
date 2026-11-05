@@ -26,6 +26,20 @@ final class InboundMovePass
     public int $snapshotsRefreshed = 0;
     public int $snapshotsPending = 0;
     public int $alertsSent = 0;
+    /** Phase 2 (P6): old inbounds removed in this pass, and new inbounds attached again first. */
+    public int $retired = 0;
+    public int $reattached = 0;
+    /** Moved services whose old inbound is due to be removed later (after the grace period), and the earliest time. */
+    public int $retirePending = 0;
+    public ?string $retireNextAt = null;
+    /** Moved services that keep the old inbound (--keep-old, or A is one of their additional inbounds). */
+    public int $keptOld = 0;
+    /** --undo: services put back on the old inbound; already retired (cannot be undone); in another process's hands. */
+    public int $undone = 0;
+    public int $alreadyRetired = 0;
+    public int $busy = 0;
+    /** --undo / --cancel: services not moved yet that will not be moved any more. */
+    public int $cancelled = 0;
     public string $runStatus = '';
     public ?string $pauseReason = null;
     /** @var array{planned: int, done: int, failed: int, skipped: int, remaining: int} */
@@ -52,6 +66,15 @@ final class InboundMovePass
             'snapshots_refreshed' => $this->snapshotsRefreshed,
             'snapshots_pending' => $this->snapshotsPending,
             'alerts_sent' => $this->alertsSent,
+            'retired' => $this->retired,
+            'reattached' => $this->reattached,
+            'retire_pending' => $this->retirePending,
+            'retire_next_at' => $this->retireNextAt,
+            'kept_old' => $this->keptOld,
+            'undone' => $this->undone,
+            'already_retired' => $this->alreadyRetired,
+            'busy' => $this->busy,
+            'cancelled' => $this->cancelled,
             'counts' => $this->counts,
         ];
     }

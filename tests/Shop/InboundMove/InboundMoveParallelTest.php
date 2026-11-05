@@ -291,7 +291,8 @@ final class InboundMoveParallelTest extends IntegrationTestCase
     private function createRun(): int
     {
         $this->em->clear();
-        $created = self::getContainer()->get(InboundMovePlanner::class)->create($this->managed($this->gold), new InboundMoveScope());
+        // keep-old: these are the phase 1 races (P4); the retire step has its own (InboundMoveRetireParallelTest, P6).
+        $created = self::getContainer()->get(InboundMovePlanner::class)->create($this->managed($this->gold), new InboundMoveScope(), null, true);
         self::assertIsArray($created, is_string($created) ? $created : '');
 
         return $created[0];

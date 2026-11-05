@@ -212,8 +212,11 @@ final class InboundMovePlanner
      *
      * @return array{int, list<InboundMoveCandidate>}|string the run id and its services, or why it was not created
      */
-    public function create(Plan $plan, InboundMoveScope $scope, ?int $requestedBy = null): array|string
+    public function create(Plan $plan, InboundMoveScope $scope, ?int $requestedBy = null, bool $keepOld = false, ?int $graceHours = null): array|string
     {
+        if (null !== $graceHours && ($graceHours < InboundMoveSettings::MIN_DETACH_GRACE_HOURS || $graceHours > InboundMoveSettings::MAX_DETACH_GRACE_HOURS)) {
+            return sprintf('The grace period must be from %d to %d hours.', InboundMoveSettings::MIN_DETACH_GRACE_HOURS, InboundMoveSettings::MAX_DETACH_GRACE_HOURS);
+        }
         if (!$this->settings->enabled()) {
             return sprintf('Moving services is switched off (%s). Turn it on in Settings → Plans to use --apply; a dry run works without it.', InboundMoveSettings::ENABLED);
         }
@@ -241,9 +244,9 @@ final class InboundMovePlanner
                 'target_inbound_id' => $target->getId(),
                 'scope' => (string) json_encode($scope->toArray()),
                 'status' => InboundMoveRun::STATUS_PLANNED,
-                'grace_hours' => $this->settings->detachGraceHours(),
-                // P4 is phase 1 only: the old inbound is never removed (4.2 (c), "--keep-old" forced).
-                'keep_old' => 1,
+                // P6: phase 2 removes the old inbound grace_hours after the switch; keep_old: never automatically (4.2 (c)).
+                'grace_hours' => $graceHours ?? $this->settings->detachGraceHours(),
+                'keep_old' => $keepOld ? 1 : 0,
                 'requested_by' => $requestedBy,
                 'created_at' => $now,
                 'planned_count' => 0, 'done_count' => 0, 'failed_count' => 0, 'skipped_count' => 0, 'remaining_count' => 0,
@@ -285,7 +288,8 @@ final class InboundMovePlanner
             'services' => count($candidates),
             'planned' => $moving,
             'skipped' => count($candidates) - $moving,
-            'keep_old' => true,
+            'keep_old' => $keepOld,
+            'grace_hours' => $graceHours ?? $this->settings->detachGraceHours(),
         ]);
         $this->logger->info('inbound_move_run_created', ['run_id' => $runId, 'plan_id' => $plan->getId(), 'planned' => $moving, 'skipped' => count($candidates) - $moving]);
 
@@ -308,8 +312,8 @@ final class InboundMovePlanner
 
     /**
      * The cached counters of a run (5.1), by an autocommit UPDATE (never while a service row is locked, 5.3):
-     * planned = every move row; done = switched (phase 1 finished) or done; failed; skipped; remaining = planned or
-     * attaching.
+     * planned = every move row; done = moved (switched, detaching or done: phase 1 finished); failed; skipped;
+     * remaining = planned or attaching. Undone and cancelled moves count only in planned.
      */
     public function refreshCounts(int $runId): void
     {
@@ -321,7 +325,7 @@ final class InboundMovePlanner
             'UPDATE inbound_move_run SET planned_count = ?, done_count = ?, failed_count = ?, skipped_count = ?, remaining_count = ? WHERE id = ?',
             [
                 array_sum($by),
-                ($by[ServiceInboundMove::STATE_SWITCHED] ?? 0) + ($by[ServiceInboundMove::STATE_DONE] ?? 0),
+                ($by[ServiceInboundMove::STATE_SWITCHED] ?? 0) + ($by[ServiceInboundMove::STATE_DETACHING] ?? 0) + ($by[ServiceInboundMove::STATE_DONE] ?? 0),
                 $by[ServiceInboundMove::STATE_FAILED] ?? 0,
                 $by[ServiceInboundMove::STATE_SKIPPED] ?? 0,
                 ($by[ServiceInboundMove::STATE_PLANNED] ?? 0) + ($by[ServiceInboundMove::STATE_ATTACHING] ?? 0),

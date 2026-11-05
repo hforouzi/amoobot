@@ -14,7 +14,7 @@ use App\Provisioning\Domain\Dto\InboundDetachResult;
  * (docs/design/plan-inbound-change.md 4.3 step 5, PR P2). A panel whose driver does not implement it (legacy mode,
  * other panel types, the dummy driver) cannot detach: callers skip such a service (NOT_MODERN), nothing is sent.
  *
- * A panel primitive only: nothing calls it yet (the move runner is P4/P6).
+ * Called by the move runner's retire step and by its undo (InboundMoveRunner, P6).
  *
  * 3x-ui v3.11.0 has no guard of its own (the design, section 1): it skips an inbound the client is not on, keeps the
  * client's record and traffic, and happily leaves a client on zero inbounds. The guards are ours, in the driver:

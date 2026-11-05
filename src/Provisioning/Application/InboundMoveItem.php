@@ -20,6 +20,14 @@ final readonly class InboundMoveItem
     public const SNAPSHOT = 'snapshot';
     /** The client's UUID, subId or remote id changed between the claim and the write (a link reset): nothing written. */
     public const IDENTITY_CHANGED = 'identity_changed';
+    /** Phase 2 (P6): the old inbound A is off the client (detached, already gone, or deleted on the panel). */
+    public const RETIRED = 'retired';
+    /** Phase 2: the new inbound B was missing on the panel and was attached again first; the retire is picked again. */
+    public const REATTACHED = 'reattached';
+    /** Phase 2: A is one of the service's additional inbounds now: it stays, nothing is detached. */
+    public const KEPT = 'kept';
+    /** --undo (P6): the service is back on A. */
+    public const UNDONE = 'undone';
 
     public function __construct(
         public int $moveId,
