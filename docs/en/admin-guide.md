@@ -475,8 +475,8 @@ Services that were not moved, and services on legacy or other panels, are never 
 
 **From the admin panel: "Apply to existing services"**
 
-On the plan's page (Plans → the plan → show), the block **Moving existing services** has the link **Apply to existing
-services**. It needs the permission to manage plans.
+On the plan's page (Plans → the plan → **Show**), the block **Moving existing services** has the link **Apply to existing
+services**. The plan's edit page has the same button. It needs the permission to manage plans.
 
 1. **The dry run.** The page counts, from the database only (it never asks the panel), how many of the plan's services
    would move to the plan's inbound and how many are skipped, by reason: on another panel, panel not in modern mode, not

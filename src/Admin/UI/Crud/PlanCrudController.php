@@ -11,6 +11,7 @@ use App\Entity\Plan;
 use App\Entity\TrialPlan;
 use App\Entity\VpnInbound;
 use App\Provisioning\Application\InboundMoveOverview;
+use App\Security\AdminPermission;
 use App\Shop\Application\InboundMoveSettings;
 use App\Shop\Application\Catalog\InvalidCatalogEntry;
 use App\Shop\Application\Catalog\PlanAdminService;
@@ -129,7 +130,9 @@ class PlanCrudController extends AbstractCrudController
     }
 
     /**
-     * Trial plans, trial claims and the bulk price adjustment are reached from here (not from the menu).
+     * Trial plans, trial claims and the bulk price adjustment are reached from here (not from the menu). The detail page
+     * (the "Moving existing services" block) is reached from the list and the edit page, and "Apply to existing services"
+     * from the edit page too.
      */
     public function configureActions(Actions $actions): Actions
     {
@@ -142,11 +145,17 @@ class PlanCrudController extends AbstractCrudController
         $bulkPrices = Action::new('bulkPriceAdjustment', 'admin.bulk_plan_price_adjustment', 'fa fa-percent')
             ->linkToRoute('admin_bulk_plan_price_adjustment')
             ->createAsGlobalAction();
+        $applyInbounds = Action::new('applyInbounds', 'inbound_move.apply.link', 'fa fa-exchange')
+            ->linkToUrl(fn (Plan $plan): string => $this->generateUrl('admin_plan_apply_inbounds', ['id' => $plan->getId()]))
+            ->displayIf(fn (): bool => $this->isGranted(AdminPermission::PLANS_MANAGE->value));
 
         return $actions
             ->add(Crud::PAGE_INDEX, $trialPlans)
             ->add(Crud::PAGE_INDEX, $trialClaims)
-            ->add(Crud::PAGE_INDEX, $bulkPrices);
+            ->add(Crud::PAGE_INDEX, $bulkPrices)
+            ->add(Crud::PAGE_INDEX, Action::DETAIL)
+            ->add(Crud::PAGE_EDIT, Action::DETAIL)
+            ->add(Crud::PAGE_EDIT, $applyInbounds);
     }
 
     /**
