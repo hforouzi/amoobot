@@ -59,11 +59,16 @@ final class SubscriptionPageViewFactory
         $subscriptionUrl = null;
         $configLinks = [];
         $withheld = false;
+        $updating = false;
         if ($usable && $withAccess) {
             // Only what a client can reach (CustomerAccessGuard alerts the admins about the rest).
             $subscriptionUrl = $this->accessGuard->subscriptionUrl($service);
-            $configLinks = $this->accessGuard->configLinks($service, $this->finalConfigLinkProvider->getFinalLinksForService($service, 'subscription_page'));
-            $withheld = (null === $subscriptionUrl && '' !== trim((string) $service->getSubscriptionUrl())) || ([] === $configLinks && '' !== trim((string) $service->getConfigText()));
+            $linkSet = $this->finalConfigLinkProvider->getFinalLinkSetForService($service, 'subscription_page');
+            // The display guard (plan-inbound-change.md 5.5): no single config while the stored ones may name an inbound
+            // the service left. That is not an unusable link, so it does not count as withheld.
+            $updating = $linkSet->linksPending;
+            $configLinks = $this->accessGuard->configLinks($service, $linkSet->finalLinks);
+            $withheld = (null === $subscriptionUrl && '' !== trim((string) $service->getSubscriptionUrl())) || (!$updating && [] === $configLinks && '' !== trim((string) $service->getConfigText()));
         }
 
         return new SubscriptionPageView(
@@ -82,6 +87,7 @@ final class SubscriptionPageViewFactory
             platform: $platform,
             apps: $usable && null !== $subscriptionUrl ? $this->clientApps->forPage($subscriptionUrl, $this->profileName($service), $platform) : [],
             downloads: $withAccess ? $this->downloads->forPage($platform) : [],
+            linksUpdating: $updating,
         );
     }
 
