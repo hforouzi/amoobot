@@ -7,9 +7,17 @@
 {% block content %}
     <section class="card">
         <h1>{{ 'area.services'|trans }}</h1>
-        {{ ui.search('miniapp_admin_services', query, 'admin.services.search', {tab: tab}) }}
+        {{ ui.search('miniapp_admin_services', query, 'admin.services.search', {tab: tab, moves: moves}) }}
     </section>
     {{ ui.chips('miniapp_admin_services', tab, tabs, counts, 'admin.services.tab.', {}) }}
+    {% if moveCounts is not null %}
+        {# Inbound moves (plan-inbound-change 5.6, P9): services whose latest move is on its way, or failed. #}
+        <nav class="chips" aria-label="{{ 'admin.inbound_move.filter'|trans }}" data-move-filters>
+            {% for key in ['moving', 'failed'] %}
+                <a class="chip{{ key == moves ? ' active' : '' }}" href="{{ path('miniapp_admin_services', {moves: key}) }}" data-nav data-replace data-chip="moves_{{ key }}"{% if key == moves %} aria-current="true"{% endif %}>{{ ('admin.inbound_move.list_' ~ key)|trans }} <span class="chip-count">{{ moveCounts[key]|number_format }}</span></a>
+            {% endfor %}
+        </nav>
+    {% endif %}
     {% if list.items is empty %}
         {{ ui.empty(query ? 'admin.no_results' : 'admin.services.none') }}
     {% else %}
@@ -36,5 +44,5 @@
             {% endfor %}
         </div>
     {% endif %}
-    {{ ui.pager('miniapp_admin_services', list, {tab: tab, q: query}) }}
+    {{ ui.pager('miniapp_admin_services', list, {tab: tab, q: query, moves: moves}) }}
 {% endblock %}

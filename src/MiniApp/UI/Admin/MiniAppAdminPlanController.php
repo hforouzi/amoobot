@@ -18,7 +18,9 @@ use App\Shop\Application\Catalog\PlanAdminService;
 use App\Shop\Application\Catalog\PlanInboundDrift;
 use App\Shop\Application\Catalog\PlanInboundWarnings;
 use App\Shop\Application\Catalog\PlanInUse;
+use App\Provisioning\Application\InboundMoveOverview;
 use App\Shop\Application\Catalog\TrialBackingPlans;
+use App\Shop\Application\InboundMoveSettings;
 use App\Shop\Application\PlanPriceSanityChecker;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
@@ -58,6 +60,8 @@ final class MiniAppAdminPlanController extends AbstractController
         private readonly TranslatorInterface $translator,
         private readonly TrialBackingPlans $trialBacking,
         private readonly PlanInboundDrift $inboundDrift,
+        private readonly InboundMoveOverview $moveOverview,
+        private readonly InboundMoveSettings $moveSettings,
     ) {
     }
 
@@ -99,13 +103,13 @@ final class MiniAppAdminPlanController extends AbstractController
     }
 
     #[Route('/app/admin/plans/new', name: 'miniapp_admin_plan_new', defaults: ['_miniapp_section' => 'admin.plans'], methods: ['GET'])]
-    public function new(Request $request): Response
+    public function new(Request $request, #[CurrentUser] MiniAppUser $user): Response
     {
-        return $this->form($request, new Plan());
+        return $this->form($request, $user, new Plan());
     }
 
     #[Route('/app/admin/plans/{id}', name: 'miniapp_admin_plan', requirements: ['id' => '\d+'], defaults: ['_miniapp_section' => 'admin.plans'], methods: ['GET'])]
-    public function edit(Request $request, int $id): Response
+    public function edit(Request $request, #[CurrentUser] MiniAppUser $user, int $id): Response
     {
         $plan = $this->plan($id);
         if ($this->trialBacking->isBacking($plan)) {
@@ -113,10 +117,10 @@ final class MiniAppAdminPlanController extends AbstractController
                 'plan' => $plan,
                 'trial' => $this->trialBacking->trialPlanOf($plan),
                 'message' => $this->trialBackingMessage($request, $plan),
-            ]);
+            ] + $this->moveBlock($user, $plan));
         }
 
-        return $this->form($request, $plan);
+        return $this->form($request, $user, $plan);
     }
 
     #[Route('/app/api/admin/plans', name: 'miniapp_admin_plan_create', defaults: ['_miniapp_section' => 'admin.plans'], methods: ['POST'])]
@@ -301,7 +305,7 @@ final class MiniAppAdminPlanController extends AbstractController
         $locale = MiniAppLocale::fromRequest($request);
         $drift = $this->inboundDrift->ofPlan($plan, $submitted);
 
-        return array_map(fn (array $w): string => $this->translator->trans($w['key'], $w['parameters'], 'admin', $locale), PlanInboundWarnings::drift($plan->getTitle(), $submitted->getTitle(), $drift, $this->inboundDrift->breakdown($drift, $locale)));
+        return array_map(fn (array $w): string => $this->translator->trans($w['key'], $w['parameters'], 'admin', $locale), PlanInboundWarnings::drift($plan->getTitle(), $submitted->getTitle(), $drift, $this->inboundDrift->breakdown($drift, $locale), 'plan_inbound_drift.plan_saved_apply'));
     }
 
     /**
@@ -317,7 +321,7 @@ final class MiniAppAdminPlanController extends AbstractController
         }
         $locale = MiniAppLocale::fromRequest($request);
 
-        return [$this->translator->trans('plan_inbound_drift.form', ['%count%' => $drift->total, '%breakdown%' => $this->inboundDrift->breakdown($drift, $locale)], 'admin', $locale)];
+        return [$this->translator->trans('plan_inbound_drift.form_apply', ['%count%' => $drift->total, '%breakdown%' => $this->inboundDrift->breakdown($drift, $locale)], 'admin', $locale)];
     }
 
     /**
@@ -338,7 +342,7 @@ final class MiniAppAdminPlanController extends AbstractController
         ], 'miniapp', $locale), $this->sanity->issues($plan));
     }
 
-    private function form(Request $request, Plan $plan): Response
+    private function form(Request $request, MiniAppUser $user, Plan $plan): Response
     {
         /** @var list<VpnInbound> $inbounds */
         $inbounds = $this->entityManager->createQueryBuilder()->select('i', 'p')->from(VpnInbound::class, 'i')->join('i.panel', 'p')
@@ -350,7 +354,24 @@ final class MiniAppAdminPlanController extends AbstractController
             'inbounds' => AdminForms::inboundChoices($inbounds),
             'warnings' => null === $plan->getId() ? [] : [...$this->warnings($request, $plan), ...$this->driftWarnings($request, $plan)],
             'orderCount' => $this->plans->orderCount($plan),
-        ]);
+        ] + (null === $plan->getId() ? [] : $this->moveBlock($user, $plan)));
+    }
+
+    /**
+     * The plan's inbound move block (plan-inbound-change P9, as the web's P7): its open or last run, the counts and the
+     * buttons this admin may press in its state. Read only, a few fixed queries, no panel call.
+     *
+     * @return array<string, mixed>
+     */
+    private function moveBlock(MiniAppUser $user, Plan $plan): array
+    {
+        return [
+            'moveRun' => $this->moveOverview->planRun((int) $plan->getId(), $plan->getInbound()?->getId()),
+            'moveProblems' => $this->moveOverview->problems(null, (int) $plan->getId()),
+            'moveEnabled' => $this->moveSettings->enabled(),
+            'moveCan' => $this->access->map($user, ['miniapp_admin_plan_apply_inbounds', ...array_values(MiniAppAdminInboundMoveController::RUN_ROUTES)]),
+            'moveRoutes' => MiniAppAdminInboundMoveController::RUN_ROUTES,
+        ];
     }
 
     /** A trial's backing plan: refused with the message (409, nothing changed); null for a sales plan. */

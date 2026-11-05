@@ -60,6 +60,8 @@ final class AdminRoutePermissions
             // As on the web (VpnServiceCrudController): regenerating configs is a panel operation.
             'miniapp_admin_service_regenerate_config' => AdminPermission::PANELS_MANAGE,
             'miniapp_admin_service_delete' => AdminPermission::SERVICES_DELETE,
+            // A service's failed inbound move due again (plan-inbound-change P9), as on the web (admin_vpn_service_retry_move).
+            'miniapp_admin_service_retry_move' => AdminPermission::SERVICES_MANAGE,
 
             // Catalog (M3b): plans, trial plans and the bulk price change need PLANS_MANAGE, as on the web
             // (AdminCrudPermissions); there is no separate view permission.
@@ -76,6 +78,14 @@ final class AdminRoutePermissions
             'miniapp_admin_plan_bulk' => AdminPermission::PLANS_MANAGE,
             'miniapp_admin_plan_bulk_preview' => AdminPermission::PLANS_MANAGE,
             'miniapp_admin_plan_bulk_apply' => AdminPermission::PLANS_MANAGE,
+            // "Apply to existing services" and the run's buttons (plan-inbound-change P9), as on the web (P7).
+            'miniapp_admin_plan_apply_inbounds' => AdminPermission::PLANS_MANAGE,
+            'miniapp_admin_plan_apply_inbounds_create' => AdminPermission::PLANS_MANAGE,
+            'miniapp_admin_plan_inbound_move_pause' => AdminPermission::PLANS_MANAGE,
+            'miniapp_admin_plan_inbound_move_resume' => AdminPermission::PLANS_MANAGE,
+            'miniapp_admin_plan_inbound_move_retry' => AdminPermission::PLANS_MANAGE,
+            'miniapp_admin_plan_inbound_move_cancel' => AdminPermission::PLANS_MANAGE,
+            'miniapp_admin_plan_inbound_move_undo' => AdminPermission::PLANS_MANAGE,
             'miniapp_admin_trial_plans' => AdminPermission::PLANS_MANAGE,
             'miniapp_admin_trial_plan_new' => AdminPermission::PLANS_MANAGE,
             'miniapp_admin_trial_plan' => AdminPermission::PLANS_MANAGE,

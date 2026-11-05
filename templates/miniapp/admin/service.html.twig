@@ -31,6 +31,28 @@
         {% if s.inboundNotice %}<p class="muted" data-inbound-notice>⚠ {{ s.inboundNotice }}</p>{% endif %}
     </section>
 
+    {% if move %}
+        {# Its latest inbound move (plan-inbound-change 5.6, P9; the web's line is P7's): run, A -> B, state, attempts,
+           next try, the masked last error, when the old inbound was or will be removed; "Retry now" for a failed move. #}
+        <section class="card" data-inbound-move="{{ move.run_id }}" data-move-state="{{ move.state }}">
+            <h2>{{ 'inbound_move.service.title'|trans({'%run%': move.run_id}, 'admin') }}</h2>
+            <p><bdi>{{ move.from }}</bdi> → <bdi>{{ move.to }}</bdi></p>
+            <dl class="facts">
+                <div><dt>{{ 'admin.inbound_move.state'|trans }}</dt><dd>{{ ('inbound_move.state.' ~ move.state)|trans({}, 'admin') }}{% if move.skip_reason %} · {{ ('inbound_move.skip.' ~ move.skip_reason)|trans({}, 'admin') }}{% endif %}</dd></div>
+                <div><dt>{{ 'admin.inbound_move.attempts'|trans }}</dt><dd class="ltr-numbers">{{ move.attempts }}</dd></div>
+                {% if move.state == 'failed' %}<div><dt>{{ 'admin.inbound_move.next_try'|trans }}</dt><dd data-move-next>{% if move.given_up %}{{ 'inbound_move.service.given_up'|trans({}, 'admin') }}{% else %}<bdi dir="ltr">{{ move.next_attempt_at }}</bdi>{% endif %}</dd></div>{% endif %}
+                {% if move.detached_at %}<div><dt>{{ 'admin.inbound_move.old_inbound'|trans }}</dt><dd>{{ 'inbound_move.service.removed_at'|trans({'%at%': move.detached_at}, 'admin') }}</dd></div>
+                {% elseif move.detach_after and move.state in ['switched', 'detaching', 'failed'] %}<div><dt>{{ 'admin.inbound_move.old_inbound'|trans }}</dt><dd>{{ 'inbound_move.service.due_at'|trans({'%at%': move.detach_after}, 'admin') }}</dd></div>
+                {% elseif move.state == 'switched' %}<div><dt>{{ 'admin.inbound_move.old_inbound'|trans }}</dt><dd>{{ 'inbound_move.service.kept'|trans({}, 'admin') }}</dd></div>{% endif %}
+            </dl>
+            {% if move.last_error %}<p class="notice-line bad ltr" dir="ltr" data-move-error>{{ move.last_error }}</p>{% endif %}
+            {% if move.state == 'failed' and move.run_status != 'cancelled' and moveEnabled and can.miniapp_admin_service_retry_move %}
+                <button type="button" class="btn secondary small" data-action="{{ path('miniapp_admin_service_retry_move', {id: id}) }}" data-reload data-move-retry data-admin-action="retry_move">🔁 {{ 'inbound_move.service.retry'|trans({}, 'admin') }}</button>
+                <p class="muted small-print">{{ 'admin.inbound_move.due_hint'|trans }}</p>
+            {% endif %}
+        </section>
+    {% endif %}
+
     <section class="card">
         <h2>{{ 'admin.customer'|trans }}</h2>
         {% if can.miniapp_admin_customer %}<a class="list-item" href="{{ path('miniapp_admin_customer', {id: s.customer.id}) }}" data-nav><span class="list-main">{{ ui.who(s.customer) }}</span><span class="chevron" aria-hidden="true">›</span></a>

@@ -59,6 +59,8 @@
     </form>
 
     {% if not isNew %}
+        {# Moving the existing services to the plan's inbound (plan-inbound-change P9). #}
+        {% include 'miniapp/admin/catalog/_inbound_move_run.html.twig' %}
         <section class="card">
             <div class="row">
                 <button type="button" class="btn secondary small" data-action="{{ path('miniapp_admin_plan_duplicate', {id: plan.id}) }}" data-confirm="{{ 'admin.plan.confirm.duplicate'|trans({'%title%': plan.title}) }}" data-admin-action="duplicate">⧉ {{ 'admin.plan.duplicate'|trans }}</button>

@@ -1,6 +1,6 @@
 # A plan's inbound changes: reaching existing services — design
 
-Status: **design for review**; **P1, P2, P3, P4, P5, P6, P7, P8 as built** (section 9.1). Built so far:
+Status: **design for review**; **P1, P2, P3, P4, P5, P6, P7, P8, P9 as built** (section 9.1). Built so far:
 
 - the notices;
 - the panel's detach primitive;
@@ -13,9 +13,10 @@ Status: **design for review**; **P1, P2, P3, P4, P5, P6, P7, P8 as built** (sect
   (or at once with `--retire-now`), and `--pause-run`, `--resume`, `--cancel`, `--undo`;
 - **the scheduled task** `inbound-moves`: it continues open runs (P8, built before P7);
 - **the web admin** (P7): "Apply to existing services" on the plan page (dry run counted locally, confirmation, run
-  created as planned), the run block with its buttons, the service page line, the list tabs and the doctor counts.
+  created as planned), the run block with its buttons, the service page line, the list tabs and the doctor counts;
+- **the Mini App admin** (P9): the same screens and actions, through the same code as the web (`InboundMoveActions`).
 
-Not built yet (P9, P10, P11): the Mini App admin, the customer message, `kind=add|remove`. The move has
+Not built yet (P10, P11): the customer message, `kind=add|remove`. The move has
 been tested against the fake 3x-ui only, not against a real panel. Persian summary:
 [docs/fa/design/plan-inbound-change.md](../fa/design/plan-inbound-change.md). This document continues
 [multi-inbound-plans.md](multi-inbound-plans.md) section 4 ("Changing inbounds after sales") and phases M3/M4, which
@@ -624,7 +625,7 @@ Order: P1 → P2 → P3 → P4 → P5 → P6 → P7 → P8 → P9 → (P10, P11)
 no customer-visible behaviour while the switch is off. Each PR follows the repository's process: phpunit and phpstan
 green; a fresh independent review; the pushed head tested from a clean checkout (M2c process rule).
 
-### 9.1 P1, P2, P3, P4, P5, P6, P7, P8 as built
+### 9.1 P1, P2, P3, P4, P5, P6, P7, P8, P9 as built
 
 **P1** (visibility, #94): `PlanInboundDrift` and the texts of 3.3 on every surface of 3.2; the admin guide (en/fa)
 "Changing a plan's inbound" with the manual move. No write, no panel call.
@@ -937,6 +938,36 @@ change, no change to what a pass does to a service). Admin guide (en/fa), `docs/
   command, no panel request while rendering, buttons per state, escaping, no link / UUID / token / owner in the HTML,
   the list query count, doctor and panel counts, redaction with `zend.exception_ignore_args` 0 and 1, fa/en keys).
 - Not tested: a real 3x-ui panel or a real server.
+
+**P9** (the Mini App admin; no schema change; the runner, the command, the scheduled task and the web pages behave as
+before).
+
+- `InboundMoveActions` (`src/Admin/Application`): the logic of P7's controller moved out of it, unchanged, so the web
+  pages and the Mini App call one implementation: `applyPage()` (the local dry run and what the page shows), `create()`,
+  `act()` (pause, resume, cancel, undo under the lock, retry) and `retryService()` (limiter `admin_service_move`, per
+  service, shared by both surfaces). The web controllers (`InboundMoveAdminController`, `ServiceInboundsController`)
+  now only add their pages, CSRF tokens and flashes. The services lists' filter is `InboundMoveOverview::listFilterDql()`.
+- `MiniAppAdminInboundMoveController`: `GET /app/admin/plans/{id}/apply-inbounds` (dry run, `?step=confirm`),
+  `POST /app/api/admin/plans/{id}/apply-inbounds`, `POST /app/api/admin/plans/{id}/inbound-move/{pause|resume|retry|cancel|undo}`
+  (body `run`; a run of another plan is 404), `POST /app/api/admin/services/{id}/retry-move`. PLANS_MANAGE and
+  SERVICES_MANAGE in `AdminRoutePermissions`, checked again in the controller. Every POST has the session's CSRF token,
+  the per-admin rate limit and the Idempotency-Key of `AdminActions` (a double tap is one request); cancel and undo go
+  through the server's confirm step. Persian digits are turned into Latin ones before the shared validation.
+- Screens: the run block on the plan screen (also on a trial's backing plan), the Apply screen, the service's move block
+  and the services list's "Being moved" / "Move failed" chips (one query per page, counts in one query). Their texts are
+  the web's (admin domain); ten Mini App labels are new (`admin.inbound_move.*`, fa and en).
+- P1: the Mini App's notices use the `_apply` texts; the old `plan_saved`, `form` and `service` texts are removed (no
+  surface used them any more).
+- Audit: a Mini App request that audits without an explicit actor (the planner, the controls, the runner) is recorded
+  as the Mini App admin, source `miniapp` (`AdminActorUser`, implemented by `MiniAppUser`); before, such an entry would
+  have been an anonymous web entry. The run's `requested_by` is the admin's account id; the bot's main admin from
+  `TELEGRAM_ADMIN_CHAT_ID` has none, so its runs show "not recorded" as their starter (no schema change).
+- Tests: `MiniAppAdminInboundMoveTest` (dry run local and scoped, Persian digits, switch off, create and double tap, one
+  open run, parity with the web and the command, CSRF and GET, permissions, buttons per state, resume and retry only make
+  the moves due, undo confirmed and under the lock, retired services, plan changed, the service block masked and the
+  limiter shared with the web, escaping and no link / UUID / token / owner, the list filter query count, redaction with
+  `zend.exception_ignore_args` 0 and 1, fa/en keys); the permission matrix covers the new routes.
+- Not tested: a real 3x-ui panel, a real server, or the real Telegram app.
 
 ## 10. Open questions for the owner
 

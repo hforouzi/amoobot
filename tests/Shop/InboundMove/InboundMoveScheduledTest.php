@@ -38,6 +38,9 @@ final class InboundMoveScheduledTest extends IntegrationTestCase
     protected function setUp(): void
     {
         parent::setUp();
+        // admin_user is not purged: linked admins left by an earlier Mini App admin test would also get the alerts
+        // counted here (TELEGRAM_ADMIN_CHAT_ID alone is expected).
+        $this->em->getConnection()->executeStatement('DELETE FROM admin_user');
         $this->setUpMove();
     }
 

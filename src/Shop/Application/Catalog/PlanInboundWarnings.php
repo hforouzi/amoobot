@@ -52,7 +52,7 @@ final class PlanInboundWarnings
      *
      * @return list<array{key: string, parameters: array<string, string|int>}>
      */
-    public static function drift(string $planTitle, string $newInbound, PlanInboundDriftCount $drift, string $breakdown, string $key = 'plan_inbound_drift.plan_saved'): array
+    public static function drift(string $planTitle, string $newInbound, PlanInboundDriftCount $drift, string $breakdown, string $key = 'plan_inbound_drift.plan_saved_apply'): array
     {
         if ($drift->total <= 0) {
             return [];

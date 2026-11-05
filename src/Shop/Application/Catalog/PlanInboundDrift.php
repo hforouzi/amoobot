@@ -240,7 +240,7 @@ final class PlanInboundDrift implements ResetInterface
     }
 
     /**
-     * Text (d) "plan_inbound_drift.service" or (e) "plan_inbound_drift.regenerate" for a service of ofServices(), not
+     * Text (d) "plan_inbound_drift.service_apply" or (e) "plan_inbound_drift.regenerate" for a service of ofServices(), not
      * escaped.
      *
      * @param array{current: string|null, planInbound: string} $notice
