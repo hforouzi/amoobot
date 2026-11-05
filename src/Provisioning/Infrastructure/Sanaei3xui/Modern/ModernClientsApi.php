@@ -296,6 +296,30 @@ class ModernClientsApi
     }
 
     /**
+     * GET panel/api/inbounds/list: the ids of the inbounds the panel has now (docs/design/plan-inbound-change.md 4.3
+     * step 5, P6: whether an old inbound was deleted on the panel). Only the ids are read.
+     *
+     * @return list<int>
+     *
+     * @throws PanelApiException when the panel cannot answer, or answers without a list (never "no inbound")
+     */
+    public function inboundIds(VpnPanel $panel, bool $recordHealth = true): array
+    {
+        $response = $this->http->get($panel, 'panel/api/inbounds/list', [], null, null, $recordHealth);
+        if (!is_array($response->obj) || !array_is_list($response->obj)) {
+            throw new PanelApiException(PanelFailure::UNEXPECTED_RESPONSE, 'GET panel/api/inbounds/list: obj is not a list.', $response->httpStatus);
+        }
+        $ids = [];
+        foreach ($response->obj as $row) {
+            if (is_array($row) && is_numeric($row['id'] ?? null)) {
+                $ids[] = (int) $row['id'];
+            }
+        }
+
+        return $ids;
+    }
+
+    /**
      * GET panel/api/inbounds/options: the light inbound picker.
      *
      * @return list<array{id: int, remark: string, tag: string, protocol: string, port: int, enable: bool, tlsFlowCapable: bool, ssMethod: string, nodeId: int}>

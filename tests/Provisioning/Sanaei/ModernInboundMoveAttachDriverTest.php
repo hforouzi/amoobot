@@ -117,6 +117,50 @@ final class ModernInboundMoveAttachDriverTest extends TestCase
         self::assertSame([3], $this->fake->clients[self::EMAIL]['inboundIds']);
     }
 
+    /**
+     * P6 (4.3 step 5): after the switch the remote id names B; when B went missing on the panel, the retire re-attaches
+     * B only while the client is still on A (expectedFrom), and sends nothing for a client on neither.
+     */
+    public function testTheRetireReattachExpectsTheOldInboundInsteadOfTheOneTheRemoteIdNames(): void
+    {
+        $onB = (new Sanaei3xuiRemoteIdParser())->format(null, null, '2', self::UUID, self::EMAIL, self::SUB_ID);
+
+        // Without expectedFrom the client must be on the inbound the remote id records (B): it is not, nothing is sent.
+        $result = $this->driver->attachForMove($onB, $this->target, $this->panel, false);
+        self::assertSame(InboundMoveAttachResult::FAILED_NOT_ON_EXPECTED, $result->reason);
+        self::assertSame(['GET panel/api/clients/get/'.self::EMAIL], $this->fake->requestLines());
+
+        // With A as the expected inbound: B is attached again, read back.
+        $this->fake->requests = [];
+        $result = $this->driver->attachForMove($onB, $this->target, $this->panel, false, 1);
+        self::assertSame(InboundMoveAttachResult::ATTACHED, $result->outcome);
+        self::assertSame([1, 2], $this->fake->clients[self::EMAIL]['inboundIds']);
+        self::assertSame(['GET panel/api/clients/get/'.self::EMAIL, 'POST panel/api/clients/'.self::EMAIL.'/attach', 'GET panel/api/clients/get/'.self::EMAIL], $this->fake->requestLines());
+
+        // On neither A nor B: nothing sent.
+        $this->fake->clients[self::EMAIL]['inboundIds'] = [3];
+        $this->fake->requests = [];
+        $result = $this->driver->attachForMove($onB, $this->target, $this->panel, false, 1);
+        self::assertSame(InboundMoveAttachResult::FAILED_NOT_ON_EXPECTED, $result->reason);
+        self::assertSame(['GET panel/api/clients/get/'.self::EMAIL], $this->fake->requestLines());
+    }
+
+    /** P6: whether an inbound still exists on the panel (inbounds/list): a GET only; unreadable is null, never "gone". */
+    public function testPanelHasInboundReadsTheInboundListOnly(): void
+    {
+        self::assertTrue($this->driver->panelHasInbound($this->panel, 2, false));
+        unset($this->fake->inbounds[2]);
+        self::assertFalse($this->driver->panelHasInbound($this->panel, 2, false));
+        self::assertSame(['GET panel/api/inbounds/list', 'GET panel/api/inbounds/list'], $this->fake->requestLines());
+
+        $this->fake->script('GET', 'panel/api/inbounds/list', Fake3xuiPanel::networkError('Could not resolve host'), 10);
+        self::assertNull($this->driver->panelHasInbound($this->panel, 2, false));
+        $this->fake->clearScripts();
+        $this->fake->script('GET', 'panel/api/inbounds/list', Fake3xuiPanel::envelope(true, ['not' => 'a list']));
+        self::assertNull($this->driver->panelHasInbound($this->panel, 2, false), 'a garbled answer is not "gone"');
+        self::assertNull($this->driver->panelHasInbound($this->fakePanel()->setIntegrationMode(SanaeiIntegrationMode::LEGACY), 2), 'not modern: not asked');
+    }
+
     public function testFailuresBeforeTheAttachSendNothing(): void
     {
         $this->fake->clients[self::EMAIL]['id'] = '11111111-2222-3333-4444-555555555555';

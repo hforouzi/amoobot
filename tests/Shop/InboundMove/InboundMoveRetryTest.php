@@ -85,7 +85,8 @@ final class InboundMoveRetryTest extends IntegrationTestCase
         $this->fake->script('GET', null, Fake3xuiPanel::networkError('Could not resolve host'), times: 100);
         $before = count($this->http->telegramTexts());
 
-        [$code, $output] = $this->command(['--apply' => true]);
+        // --keep-old: the run is done after phase 1 (the removal of the old inbound has its own tests, P6).
+        [$code, $output] = $this->command(['--apply' => true, '--keep-old' => true]);
 
         self::assertSame(1, $code, $output);
         $run = $this->runs()[0];

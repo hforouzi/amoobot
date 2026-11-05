@@ -10,11 +10,11 @@ use App\Shared\Infrastructure\SettingValueProvider;
  * The switch and limits for moving a plan's existing services to its new inbound (docs/design/plan-inbound-change.md
  * 8.1), Setting rows edited on the web settings page, "plans" tab (SETTINGS_MANAGE).
  *
- * PR P3: the keys only. Nothing reads them yet, so the switch has no effect in this release: no run can be created
- * and there is no runner. When the runner comes (P4/P6), with the switch off no run can be created and the runner
- * does nothing; primary moves do not need MultiInboundSettings::ENABLED.
+ * Read by the move runner and its command only (P4, P6): with the switch off no run can be created and the runner,
+ * the retire and the undo do nothing; primary moves do not need MultiInboundSettings::ENABLED.
  *
- * - detachGraceHours(): how long the old inbound stays on a moved client before it is removed (4.2, phase 2);
+ * - detachGraceHours(): how long the old inbound stays on a moved client before it is removed (4.2, phase 2): the
+ *   default grace_hours of a new run (--grace-hours overrides it per run, --keep-old disables the removal);
  * - batchSize(), pauseSeconds(): services per runner pass, and the pause between passes.
  *
  * Retries are not configured here: they reuse MultiInboundSettings::ATTACH_RETRY_ENABLED, ATTACH_MAX_ATTEMPTS and

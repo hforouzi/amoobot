@@ -165,7 +165,7 @@ class InboundAttachAlerts
             sprintf('Moved: %d, failed: %d, skipped: %d, remaining: %d (of %d)', $counts['done'] ?? 0, $counts['failed'] ?? 0, $counts['skipped'] ?? 0, $counts['remaining'] ?? 0, $counts['planned'] ?? 0),
         ];
         $lines[] = null === $pauseReason
-            ? sprintf('Some services were not moved; they keep their old inbound and links. See: php bin/console app:plan:apply-inbounds %d (dry run).', $planId)
+            ? sprintf('Some services were not moved (they keep their old inbound and links), or their old inbound could not be removed. See: php bin/console app:plan:apply-inbounds %d (dry run).', $planId)
             : sprintf('Paused: %s. Nothing changed for the customers not moved yet. When the panel answers again: php bin/console app:plan:apply-inbounds %d --resume=%d', mb_substr($pauseReason, 0, 120), $planId, $runId);
         $this->deliver($chats, implode("\n", $lines));
 
@@ -194,7 +194,7 @@ class InboundAttachAlerts
             return false;
         }
         $row = $connection->fetchAssociative(
-            'SELECT m.run_id, m.service_id, m.attempts, m.last_error, m.from_inbound_id, m.to_inbound_id, fi.title AS from_title, ti.title AS to_title, p.id AS plan_id, p.title AS plan_title, s.client_email
+            'SELECT m.run_id, m.service_id, m.attempts, m.last_error, m.detach_after, m.from_inbound_id, m.to_inbound_id, fi.title AS from_title, ti.title AS to_title, p.id AS plan_id, p.title AS plan_title, s.client_email
              FROM service_inbound_move m
              JOIN inbound_move_run r ON r.id = m.run_id
              JOIN plan p ON p.id = r.plan_id
@@ -215,7 +215,10 @@ class InboundAttachAlerts
             sprintf('Plan: %s (#%d)', mb_substr((string) $row['plan_title'], 0, 80), (int) $row['plan_id']),
             sprintf('From %s to %s', $inbound($row['from_inbound_id'], $row['from_title']), $inbound($row['to_inbound_id'], $row['to_title'])),
             'Last error: '.mb_substr(self::withoutClient(VpnServiceInbound::safeError((string) ($row['last_error'] ?? '-')), (string) ($row['client_email'] ?? '')), 0, 200),
-            sprintf('Gave up after %d attempt(s). The service keeps its old inbound and links. Fix the panel, then check it with: php bin/console app:plan:apply-inbounds %d --service=%d', (int) $row['attempts'], (int) $row['plan_id'], (int) $row['service_id']),
+            null === $row['detach_after']
+                ? sprintf('Gave up after %d attempt(s). The service keeps its old inbound and links. Fix the panel, then check it with: php bin/console app:plan:apply-inbounds %d --service=%d', (int) $row['attempts'], (int) $row['plan_id'], (int) $row['service_id'])
+                // P6: the retire step (the service is on the new inbound already; only the old one could not be removed).
+                : sprintf('Gave up after %d attempt(s) of removing the old inbound. The service works on the new inbound; its client is still on the old one as well. Fix the panel, then: php bin/console app:plan:apply-inbounds %d --retire-now=%d --service=%d --resume=%d', (int) $row['attempts'], (int) $row['plan_id'], (int) $row['run_id'], (int) $row['service_id'], (int) $row['run_id']),
         ]));
 
         return true;

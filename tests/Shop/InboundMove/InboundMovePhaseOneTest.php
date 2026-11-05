@@ -73,7 +73,7 @@ final class InboundMovePhaseOneTest extends IntegrationTestCase
         $remoteBefore = (string) $service->getRemoteId();
         $this->fake->requests = [];
 
-        [$code, $output] = $this->command(['--apply' => true, '--service' => (string) $service->getId()]);
+        [$code, $output] = $this->command(['--apply' => true, '--keep-old' => true, '--service' => (string) $service->getId()]);
 
         self::assertSame(0, $code, $output);
         self::assertConsoleContains(sprintf('Service #%d: "DE-1" (#%d) → "NL-2" (#%d): switched: attached and switched; links refreshed from the panel (2 link(s))', $service->getId(), $this->de->getId(), $this->nl->getId()), $output);
@@ -117,7 +117,7 @@ final class InboundMovePhaseOneTest extends IntegrationTestCase
         self::assertSame(['switched'], array_column($this->moves(), 'state'));
         self::assertNull($this->moves()[0]['detach_after'], 'keep-old: nothing is due to be detached');
         self::assertSame(['plan.inbounds_apply_started', 'plan.inbounds_apply_finished'], array_column($this->audits(), 'action'));
-        self::assertSame(['run_id' => (int) $runs[0]['id'], 'kind' => 'primary', 'target_inbound_id' => $this->nl->getId(), 'services' => 1, 'planned' => 1, 'skipped' => 0, 'keep_old' => true], $this->audits()[0]['details']);
+        self::assertSame(['run_id' => (int) $runs[0]['id'], 'kind' => 'primary', 'target_inbound_id' => $this->nl->getId(), 'services' => 1, 'planned' => 1, 'skipped' => 0, 'keep_old' => true, 'grace_hours' => 24], $this->audits()[0]['details']);
         self::assertSame(['run_id' => (int) $runs[0]['id'], 'planned' => 1, 'done' => 1, 'failed' => 0, 'skipped' => 0, 'remaining' => 0], $this->audits()[1]['details']);
         foreach ($this->secretsOf($service) as $secret) {
             self::assertConsoleNotContains($secret, $output);
@@ -132,7 +132,8 @@ final class InboundMovePhaseOneTest extends IntegrationTestCase
         $this->fake->clients['tg_p1_2']['inboundIds'] = [1, 2];
         $this->fake->requests = [];
 
-        [$code, $output] = $this->command(['--apply' => true]);
+        // --keep-old: this is about phase 1 (P6 removes the old inbound after the grace period otherwise).
+        [$code, $output] = $this->command(['--apply' => true, '--keep-old' => true]);
 
         self::assertSame(0, $code, $output);
         self::assertSame(['POST panel/api/clients/tg_p1_1/attach'], $this->attachCalls(), 'B already attached by hand: no attach call for it');
@@ -141,7 +142,7 @@ final class InboundMovePhaseOneTest extends IntegrationTestCase
         self::assertSame((string) $this->nl->getId(), (string) $this->serviceRow((int) $service->getId())['inbound_id']);
 
         $this->fake->requests = [];
-        [$code, $output] = $this->command(['--apply' => true]);
+        [$code, $output] = $this->command(['--apply' => true, '--keep-old' => true]);
         self::assertSame(0, $code, $output);
         self::assertSame([], $this->fake->requests, 'nothing left to move: no request at all');
         self::assertCount(2, $this->runs(), 'an empty second run, done at once');
@@ -150,6 +151,23 @@ final class InboundMovePhaseOneTest extends IntegrationTestCase
         // The runner on a finished run does nothing either.
         $pass = self::getContainer()->get(InboundMoveRunner::class)->process((int) $this->runs()[0]['id']);
         self::assertSame(InboundMovePass::NOT_OPEN, $pass->outcome);
+        self::assertSame([], $this->fake->requests);
+    }
+
+    /** P6: a service skipped at its claim (its inbound changed since the run was created) is reported as skipped. */
+    public function testASkipAtTheClaimIsReportedAsSkippedNotBusy(): void
+    {
+        $service = $this->movableService(1);
+        $created = self::getContainer()->get(\App\Provisioning\Application\InboundMovePlanner::class)->create($this->managed($this->gold), new \App\Provisioning\Application\InboundMoveScope());
+        self::assertIsArray($created);
+        $this->em->getConnection()->executeStatement('UPDATE vpn_service SET inbound_id = ? WHERE id = ?', [$this->nl->getId(), $service->getId()]);
+        $this->fake->requests = [];
+
+        [$code, $output] = $this->command(['--resume' => (string) $created[0]]);
+
+        self::assertSame(0, $code, $output);
+        self::assertConsoleContains(sprintf('Service #%d: "DE-1" (#%d) → "NL-2" (#%d): skipped: already on the target inbound', $service->getId(), $this->de->getId(), $this->nl->getId()), $output);
+        self::assertSame(['skipped', 'already_on_target'], [$this->moves()[0]['state'], $this->moves()[0]['skip_reason']]);
         self::assertSame([], $this->fake->requests);
     }
 

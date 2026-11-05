@@ -1,16 +1,18 @@
 # A plan's inbound changes: reaching existing services — design
 
-Status: **design for review**; **P1, P2, P3, P4, P5 as built** (section 9.1). Built so far:
+Status: **design for review**; **P1, P2, P3, P4, P5, P6 as built** (section 9.1). Built so far:
 
 - the notices;
-- the panel's detach primitive (not called yet);
+- the panel's detach primitive;
 - the schema and the switch;
 - **phase 1 of the move, from the command line only** (`app:plan:apply-inbounds`): attach B, switch the service,
-  refresh its links. The old inbound A stays attached;
+  refresh its links;
 - **the display guard** (5.5): while a moved service's links were not refreshed after the change, no customer surface
-  shows its stored single configs. The subscription URL is shown with "Your links are being updated".
+  shows its stored single configs. The subscription URL is shown with "Your links are being updated";
+- **phase 2 and the run controls, from the command line only**: the old inbound A is removed after the grace period
+  (or at once with `--retire-now`), and `--pause-run`, `--resume`, `--cancel`, `--undo`.
 
-Not built yet (P6-P10): detach, undo, the timer, the pages and the customer message. The move has
+Not built yet (P7-P10): the pages, the timer and the customer message. The move has
 been tested against the fake 3x-ui only, not against a real panel. Persian summary:
 [docs/fa/design/plan-inbound-change.md](../fa/design/plan-inbound-change.md). This document continues
 [multi-inbound-plans.md](multi-inbound-plans.md) section 4 ("Changing inbounds after sales") and phases M3/M4, which
@@ -578,7 +580,9 @@ and M2e suites):
     the move notices and finishes without error.
 12. Panel down (stop the panel) during a run of several services: the run pauses after 5 failures, one alert, nothing
     changed for customers; start the panel, resume: finishes.
-13. Note the answers for U1–U8 below and update this document.
+13. Delete A on the panel during a grace period, then let the retire run: note the error of the detach, and that
+    `inbounds/list` no longer lists A (**U9**, **U10**).
+14. Note the answers for U1–U10 below and update this document.
 
 [unverified] list:
 
@@ -592,7 +596,10 @@ and M2e suites):
 - U7 (P4): `POST clients/{email}/attach` keeps the client's UUID, subId, expiry, limits and traffic counters. The fake
   and phase 1 assume so (checklist step 4);
 - U8 (P4): after the attach, `clients/subLinks/{subId}` lists the configs of both A and B, and the subscription URL is
-  unchanged. Phase 1 stores what the panel gives (checklist step 5).
+  unchanged. Phase 1 stores what the panel gives (checklist step 5);
+- U9 (P6): `GET panel/api/inbounds/list` has the shape the fake gives it, and lists every inbound of the panel;
+- U10 (P6): what the panel answers to a detach of an inbound that was deleted. The retire does not rely on the text:
+  it counts the step as done only once `inbounds/list` confirms A is gone.
 
 ## 9. Part 8: PRs (each small, reviewable, revertible)
 
@@ -614,7 +621,7 @@ Order: P1 → P2 → P3 → P4 → P5 → P6 → P7 → P8 → P9 → (P10, P11)
 no customer-visible behaviour while the switch is off. Each PR follows the repository's process: phpunit and phpstan
 green; a fresh independent review; the pushed head tested from a clean checkout (M2c process rule).
 
-### 9.1 P1, P2, P3, P4, P5 as built
+### 9.1 P1, P2, P3, P4, P5, P6 as built
 
 **P1** (visibility, #94): `PlanInboundDrift` and the texts of 3.3 on every surface of 3.2; the admin guide (en/fa)
 "Changing a plan's inbound" with the manual move. No write, no panel call.
@@ -741,7 +748,7 @@ first, what phase 1 does and does not do.
     exact request, outside the fake's lock):
     - P-1 … P-5, and P-6 for the phase-1 steps: `InboundMoveParallelTest`;
     - P-7, in the `real-time` group: `InboundMoveLockHoldTest`;
-    - P-6 for the detach steps belongs to P6, and P-8 to P8.
+    - P-6 for the detach steps: `InboundMoveRetireParallelTest` (P6), and P-8 belongs to P8.
 - Not tested: a real 3x-ui panel. U7 and U8 were added to 8.3.
 
 **P5** (display guard 5.5, no panel call, no schema change, no switch). Admin guide (en/fa) "What customers see during
@@ -750,7 +757,7 @@ a move".
 - The rule, in one place: `FinalConfigLinkProvider::linksPending()`. A service is pending when all of these hold:
   - its panel is `sanaei_3xui` in modern mode (legacy panels rebuild links before each bot delivery; other types have
     no snapshot);
-  - `vpn_service.inbound_changed_at` is set (only the P4 runner sets it; NULL for every service until a move);
+  - `vpn_service.inbound_changed_at` is set (only the move runner sets it; NULL for every service until a move);
   - `last_access_info_synced_at` is NULL or older, compared in whole seconds as the columns store them, the same test
     as the runner's `LINKS_PENDING_SQL`.
 
@@ -790,6 +797,69 @@ a move".
     surface identical to the NULL case);
   - escaping, fa/en key parity, and logs with `zend.exception_ignore_args` 0 and 1.
 - Not tested: a real 3x-ui panel.
+
+**P6** (phase 2 "retire" and the run controls, CLI only; no schema change, the P3 tables were enough). Admin guide
+(en/fa) "Moving existing services with the command".
+
+- Phase 2 (4.3 step 5), in `InboundMoveRunner`. A move in state `switched` whose `detach_after` has passed is retired:
+  - claim with the check `inbound_id = B`, lock order `vpn_service` -> its `vpn_service_inbound` rows -> its move row;
+  - then, with no transaction and no lock, a GET of the client. A not listed: done with no detach. B missing: B is
+    attached again first and the retire is picked up again as its own step (at most 4 calls in a step, within
+    `PanelCallBudget`). Neither A nor B: failed, nothing sent. A the only inbound, or A the local primary: refused;
+  - detach [A], GET; A gone: `done`, `detached_at`, then the refresh (links only from `subLinks`, never self-built or
+    merged). A deleted on the panel counts as done once `inbounds/list` confirms it (`panelHasInbound()`, NULL =
+    unreadable, which is a failure and not a confirmation);
+  - a failed retire is `failed` with `detach_after` still set (a phase-1 failure has it NULL). It backs off, gives up
+    and alerts with the `plans.attach_*` settings. Attempts restart at the retire phase.
+- `detach_after` = now + the run's `grace_hours` (`--grace-hours`, or `plans.inbound_move_detach_grace_hours`, default
+  24, 0-168). `--keep-old` at creation: NULL, never retired automatically. With grace 0 the retire happens in the same
+  pass.
+- Due retirements from the command line: there is no timer until P8. `--resume=<runId>` handles phase 1 and due
+  retirements in one pass, idempotently. `--apply` does the same for the run it creates; **while a run is open a second
+  `--apply` stays refused** (5.1, one open run), and names the run to resume.
+- `--retire-now[=<runId>]` (default: the plan's latest run; `--service=<id>` for one) sets the moves due. It does not
+  call the panel by itself: combine it with `--resume=<runId>`, or run that next. It also re-arms failed retires
+  (attempts 0, alert reset) and reopens a finished run as paused.
+- `--pause-run`: the run stops after the service in hand (`stillRunning()` is checked before each item). One audit entry
+  and one alert.
+- `--cancel`: planned moves, and phase-1 failures waiting for a retry, become `cancelled`. A move in flight finishes
+  its step. The run stays open while moved services wait for their retire. A dead process's `attaching` row in a
+  cancelled run can still be taken over by `--resume`. Audit `plan.inbounds_apply_cancelled` (not in the original list).
+- `--undo`: for moves switched and not detached: claim (state `detaching`), GET, attach A again if needed, then the
+  local write (inbound A, remote id, `inbound_changed_at`), then detach B unless it is one of the plan's additional
+  inbounds, then the refresh. `undone` with `next_attempt_at` set means the removal of B is pending. Services not moved
+  yet are cancelled. `done` moves are not undone: the output says a new run B -> A is needed, how many services, and
+  "the old inbound was already removed from N services". Exit code 1 when anything was left. A service whose A was
+  deleted locally fails: it cannot be put back.
+- **Undo has no per-service back-off or give-up alert** (a deviation from "the same retries"): it is a foreground admin
+  action, retried by running `--undo` again, and there is no timer to retry it. The 5-in-a-row pause, the one run alert
+  and the masked errors do apply.
+- Audit: `plan.inbounds_apply_paused` (`by`: `admin` or `automatic`), `plan.inbounds_apply_undone`, counts only.
+- **Second-precision stamps.** `inbound_changed_at` and `last_access_info_synced_at` are stored in whole seconds, so a
+  retire in the same second as the last refresh would read as "already refreshed" if the process died before its own
+  refresh (the P-6 kill test found this): the run closed with A's link stored and shown. Every write of
+  `inbound_changed_at` in the runner (switch, retire, undo) now also clears `last_access_info_synced_at`, which
+  `linksPending()` and `LINKS_PENDING_SQL` read as pending. Nothing else reads that column.
+- The retire sets `inbound_changed_at` (not in 4.3 step 5; it follows 5.5): A's link is hidden until the refresh. A
+  `done` row with links pending is refreshed by the next pass, and the run waits for it.
+- **Known limit.** The retire does not change `PanelLinkSnapshot`'s identity (the remote id stays), so a Regenerate
+  that read `subLinks` BEFORE the detach and stores AFTER the runner's refresh leaves A's link in the stored snapshot
+  until the next refresh. No state is lost, and the subscription URL is live. `PanelLinkSnapshot` was left alone (out of
+  scope). `testAStaleRegenerateCannotUndoTheRetire` pins what holds in that order.
+- Off the sale path: no order, payment, wallet, user or reseller row is locked or written; `PaymentSettlementService`,
+  `VpnProvisioningService`, `PlanSaleRule`, `PlanCatalog` and checkout are untouched. Panel calls are never in a
+  transaction; `PanelCallBudget` per step; `recordHealth=false`.
+- Fixed on the way: a skip at the claim was reported as "busy" (P4); it is now reported as skipped.
+- Tests (`tests/Shop/InboundMove`, MariaDB and the fake panel):
+  - `InboundMoveRetireTest`: T4 phase 2, T5 in the retire, idempotency, retries and give-up, the automatic pause, the
+    same-second refresh;
+  - `InboundMoveControlsTest`: T10, cancel, pause and resume, the switch off;
+  - `InboundMoveRetireParallelTest` (real processes): P-6 kill -9 after the attach check, after the detach, before the
+    snapshot and after a re-attach of B; two runners; suspend, renew, link reset and Regenerate on a service being
+    retired;
+  - `InboundMoveRedactionTest`: masked errors with `zend.exception_ignore_args` 0 and 1, and D5 for reseller-sold and
+    claimed services through both phases and the undo.
+- Not tested: a real 3x-ui panel. U9 and U10 were added to 8.3.
 
 ## 10. Open questions for the owner
 

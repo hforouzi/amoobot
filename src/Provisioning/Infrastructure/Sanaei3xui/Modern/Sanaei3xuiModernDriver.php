@@ -322,7 +322,7 @@ final class Sanaei3xuiModernDriver implements VpnPanelDriverInterface, ExistingC
      * 4. one attach call with B only, then a GET: done only when that read lists B. A lost or garbled answer is read
      *    back the same way; a refused call (nothing applied) is failed without a read.
      */
-    public function attachForMove(string $remoteId, VpnInbound $target, ?VpnPanel $panel = null, bool $recordHealth = true): InboundMoveAttachResult
+    public function attachForMove(string $remoteId, VpnInbound $target, ?VpnPanel $panel = null, bool $recordHealth = true, ?int $expectedFrom = null): InboundMoveAttachResult
     {
         if (!$this->supports($panel)) {
             return InboundMoveAttachResult::refused(InboundMoveAttachResult::REFUSED_NOT_MODERN, InboundAttachDriverInterface::MODERN_PANEL_REQUIRED);
@@ -337,7 +337,7 @@ final class Sanaei3xuiModernDriver implements VpnPanelDriverInterface, ExistingC
         if (($targetPanel !== $panel && (null === $targetPanel->getId() || $targetPanel->getId() !== $panel->getId())) || !ctype_digit($rawTarget) || (int) $rawTarget <= 0) {
             return InboundMoveAttachResult::refused(InboundMoveAttachResult::REFUSED_INVALID_TARGET, 'The target inbound is on another panel or has an invalid remote inbound id: nothing sent.');
         }
-        $from = (int) trim($ref->inboundId);
+        $from = $expectedFrom ?? (int) trim($ref->inboundId);
         $to = (int) $rawTarget;
 
         $before = $this->readForMove($panel, $ref->email, $ref->clientId, $recordHealth, false);
@@ -377,6 +377,20 @@ final class Sanaei3xuiModernDriver implements VpnPanelDriverInterface, ExistingC
         }
 
         return InboundMoveAttachResult::attached($after);
+    }
+
+    public function panelHasInbound(VpnPanel $panel, int $remoteInboundId, bool $recordHealth = true): ?bool
+    {
+        if (!$this->supports($panel)) {
+            return null;
+        }
+        try {
+            return in_array($remoteInboundId, $this->api->inboundIds($panel, $recordHealth), true);
+        } catch (PanelApiException $e) {
+            $this->logger->warning('sanaei_modern_inbounds_unreadable', ['panel_id' => $panel->getId(), 'failure' => $e->failure->value]);
+
+            return null;
+        }
     }
 
     /**
