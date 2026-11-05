@@ -1,14 +1,16 @@
 # A plan's inbound changes: reaching existing services — design
 
-Status: **design for review**; **P1, P2, P3, P4 as built** (section 9.1). Built so far:
+Status: **design for review**; **P1, P2, P3, P4, P5 as built** (section 9.1). Built so far:
 
 - the notices;
 - the panel's detach primitive (not called yet);
 - the schema and the switch;
 - **phase 1 of the move, from the command line only** (`app:plan:apply-inbounds`): attach B, switch the service,
-  refresh its links. The old inbound A stays attached.
+  refresh its links. The old inbound A stays attached;
+- **the display guard** (5.5): while a moved service's links were not refreshed after the change, no customer surface
+  shows its stored single configs. The subscription URL is shown with "Your links are being updated".
 
-Not built yet (P5-P10): detach, undo, the timer, the pages, the display guard and the customer message. The move has
+Not built yet (P6-P10): detach, undo, the timer, the pages and the customer message. The move has
 been tested against the fake 3x-ui only, not against a real panel. Persian summary:
 [docs/fa/design/plan-inbound-change.md](../fa/design/plan-inbound-change.md). This document continues
 [multi-inbound-plans.md](multi-inbound-plans.md) section 4 ("Changing inbounds after sales") and phases M3/M4, which
@@ -612,7 +614,7 @@ Order: P1 → P2 → P3 → P4 → P5 → P6 → P7 → P8 → P9 → (P10, P11)
 no customer-visible behaviour while the switch is off. Each PR follows the repository's process: phpunit and phpstan
 green; a fresh independent review; the pushed head tested from a clean checkout (M2c process rule).
 
-### 9.1 P1, P2, P3, P4 as built
+### 9.1 P1, P2, P3, P4, P5 as built
 
 **P1** (visibility, #94): `PlanInboundDrift` and the texts of 3.3 on every surface of 3.2; the admin guide (en/fa)
 "Changing a plan's inbound" with the manual move. No write, no panel call.
@@ -741,6 +743,53 @@ first, what phase 1 does and does not do.
     - P-7, in the `real-time` group: `InboundMoveLockHoldTest`;
     - P-6 for the detach steps belongs to P6, and P-8 to P8.
 - Not tested: a real 3x-ui panel. U7 and U8 were added to 8.3.
+
+**P5** (display guard 5.5, no panel call, no schema change, no switch). Admin guide (en/fa) "What customers see during
+a move".
+
+- The rule, in one place: `FinalConfigLinkProvider::linksPending()`. A service is pending when all of these hold:
+  - its panel is `sanaei_3xui` in modern mode (legacy panels rebuild links before each bot delivery; other types have
+    no snapshot);
+  - `vpn_service.inbound_changed_at` is set (only the P4 runner sets it; NULL for every service until a move);
+  - `last_access_info_synced_at` is NULL or older, compared in whole seconds as the columns store them, the same test
+    as the runner's `LINKS_PENDING_SQL`.
+
+  A successful `PanelLinkSnapshot` store writes `last_access_info_synced_at` under the row lock, after its identity
+  check, for "updated" and "unchanged" alike. So the next successful refresh clears the condition by itself (the
+  runner's next pass, Regenerate, reset links). A failed read, an empty answer or a credential change meanwhile write
+  nothing, and the guard stays.
+- `getFinalLinkSetForService()` returns no links with `VpnConfigLinkSetResult::$linksPending` set (generated fallback
+  links included: they are not the panel's word either). It logs
+  `[FinalConfigLinkProvider] links_pending service_id=… source_flow=…` (ids only).
+- One text for every surface: `subscription:link.updating` (fa/en, `LinksUpdatingNotice`). It names no link, token,
+  UUID or owner. The places of section 7 and where they read now:
+  - `/s/{token}` and the Mini App subscription view: `SubscriptionPageViewFactory::create()`, through the provider.
+    `SubscriptionPageView::$linksUpdating` sits next to `accessWithheld` in `subscription/_link.html.twig`: the
+    subscription URL and its QR with the text, or the text alone when there is no subscription URL (never "missing"
+    or "contact support"). It never counts as withheld (no admin alert). The Mini App service summary and the
+    reseller views carry no links and are unchanged (D5);
+  - payment return page: `PaymentReturnController` read the raw `configText`. It now asks `linksPending()` first and
+    shows the text (Persian page, Persian text);
+  - bot: `VpnAccessMessageFormatter` (service detail, "Subscription", "Configs", the delivery of a new service, the
+    missing-delivery resend), the config-QR fallback, the admin service detail, and the renewal / add-traffic
+    confirmations (`PaymentCustomerNotifier::configLinkLines()`). All read the provider's result; while pending they
+    send the subscription URL with the text, or the text alone. "My services" lists buttons only;
+  - QR: the subscription URL's QR is unchanged (live); a config QR is never made while pending;
+  - exports: none carries links (section 7).
+- Unchanged on purpose: the web admin service page and `app:service:debug-links` still show the stored snapshot (an
+  admin's diagnostic view, with the P1 notice). Regenerate, the runner, sales, settlement and provisioning are
+  untouched.
+- With `inbound_changed_at` NULL, every surface renders byte-identical to before P5. This was checked once against
+  `develop/v2` on 22 renders (page fa/en, Mini App fa/en, payment return, four bot buttons, admin detail, renewal and
+  new-service messages, with and without a subscription URL).
+- Tests: `tests/Shop/InboundMove/InboundMoveDisplayGuardTest.php`:
+  - T8 end to end: the runner moves a service while `subLinks` fails; every surface fa/en, with no panel request; a
+    real refresh brings the links back;
+  - the text alone without a subscription URL;
+  - never withheld for NULL, refreshed after or in the same second, a legacy panel, or another panel type (each
+    surface identical to the NULL case);
+  - escaping, fa/en key parity, and logs with `zend.exception_ignore_args` 0 and 1.
+- Not tested: a real 3x-ui panel.
 
 ## 10. Open questions for the owner
 
