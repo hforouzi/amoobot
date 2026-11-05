@@ -29,7 +29,7 @@ final class AdminAuditLogger
 
     /**
      * @param array<string, mixed> $details
-     * @param AdminActor|null      $actor   the bot/CLI actor; null = the logged-in web admin during a web request, else the console
+     * @param AdminActor|null      $actor   the bot/CLI actor; null = the logged-in web (or Mini App) admin during a request, else the console
      */
     public function record(string $action, ?string $targetType = null, string|int|null $targetId = null, array $details = [], ?AdminActor $actor = null): void
     {
@@ -59,7 +59,12 @@ final class AdminAuditLogger
         $inRequest = null !== $this->requestStack->getCurrentRequest();
         if (null === $actor && $inRequest) {
             $user = $this->security->getUser();
-            $actor = $user instanceof AdminUser ? AdminActor::fromAdminUser($user) : null;
+            $actor = match (true) {
+                $user instanceof AdminUser => AdminActor::fromAdminUser($user),
+                // A Mini App admin (shared code that audits without an actor): that admin, source miniapp.
+                $user instanceof AdminActorUser => $user->adminActor(),
+                default => null,
+            };
         }
         $source = $actor->source ?? ($inRequest ? AdminAuditLog::SOURCE_WEB : AdminAuditLog::SOURCE_CLI);
         $label = $actor->label ?? ($inRequest ? 'anonymous' : 'console');

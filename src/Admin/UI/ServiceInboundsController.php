@@ -4,12 +4,10 @@ declare(strict_types=1);
 
 namespace App\Admin\UI;
 
+use App\Admin\Application\InboundMoveActions;
 use App\Entity\VpnService;
 use App\Provisioning\Application\InboundAttachRetry;
-use App\Provisioning\Application\InboundMoveControls;
-use App\Provisioning\Application\InboundMoveOverview;
 use App\Provisioning\Application\ServiceInboundAttacher;
-use App\Shop\Application\InboundMoveSettings;
 use App\Security\AdminAuditLogger;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
@@ -26,8 +24,8 @@ use Symfony\Component\Routing\Attribute\Route;
  * with the counts only.
  *
  * "Retry now" of a service's failed inbound move (docs/design/plan-inbound-change.md 5.6, PR P7): its move is due again
- * at once, attempts from zero (InboundMoveControls::retryFailed(), as the run's "Retry failed now"); the next pass of the
- * scheduled task tries it. No panel call here. A POST with a CSRF token, rate limited per service (admin_service_move).
+ * at once, attempts from zero (InboundMoveActions::retryService(), shared with the Mini App: InboundMoveControls::
+ * retryFailed(), as the run's "Retry failed now"); the next pass of the scheduled task tries it. No panel call here. A POST with a CSRF token, rate limited per service (admin_service_move).
  * No audit row per service (5.6: the move row is the record).
  */
 #[Route('/admin')]
@@ -44,11 +42,7 @@ final class ServiceInboundsController extends AbstractController
         private readonly AdminAuditLogger $auditLogger,
         #[Autowire(service: 'limiter.admin_service_attach')]
         private readonly RateLimiterFactory $limiter,
-        private readonly InboundMoveControls $moveControls,
-        private readonly InboundMoveOverview $moveOverview,
-        private readonly InboundMoveSettings $moveSettings,
-        #[Autowire(service: 'limiter.admin_service_move')]
-        private readonly RateLimiterFactory $moveLimiter,
+        private readonly InboundMoveActions $moveActions,
     ) {
     }
 
@@ -64,26 +58,9 @@ final class ServiceInboundsController extends AbstractController
 
             return $back;
         }
-        if (!$this->moveSettings->enabled()) {
-            $this->flash('danger', 'inbound_move.flash.switched_off');
-
-            return $back;
+        foreach ($this->moveActions->retryService($id)->messages as [$level, $key, $parameters]) {
+            $this->flash($level, $key, $parameters);
         }
-        $move = $this->moveOverview->serviceMove($id);
-        if (null === $move || 'failed' !== $move['state']) {
-            $this->flash('info', 'inbound_move.flash.service_nothing');
-
-            return $back;
-        }
-        if (!$this->moveLimiter->create('service-'.$id)->consume()->isAccepted()) {
-            $this->flash('warning', 'inbound_move.flash.service_rate_limited');
-
-            return $back;
-        }
-        $result = $this->moveControls->retryFailed($move['run_id'], true, $id);
-        $result['ok']
-            ? $this->flash('success', 'inbound_move.flash.service_retried', ['%run%' => $move['run_id']])
-            : $this->flash('warning', 'inbound_move.flash.refused', ['%reason%' => $result['message']]);
 
         return $back;
     }

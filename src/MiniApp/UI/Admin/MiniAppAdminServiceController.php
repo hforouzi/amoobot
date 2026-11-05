@@ -14,6 +14,7 @@ use App\MiniApp\Admin\AdminText;
 use App\MiniApp\Security\MiniAppUser;
 use App\MiniApp\UI\MiniAppFragments;
 use App\MiniApp\UI\MiniAppLocale;
+use App\Provisioning\Application\InboundMoveOverview;
 use App\Provisioning\Application\ServiceAdministration;
 use App\Provisioning\Application\ServiceAdminOutcome;
 use App\Provisioning\Application\ServiceConfigRegeneration;
@@ -22,6 +23,7 @@ use App\Provisioning\Application\ServiceUsageSyncService;
 use App\Provisioning\Domain\VpnServiceStatus;
 use App\Security\AdminAuditLogger;
 use App\Shop\Application\Catalog\PlanInboundDrift;
+use App\Shop\Application\InboundMoveSettings;
 use App\Subscription\Application\SubscriptionPageUrl;
 use Doctrine\ORM\EntityManagerInterface;
 use Psr\Clock\ClockInterface;
@@ -70,6 +72,8 @@ final class MiniAppAdminServiceController extends AbstractController
         private readonly TranslatorInterface $translator,
         private readonly ClockInterface $clock,
         private readonly PlanInboundDrift $inboundDrift,
+        private readonly InboundMoveOverview $moveOverview,
+        private readonly InboundMoveSettings $moveSettings,
     ) {
     }
 
@@ -78,13 +82,19 @@ final class MiniAppAdminServiceController extends AbstractController
     {
         $filter = ServiceTabs::normalize($request->query->getString('tab', 'all'), AdminLists::SERVICE_FILTERS);
         $query = AdminQuery::text($request);
+        // ?moves=moving|failed: services whose latest inbound move is on its way, or failed (plan-inbound-change 5.6,
+        // as the web list); its chips show while moving services is switched on, or when such a link was followed.
+        $moves = in_array($request->query->getString('moves'), AdminLists::MOVE_FILTERS, true) ? $request->query->getString('moves') : null;
+        $showMoves = null !== $moves || $this->moveSettings->enabled();
 
         return $this->fragments->render($request, 'miniapp/admin/services.html.twig', [
-            'tab' => $filter,
+            'tab' => null === $moves ? $filter : null,
             'tabs' => AdminLists::SERVICE_FILTERS,
             'counts' => ServiceTabs::countByTab($this->entityManager, $this->clock->now()),
+            'moves' => $moves,
+            'moveCounts' => $showMoves ? $this->moveOverview->listCounts() : null,
             'query' => $query,
-            'list' => $this->lists->services($filter, $query, AdminQuery::page($request)),
+            'list' => $this->lists->services(null === $moves ? $filter : 'all', $query, AdminQuery::page($request), $moves),
             'now' => $this->clock->now(),
         ]);
     }
@@ -96,7 +106,10 @@ final class MiniAppAdminServiceController extends AbstractController
 
         return $this->fragments->render($request, 'miniapp/admin/service.html.twig', [
             's' => $this->view($service, MiniAppLocale::fromRequest($request)),
-            'can' => $this->access->map($user, [...self::ASSIST, ...self::MANAGE, self::DELETE, 'miniapp_admin_customer', 'miniapp_admin_order']),
+            'can' => $this->access->map($user, [...self::ASSIST, ...self::MANAGE, self::DELETE, 'miniapp_admin_customer', 'miniapp_admin_order', 'miniapp_admin_service_retry_move']),
+            // Its latest inbound move (plan-inbound-change 5.6, P9): read only, one query, no panel call.
+            'move' => $this->moveOverview->serviceMove($id),
+            'moveEnabled' => $this->moveSettings->enabled(),
             'extendPresets' => self::EXTEND_PRESETS,
             'trafficPresets' => self::TRAFFIC_PRESETS,
             'maxDays' => ServiceAdministration::MAX_DAYS,
@@ -315,7 +328,7 @@ final class MiniAppAdminServiceController extends AbstractController
             'panel' => $service->getPanel()?->getTitle(),
             'inbound' => $service->getInbound()?->getTitle(),
             // Its plan now sells another inbound: the service stays where it is (plan-inbound-change 3.3 (d)).
-            'inboundNotice' => $this->inboundNotice($service, 'plan_inbound_drift.service', $locale),
+            'inboundNotice' => $this->inboundNotice($service, 'plan_inbound_drift.service_apply', $locale),
             'expiresAt' => $expires,
             'daysLeft' => null === $expires ? null : (int) floor(($expires->getTimestamp() - $now->getTimestamp()) / 86400),
             'used' => $used,

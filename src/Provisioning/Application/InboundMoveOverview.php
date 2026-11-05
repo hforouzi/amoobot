@@ -32,6 +32,22 @@ final class InboundMoveOverview
     }
 
     /**
+     * The services lists' filter (web and Mini App), as a DQL condition on the list's own query (one query per page):
+     * the service's latest move is on its way ("moving") or failed ("failed").
+     */
+    public static function listFilterDql(string $filter, string $serviceAlias): string
+    {
+        return sprintf(
+            'EXISTS (SELECT listMove.id FROM %1$s listMove WHERE listMove.service = %3$s AND %2$s AND listMove.id = (SELECT MAX(listLatest.id) FROM %1$s listLatest WHERE listLatest.service = %3$s))',
+            ServiceInboundMove::class,
+            'failed' === $filter
+                ? "listMove.state = 'failed'"
+                : "(listMove.state IN ('planned', 'attaching', 'detaching') OR (listMove.state = 'switched' AND listMove.detachAfter IS NOT NULL) OR (listMove.state = 'undone' AND listMove.nextAttemptAt IS NOT NULL))",
+            $serviceAlias,
+        );
+    }
+
+    /**
      * The plan's open run, or else its latest one, with what the run block shows and which buttons apply now.
      *
      * @return array<string, mixed>|null

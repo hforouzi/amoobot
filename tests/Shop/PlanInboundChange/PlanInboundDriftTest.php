@@ -132,7 +132,7 @@ final class PlanInboundDriftTest extends IntegrationTestCase
         $notices = $this->drift()->ofServices([(int) $sold->getId(), (int) $claimed->getId()]);
 
         self::assertSame(2, $drift->total, 'both counted like any other service');
-        $everything = json_encode([$drift, $notices, $this->drift()->breakdown($drift, 'en'), $this->drift()->serviceText('plan_inbound_drift.service', $notices[(int) $claimed->getId()], 'en')], JSON_UNESCAPED_UNICODE);
+        $everything = json_encode([$drift, $notices, $this->drift()->breakdown($drift, 'en'), $this->drift()->serviceText('plan_inbound_drift.service_apply', $notices[(int) $claimed->getId()], 'en')], JSON_UNESCAPED_UNICODE);
         foreach (['Rostam', 'Sohrab', '8930002', '8930003', 'aaaaaaaa', 'vless://', 'x.example'] as $secret) {
             self::assertStringNotContainsString($secret, (string) $everything, 'D5: no owner, reseller or link');
         }

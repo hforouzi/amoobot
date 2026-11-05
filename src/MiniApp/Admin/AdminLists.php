@@ -11,6 +11,7 @@ use App\Entity\Order;
 use App\Entity\Payment;
 use App\Entity\TelegramAccount;
 use App\Entity\VpnService;
+use App\Provisioning\Application\InboundMoveOverview;
 use App\Shop\Domain\OrderStatus;
 use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\ORM\QueryBuilder;
@@ -27,6 +28,8 @@ final class AdminLists
 {
     public const PAGE_SIZE = 15;
     public const SERVICE_FILTERS = [...ServiceTabs::TABS, ServiceTabs::LOW_TRAFFIC];
+    /** The services list's inbound move filters (InboundMoveOverview::listFilterDql()). */
+    public const MOVE_FILTERS = ['moving', 'failed'];
 
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
@@ -74,12 +77,16 @@ final class AdminLists
     /**
      * @return Page
      */
-    public function services(string $filter, ?string $query, int $page): array
+    public function services(string $filter, ?string $query, int $page, ?string $moves = null): array
     {
         $qb = $this->entityManager->createQueryBuilder()->select('s', 'u', 't', 'o', 'pl')->from(VpnService::class, 's')
             ->join('s.user', 'u')->leftJoin('u.telegramAccount', 't')->leftJoin('s.order', 'o')->leftJoin('o.plan', 'pl')
             ->orderBy('expiring' === $filter ? 's.expiresAt' : 's.id', 'expiring' === $filter ? 'ASC' : 'DESC');
         ServiceTabs::apply($qb, 's', $filter, $this->clock->now());
+        if (null !== $moves && in_array($moves, self::MOVE_FILTERS, true)) {
+            // In the list's own query (one query per page), as the web list.
+            $qb->andWhere(InboundMoveOverview::listFilterDql($moves, 's'));
+        }
         if (null !== $query) {
             $like = self::like(ltrim($query, '@'));
             $qb->andWhere('s.username LIKE :q OR s.clientEmail LIKE :q OR t.username LIKE :q OR t.telegramId = :exact OR s.id = :id')

@@ -46,9 +46,9 @@ final class PlanInboundNoticesMiniAppTest extends IntegrationTestCase
         $answer = $this->appPostJson('/app/api/admin/plans/check?lang=en', $session, $this->body(['inbound' => (string) $this->nl->getId()]));
 
         self::assertSame(200, $this->httpStatus(), json_encode($answer, JSON_UNESCAPED_UNICODE));
-        self::assertSame([$this->notice('plan_inbound_drift.plan_saved', ['%plan%' => 'Gold', '%new%' => 'NL-2', '%count%' => 2, '%breakdown%' => '2 on "DE-1"'])], $answer['warnings']);
+        self::assertSame([$this->notice('plan_inbound_drift.plan_saved_apply', ['%plan%' => 'Gold', '%new%' => 'NL-2', '%count%' => 2, '%breakdown%' => '2 on "DE-1"'])], $answer['warnings']);
         $fa = $this->appPostJson('/app/api/admin/plans/check', $session, $this->body(['inbound' => (string) $this->nl->getId()]));
-        self::assertSame([$this->notice('plan_inbound_drift.plan_saved', ['%plan%' => 'Gold', '%new%' => 'NL-2', '%count%' => 2, '%breakdown%' => '2 روی «DE-1»'], 'fa')], $fa['warnings']);
+        self::assertSame([$this->notice('plan_inbound_drift.plan_saved_apply', ['%plan%' => 'Gold', '%new%' => 'NL-2', '%count%' => 2, '%breakdown%' => '2 روی «DE-1»'], 'fa')], $fa['warnings']);
         self::assertSame($before, $this->checksums(), 'the check writes nothing');
         self::assertSame([], $this->fake->requests, 'and calls no panel');
 
@@ -79,7 +79,7 @@ final class PlanInboundNoticesMiniAppTest extends IntegrationTestCase
         $page = new Crawler($this->appGet('/app/admin/plans/'.$this->gold->getId().'?lang=en', $session));
 
         self::assertSame(200, $this->httpStatus());
-        self::assertSame([$this->notice('plan_inbound_drift.form', ['%count%' => 2, '%breakdown%' => '2 on "NL-2"'])], $page->filter('[data-warning-list] li')->each(static fn (Crawler $li): string => $li->text()));
+        self::assertSame([$this->notice('plan_inbound_drift.form_apply', ['%count%' => 2, '%breakdown%' => '2 on "NL-2"'])], $page->filter('[data-warning-list] li')->each(static fn (Crawler $li): string => $li->text()));
         self::assertNull($page->filter('[data-warnings]')->attr('hidden'));
         self::assertSame('⚠ Check before saving', trim($page->filter('[data-warnings] h2')->text()));
     }
@@ -127,9 +127,9 @@ final class PlanInboundNoticesMiniAppTest extends IntegrationTestCase
 
         $html = $this->appGet('/app/admin/services/'.$service->getId().'?lang=en', $session);
         $page = new Crawler($html);
-        self::assertSame('⚠ '.$this->notice('plan_inbound_drift.service', ['%current%' => 'DE-1', '%planInbound%' => 'NL-2']), trim($page->filter('[data-inbound-notice]')->text()));
+        self::assertSame('⚠ '.$this->notice('plan_inbound_drift.service_apply', ['%current%' => 'DE-1', '%planInbound%' => 'NL-2']), trim($page->filter('[data-inbound-notice]')->text()));
         $fa = new Crawler($this->appGet('/app/admin/services/'.$service->getId(), $session));
-        self::assertSame('⚠ '.$this->notice('plan_inbound_drift.service', ['%current%' => 'DE-1', '%planInbound%' => 'NL-2'], 'fa'), trim($fa->filter('[data-inbound-notice]')->text()));
+        self::assertSame('⚠ '.$this->notice('plan_inbound_drift.service_apply', ['%current%' => 'DE-1', '%planInbound%' => 'NL-2'], 'fa'), trim($fa->filter('[data-inbound-notice]')->text()));
         self::assertStringNotContainsString('Kaveh', $page->filter('[data-inbound-notice]')->text());
 
         $answer = $this->confirmedPost('/app/api/admin/services/'.$service->getId().'/regenerate-config?lang=en', $session);

@@ -9,7 +9,6 @@ use App\Admin\UI\ServiceInboundsController;
 use App\Admin\UI\SubscriptionPageLinkController;
 use App\Admin\UI\Support\AdminFormat;
 use App\Entity\VpnService;
-use App\Entity\ServiceInboundMove;
 use App\Entity\VpnServiceInbound;
 use App\Provisioning\Application\FinalConfigLinkProvider;
 use App\Provisioning\Application\InboundMoveOverview;
@@ -253,13 +252,7 @@ class VpnServiceCrudController extends AbstractCrudController
         $moves = $this->movesFilter();
         if (null !== $moves) {
             // In the list's own query (one query per page): the service's latest move, on its way or failed.
-            $queryBuilder->andWhere(sprintf(
-                'EXISTS (SELECT listMove.id FROM %1$s listMove WHERE listMove.service = entity AND %2$s AND listMove.id = (SELECT MAX(listLatest.id) FROM %1$s listLatest WHERE listLatest.service = entity))',
-                ServiceInboundMove::class,
-                'failed' === $moves
-                    ? "listMove.state = 'failed'"
-                    : "(listMove.state IN ('planned', 'attaching', 'detaching') OR (listMove.state = 'switched' AND listMove.detachAfter IS NOT NULL) OR (listMove.state = 'undone' AND listMove.nextAttemptAt IS NOT NULL))",
-            ));
+            $queryBuilder->andWhere(InboundMoveOverview::listFilterDql($moves, 'entity'));
         }
 
         return ServiceTabs::apply($queryBuilder, 'entity', $this->notConnectedFilter() || null !== $moves ? 'all' : $this->currentTab(), $this->clock->now());

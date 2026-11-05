@@ -66,18 +66,26 @@ final class InboundMoveSwitchHasNoEffectTest extends IntegrationTestCase
         sort($readers);
 
         self::assertSame([
+            // P9: the actions of the web pages (P7) and the Mini App admin, one implementation calling the command's
+            // planner and controls.
+            'Admin/Application/InboundMoveActions.php',
             'Admin/Application/SettingsAdministration.php',
             // P7: the web pages of the move (the plan's run block, the service's move line, the list filter, the
             // Apply page and its buttons). They read, or call the same planner and controls as the command.
             'Admin/UI/Crud/PlanCrudController.php',
             'Admin/UI/Crud/VpnServiceCrudController.php',
             'Admin/UI/InboundMoveAdminController.php',
-            'Admin/UI/ServiceInboundsController.php',
             'Command/AutomationRunCommand.php',
             'Command/PlanApplyInboundsCommand.php',
             'Entity/InboundMoveRun.php',
             'Entity/ServiceInboundMove.php',
             'Entity/VpnService.php',
+            // P9: the Mini App admin's screens of the move (route names, the plan's run block, the service's move
+            // block, the list filter, the Apply screen and its buttons), through InboundMoveActions.
+            'MiniApp/Admin/AdminRoutePermissions.php',
+            'MiniApp/UI/Admin/MiniAppAdminInboundMoveController.php',
+            'MiniApp/UI/Admin/MiniAppAdminPlanController.php',
+            'MiniApp/UI/Admin/MiniAppAdminServiceController.php',
             // P5: the display guard reads inbound_changed_at (linksPending()), no setting and no move row.
             'Provisioning/Application/FinalConfigLinkProvider.php',
             'Provisioning/Application/InboundAttachAlerts.php',
@@ -91,7 +99,7 @@ final class InboundMoveSwitchHasNoEffectTest extends IntegrationTestCase
             'Provisioning/Application/InboundMoveScheduler.php',
             'Provisioning/Application/InboundMoveScope.php',
             'Shop/Application/InboundMoveSettings.php',
-        ], $readers, 'P4-P8: only the runner (its alerts and controls, the command, the scheduled task), the display guard and the web pages of P7 read them; no sale, settlement, regenerate or plan save does');
+        ], $readers, 'P4-P9: only the runner (its alerts and controls, the command, the scheduled task), the display guard, the web pages of P7 and the Mini App screens of P9 read them; no sale, settlement, regenerate or plan save does');
     }
 
     /**
