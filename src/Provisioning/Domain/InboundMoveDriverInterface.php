@@ -25,9 +25,20 @@ use App\Provisioning\Domain\Dto\InboundMoveAttachResult;
 interface InboundMoveDriverInterface
 {
     /**
-     * @param bool $recordHealth false: a failing call is not counted towards the panel's "degraded" state (a bulk run)
+     * @param bool     $recordHealth false: a failing call is not counted towards the panel's "degraded" state (a bulk run)
+     * @param int|null $expectedFrom the remote inbound the client must be on when B is missing, instead of the one the
+     *                               remote id records (P6: the retire step re-attaches B after the switch, when the remote
+     *                               id already names B and the client must still be on the old inbound A)
      *
      * Never throws for a panel outcome: every case is an InboundMoveAttachResult.
      */
-    public function attachForMove(string $remoteId, VpnInbound $target, ?VpnPanel $panel = null, bool $recordHealth = true): InboundMoveAttachResult;
+    public function attachForMove(string $remoteId, VpnInbound $target, ?VpnPanel $panel = null, bool $recordHealth = true, ?int $expectedFrom = null): InboundMoveAttachResult;
+
+    /**
+     * Whether the panel still has the inbound with this remote id (GET panel/api/inbounds/list; P6, 4.3 step 5: a detach
+     * of an inbound deleted on the panel fails, and the step counts as done only when this read confirms it is gone).
+     *
+     * @return bool|null null: the panel could not be read (never "gone")
+     */
+    public function panelHasInbound(VpnPanel $panel, int $remoteInboundId, bool $recordHealth = true): ?bool;
 }
