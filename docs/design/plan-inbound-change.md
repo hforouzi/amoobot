@@ -1,6 +1,6 @@
 # A plan's inbound changes: reaching existing services — design
 
-Status: **design for review**; **P1, P2, P3, P4, P5, P6, P8 as built** (section 9.1). Built so far:
+Status: **design for review**; **P1, P2, P3, P4, P5, P6, P7, P8 as built** (section 9.1). Built so far:
 
 - the notices;
 - the panel's detach primitive;
@@ -11,9 +11,11 @@ Status: **design for review**; **P1, P2, P3, P4, P5, P6, P8 as built** (section 
   shows its stored single configs. The subscription URL is shown with "Your links are being updated";
 - **phase 2 and the run controls, from the command line only**: the old inbound A is removed after the grace period
   (or at once with `--retire-now`), and `--pause-run`, `--resume`, `--cancel`, `--undo`;
-- **the scheduled task** `inbound-moves`: it continues open runs (P8, built before P7).
+- **the scheduled task** `inbound-moves`: it continues open runs (P8, built before P7);
+- **the web admin** (P7): "Apply to existing services" on the plan page (dry run counted locally, confirmation, run
+  created as planned), the run block with its buttons, the service page line, the list tabs and the doctor counts.
 
-Not built yet (P7, P9, P10): the pages and the customer message. The move has
+Not built yet (P9, P10, P11): the Mini App admin, the customer message, `kind=add|remove`. The move has
 been tested against the fake 3x-ui only, not against a real panel. Persian summary:
 [docs/fa/design/plan-inbound-change.md](../fa/design/plan-inbound-change.md). This document continues
 [multi-inbound-plans.md](multi-inbound-plans.md) section 4 ("Changing inbounds after sales") and phases M3/M4, which
@@ -622,7 +624,7 @@ Order: P1 → P2 → P3 → P4 → P5 → P6 → P7 → P8 → P9 → (P10, P11)
 no customer-visible behaviour while the switch is off. Each PR follows the repository's process: phpunit and phpstan
 green; a fresh independent review; the pushed head tested from a clean checkout (M2c process rule).
 
-### 9.1 P1, P2, P3, P4, P5, P6, P8 as built
+### 9.1 P1, P2, P3, P4, P5, P6, P7, P8 as built
 
 **P1** (visibility, #94): `PlanInboundDrift` and the texts of 3.3 on every surface of 3.2; the admin guide (en/fa)
 "Changing a plan's inbound" with the manual move. No write, no panel call.
@@ -898,6 +900,43 @@ change, no change to what a pass does to a service). Admin guide (en/fa), `docs/
   ops tests in `tests/ops/scheduled-jobs.test.sh`. Tests of two runners on one item now call the runner directly
   (helper mode `runner`), since two commands refuse each other.
 - Not tested: a real 3x-ui panel, a real server or systemd timer, or a real `deploy.sh` run.
+
+**P7** (the web admin; no schema change; the runner, the command's behaviour and the scheduled task are unchanged).
+
+- `InboundMoveAdminController` (permission PLANS_MANAGE): `GET /admin/plan/{id}/apply-inbounds` is the dry run (and,
+  with `step=confirm`, the confirmation); `POST .../apply-inbounds` creates the run; `POST
+  /admin/inbound-move-run/{id}/{pause|resume|cancel|undo|retry}` are the buttons. Every POST has a CSRF token (one per
+  plan for create, one per run for the buttons); a GET never writes. Each action calls the code the command uses:
+  `InboundMovePlanner::create()` (scope, target and switch checks, the one-open-run rule of the database, the
+  `plan.inbounds_apply_started` audit) and `InboundMoveControls` / `InboundMoveRunner::undo()`.
+- The dry run calls `InboundMovePlanner::candidates(..., localOnly: true)`: the same planner and skip reasons as the
+  command, with no panel request. The protocol rule that needs `inbounds/options` (services with several inbounds) is
+  counted as "checked when the run is created"; `create()` checks it as before (a GET to the panel on the POST only).
+- New in `InboundMoveControls`, used by the page only so far: `resume()` (paused → running; it does not run a pass, the
+  scheduled task does) and `retryFailed()` (failed moves of the run, or of one service, get `attempts = 0` and are due
+  now; a done run with failures reopens as running when the plan has no other open run). `alreadyRetiredText()` is the
+  command's undo message, now shared with the page. Undo runs `InboundMoveRunner::undo()` in the request under the same
+  MariaDB lock as the command and the task (refused while either holds it); it is not resumable other than by pressing
+  it again.
+- `InboundMoveOverview` (read only): the plan's open or last run (status, target, started by, times, counts, skipped by
+  reason, given up, retired, next retire due, "the plan changed since this run was created", which buttons are valid),
+  a service's latest move (error through `VpnServiceInbound::safeError`), the failed / given-up counts per panel or plan,
+  and the list-tab counts.
+- Plan page: the block "Moving existing services" with the run and the buttons valid in its state (Resume, Retry and
+  Undo hidden while the switch is off; Undo refused for retired services with the command's text). The P1 web notices
+  (`plan_inbound_drift.*_apply`) gain `Use "Apply to existing services" on the plan to move them.` (en, fa); the Mini App
+  keeps the P1 texts until P9.
+- Service page: the line "Existing services" (run, A → B, state, attempts, next try, masked error, old inbound removed
+  at / due at) with "Retry now" (SERVICES_MANAGE, `admin_vpn_service_retry_move`, limiter `admin_service_move`: 5 per
+  10 minutes per service). Services list: tabs "Being moved" / "Move failed", one `EXISTS` on the latest move inside
+  the list query.
+- `app:panel:doctor` and the panel page show "inbound moves: N failed (M given up)" when there are failures.
+- No audit rows are added by the pages beyond what the command writes; nothing locks or writes orders, payments,
+  wallets, users or resellers.
+- Tests: `InboundMoveWebTest` (pages, CSRF, permissions, switch off, one open run and double submit, parity with the
+  command, no panel request while rendering, buttons per state, escaping, no link / UUID / token / owner in the HTML,
+  the list query count, doctor and panel counts, redaction with `zend.exception_ignore_args` 0 and 1, fa/en keys).
+- Not tested: a real 3x-ui panel or a real server.
 
 ## 10. Open questions for the owner
 

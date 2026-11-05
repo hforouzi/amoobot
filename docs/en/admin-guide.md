@@ -411,10 +411,11 @@ Limits of the manual move:
 - Not possible on a legacy panel, or to an inbound on another panel (that would be a new client: new subscription,
   usage counted from zero).
 
-**Moving existing services with the command (command line only)**
+**Moving existing services (admin panel or command line)**
 
-`app:plan:apply-inbounds` moves a plan's existing services to the plan's current inbound, on modern 3x-ui panels.
-There is no button for it yet: you start a move on the server. The scheduled task `inbound-moves` then continues it
+`app:plan:apply-inbounds` moves a plan's existing services to the plan's current inbound, on modern 3x-ui panels. You
+start a move from the plan's page in the admin panel ("Apply to existing services", below) or on the server with the
+command. The scheduled task `inbound-moves` then continues it
 (a timer every 30 minutes, installed by a **full** `deploy.sh`, not `--app-only`).
 
 A move has two phases:
@@ -451,7 +452,7 @@ What the move does **not** do:
   both until the retire.
 - No message to customers. A customer sees the new inbound's configs after updating the subscription in their app
   (the subscription URL does not change). Single configs copied before keep working, on the old inbound, until phase 2.
-- No admin page: a move is started and controlled from the command line.
+- Not in the Mini App yet: a move is started and controlled from the admin panel or the command line.
 - Services on a legacy panel, on another panel or on a test (dummy) panel are listed as skipped, with the reason.
   Deleted services are never moved. Adding or removing a plan's additional inbounds on existing services is not part
   of it (a moved service keeps its additional inbounds, and the old inbound becomes one of them when the plan still
@@ -472,7 +473,68 @@ The links come back by themselves with the next successful refresh: run the comm
 Services that were not moved, and services on legacy or other panels, are never affected. The admin service page and
 `app:service:debug-links` still show what is stored.
 
-How to use it:
+**From the admin panel: "Apply to existing services"**
+
+On the plan's page (Plans → the plan → show), the block **Moving existing services** has the link **Apply to existing
+services**. It needs the permission to manage plans.
+
+1. **The dry run.** The page counts, from the database only (it never asks the panel), how many of the plan's services
+   would move to the plan's inbound and how many are skipped, by reason: on another panel, panel not in modern mode, not
+   a real panel, in another run, moved too often, already on the target, suspended / expired / trial services (not
+   included unless you tick them). It lists them by service id and title only. Services with several inbounds have the
+   note "protocol rules checked when the run is created": that check needs the panel and is done when you create the
+   run, like the command.
+2. **The options**: only one service id (recommended for the first test), only services now on one inbound, include
+   suspended / expired / trial services, keep the old inbound (never removed automatically), and the hours before the
+   old inbound is removed (0–168, default `plans.inbound_move_detach_grace_hours`). Press **Show the dry run** to
+   recount.
+3. **Continue** shows the confirmation: the target inbound, the counts, and what phase 1 (now) and phase 2 (after the
+   grace period) do. **Create the run** creates it as *planned*; nothing is sent to the panel by the page. The scheduled
+   task `inbound-moves` starts it at its next pass (every 30 minutes) and moves the services in batches.
+
+With `Settings → Plans → Moving existing services` off, the page says so and has no create button (the counts still
+show). A plan has one open run at a time: the page names the open run and has no create button, and a second create is
+refused. Pressing the button twice creates one run. A run created here is the same as one created by
+`app:plan:apply-inbounds <planId> --apply` with the same options.
+
+**Test ONE service first**: put its id in "Only this service id", create the run, wait for the scheduled task (or run
+`--resume=<runId>` on the server), check the client on the panel and connect with a test phone. Then apply to the rest.
+
+**The run block on the plan's page** shows the open run, or the last one: its status, the target, started by (an admin
+or "command line"), the times, moved / failed / skipped (by reason) / not moved yet, how many old inbounds were removed
+and when the next removal is due. If the plan's inbound changed since the run was created, it says so: the run still
+moves services to its own target; cancel it (and undo it if needed), then apply again. The statuses:
+
+- **Planned**: created; the scheduled task starts it at its next pass.
+- **Running**: the scheduled task moves services, retries failures and removes old inbounds when their grace period
+  ends.
+- **Paused**: nothing is done until someone presses Resume (also when the run paused itself because the panel did not
+  answer 5 times in a row; the reason is shown).
+- **Done**: nothing is left: every service was moved, skipped, or failed with no automatic retry left.
+- **Cancelled**: services not moved yet will not be moved. While moved services wait for their old inbound to be removed,
+  the run stays open until that is done.
+
+Only the buttons valid for the status are shown:
+
+- **Pause** (planned or running) and **Resume** (paused): like `--pause-run` and `--resume`. Resume does not call the
+  panel; the scheduled task continues the run at its next pass (or `--resume` on the server, at once).
+- **Cancel**: like `--cancel` (asks for confirmation).
+- **Undo**: like `--undo`; it calls the panel now and can take a while for a big run (asks for confirmation). Services
+  whose old inbound was already removed cannot be put back; the message says how many and what to do (a new run back
+  to the old inbound). Press Undo again if it stopped half way.
+- **Retry failed now**: gives the failed services a new set of attempts; the scheduled task retries them at its next
+  pass.
+
+Resume, Retry and Undo are not shown while the switch is off. The same counts of failed moves (and those with no
+automatic retry left) are shown on the panel's page and by `app:panel:doctor`. Audit entries are the command's
+(`plan.inbounds_apply_started`, `_paused`, `_finished`, `_undone`, counts only).
+
+**On a service's page** the line "Existing services" shows its latest move: the run, old → new inbound, the state,
+attempts, next try, the last error (masked) and when the old inbound was or will be removed. A failed move has
+**Retry now** (permission to manage services; at most 5 times in 10 minutes per service): the scheduled task retries it
+at its next pass. The services list has the tabs **Being moved** and **Move failed**.
+
+How to use it from the command line:
 
 1. **Dry run first** (it changes nothing, and works with the switch off):
    `php bin/console app:plan:apply-inbounds <planId>`. It lists each service with its current inbound, the target, and
