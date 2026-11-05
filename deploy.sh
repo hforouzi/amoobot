@@ -91,8 +91,7 @@ HSTS_STATE_FILE="${STATE_DIR}/hsts-enabled"
 # nothing while plans.multi_inbound_enabled is off.
 # inbound-moves (moving existing services to a plan's new inbound, docs/design/plan-inbound-change.md 5.2) is in the
 # lifecycle group for the same reason. It stops starting services after InboundMoveScheduler::TIME_BUDGET_SECONDS (420 s),
-# well inside its 600 s timeout, and does nothing while plans.inbound_move_enabled is off. :20/:50 are also expiry's
-# minutes: the group lock serialises them (the later one waits up to LOCK_WAIT, then skips one slot).
+# well inside its 600 s timeout, and does nothing while plans.inbound_move_enabled is off. :21/:51 is a free slot.
 SCHEDULED_JOBS=(
   "broadcasts|broadcasts|*:0/2|600|120|app:automation:run --only=broadcasts"
   "orders|orders|*:0/10|300|600|app:automation:run --only=orders"
@@ -102,7 +101,7 @@ SCHEDULED_JOBS=(
   "notifications|lifecycle|*:10/30|900|1800|app:automation:run --only=notifications"
   "claims|lifecycle|*:13/15|300|900|app:automation:run --only=claims"
   "attach-inbounds|lifecycle|*:25/30|300|1800|app:automation:run --only=attach-inbounds"
-  "inbound-moves|lifecycle|*:20/30|600|1800|app:automation:run --only=inbound-moves"
+  "inbound-moves|lifecycle|*:21/30|600|1800|app:automation:run --only=inbound-moves"
 )
 JOBS_LOG_DIR="/var/log/amoobot"
 JOBS_STATE_DIR="${STATE_DIR}/jobs"

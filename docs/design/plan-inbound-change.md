@@ -307,7 +307,7 @@ One open run (`planned|running|paused`) per plan. A second one is refused with t
   computed locally, without panel calls. The admin confirms and the run is created `planned`. The scheduled task
   processes it.
 - **Scheduled task** `inbound-moves`:
-  - runs `app:automation:run --only=inbound-moves`, deploy job `inbound-moves|lifecycle|*:20/30|600|1800`, in the
+  - runs `app:automation:run --only=inbound-moves`, deploy job `inbound-moves|lifecycle|*:21/30|600|1800`, in the
     **lifecycle** lock group like `attach-inbounds`. It writes the same client, which must not overlap sync, suspend
     or claims;
   - processes open runs in id order, and items whose `next_attempt_at` or `detach_after` is due;
@@ -888,11 +888,10 @@ change, no change to what a pass does to a service). Admin guide (en/fa), `docs/
   alert, not a failed job. Only a run that throws fails the job (logged masked), and the next run still goes.
 - A run that `--cancel` left open (moved services waiting for their retire) stays `running` (P6), so the task finishes those
   retires.
-- Deploy: `inbound-moves|lifecycle|*:20/30|600|1800`, on the allowlist, max age 6000 s, `NEW` until the first run. It
+- Deploy: `inbound-moves|lifecycle|*:21/30|600|1800`, on the allowlist, max age 6000 s, `NEW` until the first run. It
   needs a **full** deploy.
-- **:20 and :50 are also `expiry`'s minutes** in the lifecycle group (`*:5/15`). The group lock serialises them, so they
-  never overlap: the later one waits up to 120 s, then skips one slot. A long pass can make the next lifecycle jobs skip
-  a slot too, at any offset. The free offset nearest to :20 is `*:21/30` (no timer of any group on :21 or :51).
+- **:21 and :51 are free minutes:** no timer of any group uses them. A long pass can still make the next lifecycle jobs
+  skip a slot, at any offset: the group lock serialises them, and the later one waits up to 120 s, then skips one slot.
 - Tests: `InboundMoveScheduledTest`, `InboundMoveScheduledParallelTest` (P-8 with real processes: both directions, a
   simultaneous start, a pause during a pass, kill -9 after the attach, before the snapshot, after the detach), and the
   ops tests in `tests/ops/scheduled-jobs.test.sh`. Tests of two runners on one item now call the runner directly
