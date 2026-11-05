@@ -583,7 +583,7 @@ or a token.
 - Choose the grace period when you create the run: `--grace-hours=N` (0–168), otherwise the setting below. With 0 the
   old inbound is removed in the same pass. With `--keep-old` it is never removed automatically, only with
   `--retire-now`.
-- **After the grace period**, the scheduled task's next pass removes it (`amoobot-job-inbound-moves`, at :20 and :50). To
+- **After the grace period**, the scheduled task's next pass removes it (`amoobot-job-inbound-moves`, at :21 and :51). To
   do it at once: `php bin/console app:plan:apply-inbounds <planId> --resume=<runId>`. Either way one pass handles what
   is left of phase 1 **and** every removal that is due, and running it twice does nothing twice. A run that is open
   refuses a second `--apply`: use `--resume`.
