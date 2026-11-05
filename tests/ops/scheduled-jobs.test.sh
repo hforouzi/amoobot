@@ -192,7 +192,7 @@ if [[ -e "$ROOT/bin/check-scheduled-jobs.sh" ]]; then
   touch -d '99 minutes ago' "$WORK/state/inbound-moves.last-success"
   out="$(bash "$CHECK" 2>&1)"; rc=$?
   check "  ...within 6000 s it is still OK: one skipped run tolerated" bash -c '[[ $1 -eq 0 ]] && grep -qE "^OK +inbound-moves" <<< "$2"' _ "$rc" "$out"
-  rm -rf "$WORK/state"; mkdir -p "$WORK/state"
+  rm -rf "$WORK/state"; mkdir -p "$WORK/state"; touch "$WORK/state/fresh.last-success"
   printf '# comment\n\nfresh 600 *:0/2\nstale 600 *:0/2\nnever 600 *:0/2\nbroken 600 *:0/2\n' > "$WORK/manifest"
   printf '# empty manifest\n' > "$WORK/manifest"
   bash "$CHECK" > /dev/null 2>&1; rc=$?
@@ -283,7 +283,7 @@ if have systemd-analyze; then
     check "OnCalendar '${JOB_CALENDAR}' (${JOB_NAME}) is valid" grep -q 'Next elapse' <<< "$out"
   done
   check "9 jobs rendered" test "$(ls "$units"/*.timer | wc -l)" -eq 9
-  check "inbound-moves timer and service" bash -c 'grep -qxF "OnCalendar=*:20/30" "$1/amoobot-job-inbound-moves.timer" && grep -qxF "TimeoutStartSec=600" "$1/amoobot-job-inbound-moves.service" && grep -q "scheduled-job.sh inbound-moves lifecycle -- .*app:automation:run --only=inbound-moves$" "$1/amoobot-job-inbound-moves.service"' _ "$units"
+  check "inbound-moves timer and service" bash -c 'grep -qxF "OnCalendar=*:20/30" "$1/amoobot-job-inbound-moves.timer" && grep -qxF "TimeoutStartSec=600" "$1/amoobot-job-inbound-moves.service" && grep -q "scheduled-job.sh inbound-moves lifecycle -- .*app:automation:run --only=inbound-moves " "$1/amoobot-job-inbound-moves.service"' _ "$units"
   check "no job schedules repair-stuck" bash -c '! grep -l repair-stuck "$1"/*.service' _ "$units"
   check "every job runs as www-data" bash -c '[[ $(grep -l "^User=www-data$" "$1"/*.service | wc -l) -eq 9 ]]' _ "$units"
   check "every job has OnFailure alert" bash -c '[[ $(grep -l "^OnFailure=amoobot-job-alert@%N.service$" "$1"/*.service | wc -l) -eq 9 ]]' _ "$units"
@@ -345,7 +345,7 @@ EOF
   check "preflight refuses to schedule repair-stuck" bash -c '[[ $1 -ne 0 ]] && grep -q "must never be scheduled" <<< "$2"' _ "$rc" "$out"
   sed 's/app:payments:repair-stuck --apply/app:plans:adjust-prices --percent=50/' "$WORK/deploy-bad.sh" > "$WORK/deploy-destructive.sh"
   out="$(dry_run "$WORK/deploy-destructive.sh" "$WORK/prod.env")"; rc=$?
-  check "preflight refuses other unreviewed commands" bash -c '[[ $1 -ne 0 ]] && grep -q "only the eight reviewed automation tasks" <<< "$2"' _ "$rc" "$out"
+  check "preflight refuses other unreviewed commands" bash -c '[[ $1 -ne 0 ]] && grep -q "only the nine reviewed automation tasks" <<< "$2"' _ "$rc" "$out"
 
   # write_file for real (as the current user): new -> changed, same content -> unchanged, edit -> changed.
   eval "$(sed -n '/^FILE_CHANGED=0$/,/^}/p' "$ROOT/deploy.sh")"
