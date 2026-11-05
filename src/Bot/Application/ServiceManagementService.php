@@ -50,6 +50,7 @@ use App\Shop\Domain\OrderDraftStatus;
 use App\Shop\Domain\OrderStatus;
 use App\Shop\Domain\OrderType;
 use App\Security\AdminPermission;
+use App\Subscription\Application\LinksUpdatingNotice;
 use App\Subscription\Application\SubscriptionPageUrl;
 use Doctrine\ORM\EntityManagerInterface;
 
@@ -82,6 +83,7 @@ class ServiceManagementService
         private readonly WalletPayment $walletPayment,
         private readonly ServiceOwnership $serviceOwnership,
         private readonly ServiceInboundCounts $inboundCounts,
+        private readonly LinksUpdatingNotice $linksUpdatingNotice,
     ) {
     }
 
@@ -239,6 +241,9 @@ class ServiceManagementService
                     count($configLinkSet->finalLinks),
                     $configLinkSet->droppedDuplicateCount
                 ));
+            } elseif ($configLinkSet->linksPending) {
+                // The display guard (plan-inbound-change.md 5.5): no config, the customer is told the links are being updated.
+                $this->sendAccessMessages($chatId, $service, '✅ سرویس شما آماده شد', 'telegram_subscription_fallback_config');
             }
 
             return;
@@ -271,7 +276,8 @@ class ServiceManagementService
         }
 
         $configLinkSet = $this->collectConfigLinks($service, 'telegram_resend_config');
-        if ([] === $this->accessGuard->configLinks($service, $configLinkSet->finalLinks) && null === $this->accessGuard->subscriptionUrl($service)) {
+        // While the display guard withholds the configs (plan-inbound-change.md 5.5) the access message says so instead.
+        if (!$configLinkSet->linksPending && [] === $this->accessGuard->configLinks($service, $configLinkSet->finalLinks) && null === $this->accessGuard->subscriptionUrl($service)) {
             $this->showPopupOrMessage($chatId, $callbackId, 'اطلاعات اتصال کامل نیست. لطفاً با پشتیبانی تماس بگیرید.', 'missing_config');
 
             return;
@@ -314,6 +320,13 @@ class ServiceManagementService
             }
             $configLinkSet = $this->collectConfigLinks($service, 'telegram_qr_fallback_config');
             $qrLinks = $this->accessGuard->configLinks($service, $configLinkSet->finalLinks);
+            if ([] === $qrLinks && $configLinkSet->linksPending) {
+                // The display guard (plan-inbound-change.md 5.5): no QR of a config that may name an inbound the service left.
+                $this->acknowledgeCallback($callbackId);
+                $this->telegramApiClient->sendMessage($chatId, '⏳ '.$this->linksUpdatingNotice->text());
+
+                return;
+            }
             if ([] === $qrLinks) {
                 $this->showPopupOrMessage($chatId, $callbackId, 'برای این سرویس هنوز لینک اشتراک یا کانفیگ قابل ساخت QR موجود نیست.', 'missing_subscription_and_config_qr');
 
@@ -1518,7 +1531,7 @@ class ServiceManagementService
         );
 
         $configLinkSet = $this->collectConfigLinks($service, $sourceFlow);
-        if ([] === $configLinkSet->finalLinks) {
+        if ([] === $configLinkSet->finalLinks && !$configLinkSet->linksPending) {
             return;
         }
 
@@ -1543,7 +1556,10 @@ class ServiceManagementService
 
     private function formatServiceDetailForAdmin(VpnService $service): string
     {
-        $finalLinks = $this->collectConfigLinks($service, 'telegram_admin_service_detail')->finalLinks;
+        $linkSet = $this->collectConfigLinks($service, 'telegram_admin_service_detail');
+        $finalLinks = $linkSet->finalLinks;
+        // The display guard (plan-inbound-change.md 5.5): not the stored configs, which may name an inbound the service left.
+        $configPreview = $linkSet->linksPending ? '⏳ '.$this->linksUpdatingNotice->text() : $this->preview([] === $finalLinks ? $service->getConfigText() : implode("\n", $finalLinks), 120);
 
         return sprintf(
             "سرویس #%d\nکاربر: %s\nوضعیت: %s\nانقضا: %s\nحجم کل: %s\nمصرف: %s\nباقیمانده: %s\nآخرین بروزرسانی مصرف: %s\nآخرین بررسی وضعیت: %s\nاشتراک: %s\nپیشنمایش کانفیگ: %s\nایجاد: %s",
@@ -1557,7 +1573,7 @@ class ServiceManagementService
             $service->getLastUsageSyncedAt()?->format('Y-m-d H:i:s') ?? '-',
             $service->getLastStatusCheckedAt()?->format('Y-m-d H:i:s') ?? '-',
             $this->preview($service->getSubscriptionUrl(), 80),
-            $this->preview([] === $finalLinks ? $service->getConfigText() : implode("\n", $finalLinks), 120),
+            $configPreview,
             $service->getCreatedAt()->format('Y-m-d H:i:s')
         );
     }

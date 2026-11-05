@@ -20,6 +20,7 @@ use App\Provisioning\Application\FinalConfigLinkProvider;
 use App\Provisioning\Application\ServiceConfigDeliveryRefresher;
 use App\Provisioning\Application\ServiceConfigRefreshOutcome;
 use App\Provisioning\Domain\VpnServiceStatus;
+use App\Subscription\Application\LinksUpdatingNotice;
 use App\Wallet\Application\WalletService;
 use App\Wallet\Domain\WalletKeys;
 use Psr\Log\LoggerInterface;
@@ -60,6 +61,7 @@ class PaymentCustomerNotifier
         private readonly WalletService $walletService,
         private readonly PaymentDeliveryLog $deliveryLog,
         private readonly AdminPaymentAlerter $adminAlerter,
+        private readonly LinksUpdatingNotice $linksUpdatingNotice,
     ) {
     }
 
@@ -428,13 +430,7 @@ class PaymentCustomerNotifier
             sprintf('لینک اشتراک: %s', $this->subscriptionLine($vpnService)),
         ];
 
-        $configLinks = $this->accessGuard->configLinks($vpnService, $this->finalConfigLinkProvider->getFinalLinksForService($vpnService, 'payment_confirmed_renewal'));
-        if ([] !== $configLinks) {
-            $lines[] = 'لینکهای اتصال:';
-            foreach ($configLinks as $index => $link) {
-                $lines[] = sprintf("%d.\n%s", $index + 1, $this->htmlCode($link));
-            }
-        }
+        array_push($lines, ...$this->configLinkLines($vpnService, 'payment_confirmed_renewal'));
 
         if (null !== $refreshWarning) {
             array_unshift($lines, $refreshWarning);
@@ -466,19 +462,37 @@ class PaymentCustomerNotifier
             sprintf('لینک اشتراک: %s', $this->subscriptionLine($vpnService)),
         ];
 
-        $configLinks = $this->accessGuard->configLinks($vpnService, $this->finalConfigLinkProvider->getFinalLinksForService($vpnService, 'payment_confirmed_add_traffic'));
-        if ([] !== $configLinks) {
-            $lines[] = 'لینکهای اتصال:';
-            foreach ($configLinks as $index => $link) {
-                $lines[] = sprintf("%d.\n%s", $index + 1, $this->htmlCode($link));
-            }
-        }
+        array_push($lines, ...$this->configLinkLines($vpnService, 'payment_confirmed_add_traffic'));
 
         if (null !== $refreshWarning) {
             array_unshift($lines, $refreshWarning);
         }
 
         return $this->splitLongMessage(implode("\n", $lines));
+    }
+
+    /**
+     * The connection links of a renewal or add-traffic confirmation: the usable single configs, or, while the display
+     * guard withholds them (plan-inbound-change.md 5.5), the "being updated" line. Nothing when there are none.
+     *
+     * @return list<string>
+     */
+    private function configLinkLines(VpnService $vpnService, string $sourceFlow): array
+    {
+        $linkSet = $this->finalConfigLinkProvider->getFinalLinkSetForService($vpnService, $sourceFlow);
+        if ($linkSet->linksPending) {
+            return ['⏳ '.$this->html($this->linksUpdatingNotice->text())];
+        }
+        $configLinks = $this->accessGuard->configLinks($vpnService, $linkSet->finalLinks);
+        if ([] === $configLinks) {
+            return [];
+        }
+        $lines = ['لینکهای اتصال:'];
+        foreach ($configLinks as $index => $link) {
+            $lines[] = sprintf("%d.\n%s", $index + 1, $this->htmlCode($link));
+        }
+
+        return $lines;
     }
 
     /** The usable subscription URL, the support notice when the stored one cannot be reached, or "-". */
