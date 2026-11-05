@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Shop\InboundMove;
 
+use App\Entity\Reseller;
 use App\Shop\Application\MultiInboundSettings;
 use App\Tests\Support\Fake3xui\Fake3xuiPanel;
 use App\Tests\Support\IntegrationTestCase;
@@ -132,6 +133,61 @@ final class InboundMoveRedactionTest extends IntegrationTestCase
             }
         } finally {
             ini_set('zend.exception_ignore_args', (string) $before);
+        }
+    }
+
+    /**
+     * PR P6, D5: a reseller-sold service and a claimed one go through both phases and the undo like any other, nothing
+     * names their owner, the reseller or the claimer or shows their links, and the runner writes no owner or reseller row.
+     */
+    public function testResellerSoldAndClaimedServicesAreNotRevealedAndTheirOwnersAreNotTouched(): void
+    {
+        $this->setUpMove();
+        $reseller = (new Reseller($this->createUser('8930002')->setName('Reseller Rostam')))->setDisplayName('Rostam Shop');
+        $this->em->persist($reseller);
+        $sold = $this->movableService(1)->setSoldByReseller($reseller);
+        $claimed = $this->movableService(2)->setSoldByReseller($reseller)->setUser($this->createUser('8930003')->setName('Claimer Sohrab'));
+        $undone = $this->movableService(3)->setSoldByReseller($reseller);
+        $this->em->flush();
+        $ids = [(int) $sold->getId(), (int) $claimed->getId(), (int) $undone->getId()];
+        $secrets = [...$this->secretsOf($sold), ...$this->secretsOf($claimed), ...$this->secretsOf($undone), 'Rostam', 'Sohrab', 'Owner Kaveh', '8930002', '8930003', '8940001'];
+        $owners = fn (): array => [
+            $this->em->getConnection()->fetchAllAssociative('SELECT * FROM `user` ORDER BY id'),
+            $this->em->getConnection()->fetchAllAssociative('SELECT * FROM reseller ORDER BY id'),
+            $this->em->getConnection()->fetchFirstColumn('SELECT user_id FROM vpn_service ORDER BY id'),
+        ];
+        $before = $owners();
+        $alerts = count($this->http->telegramTexts());
+
+        [$code, $dry] = $this->command(['--json' => true]);
+        self::assertSame(0, $code, $dry);
+        [$code, $applied] = $this->command(['--apply' => true]);
+        self::assertSame(0, $code, $applied);
+        $runId = (int) $this->runs()[0]['id'];
+        [$code, $retireNow] = $this->command(['--retire-now' => (string) $runId, '--service' => (string) $ids[0]]);
+        self::assertSame(0, $code, $retireNow);
+        $this->em->getConnection()->executeStatement("UPDATE service_inbound_move SET detach_after = '2000-01-01 00:00:00' WHERE service_id = ?", [$ids[1]]);
+        [$code, $retired] = $this->command(['--resume' => (string) $runId]);
+        self::assertSame(0, $code, $retired);
+        self::assertSame(['done', 'done', 'switched'], array_column($this->moves(), 'state'));
+        [$code, $undo] = $this->command(['--undo' => (string) $runId]);
+        self::assertSame(1, $code, $undo); // two services could not be put back: reported, not silently passed
+        self::assertSame(['done', 'done', 'undone'], array_column($this->moves(), 'state'));
+
+        self::assertSame($before, $owners(), 'no owner, reseller or ownership change');
+        $texts = [
+            'output' => implode("
+", [$dry, $applied, $retireNow, $retired, $undo]),
+            'stored errors' => implode("
+", array_column($this->moves(), 'last_error')),
+            'audit' => (string) json_encode($this->audits(), JSON_UNESCAPED_SLASHES),
+            'alerts' => implode("
+", array_slice($this->http->telegramTexts(), $alerts)),
+        ];
+        foreach ($texts as $where => $text) {
+            foreach ($secrets as $secret) {
+                self::assertStringNotContainsString($secret, $text, $where);
+            }
         }
     }
 }
