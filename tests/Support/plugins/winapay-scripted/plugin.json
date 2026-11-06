@@ -1,0 +1,18 @@
+{
+  "manifestVersion": 1,
+  "type": "payment_gateway",
+  "code": "winapay",
+  "name": {
+    "en": "Winapay, scripted answers (tests only)"
+  },
+  "version": "1.0.0",
+  "mainClass": "Amoobot\\Plugin\\WinapayScripted\\ScriptedWinapayPlugin",
+  "category": "payment",
+  "permissions": [
+    "payment.verify"
+  ],
+  "supportsWebhook": false,
+  "supportsOnlinePayment": true,
+  "supportsManualConfirmation": false,
+  "configSchema": []
+}
