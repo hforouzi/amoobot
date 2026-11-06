@@ -637,10 +637,10 @@ The settings, under `Settings → Plans → Moving existing services to a new in
 - `plans.inbound_move_detach_grace_hours` (24, 0–168): the grace period of a new run; a run keeps the value it was
   created with.
 
-**Adding an inbound to existing services (`--kind=add`, command line and scheduled task only).** A plan's additional
+**Adding an inbound to existing services (`--kind=add`, or on the web and in the Mini App: see "On the web panel" below).** A plan's additional
 inbound reaches new sales at once. `--kind=add` brings the plan's existing services to it: each client gets the one
 inbound C on top of what it has. The primary, UUID, subscription id and URL, expiry, limits and usage do not change, and
-neither does any other inbound. There is no page for this yet.
+neither does any other inbound.
 
 The plan changes first: **add C to the plan** (Plans → the plan → additional inbounds), then run the command. A run never
 writes the plan. It needs both `plans.inbound_move_enabled` and `plans.multi_inbound_enabled`, an active C on the panel of
@@ -682,10 +682,10 @@ Skip reasons of an add, besides those above: `is_primary` (C is the service's pr
 inbound was deleted in the bot, so the plan rules cannot be checked), `already_on_target` (it has the row already). Undo
 adds `last_inbound`: C is the only inbound the client has on the panel, so it stays, and so does the row.
 
-**Removing an inbound from existing services (`--kind=remove`, command line and scheduled task only).** Taking an additional
+**Removing an inbound from existing services (`--kind=remove`, or on the web and in the Mini App: see "On the web panel" below).** Taking an additional
 inbound off a plan changes new sales only: existing services keep it. `--kind=remove` takes the one inbound D off the plan's
 existing services. The primary, every other inbound, UUID, subscription id and URL, expiry, limits and usage do not change.
-There is no page for this yet. A client is never left with zero inbounds, and a plan's primary is never removed: changing
+A client is never left with zero inbounds, and a plan's primary is never removed: changing
 that is `--kind=primary`.
 
 The plan changes first: **take D out of the plan** (Plans → the plan → additional inbounds), then run the command. A run
@@ -735,8 +735,34 @@ off D loses only the row.
 
 After a remove of every service, D can be deleted in the bot. Rows of **deleted** services no longer hold it.
 
-The command has been tested against a simulated panel only, not against a real 3x-ui panel: try one service first.
-Design: [plan-inbound-change.md](../design/plan-inbound-change.md).
+**On the web panel (add and remove).** Plans → the plan → **Apply to existing services** (needs managing plans). With both
+switches on, the page has three tabs: move, add an inbound, remove an inbound. A trial's backing plan shows no tabs.
+
+1. Change the plan first, as above. The inbound chooser offers only what the plan allows: for an add, an active additional
+   inbound of the primary's panel that some service still lacks; for a remove, an inbound the plan no longer sells that some
+   service still has. The primary is never offered. If there is nothing to offer, the page says why and links to the plan.
+2. Choose the inbound and the scope. The page counts from the bot's own data, asks no panel and writes nothing, and works with
+   the switches off. For each service it shows the inbounds now and after. A case only the panel can answer, such as a protocol
+   mix, is counted apart and checked when the run is created.
+3. **Continue** shows the confirmation: the inbound, how many services, what the customer sees. For a remove it also shows the
+   grace period, whose field starts at **0** and ignores `plans.inbound_move_detach_grace_hours`.
+4. The confirm button only records the run as planned, as `--apply` does. The inbound-moves task does the work; the page never
+   calls the panel.
+
+The options are those of the command, and what it refuses is refused here. The plan page shows the run's block with the
+kind's own wording and counts, and the buttons to pause, resume, cancel, retry failed services and undo. With
+`plans.multi_inbound_enabled` off, resume and retry are hidden and refused, as creating a run is: pause, cancel and undo stay,
+so you can always stop. Undo works with `plans.inbound_move_enabled` alone, and it calls the panel from the request. The
+service page names the inbound ("Inbound added: C", "Inbound removed: D"), with **Retry now** on a failed move. Retry is not
+offered for an add whose undo stopped, because it would put the inbound back: run undo again. `--retire-now` is on the command
+line only.
+
+**In the Mini App admin.** The same on the plan's "Apply to existing services" screen, with the same permissions, rules,
+switches and refusals: the kind is a chip, numbers may be typed with Persian digits, cancel and undo are confirmed first, and
+a double tap is one request. A plan's additional inbounds are edited on the web panel only, so change the plan there first.
+
+The command, the pages and the Mini App have been tested against a simulated panel only, not against a real 3x-ui panel: try one service
+first. Design: [plan-inbound-change.md](../design/plan-inbound-change.md).
 
 ## Branding (customer pages)
 

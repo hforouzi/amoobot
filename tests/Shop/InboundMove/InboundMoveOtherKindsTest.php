@@ -22,8 +22,8 @@ use Twig\Environment;
  * PR P11a (docs/design/plan-inbound-add-remove.md 3.3, 13): the preparation for kind=add and kind=remove, with neither
  * reachable yet. A run row of such a kind stays inert: no pass, control, page or dry run takes it, and it is never due.
  * The kind-aware rules are pinned here on the rows they read, for P11b and P11c to open. P11b and P11c opened add and
- * remove for the command line and the scheduled task, so the "inert" tests below now pin a kind nobody built, and the web
- * stays closed to both.
+ * remove for the command line and the scheduled task, so the "inert" tests below now pin a kind nobody built. P11d opened
+ * the pages to both (InboundMoveAddRemoveWebTest).
  */
 final class InboundMoveOtherKindsTest extends IntegrationTestCase
 {
@@ -87,12 +87,12 @@ final class InboundMoveOtherKindsTest extends IntegrationTestCase
     }
 
     #[DataProvider('otherKinds')]
-    public function testNoPageTakesARunOfAnotherKind(string $kind): void
+    public function testThePagesTakeARunOfEitherKind(string $kind): void
     {
         $runId = $this->planned($kind);
 
-        self::assertNull(self::getContainer()->get(InboundMoveActions::class)->planOfRun($runId));
-        self::assertNull(self::getContainer()->get(InboundMoveOverview::class)->planRun((int) $this->gold->getId(), null));
+        self::assertSame((int) $this->gold->getId(), self::getContainer()->get(InboundMoveActions::class)->planOfRun($runId));
+        self::assertSame($kind, self::getContainer()->get(InboundMoveOverview::class)->planRun((int) $this->gold->getId(), null)['kind'] ?? null);
     }
 
     public function testAPlannedMoveIsDueOnceItsDetachAfterHasPassed(): void

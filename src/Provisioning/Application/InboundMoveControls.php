@@ -29,6 +29,12 @@ final class InboundMoveControls
     /** A move that is not finished (InboundMovePlanner's rule, on alias o): its service is held by that run meanwhile. */
     private const UNFINISHED_SQL = "(o.state IN ('planned', 'attaching', 'detaching') OR (o.state = 'switched' AND o.detach_after IS NOT NULL) OR (o.state = 'failed' AND o.next_attempt_at IS NOT NULL))";
 
+    /**
+     * On alias m: a failed move that "retry failed now" takes: not a service in an unfinished move of another run or moved
+     * again by a later one, and not an add whose undo stopped holding the row. The pages show their buttons by this rule.
+     */
+    public const RETRYABLE_SQL = "(m.state = 'failed' AND NOT EXISTS (SELECT 1 FROM service_inbound_move o WHERE o.service_id = m.service_id AND o.id <> m.id AND (o.id > m.id OR ".self::UNFINISHED_SQL.')) AND NOT '.InboundMoveRunner::ADD_UNDO_HELD_SQL.')';
+
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
         private readonly InboundMovePlanner $planner,
@@ -238,9 +244,11 @@ final class InboundMoveControls
      * "Retry failed now" (5.6, the web's run and service buttons, PR P7): the run's failed moves (one service's, or
      * all) are due at once, their attempts from zero and their alert reset, as --retire-now does for a failed retire.
      * The next pass (the scheduled task, or --resume) tries them; no panel is called here. A move whose service is in an
-     * unfinished move of another run, or was moved again by a later run, is left alone. A done run is reopened as
-     * running unless the plan has another open run; a cancelled run is not retried (it was stopped on purpose); a
-     * paused run stays paused.
+     * unfinished move of another run, or was moved again by a later run, is left alone, and so is an add whose undo
+     * stopped holding the row (RETRYABLE_SQL). A failed remove keeps its held row and starts with a read, like its
+     * back-off. A done run is reopened as running unless the plan has another open run; a cancelled run is not retried
+     * (it was stopped on purpose); a paused run stays paused. Adding and removing also need plans.multi_inbound_enabled:
+     * the pages refuse without it, since a pass would do nothing.
      *
      * @return array{ok: bool, message: string, due: int, reopened: bool}
      */
@@ -249,10 +257,6 @@ final class InboundMoveControls
         $run = $this->run($runId);
         if (null === $run) {
             return ['ok' => false, 'message' => sprintf('There is no run #%d.', $runId), 'due' => 0, 'reopened' => false];
-        }
-        if (InboundMoveRun::KIND_ADD === $run['kind'] || InboundMoveRun::KIND_REMOVE === $run['kind']) {
-            // The buttons of the web and the Mini App, closed until P11d. It would also re-arm a move whose undo failed.
-            return ['ok' => false, 'message' => sprintf(InboundMoveRun::KIND_ADD === $run['kind'] ? 'Run #%d adds an inbound: it is handled from the command line (--resume, --undo).' : 'Run #%d removes an inbound: it is handled from the command line (--retire-now, --resume, --undo).', $runId), 'due' => 0, 'reopened' => false];
         }
         if (!$enabled) {
             return ['ok' => false, 'message' => 'Moving services is switched off: nothing is retried.', 'due' => 0, 'reopened' => false];
@@ -265,10 +269,8 @@ final class InboundMoveControls
             return ['ok' => false, 'message' => sprintf('Run #%d is done and the plan has another open run (#%d): finish or cancel that one first.', $runId, $open), 'due' => 0, 'reopened' => false];
         }
         $ids = array_map('intval', $this->db()->fetchFirstColumn(
-            'SELECT m.id FROM service_inbound_move m WHERE m.run_id = ? AND m.state = ?'.(null === $serviceId ? '' : ' AND m.service_id = '.(int) $serviceId).'
-               AND NOT EXISTS (SELECT 1 FROM service_inbound_move o WHERE o.service_id = m.service_id AND o.id <> m.id AND (o.id > m.id OR '.self::UNFINISHED_SQL.'))
-             ORDER BY m.id',
-            [$runId, ServiceInboundMove::STATE_FAILED],
+            'SELECT m.id FROM service_inbound_move m WHERE m.run_id = ?'.(null === $serviceId ? '' : ' AND m.service_id = '.(int) $serviceId).' AND '.self::RETRYABLE_SQL.' ORDER BY m.id',
+            [$runId],
         ));
         if ([] === $ids) {
             return ['ok' => false, 'message' => sprintf('Run #%d has no failed service%s to retry.', $runId, null === $serviceId ? '' : ' #'.$serviceId), 'due' => 0, 'reopened' => false];

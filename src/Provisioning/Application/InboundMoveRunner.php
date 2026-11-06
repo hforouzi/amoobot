@@ -134,6 +134,12 @@ final class InboundMoveRunner
      */
     public const REMOVE_HELD_SQL = "EXISTS (SELECT 1 FROM vpn_service_inbound held WHERE held.service_id = m.service_id AND held.inbound_id = m.from_inbound_id AND held.status = 'detached' AND held.last_error = CONCAT('being removed by run #', m.run_id))";
 
+    /**
+     * On alias m: a kind=add move whose undo stopped with the service's row still held (UNDO_ADD_HOLD). Only --undo goes
+     * on from there: a retry would attach the inbound again under that hold.
+     */
+    public const ADD_UNDO_HELD_SQL = "EXISTS (SELECT 1 FROM vpn_service_inbound held WHERE held.service_id = m.service_id AND held.inbound_id = m.to_inbound_id AND held.status = 'detached' AND held.last_error = CONCAT('being removed by undo of run #', m.run_id))";
+
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
         private readonly VpnPanelDriverRegistry $drivers,
@@ -2494,7 +2500,7 @@ final class InboundMoveRunner
      * precision: every write of inbound_changed_at here also clears last_access_info_synced_at, so that "same second" can
      * never read as "already refreshed".
      */
-    private const LINKS_PENDING_SQL = 's.inbound_changed_at IS NOT NULL AND (s.last_access_info_synced_at IS NULL OR s.last_access_info_synced_at < s.inbound_changed_at)';
+    public const LINKS_PENDING_SQL = 's.inbound_changed_at IS NOT NULL AND (s.last_access_info_synced_at IS NULL OR s.last_access_info_synced_at < s.inbound_changed_at)';
 
     /** Counters, the given-up alerts (one per service) and what is pending, after a pass. */
     private function finishPass(int $runId, InboundMovePass $pass): void

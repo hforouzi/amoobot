@@ -7,6 +7,8 @@ namespace App\Provisioning\Application;
 use App\Entity\InboundMoveRun;
 use App\Entity\ServiceInboundMove;
 use App\Entity\VpnServiceInbound;
+use App\Shop\Application\MultiInboundSettings;
+use Doctrine\DBAL\ArrayParameterType;
 use Doctrine\DBAL\Connection;
 use Doctrine\ORM\EntityManagerInterface;
 
@@ -19,16 +21,24 @@ use Doctrine\ORM\EntityManagerInterface;
  * A move is "given up" when it failed with no automatic retry left (next_attempt_at NULL: the attempts are used up or
  * the retry is off). Counts per service use the service's latest move only, so a service moved by a later run is not
  * counted for an old failure.
+ *
+ * A run of any kind shows here (docs/design/plan-inbound-add-remove.md 9.1, PR P11d). "multi_off" says that
+ * plans.multi_inbound_enabled is off for an add or a remove: resume and retry are refused, pause, cancel and undo are not
+ * (6.3).
  */
 final class InboundMoveOverview
 {
     /** The latest move of each service (alias m; vpn_service s joined). */
     public const LATEST_SQL = 'm.id = (SELECT MAX(l.id) FROM service_inbound_move l WHERE l.service_id = m.service_id)';
+    /** On alias r: "retry" is refused for a cancelled run, and for a done run while the plan has another open run. */
+    private const RETRY_REFUSED_SQL = "(r.status = 'cancelled' OR (r.status = 'done' AND EXISTS (SELECT 1 FROM inbound_move_run other WHERE other.open_plan_id = r.plan_id AND other.id <> r.id)))";
     /** A move still on its way (alias m): not started, in a step, or moved with the old inbound still to be removed. */
     public const MOVING_SQL = "(m.state IN ('planned', 'attaching', 'detaching') OR (m.state = 'switched' AND m.detach_after IS NOT NULL) OR (m.state = 'undone' AND m.next_attempt_at IS NOT NULL))";
 
-    public function __construct(private readonly EntityManagerInterface $entityManager)
-    {
+    public function __construct(
+        private readonly EntityManagerInterface $entityManager,
+        private readonly MultiInboundSettings $multiInbound,
+    ) {
     }
 
     /**
@@ -57,8 +67,9 @@ final class InboundMoveOverview
         $run = $this->db()->fetchAssociative(
             'SELECT r.*, t.title AS target_title, t.remote_inbound_id AS target_remote, a.email AS admin_email
              FROM inbound_move_run r LEFT JOIN vpn_inbound t ON t.id = r.target_inbound_id LEFT JOIN admin_user a ON a.id = r.requested_by
-             WHERE r.plan_id = ? AND r.kind = ? ORDER BY (r.open_plan_id IS NULL), r.id DESC LIMIT 1',
-            [$planId, InboundMoveRun::KIND_PRIMARY],
+             WHERE r.plan_id = ? AND r.kind IN (?) ORDER BY (r.open_plan_id IS NULL), r.id DESC LIMIT 1',
+            [$planId, InboundMoveRun::RUNNABLE_KINDS],
+            [1 => ArrayParameterType::STRING],
         );
         if (false === $run) {
             return null;
@@ -69,15 +80,16 @@ final class InboundMoveOverview
         // A remove waits in "planned" for its detach_after; a primary move in "planned" has none.
         $sum = $this->db()->fetchAssociative(
             sprintf("SELECT COALESCE(SUM(%s), 0) AS retired,
-                    COALESCE(SUM(state IN ('switched', 'planned') AND detach_after IS NOT NULL), 0) AS waiting_retire,
-                    MIN(CASE WHEN state IN ('switched', 'planned') THEN detach_after END) AS next_retire,
-                    COALESCE(SUM(state = 'failed'), 0) AS failed,
-                    COALESCE(SUM(state = 'failed' AND next_attempt_at IS NULL), 0) AS given_up,
-                    COALESCE(SUM(state = 'undone'), 0) AS undone,
-                    COALESCE(SUM(state = 'cancelled'), 0) AS cancelled,
+                    COALESCE(SUM(m.state IN ('switched', 'planned') AND m.detach_after IS NOT NULL), 0) AS waiting_retire,
+                    MIN(CASE WHEN m.state IN ('switched', 'planned') THEN m.detach_after END) AS next_retire,
+                    COALESCE(SUM(m.state = 'failed'), 0) AS failed,
+                    COALESCE(SUM(m.state = 'failed' AND m.next_attempt_at IS NULL), 0) AS given_up,
+                    COALESCE(SUM(m.state = 'undone'), 0) AS undone,
+                    COALESCE(SUM(m.state = 'cancelled'), 0) AS cancelled,
                     COALESCE(SUM(%s), 0) AS undoable,
-                    COALESCE(SUM(state = 'planned' OR (state = 'failed' AND detach_after IS NULL AND next_attempt_at IS NOT NULL)), 0) AS not_started
-             FROM service_inbound_move WHERE run_id = ?", self::retiredSql($kind), self::undoableSql($kind)),
+                    COALESCE(SUM(%s), 0) AS retryable,
+                    COALESCE(SUM(m.state = 'planned' OR (m.state = 'failed' AND m.detach_after IS NULL AND m.next_attempt_at IS NOT NULL)), 0) AS not_started
+             FROM service_inbound_move m WHERE m.run_id = ?", self::retiredSql($kind), self::undoableSql($kind), InboundMoveControls::RETRYABLE_SQL),
             [$runId],
         ) ?: [];
         $skipped = [];
@@ -114,6 +126,8 @@ final class InboundMoveOverview
             'given_up' => $int('given_up'),
             'retired' => $int('retired'),
             'waiting_retire' => $int('waiting_retire'),
+            'links_pending' => $this->linksPending($runId, $kind),
+            'multi_off' => InboundMoveRun::KIND_PRIMARY !== $kind && !$this->multiInbound->enabled(),
             'next_retire_at' => null === ($sum['next_retire'] ?? null) ? null : (string) $sum['next_retire'],
             'undone' => $int('undone'),
             'cancelled' => $int('cancelled'),
@@ -123,7 +137,7 @@ final class InboundMoveOverview
                 'cancel' => $open,
                 // Undo puts back what moved and cancels, in an open run, what did not start yet (InboundMoveRunner::undo()).
                 'undo' => $int('undoable') + ($open ? $int('not_started') : 0) > 0,
-                'retry' => $int('failed') > 0 && InboundMoveRun::STATUS_CANCELLED !== $status,
+                'retry' => $int('retryable') > 0 && InboundMoveRun::STATUS_CANCELLED !== $status,
             ],
         ];
     }
@@ -136,13 +150,14 @@ final class InboundMoveOverview
 
     /**
      * Which of a run's moves undo can still put back (SQL on service_inbound_move). A done add or remove can, unlike a
-     * retired primary move: docs/design/plan-inbound-add-remove.md 7.
+     * retired primary move: docs/design/plan-inbound-add-remove.md 7. An undo cut off in a step, or with its links still
+     * owed, is finished only by undo, so those count for the button too.
      */
     public static function undoableSql(string $kind): string
     {
         return match ($kind) {
-            InboundMoveRun::KIND_ADD => "state IN ('switched', 'done', 'failed') AND (skip_reason IS NULL OR skip_reason <> 'already_on_panel')",
-            InboundMoveRun::KIND_REMOVE => "state IN ('detaching', 'failed', 'done')",
+            InboundMoveRun::KIND_ADD => "(state IN ('switched', 'done', 'failed', 'attaching', 'detaching') OR (state = 'undone' AND next_attempt_at IS NOT NULL)) AND (skip_reason IS NULL OR skip_reason <> 'already_on_panel')",
+            InboundMoveRun::KIND_REMOVE => "state IN ('attaching', 'detaching', 'failed', 'done') OR (state = 'undone' AND next_attempt_at IS NOT NULL)",
             default => "state IN ('switched', 'detaching') OR (state = 'failed' AND detach_after IS NOT NULL) OR (state = 'undone' AND next_attempt_at IS NOT NULL)",
         };
     }
@@ -162,6 +177,22 @@ final class InboundMoveOverview
         };
     }
 
+    /**
+     * The services of a run that wait for their links: an add's "switched" moves, a remove's "done" moves with the display
+     * guard still on (docs/design/plan-inbound-add-remove.md 6.4). A primary run shows no such line.
+     */
+    private function linksPending(int $runId, string $kind): int
+    {
+        return match ($kind) {
+            InboundMoveRun::KIND_ADD => (int) $this->db()->fetchOne("SELECT COUNT(*) FROM service_inbound_move WHERE run_id = ? AND state = 'switched'", [$runId]),
+            InboundMoveRun::KIND_REMOVE => (int) $this->db()->fetchOne(
+                "SELECT COUNT(*) FROM service_inbound_move m JOIN vpn_service s ON s.id = m.service_id WHERE m.run_id = ? AND m.state = 'done' AND ".InboundMoveRunner::LINKS_PENDING_SQL,
+                [$runId],
+            ),
+            default => 0,
+        };
+    }
+
     /** @return list<int> */
     private function planAdditionalIds(int $planId): array
     {
@@ -176,7 +207,8 @@ final class InboundMoveOverview
     public function serviceMove(int $serviceId): ?array
     {
         $move = $this->db()->fetchAssociative(
-            'SELECT m.*, r.status AS run_status, fi.title AS from_title, ti.title AS to_title
+            'SELECT m.*, r.status AS run_status, r.kind AS run_kind, fi.title AS from_title, ti.title AS to_title,
+                    '.self::RETRY_REFUSED_SQL.' AS retry_refused, '.InboundMoveControls::RETRYABLE_SQL.' AS retryable
              FROM service_inbound_move m JOIN inbound_move_run r ON r.id = m.run_id
              LEFT JOIN vpn_inbound fi ON fi.id = m.from_inbound_id LEFT JOIN vpn_inbound ti ON ti.id = m.to_inbound_id
              WHERE m.service_id = ? ORDER BY m.id DESC LIMIT 1',
@@ -192,13 +224,26 @@ final class InboundMoveOverview
             default => '#'.mb_substr((string) $remote, 0, 20),
         };
 
+        $kind = (string) $move['run_kind'];
+        $state = (string) $move['state'];
+        $from = $title($move['from_title'], $move['from_remote_inbound_id']);
+        $to = $title($move['to_title'], $move['to_remote_inbound_id']);
+        $multiOff = InboundMoveRun::KIND_PRIMARY !== $kind && !$this->multiInbound->enabled();
+
         return [
             'id' => (int) $move['id'],
             'run_id' => (int) $move['run_id'],
             'run_status' => (string) $move['run_status'],
-            'from' => $title($move['from_title'], $move['from_remote_inbound_id']),
-            'to' => $title($move['to_title'], $move['to_remote_inbound_id']),
-            'state' => (string) $move['state'],
+            'kind' => $kind,
+            'from' => $from,
+            'to' => $to,
+            // An add or a remove has one inbound, and its line says what happens to it (9.1), not "A -> B".
+            'inbound' => InboundMoveRun::KIND_ADD === $kind ? $to : $from,
+            'line' => self::lineKey($kind, $state),
+            'state' => $state,
+            'state_label' => self::stateKey($kind, $state),
+            'multi_off' => $multiOff,
+            'retryable' => 1 === (int) $move['retryable'] && 0 === (int) $move['retry_refused'] && !$multiOff,
             'skip_reason' => null === $move['skip_reason'] ? null : (string) $move['skip_reason'],
             'attempts' => (int) $move['attempts'],
             'next_attempt_at' => null === $move['next_attempt_at'] ? null : (string) $move['next_attempt_at'],
@@ -209,6 +254,27 @@ final class InboundMoveOverview
             'detached_at' => null === $move['detached_at'] ? null : (string) $move['detached_at'],
             'updated_at' => (string) $move['updated_at'],
         ];
+    }
+
+    /** The label of a service's add or remove line (admin domain), or null for a primary move's "A -> B". */
+    private static function lineKey(string $kind, string $state): ?string
+    {
+        return match ($kind) {
+            InboundMoveRun::KIND_ADD => 'inbound_move.service.'.(in_array($state, [ServiceInboundMove::STATE_SWITCHED, ServiceInboundMove::STATE_DONE], true) ? 'added' : 'adding'),
+            InboundMoveRun::KIND_REMOVE => 'inbound_move.service.'.(ServiceInboundMove::STATE_DONE === $state ? 'removed' : 'removing'),
+            default => null,
+        };
+    }
+
+    /** The text of a move's state (admin domain): a primary move's words do not fit every state of an add or a remove. */
+    private static function stateKey(string $kind, string $state): string
+    {
+        $own = [
+            InboundMoveRun::KIND_ADD => [ServiceInboundMove::STATE_SWITCHED, ServiceInboundMove::STATE_DETACHING, ServiceInboundMove::STATE_UNDONE],
+            InboundMoveRun::KIND_REMOVE => [ServiceInboundMove::STATE_ATTACHING, ServiceInboundMove::STATE_DETACHING],
+        ];
+
+        return in_array($state, $own[$kind] ?? [], true) ? 'inbound_move.state_'.$kind.'.'.$state : 'inbound_move.state.'.$state;
     }
 
     /**

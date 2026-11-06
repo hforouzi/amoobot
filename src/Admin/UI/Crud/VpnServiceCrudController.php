@@ -280,7 +280,9 @@ class VpnServiceCrudController extends AbstractCrudController
     /**
      * "Inbound move #run: A → B, state, attempts, next try, last error (masked), old inbound removed at / due at" on the
      * detail page of a service that was in a move (docs/design/plan-inbound-change.md 5.6, P7), with "Retry now" for a
-     * failed move (SERVICES_MANAGE, ServiceInboundsController). One query; nothing shown otherwise. Escaped.
+     * failed move it would not refuse (SERVICES_MANAGE, ServiceInboundsController). An add or a remove reads "Inbound added:
+     * C" or "Inbound removed: D" instead of "A → B" (docs/design/plan-inbound-add-remove.md 9.1). One query; nothing shown
+     * otherwise. Escaped.
      *
      * @return list<Field>
      */
@@ -294,13 +296,15 @@ class VpnServiceCrudController extends AbstractCrudController
         $t = fn (string $key, array $parameters = []): string => AdminFormat::e($this->translator->trans($key, $parameters, 'admin'));
         $id = (int) $service->getId();
         $html = sprintf(
-            '<div data-inbound-move="%d" data-move-state="%s"><strong>%s</strong> <bdi>%s</bdi> → <bdi>%s</bdi> · %s · %s',
+            '<div data-inbound-move="%d" data-move-state="%s" data-move-kind="%s"><strong>%s</strong> %s · %s · %s',
             $move['run_id'],
             AdminFormat::e($move['state']),
+            AdminFormat::e($move['kind']),
             $t('inbound_move.service.title', ['%run%' => $move['run_id']]),
-            AdminFormat::e($move['from']),
-            AdminFormat::e($move['to']),
-            $t('inbound_move.state.'.$move['state']),
+            null === $move['line']
+                ? sprintf('<bdi>%s</bdi> → <bdi>%s</bdi>', AdminFormat::e($move['from']), AdminFormat::e($move['to']))
+                : sprintf('<span data-move-line>%s <bdi>%s</bdi></span>', $t($move['line']), AdminFormat::e($move['inbound'])),
+            $t($move['state_label']),
             $t('service_inbounds.attempts', ['%count%' => $move['attempts']]),
         );
         if (null !== $move['skip_reason']) {
@@ -312,14 +316,20 @@ class VpnServiceCrudController extends AbstractCrudController
         if (null !== $move['last_error']) {
             $html .= ' · <span dir="ltr" data-move-error>'.AdminFormat::e($move['last_error']).'</span>';
         }
-        if (null !== $move['detached_at']) {
+        if ('primary' !== $move['kind']) {
+            if ('remove' === $move['kind'] && 'done' === $move['state'] && null !== $move['detached_at']) {
+                $html .= ' · '.$t('inbound_move.service.removed_at_remove', ['%at%' => $move['detached_at']]);
+            } elseif ('remove' === $move['kind'] && 'planned' === $move['state'] && null !== $move['detach_after']) {
+                $html .= ' · '.$t('inbound_move.service.due_at_remove', ['%at%' => $move['detach_after']]);
+            }
+        } elseif (null !== $move['detached_at']) {
             $html .= ' · '.$t('inbound_move.service.removed_at', ['%at%' => $move['detached_at']]);
         } elseif (null !== $move['detach_after'] && in_array($move['state'], ['switched', 'detaching', 'failed'], true)) {
             $html .= ' · '.$t('inbound_move.service.due_at', ['%at%' => $move['detach_after']]);
         } elseif ('switched' === $move['state']) {
             $html .= ' · '.$t('inbound_move.service.kept');
         }
-        if ('failed' === $move['state'] && 'cancelled' !== $move['run_status'] && $this->moveSettings->enabled() && $this->isGranted(AdminPermission::SERVICES_MANAGE->value)) {
+        if ($move['retryable'] && $this->moveSettings->enabled() && $this->isGranted(AdminPermission::SERVICES_MANAGE->value)) {
             $html .= sprintf(
                 '<form method="post" action="%s" class="d-inline ms-2" data-move-retry><input type="hidden" name="_token" value="%s"><button type="submit" class="btn btn-sm btn-warning">%s</button></form>',
                 AdminFormat::e($this->generateUrl('admin_vpn_service_retry_move', ['id' => $id])),
