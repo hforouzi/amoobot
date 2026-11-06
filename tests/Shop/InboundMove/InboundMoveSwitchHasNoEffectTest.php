@@ -15,6 +15,7 @@ use App\Provisioning\Domain\VpnServiceStatus;
 use App\Shop\Application\Checkout\PlanCatalog;
 use App\Shop\Application\InboundMoveSettings;
 use App\Tests\Shop\PlanInboundChange\PlanInboundChangeFixtures;
+use App\Tests\Support\AdminForms;
 use App\Tests\Support\IntegrationTestCase;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Component\DomCrawler\Field\ChoiceFormField;
@@ -27,6 +28,7 @@ use Symfony\Component\DomCrawler\Field\ChoiceFormField;
  */
 final class InboundMoveSwitchHasNoEffectTest extends IntegrationTestCase
 {
+    use AdminForms;
     use PlanInboundChangeFixtures;
 
     private KernelBrowser $client;
@@ -139,7 +141,7 @@ final class InboundMoveSwitchHasNoEffectTest extends IntegrationTestCase
         $service = $this->planService($this->gold, $this->de, VpnServiceStatus::ACTIVE, 1);
         $this->sellOn($this->gold, $this->nl);
         $this->fake->requests = [];
-        $this->client->request('GET', '/admin/vpn-service/'.$service->getId().'/regenerate-config');
+        $this->confirmAction($this->client, '/admin/vpn-service/'.$service->getId().'/regenerate-config');
         $this->client->followRedirect();
         $regenerated = $this->em->getConnection()->fetchAssociative('SELECT i.title AS inbound, s.config_links, s.config_text, s.remote_id, s.inbound_changed_at FROM vpn_service s LEFT JOIN vpn_inbound i ON i.id = s.inbound_id WHERE s.id = ?', [$service->getId()]) ?: [];
         $regenerate = ['flash' => $this->flashes(), 'service' => self::anonymous($regenerated), 'panel' => $this->panelCalls()];

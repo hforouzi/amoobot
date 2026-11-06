@@ -106,6 +106,9 @@ final class PanelSetupFlowTest extends IntegrationTestCase
         // Step 2: inbounds (the disabled one cannot be chosen).
         $crawler = $this->client->request('GET', '/admin/panel-setup/'.$panel->getId().'/inbounds');
         $this->assertResponseIsSuccessfulHere();
+        self::assertCount(0, $crawler->filter('input[name="inbounds[]"]'), 'the GET reads nothing from the panel');
+        $crawler = $this->client->submit($crawler->filter('form')->form());
+        $this->assertResponseIsSuccessfulHere();
         self::assertCount(3, $crawler->filter('input[name="inbounds[]"]'));
         self::assertCount(1, $crawler->filter('input[name="inbounds[]"][disabled]'));
         $form = $crawler->filter('form')->form();

@@ -9,6 +9,7 @@ use App\Entity\Plan;
 use App\Entity\TrialPlan;
 use App\Provisioning\Domain\VpnServiceStatus;
 use App\Shop\Domain\OrderType;
+use App\Tests\Support\AdminForms;
 use App\Tests\Support\ConsoleOutputAssertions;
 use App\Tests\Support\IntegrationTestCase;
 use App\Tests\Support\QueryCounter;
@@ -28,6 +29,7 @@ use Symfony\Component\Translation\TranslatableMessage;
  */
 final class PlanInboundNoticesWebTest extends IntegrationTestCase
 {
+    use AdminForms;
     use ConsoleOutputAssertions;
     use PlanInboundChangeFixtures;
 
@@ -217,14 +219,14 @@ final class PlanInboundNoticesWebTest extends IntegrationTestCase
         self::assertSame($before, $this->checksums(), 'pages write nothing');
         self::assertSame([], $this->fake->requests, 'and call no panel');
 
-        $this->client->request('GET', '/admin/vpn-service/'.$service->getId().'/regenerate-config');
+        $this->confirmAction($this->client, '/admin/vpn-service/'.$service->getId().'/regenerate-config');
         $this->client->followRedirect();
         $suffix = $this->notice('plan_inbound_drift.regenerate', ['%current%' => 'DE-1', '%planInbound%' => 'NL-2']);
         self::assertStringContainsString('refreshed from the panel', $this->page());
         self::assertStringContainsString($suffix, $this->page(), 'text (e) after the existing message');
         self::assertSame((int) $this->de->getId(), (int) $this->row('vpn_service', (int) $service->getId())['inbound_id'], 'not moved');
 
-        $this->client->request('GET', '/admin/vpn-service/'.$onNew->getId().'/regenerate-config');
+        $this->confirmAction($this->client, '/admin/vpn-service/'.$onNew->getId().'/regenerate-config');
         $this->client->followRedirect();
         self::assertStringContainsString('refreshed from the panel', $this->page());
         self::assertStringNotContainsString('still serves', $this->page(), 'on the plan\'s inbound: the message as before');
@@ -254,8 +256,9 @@ final class PlanInboundNoticesWebTest extends IntegrationTestCase
 
         $support->request('GET', '/admin/plan/'.$this->gold->getId().'/edit');
         self::assertContains($support->getResponse()->getStatusCode(), [302, 403], 'support cannot edit plans, notice or not');
+        // Regenerate config is a support action (SERVICES_ASSIST): the GET is its confirm page, and moves nothing.
         $support->request('GET', '/admin/vpn-service/'.$service->getId().'/regenerate-config');
-        self::assertContains($support->getResponse()->getStatusCode(), [302, 403]);
+        self::assertSame(200, $support->getResponse()->getStatusCode());
         self::assertSame((int) $this->de->getId(), (int) $this->row('vpn_service', (int) $service->getId())['inbound_id']);
     }
 

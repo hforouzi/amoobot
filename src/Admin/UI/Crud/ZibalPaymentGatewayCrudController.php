@@ -37,7 +37,7 @@ final class ZibalPaymentGatewayCrudController extends AbstractCrudController
     public function configureActions(Actions $actions): Actions
     {
         return $actions
-            ->disable(Action::DELETE)
+            ->disable(Action::DELETE, Action::BATCH_DELETE)
             ->add(Action::INDEX, Action::DETAIL);
     }
 

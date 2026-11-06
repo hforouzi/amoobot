@@ -11,16 +11,19 @@ use App\Security\AdminAuditLogger;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\RedirectResponse;
 use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Attribute\Route;
 
 /**
  * EasyAdmin broadcast actions (BROADCAST_SEND, AdminCrudPermissions): duplicate a finished broadcast as a new draft, and
- * retry its failed deliveries (refused while they failed because Telegram could not parse the same text). POST only
- * with a per-broadcast CSRF token (see BroadcastMessageCrudController), through the shared BroadcastAdministration.
+ * retry its failed deliveries (refused while they failed because Telegram could not parse the same text; its GET is a
+ * page with the number of deliveries). Writes are POST only with a per-broadcast CSRF token (see
+ * BroadcastMessageCrudController), through the shared BroadcastAdministration.
  */
 #[Route('/admin/broadcast')]
 final class BroadcastActionsController extends AbstractController
 {
+    use ConfirmPages;
     use TranslatedFlashes;
 
     public const CSRF_PREFIX = 'broadcast_action_';
@@ -51,9 +54,18 @@ final class BroadcastActionsController extends AbstractController
         return $this->redirectToRoute('admin_broadcast_message_edit', ['entityId' => $copy->getId()]);
     }
 
-    #[Route('/{id}/retry-failed', name: 'admin_broadcast_retry_failed', requirements: ['id' => '\d+'], methods: ['POST'])]
-    public function retryFailed(BroadcastMessage $broadcast, Request $request): RedirectResponse
+    #[Route('/{id}/retry-failed', name: 'admin_broadcast_retry_failed', requirements: ['id' => '\d+'], methods: ['GET', 'POST'])]
+    public function retryFailed(BroadcastMessage $broadcast, Request $request): Response
     {
+        if (!$request->isMethod('POST')) {
+            return $this->confirmPage(
+                'action_confirm.broadcast_retry.title',
+                [['action_confirm.broadcast_retry.body', ['%count%' => $broadcast->getFailedCount(), '%title%' => $broadcast->getTitle()]]],
+                self::CSRF_PREFIX.$broadcast->getId(),
+                'action.retry_failed_broadcast',
+                $this->generateUrl('admin_broadcast_message_detail', ['entityId' => $broadcast->getId()]),
+            );
+        }
         if (!$this->validToken($broadcast, $request)) {
             return $this->invalidToken($broadcast);
         }

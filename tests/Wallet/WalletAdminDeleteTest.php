@@ -18,8 +18,8 @@ use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 
 /**
  * Second review, minor 3: the wallet ledger references payments (by key) and customers (foreign keys, RESTRICT).
- * Orders and payments are never deleted from the admin; a customer with a wallet is refused with a clear message
- * (not a raw foreign key error page); a customer without a wallet is deleted as before.
+ * Orders and payments are never deleted from the admin. Neither are customers on the web (their services would go with
+ * the row and stay on the panel), wallet or not.
  */
 final class WalletAdminDeleteTest extends IntegrationTestCase
 {
@@ -42,10 +42,10 @@ final class WalletAdminDeleteTest extends IntegrationTestCase
         $this->client->loginUser($admin, 'main');
     }
 
-    /** The EasyAdmin delete token ("ea-delete"), from a page that still offers a delete (a customer's). */
-    private function deleteToken(User $customer): string
+    /** The EasyAdmin delete token ("ea-delete"), from a page that still offers a delete (a plan's). */
+    private function deleteToken(): string
     {
-        $crawler = $this->client->request('GET', '/admin/customer/'.$customer->getId());
+        $crawler = $this->client->request('GET', '/admin/plan/'.$this->plan->getId());
         self::assertSame(200, $this->client->getResponse()->getStatusCode());
 
         return (string) $crawler->filter('input[name="token"]')->attr('value');
@@ -56,7 +56,7 @@ final class WalletAdminDeleteTest extends IntegrationTestCase
         self::getContainer()->get(WalletService::class)->credit($this->user, 200000, WalletTransactionType::TOPUP, 'seed:'.random_int(1, PHP_INT_MAX), WalletActor::system());
         $order = $this->createOrder($this->user, $this->plan, OrderType::NEW_SERVICE, 150000);
         $payment = self::getContainer()->get(WalletPayment::class)->open($order);
-        $token = $this->deleteToken($this->createUser());
+        $token = $this->deleteToken();
 
         foreach (['order' => (int) $order->getId(), 'payment' => (int) $payment->getId()] as $page => $id) {
             $crawler = $this->client->request('GET', sprintf('/admin/%s/%d', $page, $id));
@@ -72,89 +72,38 @@ final class WalletAdminDeleteTest extends IntegrationTestCase
         self::assertSame(50000, (int) $this->em->getConnection()->fetchOne('SELECT balance FROM wallet WHERE user_id = ?', [$this->user->getId()]));
     }
 
-    public function testACustomerWithAWalletIsNotDeletedAndTheAdminIsToldWhy(): void
+    public function testNoCustomerIsDeletedFromTheWeb(): void
     {
         self::getContainer()->get(WalletService::class)->credit($this->user, 1000, WalletTransactionType::TOPUP, 'seed:'.random_int(1, PHP_INT_MAX), WalletActor::system());
-        $customerId = (int) $this->user->getId();
+        $token = $this->deleteToken();
 
-        $this->client->request('POST', '/admin/customer/'.$customerId.'/delete', ['token' => $this->deleteToken($this->user)]);
+        foreach ([$this->user, $this->createUser()] as $customer) {
+            $crawler = $this->client->request('GET', '/admin/customer/'.$customer->getId());
+            self::assertCount(0, $crawler->filter('form[action$="/delete"], a.action-delete'), 'the page offers no delete');
 
-        self::assertTrue($this->client->getResponse()->isRedirect(), (string) $this->client->getResponse()->getStatusCode());
-        self::assertStringContainsString('/admin/customer', (string) $this->client->getResponse()->headers->get('Location'));
-        $page = $this->client->followRedirect();
-        // The admin's default language is Persian: "customer #N has a wallet and cannot be deleted".
-        self::assertStringContainsString('مشتری #'.$customerId.' کیف پول دارد و حذف نمی‌شود', $page->text());
-        self::assertSame(1, (int) $this->em->getConnection()->fetchOne('SELECT COUNT(*) FROM `user` WHERE id = ?', [$customerId]));
+            $this->client->request('POST', '/admin/customer/'.$customer->getId().'/delete', ['token' => $token]);
+
+            self::assertSame(403, $this->client->getResponse()->getStatusCode());
+            self::assertSame(1, (int) $this->em->getConnection()->fetchOne('SELECT COUNT(*) FROM `user` WHERE id = ?', [$customer->getId()]));
+        }
         self::assertSame(1, (int) $this->em->getConnection()->fetchOne('SELECT COUNT(*) FROM wallet'));
         self::assertSame(0, (int) $this->em->getConnection()->fetchOne("SELECT COUNT(*) FROM admin_audit_log WHERE action LIKE '%delete%'"), 'no delete was audited');
     }
 
-    /**
-     * The customer list's batch delete, as its button posts it.
-     *
-     * @param list<int> $ids
-     */
-    private function batchDelete(array $ids): void
-    {
-        $crawler = $this->client->request('GET', '/admin/customer');
-        self::assertSame(200, $this->client->getResponse()->getStatusCode());
-        $button = $crawler->filter('[data-action-batch][data-action-name="batchDelete"]');
-        self::assertCount(1, $button, 'the customer list offers a batch delete');
-
-        $fields = [
-            'batchActionName' => 'batchDelete',
-            'entityFqcn' => User::class,
-            'batchActionUrl' => (string) $button->attr('data-action-url'),
-            'batchActionCsrfToken' => (string) $button->attr('data-action-csrf-token'),
-        ];
-        foreach ($ids as $i => $id) {
-            $fields['batchActionEntityIds'][$i] = (string) $id;
-        }
-        $this->client->request('POST', (string) $button->attr('data-action-url'), $fields);
-    }
-
-    /** Third review, minor: a batch used to delete the customers selected before the one with a wallet. */
-    public function testABatchWithACustomerWithAWalletDeletesNobody(): void
-    {
-        $before = $this->createUser();
-        self::getContainer()->get(WalletService::class)->credit($this->user, 1000, WalletTransactionType::TOPUP, 'seed:'.random_int(1, PHP_INT_MAX), WalletActor::system());
-        $after = $this->createUser();
-        // EasyAdmin deletes in the posted order: the customer with the wallet comes second.
-        $ids = [(int) $before->getId(), (int) $this->user->getId(), (int) $after->getId()];
-
-        $this->batchDelete($ids);
-
-        self::assertTrue($this->client->getResponse()->isRedirect(), (string) $this->client->getResponse()->getStatusCode());
-        $page = $this->client->followRedirect();
-        // Persian (the admin's default language): "nothing was deleted: customer(s) #N have a wallet".
-        self::assertStringContainsString('چیزی حذف نشد: مشتری(های) #'.$this->user->getId().' کیف پول دارند', $page->text());
-        self::assertSame(3, (int) $this->em->getConnection()->fetchOne('SELECT COUNT(*) FROM `user` WHERE id IN (?, ?, ?)', $ids), 'nobody was deleted');
-        self::assertSame(0, (int) $this->em->getConnection()->fetchOne("SELECT COUNT(*) FROM admin_audit_log WHERE action LIKE '%delete%'"), 'no delete was audited');
-    }
-
-    /**
-     * A batch without a customer with a wallet goes on to EasyAdmin's own batch delete, as before. (One customer: a batch
-     * of several customers with Telegram accounts fails in the ORM on the second one, with or without this guard; a
-     * separate, older issue.)
-     */
-    public function testABatchWithoutACustomerWithAWalletIsDeletedAsBefore(): void
-    {
-        $customerId = (int) $this->createUser()->getId();
-
-        $this->batchDelete([$customerId]);
-
-        self::assertTrue($this->client->getResponse()->isRedirect(), (string) $this->client->getResponse()->getStatusCode());
-        self::assertSame(0, (int) $this->em->getConnection()->fetchOne('SELECT COUNT(*) FROM `user` WHERE id = ?', [$customerId]));
-    }
-
-    public function testACustomerWithoutAWalletIsDeletedAsBefore(): void
+    public function testTheCustomerListOffersNoBatchDeleteAndRefusesOne(): void
     {
         $customer = $this->createUser();
-        $customerId = (int) $customer->getId();
+        $crawler = $this->client->request('GET', '/admin/customer');
+        self::assertCount(0, $crawler->filter('[data-action-batch][data-action-name="batchDelete"]'));
 
-        $this->client->request('POST', '/admin/customer/'.$customerId.'/delete', ['token' => $this->deleteToken($customer)]);
+        $this->client->request('POST', '/admin/customer/batch-delete', [
+            'batchActionName' => 'batchDelete',
+            'entityFqcn' => User::class,
+            'batchActionCsrfToken' => 'x',
+            'batchActionEntityIds' => [(string) $customer->getId()],
+        ]);
 
-        self::assertTrue($this->client->getResponse()->isRedirect(), (string) $this->client->getResponse()->getStatusCode());
-        self::assertSame(0, (int) $this->em->getConnection()->fetchOne('SELECT COUNT(*) FROM `user` WHERE id = ?', [$customerId]));
+        // With a valid token it is a 403: AdminSafetyTest.
+        self::assertSame(1, (int) $this->em->getConnection()->fetchOne('SELECT COUNT(*) FROM `user` WHERE id = ?', [$customer->getId()]));
     }
 }

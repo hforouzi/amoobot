@@ -18,7 +18,7 @@ enum AdminPermission: string
     case CUSTOMERS_VIEW = 'PERM_CUSTOMERS_VIEW';
     case CUSTOMERS_MANAGE = 'PERM_CUSTOMERS_MANAGE';
     case SERVICES_VIEW = 'PERM_SERVICES_VIEW';
-    /** Help a customer without changing what they paid for: resend config, refresh, sync usage. */
+    /** Help a customer without changing what they paid for: resend config, refresh, sync usage, regenerate config on the web. */
     case SERVICES_ASSIST = 'PERM_SERVICES_ASSIST';
     /** Change a service: suspend, activate, extend, add traffic, reset usage, start a renewal, edit it on the web. */
     case SERVICES_MANAGE = 'PERM_SERVICES_MANAGE';
@@ -32,7 +32,7 @@ enum AdminPermission: string
     case SETTINGS_MANAGE = 'PERM_SETTINGS_MANAGE';
     /** Payment gateways and store payment methods. */
     case GATEWAYS_MANAGE = 'PERM_GATEWAYS_MANAGE';
-    /** Panels and inbounds (including their sync/test/regenerate actions). */
+    /** Panels and inbounds (including their sync/test actions and regenerating an inbound's services). */
     case PANELS_MANAGE = 'PERM_PANELS_MANAGE';
     case PLUGINS_MANAGE = 'PERM_PLUGINS_MANAGE';
     case ADMINS_MANAGE = 'PERM_ADMINS_MANAGE';

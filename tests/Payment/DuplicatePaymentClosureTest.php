@@ -13,6 +13,7 @@ use App\Payment\Application\Settlement\VerifiedPayment;
 use App\Payment\Domain\Dto\PaymentVerificationResult;
 use App\Payment\Domain\PaymentStatus;
 use App\Shop\Domain\OrderStatus;
+use App\Tests\Support\AdminForms;
 use App\Tests\Support\IntegrationTestCase;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 
@@ -21,6 +22,8 @@ use Symfony\Bundle\FrameworkBundle\KernelBrowser;
  */
 final class DuplicatePaymentClosureTest extends IntegrationTestCase
 {
+    use AdminForms;
+
     private function settlement(): PaymentSettlementService
     {
         return self::getContainer()->get(PaymentSettlementService::class);
@@ -134,15 +137,15 @@ final class DuplicatePaymentClosureTest extends IntegrationTestCase
         $client->loginUser($admin, 'main');
 
         $crawler = $client->request('GET', '/admin/payment?tab=needs_review');
-        $approve = $crawler->filter(sprintf('form[action*="/admin/payment/%d/confirm"]', $duplicate->getId()));
-        $client->request('POST', (string) $approve->attr('action'));
+        $approve = $crawler->filter(sprintf('a[href*="/admin/payment/%d/confirm"]', $duplicate->getId()));
+        $this->confirmAction($client, (string) $approve->attr('href'));
         $client->followRedirect();
         self::assertStringContainsString('already fulfilled', (string) $client->getResponse()->getContent());
 
         $crawler = $client->request('GET', '/admin/payment?tab=needs_review');
-        $form = $crawler->filter(sprintf('form[action*="/admin/payment/%d/reject"][action*="refunded=1"]', $duplicate->getId()));
-        self::assertCount(1, $form, 'Reject (refunded) is offered');
-        $client->request('POST', (string) $form->attr('action'));
+        $reject = $crawler->filter(sprintf('a[href*="/admin/payment/%d/reject"][href*="refunded=1"]', $duplicate->getId()));
+        self::assertCount(1, $reject, 'Reject (refunded) is offered');
+        $this->confirmAction($client, (string) $reject->attr('href'));
 
         self::assertNotNull($this->row('payment', (int) $duplicate->getId())['refunded_at']);
         self::assertSame(OrderStatus::PROVISIONED, $this->row('`order`', (int) $order->getId())['status']);

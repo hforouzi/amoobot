@@ -15,6 +15,7 @@ use App\Provisioning\Domain\VpnServiceStatus;
 use App\Reseller\Application\ResellerSettings;
 use App\Reseller\Domain\ResellerStatus;
 use App\Security\AdminPermission;
+use App\Tests\Support\AdminForms;
 use App\Tests\Support\BotAdminTestTrait;
 use App\Tests\Support\IntegrationTestCase;
 use App\Tests\Support\MiniAppAdminFixtures;
@@ -31,6 +32,7 @@ use Symfony\Component\Routing\RouterInterface;
  */
 final class ResellerAdminTest extends IntegrationTestCase
 {
+    use AdminForms;
     use BotAdminTestTrait;
     use MiniAppAdminFixtures;
     use MiniAppTestTrait;
@@ -177,12 +179,12 @@ final class ResellerAdminTest extends IntegrationTestCase
         self::assertSame('1000', $page->filter('#reseller_rounding')->attr('value'));
         $settings = self::getContainer()->get(ResellerSettings::class);
 
-        $this->web->request('POST', '/admin/settings?tab=resellers', ['reseller_enabled' => 'on', 'reseller_floor_percent' => '120', 'reseller_rounding' => '1000']);
+        $this->saveSettings($this->web, 'resellers', ['reseller_enabled' => 'on', 'reseller_floor_percent' => '120', 'reseller_rounding' => '1000']);
         self::assertFalse($settings->enabled(), 'a refused form saves nothing');
-        $this->web->request('POST', '/admin/settings?tab=resellers', ['reseller_enabled' => 'on', 'reseller_floor_percent' => '40', 'reseller_rounding' => '0']);
+        $this->saveSettings($this->web, 'resellers', ['reseller_enabled' => 'on', 'reseller_floor_percent' => '40', 'reseller_rounding' => '0']);
         self::assertFalse($settings->enabled());
 
-        $this->web->request('POST', '/admin/settings?tab=resellers', ['reseller_enabled' => 'on', 'reseller_floor_percent' => '37.5', 'reseller_rounding' => '500']);
+        $this->saveSettings($this->web, 'resellers', ['reseller_enabled' => 'on', 'reseller_floor_percent' => '37.5', 'reseller_rounding' => '500']);
         self::assertTrue($settings->enabled());
         self::assertSame(3750, $settings->floorBp());
         self::assertSame(500, $settings->rounding());
@@ -211,18 +213,16 @@ final class ResellerAdminTest extends IntegrationTestCase
         self::assertStringContainsString(',120000,150000,30000,0', $csv);
     }
 
-    /** A reseller (here without a wallet yet) cannot be deleted as a customer: a clear refusal, not a key error. */
+    /** A reseller (here without a wallet yet) cannot be deleted as a customer: no customer is deleted from the web. */
     public function testAResellersCustomerAccountIsNotDeleted(): void
     {
         $this->reseller();
         $this->webAdmin(AdminUser::ROLE_SUPER_ADMIN);
         $customerId = (int) $this->buyer->getId();
-        $token = (string) $this->web->request('GET', '/admin/customer/'.$customerId)->filter('input[name="token"]')->attr('value');
 
-        $this->web->request('POST', '/admin/customer/'.$customerId.'/delete', ['token' => $token]);
+        $this->web->request('POST', '/admin/customer/'.$customerId.'/delete');
 
-        self::assertTrue($this->web->getResponse()->isRedirect(), (string) $this->web->getResponse()->getStatusCode());
-        self::assertStringContainsString('مشتری #'.$customerId.' نماینده است', $this->web->followRedirect()->text());
+        self::assertSame(403, $this->web->getResponse()->getStatusCode());
         self::assertSame(1, $this->rows('reseller'));
         self::assertSame(1, (int) $this->em->getConnection()->fetchOne('SELECT COUNT(*) FROM `user` WHERE id = ?', [$customerId]));
     }

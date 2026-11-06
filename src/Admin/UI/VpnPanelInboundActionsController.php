@@ -26,14 +26,18 @@ use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\RedirectResponse;
 use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Attribute\Route;
 use Symfony\Contracts\Translation\TranslatorInterface;
 
 #[Route('/admin')]
 final class VpnPanelInboundActionsController extends AbstractController
 {
+    use ConfirmPages;
     use TranslatedFlashes;
 
+    /** CSRF token id prefix of the other actions here: the action and the row's id are added. */
+    public const CSRF_PREFIX = 'vpn_action_';
     /** CSRF token id prefix of the inbound-wide "regenerate service configs" form (VpnInboundCrudController). */
     public const REGENERATE_INBOUND_CSRF_PREFIX = 'regenerate_inbound_configs_';
     /**
@@ -52,9 +56,17 @@ final class VpnPanelInboundActionsController extends AbstractController
     ) {
     }
 
-    #[Route('/vpn-panel/{id}/sync-inbounds', name: 'admin_vpn_panel_sync_inbounds', methods: ['GET'])]
-    public function syncPanelInbounds(VpnPanel $panel, VpnInboundSyncService $inboundSyncService): RedirectResponse
+    #[Route('/vpn-panel/{id}/sync-inbounds', name: 'admin_vpn_panel_sync_inbounds', methods: ['GET', 'POST'])]
+    public function syncPanelInbounds(VpnPanel $panel, Request $request, VpnInboundSyncService $inboundSyncService): Response
     {
+        $csrf = self::CSRF_PREFIX.'sync_panel_'.$panel->getId();
+        if (!$request->isMethod('POST')) {
+            return $this->confirmPage('action_confirm.sync_inbounds.title', [['action_confirm.sync_inbounds.body', ['%panel%' => $panel->getTitle()]]], $csrf, 'action.sync_inbounds', $this->generateUrl('admin_vpn_panel_index'));
+        }
+        if (!$this->validToken($csrf, $request)) {
+            return $this->redirectToPanels();
+        }
+
         try {
             $sync = $inboundSyncService->syncPanelInbounds($panel);
             $this->flash('success', 'flash.inbound.synced', ['%count%' => $sync->syncedCount]);
@@ -83,10 +95,21 @@ final class VpnPanelInboundActionsController extends AbstractController
         ]);
     }
 
-    #[Route('/vpn-inbound/{id}/test-create-client', name: 'admin_vpn_inbound_test_create_client', methods: ['GET'])]
-    public function testCreateClient(VpnInbound $inbound, VpnPanelDriverRegistry $driverRegistry): RedirectResponse
+    /**
+     * A real client on the panel, deleted again in the same request. Only the client this request made is deleted: its
+     * name is new (time and random), and a client answered under any other name is left alone.
+     */
+    #[Route('/vpn-inbound/{id}/test-create-client', name: 'admin_vpn_inbound_test_create_client', methods: ['GET', 'POST'])]
+    public function testCreateClient(VpnInbound $inbound, Request $request, VpnPanelDriverRegistry $driverRegistry): Response
     {
         $panel = $inbound->getPanel();
+        $csrf = self::CSRF_PREFIX.'test_client_'.$inbound->getId();
+        if (!$request->isMethod('POST')) {
+            return $this->confirmPage('action_confirm.test_client.title', [['action_confirm.test_client.body', ['%panel%' => $panel->getTitle(), '%inbound%' => $inbound->getTitle()]]], $csrf, 'action.test_create_client', $this->inboundsUrl($inbound));
+        }
+        if (!$this->validToken($csrf, $request)) {
+            return $this->redirectToInbounds($inbound);
+        }
         if ('sanaei_3xui' !== $panel->getType()) {
             $this->flash('danger', 'flash.inbound.test_client_unsupported');
 
@@ -94,7 +117,7 @@ final class VpnPanelInboundActionsController extends AbstractController
         }
 
         $driver = $driverRegistry->resolve($panel);
-        $username = sprintf('test_amoobot_%d', time());
+        $username = sprintf('test_amoobot_%d_%s', time(), bin2hex(random_bytes(3)));
 
         try {
             $created = $driver->createService(new CreateVpnServiceRequest(
@@ -107,17 +130,39 @@ final class VpnPanelInboundActionsController extends AbstractController
                 meta: ['test' => true],
             ), $panel);
 
-            $this->flash('success', 'flash.inbound.test_client_created', ['%username%' => $created->username ?? $username]);
         } catch (\Throwable $e) {
-            $this->flash('danger', 'flash.inbound.test_client_failed', ['%error%' => $e->getMessage()]);
+            // It may exist anyway: the driver can fail after the panel added it.
+            $this->flash('danger', 'flash.inbound.test_client_failed', ['%error%' => $e->getMessage(), '%username%' => $username]);
+
+            return $this->redirectToInbounds($inbound);
+        }
+
+        if ($username !== $created->username) {
+            $this->flash('warning', 'flash.inbound.test_client_other_name', ['%username%' => $created->username, '%expected%' => $username]);
+
+            return $this->redirectToInbounds($inbound);
+        }
+        try {
+            $driver->deleteService($created->remoteId, $panel);
+            $this->flash('success', 'flash.inbound.test_client_removed', ['%username%' => $username]);
+        } catch (\Throwable $e) {
+            $this->flash('warning', 'flash.inbound.test_client_not_removed', ['%username%' => $username, '%error%' => $e->getMessage()]);
         }
 
         return $this->redirectToInbounds($inbound);
     }
 
-    #[Route('/vpn-inbound/{id}/resync', name: 'admin_vpn_inbound_resync', methods: ['GET'])]
-    public function resyncInbound(VpnInbound $inbound, VpnInboundSyncService $inboundSyncService): RedirectResponse
+    #[Route('/vpn-inbound/{id}/resync', name: 'admin_vpn_inbound_resync', methods: ['GET', 'POST'])]
+    public function resyncInbound(VpnInbound $inbound, Request $request, VpnInboundSyncService $inboundSyncService): Response
     {
+        $csrf = self::CSRF_PREFIX.'resync_'.$inbound->getId();
+        if (!$request->isMethod('POST')) {
+            return $this->confirmPage('action_confirm.resync_inbound.title', [['action_confirm.resync_inbound.body', ['%inbound%' => $inbound->getTitle()]]], $csrf, 'action.resync_inbound', $this->inboundsUrl($inbound));
+        }
+        if (!$this->validToken($csrf, $request)) {
+            return $this->redirectToInbounds($inbound);
+        }
+
         try {
             $inboundSyncService->syncInbound($inbound);
             $this->flash('success', 'flash.inbound.resynced');
@@ -128,9 +173,17 @@ final class VpnPanelInboundActionsController extends AbstractController
         return $this->redirectToInbounds($inbound);
     }
 
-    #[Route('/vpn-inbound/{id}/sync-access-metadata', name: 'admin_vpn_inbound_sync_access_metadata', methods: ['GET'])]
-    public function syncInboundAccessMetadata(VpnInbound $inbound, VpnInboundSyncService $inboundSyncService): RedirectResponse
+    #[Route('/vpn-inbound/{id}/sync-access-metadata', name: 'admin_vpn_inbound_sync_access_metadata', methods: ['GET', 'POST'])]
+    public function syncInboundAccessMetadata(VpnInbound $inbound, Request $request, VpnInboundSyncService $inboundSyncService): Response
     {
+        $csrf = self::CSRF_PREFIX.'sync_metadata_'.$inbound->getId();
+        if (!$request->isMethod('POST')) {
+            return $this->confirmPage('action_confirm.sync_metadata.title', [['action_confirm.sync_metadata.body', ['%inbound%' => $inbound->getTitle()]]], $csrf, 'action.sync_access_metadata', $this->inboundsUrl($inbound));
+        }
+        if (!$this->validToken($csrf, $request)) {
+            return $this->redirectToInbounds($inbound);
+        }
+
         try {
             $inboundSyncService->syncInbound($inbound);
             $this->flash('success', 'flash.inbound.metadata_synced');
@@ -141,26 +194,33 @@ final class VpnPanelInboundActionsController extends AbstractController
         return $this->redirectToInbounds($inbound);
     }
 
-    #[Route('/vpn-inbound/{id}/regenerate-service-configs', name: 'admin_vpn_inbound_regenerate_service_configs', methods: ['POST'])]
-    public function regenerateInboundServiceConfigs(VpnInbound $inbound, Request $request): RedirectResponse
+    #[Route('/vpn-inbound/{id}/regenerate-service-configs', name: 'admin_vpn_inbound_regenerate_service_configs', methods: ['GET', 'POST'])]
+    public function regenerateInboundServiceConfigs(VpnInbound $inbound, Request $request): Response
     {
-        $token = $request->request->get('_token') ?? $request->query->get('_token');
-        if (!is_string($token) || !$this->isCsrfTokenValid(self::REGENERATE_INBOUND_CSRF_PREFIX.$inbound->getId(), $token)) {
-            $this->flash('danger', 'flash.csrf_expired');
-
-            return $this->redirectToInbounds($inbound);
-        }
+        $csrf = self::REGENERATE_INBOUND_CSRF_PREFIX.$inbound->getId();
         $count = (int) $this->entityManager->createQueryBuilder()
             ->select('COUNT(s.id)')->from(VpnService::class, 's')
             ->where('s.inbound = :inbound')->andWhere('s.status <> :deleted')
             ->setParameter('inbound', $inbound)->setParameter('deleted', VpnServiceStatus::DELETED)
             ->getQuery()->getSingleScalarResult();
+        $tooMany = [
+            '%count%' => $count,
+            '%max%' => self::WEB_REGENERATE_MAX_SERVICES,
+            '%command%' => sprintf('php bin/console app:inbound:regenerate-service-configs %d --apply', $inbound->getId() ?? 0),
+        ];
+        if (!$request->isMethod('POST')) {
+            $lines = [['action_confirm.regenerate_inbound.body', ['%count%' => $count, '%inbound%' => $inbound->getTitle()]]];
+            if ($count > self::WEB_REGENERATE_MAX_SERVICES) {
+                return $this->confirmPage('action_confirm.regenerate_inbound.title', [...$lines, ['flash.inbound.regenerate_use_cli', $tooMany]], $csrf, null, $this->inboundsUrl($inbound));
+            }
+
+            return $this->confirmPage('action_confirm.regenerate_inbound.title', $lines, $csrf, 'action.regenerate_service_configs', $this->inboundsUrl($inbound));
+        }
+        if (!$this->validToken($csrf, $request)) {
+            return $this->redirectToInbounds($inbound);
+        }
         if ($count > self::WEB_REGENERATE_MAX_SERVICES) {
-            $this->flash('warning', 'flash.inbound.regenerate_use_cli', [
-                '%count%' => $count,
-                '%max%' => self::WEB_REGENERATE_MAX_SERVICES,
-                '%command%' => sprintf('php bin/console app:inbound:regenerate-service-configs %d --apply', $inbound->getId() ?? 0),
-            ]);
+            $this->flash('warning', 'flash.inbound.regenerate_use_cli', $tooMany);
 
             return $this->redirectToInbounds($inbound);
         }
@@ -262,9 +322,18 @@ final class VpnPanelInboundActionsController extends AbstractController
         return $this->redirectToInbounds($inbound);
     }
 
-    #[Route('/vpn-service/{id}/regenerate-config', name: 'admin_vpn_service_regenerate_config', methods: ['GET'])]
-    public function regenerateServiceConfig(VpnService $service, ServiceConfigRegenerator $regenerator, PlanInboundDrift $inboundDrift, TranslatorInterface $translator): RedirectResponse
+    /** SERVICES_ASSIST (AdminCrudPermissions::ROUTES): the one action here that is not a panel admin's. */
+    #[Route('/vpn-service/{id}/regenerate-config', name: 'admin_vpn_service_regenerate_config', methods: ['GET', 'POST'])]
+    public function regenerateServiceConfig(VpnService $service, Request $request, ServiceConfigRegenerator $regenerator, PlanInboundDrift $inboundDrift, TranslatorInterface $translator): Response
     {
+        $csrf = self::CSRF_PREFIX.'regenerate_service_'.$service->getId();
+        if (!$request->isMethod('POST')) {
+            return $this->confirmPage('action_confirm.regenerate_service.title', [['action_confirm.regenerate_service.body', ['%id%' => $service->getId(), '%name%' => (string) $service->getUsername()]]], $csrf, 'action.regenerate_config', $this->generateUrl('admin_vpn_service_index'));
+        }
+        if (!$this->validToken($csrf, $request)) {
+            return $this->redirectToServices();
+        }
+
         $result = $regenerator->regenerate($service, 'admin_service_regenerate_config');
         // The service is not on the inbound its plan now sells: the message says why the links are still that inbound's
         // (docs/design/plan-inbound-change.md 3.3 (e)). Otherwise the messages are exactly as before.
@@ -287,6 +356,15 @@ final class VpnPanelInboundActionsController extends AbstractController
         return $this->redirectToServices();
     }
 
+    private function validToken(string $csrf, Request $request): bool
+    {
+        if ($this->isCsrfTokenValid($csrf, (string) $request->request->get('_token'))) {
+            return true;
+        }
+        $this->flash('danger', 'flash.csrf_expired');
+
+        return false;
+    }
 
     private function redirectToPanels(): RedirectResponse
     {
@@ -297,6 +375,11 @@ final class VpnPanelInboundActionsController extends AbstractController
     private function redirectToInbounds(VpnInbound $inbound): RedirectResponse
     {
         return $this->redirectToRoute('admin_vpn_panel_view_inbounds', ['id' => $inbound->getPanel()->getId()]);
+    }
+
+    private function inboundsUrl(VpnInbound $inbound): string
+    {
+        return $this->generateUrl('admin_vpn_panel_view_inbounds', ['id' => $inbound->getPanel()->getId()]);
     }
 
     private function redirectToServices(): RedirectResponse

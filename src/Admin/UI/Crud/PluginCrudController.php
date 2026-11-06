@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Admin\UI\Crud;
 
+use App\Admin\UI\ConfirmPages;
 use App\Admin\UI\TranslatedFlashes;
 use App\Admin\Security\AdminCrudPermissions;
 use App\Admin\UI\DashboardController;
@@ -32,7 +33,10 @@ use Symfony\Component\Validator\Constraints\File;
 use Symfony\Component\Validator\Constraints\NotNull;
 final class PluginCrudController extends AbstractCrudController
 {
+    use ConfirmPages;
     use TranslatedFlashes;
+
+    public const CSRF_PREFIX = 'plugin_action_';
 
     public function __construct(
         private readonly PluginManager $pluginManager,
@@ -64,11 +68,11 @@ final class PluginCrudController extends AbstractCrudController
             ->linkToRoute('admin_plugins_upload');
 
         $enable = Action::new('enablePlugin', 'plugin.enable', 'fa fa-toggle-on')
-            ->linkToRoute('admin_plugins_enable', fn (Plugin $plugin): array => ['id' => $plugin->getId()])
+            ->linkToUrl(fn (Plugin $plugin): string => $this->generateUrl('admin_plugins_enable', ['id' => $plugin->getId()]))
             ->displayIf(fn (Plugin $plugin): bool => Plugin::STATUS_ENABLED !== $plugin->getStatus());
 
         $disable = Action::new('disablePlugin', 'plugin.disable', 'fa fa-toggle-off')
-            ->linkToRoute('admin_plugins_disable', fn (Plugin $plugin): array => ['id' => $plugin->getId()])
+            ->linkToUrl(fn (Plugin $plugin): string => $this->generateUrl('admin_plugins_disable', ['id' => $plugin->getId()]))
             ->displayIf(fn (Plugin $plugin): bool => Plugin::STATUS_ENABLED === $plugin->getStatus());
 
         return $actions
@@ -182,9 +186,17 @@ final class PluginCrudController extends AbstractCrudController
         ]);
     }
 
-    #[Route('/admin/plugins/{id}/enable', name: 'admin_plugins_enable', methods: ['GET'])]
-    public function enable(Plugin $plugin, AdminAuditLogger $auditLogger): Response
+    #[Route('/admin/plugins/{id}/enable', name: 'admin_plugins_enable', methods: ['GET', 'POST'])]
+    public function enable(Plugin $plugin, Request $request, AdminAuditLogger $auditLogger): Response
     {
+        $csrf = self::CSRF_PREFIX.'enable_'.$plugin->getId();
+        if (!$request->isMethod('POST')) {
+            return $this->confirmPlugin($plugin, 'enable', $csrf);
+        }
+        if (!$this->isCsrfTokenValid($csrf, (string) $request->request->get('_token'))) {
+            return $this->invalidToken();
+        }
+
         $this->pluginManager->enable($plugin);
         $auditLogger->record('plugin.enable', 'Plugin', $plugin->getId(), ['code' => $plugin->getCode()]);
         $this->flash('success', 'flash.plugin.enabled');
@@ -192,12 +204,39 @@ final class PluginCrudController extends AbstractCrudController
         return $this->redirect($this->pluginListUrl());
     }
 
-    #[Route('/admin/plugins/{id}/disable', name: 'admin_plugins_disable', methods: ['GET'])]
-    public function disable(Plugin $plugin, AdminAuditLogger $auditLogger): Response
+    #[Route('/admin/plugins/{id}/disable', name: 'admin_plugins_disable', methods: ['GET', 'POST'])]
+    public function disable(Plugin $plugin, Request $request, AdminAuditLogger $auditLogger): Response
     {
+        $csrf = self::CSRF_PREFIX.'disable_'.$plugin->getId();
+        if (!$request->isMethod('POST')) {
+            return $this->confirmPlugin($plugin, 'disable', $csrf);
+        }
+        if (!$this->isCsrfTokenValid($csrf, (string) $request->request->get('_token'))) {
+            return $this->invalidToken();
+        }
+
         $this->pluginManager->disable($plugin);
         $auditLogger->record('plugin.disable', 'Plugin', $plugin->getId(), ['code' => $plugin->getCode()]);
         $this->flash('success', 'flash.plugin.disabled');
+
+        return $this->redirect($this->pluginListUrl());
+    }
+
+    private function confirmPlugin(Plugin $plugin, string $action, string $csrf): Response
+    {
+        return $this->confirmPage(
+            'action_confirm.plugin_'.$action.'.title',
+            [['action_confirm.plugin_'.$action.'.body', ['%plugin%' => $plugin->getCode(), '%version%' => $plugin->getVersion()]]],
+            $csrf,
+            'plugin.'.$action,
+            $this->pluginListUrl(),
+            'enable' === $action ? 'primary' : 'warning',
+        );
+    }
+
+    private function invalidToken(): Response
+    {
+        $this->flash('danger', 'flash.csrf_expired');
 
         return $this->redirect($this->pluginListUrl());
     }

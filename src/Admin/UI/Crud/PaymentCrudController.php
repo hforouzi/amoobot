@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Admin\UI\Crud;
 
 use App\Admin\Application\PaymentTabs;
-use App\Admin\UI\PaymentModerationController;
 use App\Admin\UI\Support\AdminFormat;
 use App\Admin\UI\Support\AdminStatusBadge;
 use App\Entity\Payment;
@@ -33,7 +32,6 @@ use EasyCorp\Bundle\EasyAdminBundle\Field\TextField;
 use EasyCorp\Bundle\EasyAdminBundle\Filter\ChoiceFilter;
 use EasyCorp\Bundle\EasyAdminBundle\Filter\EntityFilter;
 use Symfony\Component\HttpFoundation\RequestStack;
-use Symfony\Component\Security\Csrf\CsrfTokenManagerInterface;
 use Symfony\Contracts\Translation\TranslatorInterface;
 
 /**
@@ -46,7 +44,6 @@ final class PaymentCrudController extends AbstractCrudController
     public const TABS = PaymentTabs::TABS;
 
     public function __construct(
-        private readonly CsrfTokenManagerInterface $csrfTokenManager,
         private readonly RequestStack $requestStack,
         private readonly EntityManagerInterface $entityManager,
         private readonly AdminFormat $format,
@@ -137,30 +134,25 @@ final class PaymentCrudController extends AbstractCrudController
 
     public function configureActions(Actions $actions): Actions
     {
-        // POST forms straight to PaymentModerationController (not via the dashboard router, which would
-        // drop the query string) carrying a per-payment CSRF token.
+        // Links to PaymentModerationController's confirm pages (amount, order, effect); only their POST does anything.
         $confirm = Action::new('confirmPayment', 'action.confirm_payment')
-            ->linkToUrl(fn (Payment $payment): string => $this->generateUrl('admin_payment_confirm', $this->routeParameters($payment)))
-            ->renderAsForm()
+            ->linkToUrl(fn (Payment $payment): string => $this->generateUrl('admin_payment_confirm', ['id' => $payment->getId()]))
             ->setCssClass('btn btn-success')
             ->displayIf(fn (Payment $payment): bool => in_array($payment->getStatus(), [PaymentStatus::PENDING, PaymentStatus::SUBMITTED, PaymentStatus::NEEDS_REVIEW], true));
 
         $retry = Action::new('retryProvisioning', 'action.retry_provisioning')
-            ->linkToUrl(fn (Payment $payment): string => $this->generateUrl('admin_payment_retry', $this->routeParameters($payment)))
-            ->renderAsForm()
+            ->linkToUrl(fn (Payment $payment): string => $this->generateUrl('admin_payment_retry', ['id' => $payment->getId()]))
             ->setCssClass('btn btn-primary')
             ->displayIf(fn (Payment $payment): bool => PaymentStatus::PROVISIONING_FAILED === $payment->getStatus());
 
         $reject = Action::new('rejectPayment', 'action.reject_payment')
-            ->linkToUrl(fn (Payment $payment): string => $this->generateUrl('admin_payment_reject', $this->routeParameters($payment)))
-            ->renderAsForm()
+            ->linkToUrl(fn (Payment $payment): string => $this->generateUrl('admin_payment_reject', ['id' => $payment->getId()]))
             ->setCssClass('btn btn-warning')
             ->displayIf(fn (Payment $payment): bool => in_array($payment->getStatus(), [PaymentStatus::PENDING, PaymentStatus::SUBMITTED, PaymentStatus::NEEDS_REVIEW, PaymentStatus::PROVISIONING_FAILED], true));
 
         // Closing a duplicate (or any reviewed payment) whose money was sent back to the customer.
         $rejectRefunded = Action::new('rejectPaymentRefunded', 'action.reject_payment_refunded')
-            ->linkToUrl(fn (Payment $payment): string => $this->generateUrl('admin_payment_reject', $this->routeParameters($payment) + ['refunded' => 1]))
-            ->renderAsForm()
+            ->linkToUrl(fn (Payment $payment): string => $this->generateUrl('admin_payment_reject', ['id' => $payment->getId(), 'refunded' => 1]))
             ->setCssClass('btn btn-secondary')
             ->displayIf(fn (Payment $payment): bool => in_array($payment->getStatus(), [PaymentStatus::NEEDS_REVIEW, PaymentStatus::PROVISIONING_FAILED], true));
 
@@ -171,17 +163,6 @@ final class PaymentCrudController extends AbstractCrudController
 
         // A payment is never deleted from the admin (the wallet ledger references it): reject it instead.
         return $actions->disable(Action::DELETE, Action::BATCH_DELETE);
-    }
-
-    /**
-     * @return array{id: int|null, _token: string}
-     */
-    private function routeParameters(Payment $payment): array
-    {
-        return [
-            'id' => $payment->getId(),
-            '_token' => $this->csrfTokenManager->getToken(PaymentModerationController::CSRF_PREFIX.$payment->getId())->getValue(),
-        ];
     }
 
     /**

@@ -451,6 +451,8 @@ panel_connection:
       explain: The panel URL, API token or proxy is missing or not allowed.
       fix: Enter the URL (https://) and the API token under "Edit settings"; if the proxy is enabled, configure the server's PANEL_PROXY_* variables.
   inbounds:
+    load_intro: Read this panel's inbounds to choose from them.
+    load: Read inbounds from the panel
     intro: Choose the inbounds that sold services are created on. Inbounds disabled on the panel cannot be chosen.
     needs_modern: Choosing inbounds here is for panels with the new API; run the connection test first. For old panels use "Sync inbounds".
     remark: Name
@@ -547,6 +549,7 @@ panel_inbounds:
   last_synced: Last synced
 
 action:
+  delete_on_panel: "Delete on panel"
   rotate_page_link_confirm: "The current subscription page link of this service will stop working; the customer gets the new one from the bot. Continue?"
   rotate_page_link: "New subscription page link"
   claims_history: "Claim links and owners"
@@ -947,6 +950,10 @@ flash:
   customer.delete_is_reseller: "Customer #%id% is a reseller and cannot be deleted: orders and services point at the profile. Disable the reseller instead. Nothing was deleted."
   customer.batch_delete_is_reseller: "Nothing was deleted: customer(s) #%ids% are resellers and cannot be deleted. Deselect them and try again."
   service.page_link_csrf: "Invalid request (security token). Reload the page and try again."
+  service.delete_name_mismatch: "The name does not match the service. Nothing was deleted."
+  service.deleted_on_panel: "Service %name% was deleted on the panel and marked deleted here."
+  service.already_deleted: "Service %name% is already deleted."
+  service.delete_panel_failed: "The panel did not delete service %name%. Nothing changed here; try again."
   service.page_link_rotated: "The subscription page link of service #%id% was replaced; the old link no longer works."
   service.retry_attach_done: "Retry attach: %attached% inbound(s) attached, %failed% still not attached."
   service.retry_attach_failed: "Retry attach failed, nothing changed on the panel: %error%"
@@ -996,8 +1003,10 @@ flash:
   inbound.missing_locally: "%count% local inbound(s) were not found on the panel."
   inbound.updated_hint: "Inbounds updated. If the external proxy changed, regenerate the service configs."
   inbound.test_client_unsupported: "The client test is only available for sanaei_3xui panels."
-  inbound.test_client_created: "Test client created (username: %username%). Delete it from the panel if needed."
-  inbound.test_client_failed: "Creating the test client failed: %error%"
+  inbound.test_client_removed: "The test client %username% was created and deleted again: the inbound works."
+  inbound.test_client_not_removed: "The test client %username% was created but could not be deleted (%error%). Remove it on the panel by hand."
+  inbound.test_client_other_name: "The panel answered with client %username% instead of %expected%, so nothing was deleted. Check both on the panel and remove the test client by hand."
+  inbound.test_client_failed: "Creating the test client failed: %error%. If %username% exists on the panel, remove it by hand."
   inbound.resynced: "Inbound resynced."
   inbound.metadata_synced: "Access metadata synced."
   inbound.configs_partially_updated: "Configs of %updated% service(s) updated, %failed% failed (external proxies: %proxies%)."
@@ -1786,3 +1795,50 @@ inbound_move:
   service.due_at_remove: "removed after %at%"
   service.kept: "old inbound kept"
   service.retry: "Retry now"
+
+action_confirm:
+  type_name: "To confirm, type the service's name: %name%"
+  sync_inbounds:
+    title: "Sync inbounds"
+    body: "The inbounds of panel \"%panel%\" are read from the panel and the inbounds stored here are updated. Nothing changes on the panel."
+  resync_inbound:
+    title: "Resync inbound"
+    body: "Inbound \"%inbound%\" is read from its panel and its stored settings are updated. Nothing changes on the panel."
+  sync_metadata:
+    title: "Sync access metadata"
+    body: "The access settings of inbound \"%inbound%\" (host, port, TLS and the like) are read from its panel and stored here. Nothing changes on the panel."
+  test_client:
+    title: "Test: create client"
+    body: "A real test client (1 day, 1 GB) is created on inbound \"%inbound%\" of panel \"%panel%\", then deleted again in the same step. No other client is touched."
+  regenerate_inbound:
+    title: "Regenerate service configs"
+    body: "The links of %count% service(s) on inbound \"%inbound%\" are rebuilt. The panel is called once per service, and what customers have saved may stop matching."
+  regenerate_service:
+    title: "Regenerate config"
+    body: "The links of service #%id% (%name%) are rebuilt. What the customer has saved may stop matching."
+  plugin_enable:
+    title: "Enable plugin"
+    body: "Plugin %plugin% (version %version%) is enabled: its code runs inside this application from now on."
+  plugin_disable:
+    title: "Disable plugin"
+    body: "Plugin %plugin% (version %version%) is disabled: whatever it provides, such as a payment method, stops working."
+  payment:
+    summary: "Payment #%id%: %amount% %currency%, order #%order% (%type%), customer %customer%."
+    confirm:
+      title: "Confirm payment"
+      body: "The payment is approved and the order is fulfilled: the service is provisioned and the customer may be sent its config."
+    retry:
+      title: "Retry provisioning"
+      body: "Provisioning this order runs again, on the panel. The payment was already verified."
+    reject:
+      title: "Reject payment"
+      body: "The payment is rejected. The order may fail and any wallet amount debited for it is returned."
+    reject_refunded:
+      title: "Reject as refunded"
+      body: "The payment is rejected and recorded as refunded: use this only after the money went back to the customer. The order may fail and any wallet amount debited for it is returned."
+  broadcast_retry:
+    title: "Retry failed deliveries"
+    body: "%count% failed deliveries of broadcast \"%title%\" are sent again now."
+  service_delete:
+    title: "Delete on panel"
+    body: "Service #%id% (%name%) is deleted on panel \"%panel%\" first, then marked deleted here. The customer's connection stops, and this cannot be undone."

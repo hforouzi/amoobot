@@ -1,0 +1,37 @@
+{# ConfirmPages: what the action will do; only the form's POST (with its CSRF token) does it. #}
+{% extends '@EasyAdmin/page/content.html.twig' %}
+{% trans_default_domain 'admin' %}
+
+{% block content_title %}{{ title|trans }}{% endblock %}
+
+{% block main %}
+    <div class="admin-custom-page" data-action-confirm>
+        <div class="admin-form-card">
+            {% for line in lines %}
+                <p>{{ line[0]|trans(line[1] ?? {}) }}</p>
+            {% endfor %}
+            {% if submit %}
+                <form method="post">
+                    <input type="hidden" name="_token" value="{{ csrf_token(csrf) }}">
+                    {% for name, value in hidden %}
+                        <input type="hidden" name="{{ name }}" value="{{ value }}">
+                    {% endfor %}
+                    {% if typedName is not null %}
+                        <div class="mb-3">
+                            <label class="form-label" for="confirm-name">{{ 'action_confirm.type_name'|trans({'%name%': typedName}) }}</label>
+                            <input class="form-control" id="confirm-name" type="text" name="confirmName" dir="ltr" autocomplete="off" required>
+                        </div>
+                    {% endif %}
+                    <div class="admin-actions">
+                        <button type="submit" class="btn btn-{{ style }}" data-confirm-submit>{{ submit|trans }}</button>
+                        <a class="btn btn-secondary" href="{{ cancelUrl }}">{{ 'common.cancel'|trans }}</a>
+                    </div>
+                </form>
+            {% else %}
+                <div class="admin-actions">
+                    <a class="btn btn-secondary" href="{{ cancelUrl }}">{{ 'common.cancel'|trans }}</a>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+{% endblock %}

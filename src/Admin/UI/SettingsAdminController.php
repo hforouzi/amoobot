@@ -33,6 +33,7 @@ final class SettingsAdminController extends AbstractController
     use TranslatedFlashes;
 
     private const BRANDING_CSRF = 'settings_branding';
+    private const CSRF = 'settings_save';
 
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
@@ -50,7 +51,10 @@ final class SettingsAdminController extends AbstractController
             $tab = 'sales';
         }
 
-        if ($request->isMethod('POST')) {
+        // Branding checks its own token (saveBranding()).
+        if ($request->isMethod('POST') && 'branding' !== $tab && !$this->isCsrfTokenValid(self::CSRF, (string) $request->request->get('_token'))) {
+            $this->flash('danger', 'flash.csrf_expired');
+        } elseif ($request->isMethod('POST')) {
             match ($tab) {
                 'sales' => $this->saveSales($request, $auditLogger),
                 'automation' => $this->saveAutomation($request, $auditLogger),
@@ -66,13 +70,14 @@ final class SettingsAdminController extends AbstractController
         return $this->render('admin/settings/index.html.twig', [
             'tab' => $tab,
             'tabs' => $this->tabs->settings($tab),
+            'csrf' => 'branding' === $tab ? self::BRANDING_CSRF : self::CSRF,
         ] + match ($tab) {
             'sales' => $this->salesParameters(),
             'automation' => ['values' => $this->settings->automationValues()],
             'wallet' => ['values' => $this->settings->walletValues()],
             'resellers' => ['values' => $this->settings->resellerValues()],
             'plans' => ['values' => $this->settings->plansValues()],
-            'branding' => ['values' => $this->settings->brandingValues(), 'csrf' => self::BRANDING_CSRF],
+            'branding' => ['values' => $this->settings->brandingValues()],
             'channels' => ['channels' => $this->entityManager->getRepository(RequiredChannel::class)->findBy([], ['sortOrder' => 'ASC', 'id' => 'ASC'])],
             'advanced' => ['settings' => $this->entityManager->getRepository(Setting::class)->findBy([], ['keyName' => 'ASC'])],
         });

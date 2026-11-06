@@ -14,6 +14,7 @@ use App\Payment\Application\Settlement\VerifiedPayment;
 use App\Payment\Domain\Dto\PaymentVerificationResult;
 use App\Payment\Domain\PaymentGatewayType;
 use App\Payment\Domain\PaymentStatus;
+use App\Tests\Support\AdminForms;
 use App\Tests\Support\IntegrationTestCase;
 use Symfony\Bundle\FrameworkBundle\Console\Application;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
@@ -25,6 +26,8 @@ use Symfony\Component\DomCrawler\Field\ChoiceFormField;
  */
 final class AdminAuditLogTest extends IntegrationTestCase
 {
+    use AdminForms;
+
     private const SECRET = 'np-secret-should-not-be-logged-55aa';
 
     private KernelBrowser $client;
@@ -142,8 +145,7 @@ final class AdminAuditLogTest extends IntegrationTestCase
         self::getContainer()->get(PaymentSettlementService::class)->settle($payment, VerifiedPayment::fromGateway(new PaymentVerificationResult(success: true, paid: true, amount: '100', currency: 'IRR')), 'test');
 
         $crawler = $this->client->request('GET', '/admin/payment?tab=needs_review');
-        $action = (string) $crawler->filter(sprintf('form[action*="/admin/payment/%d/reject"]', $payment->getId()))->attr('action');
-        $this->client->request('POST', $action);
+        $this->confirmAction($this->client, (string) $crawler->filter(sprintf('a[href*="/admin/payment/%d/reject"]', $payment->getId()))->attr('href'));
         $this->assertLogged('payment.reject', 'Payment', (string) $payment->getId(), AdminAuditLog::SOURCE_WEB);
     }
 

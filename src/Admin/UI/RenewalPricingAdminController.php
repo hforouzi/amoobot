@@ -20,6 +20,8 @@ final class RenewalPricingAdminController extends AbstractController
 {
     use TranslatedFlashes;
 
+    public const CSRF = 'bulk_plan_price_adjustment';
+
     public function __construct(
         private readonly PlanPriceAdjustmentService $planPriceAdjustmentService,
     ) {
@@ -36,7 +38,9 @@ final class RenewalPricingAdminController extends AbstractController
         ];
         $changes = [];
 
-        if ($request->isMethod('POST')) {
+        if ($request->isMethod('POST') && !$this->isCsrfTokenValid(self::CSRF, (string) $request->request->get('_token'))) {
+            $this->flash('danger', 'flash.csrf_expired');
+        } elseif ($request->isMethod('POST')) {
             $direction = $input['direction'];
             $field = $input['field'];
             $value = $input['value'];
@@ -74,6 +78,7 @@ final class RenewalPricingAdminController extends AbstractController
         return $this->render('admin/bulk_plan_price_adjustment.html.twig', [
             'input' => $input,
             'changes' => $changes,
+            'csrf' => self::CSRF,
         ]);
     }
 }

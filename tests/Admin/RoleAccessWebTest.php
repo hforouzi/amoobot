@@ -129,11 +129,19 @@ final class RoleAccessWebTest extends IntegrationTestCase
                 self::assertSame($this->allowed($role, $permission) ? 200 : 403, $this->client->getResponse()->getStatusCode(), sprintf('%s GET %s', $role, $path));
             }
 
-            // Delete (POST) needs SERVICES_DELETE; the CSRF check comes later, so an allowed role is not answered 403.
-            $this->client->request('POST', '/admin/vpn-service/'.$service->getId().'/delete');
+            // Delete on panel needs SERVICES_DELETE; the CSRF check comes later, so an allowed role is not answered 403.
+            $this->client->request('POST', '/admin/vpn-service/'.$service->getId().'/delete-on-panel');
             self::assertSame($this->allowed($role, 'SERVICES_DELETE'), 403 !== $this->client->getResponse()->getStatusCode(), $role.' delete service');
 
-            // Approve / reject (POST, own routes) need PAYMENTS_MODERATE; the buttons are only shown with it.
+            // EasyAdmin's own delete is off for everyone: it would leave the client on the panel.
+            $this->client->request('POST', '/admin/vpn-service/'.$service->getId().'/delete');
+            self::assertSame(403, $this->client->getResponse()->getStatusCode(), $role.' EasyAdmin delete of a service');
+
+            // Regenerate config is a support action.
+            $this->client->request('GET', '/admin/vpn-service/'.$service->getId().'/regenerate-config');
+            self::assertSame($this->allowed($role, 'SERVICES_ASSIST') ? 200 : 403, $this->client->getResponse()->getStatusCode(), $role.' regenerate config');
+
+            // Approve / reject (own routes) need PAYMENTS_MODERATE; the buttons are only shown with it.
             $this->client->request('POST', '/admin/payment/'.$payment->getId().'/confirm');
             self::assertSame($this->allowed($role, 'PAYMENTS_MODERATE'), 403 !== $this->client->getResponse()->getStatusCode(), $role.' confirm payment');
             $this->client->request('GET', '/admin/payment/'.$payment->getId());

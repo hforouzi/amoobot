@@ -26,6 +26,7 @@ use App\Entity\RequiredChannel;
 use App\Entity\ServiceNotificationLog;
 use App\Entity\Setting;
 use App\Entity\StorePaymentMethod;
+use App\Tests\Support\AdminForms;
 use App\Tests\Support\IntegrationTestCase;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Option\EA;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
@@ -40,6 +41,8 @@ use Symfony\Component\Security\Core\Role\RoleHierarchyInterface;
  */
 final class SuperAdminGatingTest extends IntegrationTestCase
 {
+    use AdminForms;
+
     private const GATED_CRUDS = [
         PaymentGatewayCrudController::class,
         StorePaymentMethodCrudController::class,
@@ -64,7 +67,6 @@ final class SuperAdminGatingTest extends IntegrationTestCase
     private AdminUser $support;
     /** @var array<class-string, int> entity id per gated CRUD controller */
     private array $ids = [];
-    private int $serviceId;
 
     protected function setUp(): void
     {
@@ -87,7 +89,6 @@ final class SuperAdminGatingTest extends IntegrationTestCase
         $this->em->flush();
         $user = $this->createUser();
         $service = $this->createActiveService($user, $inbound);
-        $this->serviceId = (int) $service->getId();
         $channel = (new RequiredChannel())->setTitle('gating test channel')->setChatId('@gating_test');
         $notification = (new ServiceNotificationLog())->setService($service)->setUser($user)->setType('expiry')->setKeyName('gating-test')->setSentAt(new \DateTimeImmutable());
         $botLog = (new BotMessageLog())->setDirection(BotMessageDirection::INCOMING)->setPayload([]);
@@ -196,12 +197,14 @@ final class SuperAdminGatingTest extends IntegrationTestCase
             self::assertSame(200, $this->client->getResponse()->getStatusCode(), 'GET '.$page);
         }
 
-        // Actions that redirect back to a list (the test panel is not a 3x-ui panel, so nothing is sent anywhere).
         $panelId = $this->ids[VpnPanelCrudController::class];
         $inboundId = $this->ids[VpnInboundCrudController::class];
-        foreach (['/admin/vpn-panel/'.$panelId.'/sync-inbounds', '/admin/vpn-panel/'.$panelId.'/inbounds', '/admin/vpn-inbound/'.$inboundId.'/test-create-client'] as $action) {
-            $this->client->request('GET', $action);
-            self::assertTrue($this->client->getResponse()->isRedirect(), 'GET '.$action.' answered '.$this->client->getResponse()->getStatusCode());
+        $this->client->request('GET', '/admin/vpn-panel/'.$panelId.'/inbounds');
+        self::assertTrue($this->client->getResponse()->isRedirect(), 'the panel\'s inbounds answered '.$this->client->getResponse()->getStatusCode());
+        // Actions: a confirm page first (the test panel is not a 3x-ui panel, so nothing is sent anywhere), then back to a list.
+        foreach (['/admin/vpn-panel/'.$panelId.'/sync-inbounds', '/admin/vpn-inbound/'.$inboundId.'/test-create-client'] as $action) {
+            $this->confirmAction($this->client, $action);
+            self::assertTrue($this->client->getResponse()->isRedirect(), 'POST '.$action.' answered '.$this->client->getResponse()->getStatusCode());
         }
     }
 
@@ -212,9 +215,9 @@ final class SuperAdminGatingTest extends IntegrationTestCase
             $this->client->request('GET', $page);
             self::assertSame(200, $this->client->getResponse()->getStatusCode(), 'GET '.$page);
         }
-        // The service list no longer offers the (super-admin) "regenerate config" button.
+        // "Regenerate config" of a service is a support action (SERVICES_ASSIST), not a panel admin's.
         $this->client->request('GET', '/admin/vpn-service');
-        self::assertStringNotContainsString('/regenerate-config', (string) $this->client->getResponse()->getContent());
+        self::assertStringContainsString('/regenerate-config', (string) $this->client->getResponse()->getContent());
     }
 
     public function testMenuShowsGatedEntriesOnlyToSuperAdmins(): void
@@ -274,14 +277,15 @@ final class SuperAdminGatingTest extends IntegrationTestCase
             ['GET', '/admin/plugins/upload', []],
             ['POST', '/admin/plugins/upload', []],
             ['GET', '/admin/plugins/'.$pluginId.'/enable', []],
+            ['POST', '/admin/plugins/'.$pluginId.'/enable', []],
             ['GET', '/admin/plugins/'.$pluginId.'/disable', []],
+            ['POST', '/admin/plugins/'.$pluginId.'/disable', []],
             ['GET', '/admin/vpn-panel/'.$panelId.'/sync-inbounds', []],
             ['GET', '/admin/vpn-panel/'.$panelId.'/inbounds', []],
             ['GET', '/admin/vpn-inbound/'.$inboundId.'/test-create-client', []],
             ['GET', '/admin/vpn-inbound/'.$inboundId.'/resync', []],
             ['GET', '/admin/vpn-inbound/'.$inboundId.'/sync-access-metadata', []],
             ['POST', '/admin/vpn-inbound/'.$inboundId.'/regenerate-service-configs', []],
-            ['GET', '/admin/vpn-service/'.$this->serviceId.'/regenerate-config', []],
             ['GET', '/admin/settings/renewal-pricing', []],
             ['POST', '/admin/settings/renewal-pricing', []],
             ['GET', '/admin/settings/automation', []],

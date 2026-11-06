@@ -8,7 +8,6 @@ use App\Admin\Security\AdminCrudPermissions;
 use App\Admin\UI\Field\JsonField;
 use App\Admin\UI\Support\AdminFormat;
 use App\Admin\UI\TranslatedFlashes;
-use App\Admin\UI\VpnPanelInboundActionsController;
 use App\Entity\VpnInbound;
 use App\Shop\Application\Catalog\PlanInboundUsage;
 use App\Shop\Application\MultiInboundSettings;
@@ -24,7 +23,6 @@ use EasyCorp\Bundle\EasyAdminBundle\Field\DateTimeField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\IdField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\IntegerField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\TextField;
-use Symfony\Component\Security\Csrf\CsrfTokenManagerInterface;
 use Symfony\Contracts\Translation\TranslatorInterface;
 
 class VpnInboundCrudController extends AbstractCrudController
@@ -32,7 +30,6 @@ class VpnInboundCrudController extends AbstractCrudController
     use TranslatedFlashes;
 
     public function __construct(
-        private readonly CsrfTokenManagerInterface $csrfTokenManager,
         private readonly MultiInboundSettings $multiInbound,
         private readonly PlanInboundUsage $inboundUsage,
         private readonly TranslatorInterface $translator,
@@ -70,31 +67,29 @@ class VpnInboundCrudController extends AbstractCrudController
     public function configureActions(Actions $actions): Actions
     {
         $testCreateClient = Action::new('testCreateClient', 'action.test_create_client')
-            ->linkToRoute('admin_vpn_inbound_test_create_client', fn (VpnInbound $inbound): array => ['id' => $inbound->getId()])
+            ->linkToUrl(fn (VpnInbound $inbound): string => $this->generateUrl('admin_vpn_inbound_test_create_client', ['id' => $inbound->getId()]))
             ->setCssClass('btn btn-success')
             ->displayIf(fn (VpnInbound $inbound): bool => 'sanaei_3xui' === $inbound->getPanel()->getType());
 
         $resync = Action::new('resyncInbound', 'action.resync_inbound')
-            ->linkToRoute('admin_vpn_inbound_resync', fn (VpnInbound $inbound): array => ['id' => $inbound->getId()])
+            ->linkToUrl(fn (VpnInbound $inbound): string => $this->generateUrl('admin_vpn_inbound_resync', ['id' => $inbound->getId()]))
             ->setCssClass('btn btn-primary')
             ->displayIf(fn (VpnInbound $inbound): bool => 'sanaei_3xui' === $inbound->getPanel()->getType());
 
         $syncAccessMetadata = Action::new('syncAccessMetadata', 'action.sync_access_metadata')
-            ->linkToRoute('admin_vpn_inbound_sync_access_metadata', fn (VpnInbound $inbound): array => ['id' => $inbound->getId()])
+            ->linkToUrl(fn (VpnInbound $inbound): string => $this->generateUrl('admin_vpn_inbound_sync_access_metadata', ['id' => $inbound->getId()]))
             ->setCssClass('btn btn-warning')
             ->displayIf(fn (VpnInbound $inbound): bool => 'sanaei_3xui' === $inbound->getPanel()->getType());
 
-        // A POST form with a per-inbound CSRF token: it calls the panel once per service.
+        // Its confirm page shows the number of services; it calls the panel once per service.
         $regenerateServiceConfigs = Action::new('regenerateServiceConfigs', 'action.regenerate_service_configs')
-            ->linkToUrl(fn (VpnInbound $inbound): string => $this->generateUrl('admin_vpn_inbound_regenerate_service_configs', [
-                'id' => $inbound->getId(),
-                '_token' => $this->csrfTokenManager->getToken(VpnPanelInboundActionsController::REGENERATE_INBOUND_CSRF_PREFIX.$inbound->getId())->getValue(),
-            ]))
-            ->renderAsForm()
+            ->linkToUrl(fn (VpnInbound $inbound): string => $this->generateUrl('admin_vpn_inbound_regenerate_service_configs', ['id' => $inbound->getId()]))
             ->setCssClass('btn btn-info')
             ->displayIf(fn (VpnInbound $inbound): bool => 'sanaei_3xui' === $inbound->getPanel()->getType());
 
         return $actions
+            // Its services would keep their clients on the panel with no inbound here.
+            ->disable(Action::DELETE, Action::BATCH_DELETE)
             ->add(Action::INDEX, $testCreateClient)
             ->add(Action::INDEX, $resync)
             ->add(Action::INDEX, $syncAccessMetadata)

@@ -7,6 +7,7 @@ namespace App\Tests\Admin;
 use App\Entity\AdminUser;
 use App\Entity\BroadcastDelivery;
 use App\Entity\BroadcastMessage;
+use App\Tests\Support\AdminForms;
 use App\Tests\Support\IntegrationTestCase;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Component\DomCrawler\Crawler;
@@ -19,6 +20,8 @@ use Symfony\Component\DomCrawler\Field\ChoiceFormField;
  */
 final class BroadcastWebFormatTest extends IntegrationTestCase
 {
+    use AdminForms;
+
     private const FORM = 'BroadcastMessage';
 
     private KernelBrowser $client;
@@ -102,7 +105,7 @@ final class BroadcastWebFormatTest extends IntegrationTestCase
         self::assertSame(200, $this->client->getResponse()->getStatusCode());
         $duplicate = $detail->filter('form[action*="/admin/broadcast/'.$stopped->getId().'/duplicate"]');
         self::assertCount(1, $duplicate, 'the duplicate action');
-        self::assertCount(1, $detail->filter('form[action*="/admin/broadcast/'.$stopped->getId().'/retry-failed"]'), 'retry is shown for failed deliveries');
+        self::assertCount(1, $detail->filter('a[href*="/admin/broadcast/'.$stopped->getId().'/retry-failed"]'), 'retry is shown for failed deliveries');
 
         $this->client->request('POST', '/admin/broadcast/'.$stopped->getId().'/duplicate', ['_token' => 'forged']);
         self::assertSame(1, $this->em->getRepository(BroadcastMessage::class)->count(['title' => 'Stopped']), 'no copy without a valid token');
@@ -117,7 +120,7 @@ final class BroadcastWebFormatTest extends IntegrationTestCase
 
         $this->client->request('GET', '/admin/locale/en');
         $detail = $this->client->request('GET', '/admin/broadcast-message/'.$stopped->getId());
-        $this->client->submit($detail->filter('form[action*="/retry-failed"]')->form());
+        $this->confirmAction($this->client, (string) $detail->filter('a[href*="/retry-failed"]')->attr('href'));
         $this->client->followRedirect();
         self::assertStringContainsString('Not retried', (string) $this->client->getResponse()->getContent());
         self::assertCount(0, $this->http->requests('/sendMessage'));

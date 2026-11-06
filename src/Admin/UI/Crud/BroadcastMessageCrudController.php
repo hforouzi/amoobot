@@ -78,15 +78,14 @@ final class BroadcastMessageCrudController extends AbstractCrudController
 
     public function configureActions(Actions $actions): Actions
     {
-        // POST forms to BroadcastActionsController with a per-broadcast CSRF token.
+        // BroadcastActionsController: duplicate is a POST form with a per-broadcast CSRF token, retry a confirm page first.
         $duplicate = Action::new('duplicateBroadcast', 'action.duplicate_broadcast', 'fa fa-copy')
             ->linkToUrl(fn (BroadcastMessage $broadcast): string => $this->generateUrl('admin_broadcast_duplicate', $this->actionParameters($broadcast)))
             ->renderAsForm()
             ->setCssClass('btn btn-secondary')
             ->displayIf(static fn (BroadcastMessage $broadcast): bool => BroadcastAdministration::isDuplicable($broadcast));
         $retry = Action::new('retryFailedBroadcast', 'action.retry_failed_broadcast', 'fa fa-redo')
-            ->linkToUrl(fn (BroadcastMessage $broadcast): string => $this->generateUrl('admin_broadcast_retry_failed', $this->actionParameters($broadcast)))
-            ->renderAsForm()
+            ->linkToUrl(fn (BroadcastMessage $broadcast): string => $this->generateUrl('admin_broadcast_retry_failed', ['id' => $broadcast->getId()]))
             ->setCssClass('btn btn-secondary')
             ->displayIf(static fn (BroadcastMessage $broadcast): bool => $broadcast->getFailedCount() > 0 && BroadcastMessage::STATUS_CANCELLED !== $broadcast->getStatus());
         foreach ([$duplicate, $retry] as $action) {

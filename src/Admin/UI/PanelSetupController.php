@@ -117,6 +117,15 @@ final class PanelSetupController extends AbstractController
 
             return $this->redirectToRoute('admin_panel_setup_show', ['id' => $panel->getId()]);
         }
+        // A GET calls nothing: reading the panel's list (and recording its health) is the button's POST.
+        if (!$request->isMethod('POST')) {
+            return $this->render('admin/panel_setup/inbounds.html.twig', ['panel' => $panel, 'options' => null, 'selected' => [], 'error' => null]);
+        }
+        if (!$this->isCsrfTokenValid('panel_inbounds_'.$panel->getId(), (string) $request->request->get('_token'))) {
+            $this->flash('danger', 'panel_connection.flash.csrf');
+
+            return $this->redirectToRoute('admin_panel_setup_inbounds', ['id' => $panel->getId()]);
+        }
         try {
             $options = $this->clientsApi->inboundOptions($panel);
         } catch (PanelApiException $e) {
@@ -130,12 +139,7 @@ final class PanelSetupController extends AbstractController
             $local[$inbound->getRemoteInboundId()] = $inbound;
         }
 
-        if ($request->isMethod('POST')) {
-            if (!$this->isCsrfTokenValid('panel_inbounds_'.$panel->getId(), (string) $request->request->get('_token'))) {
-                $this->flash('danger', 'panel_connection.flash.csrf');
-
-                return $this->redirectToRoute('admin_panel_setup_inbounds', ['id' => $panel->getId()]);
-            }
+        if ($request->request->has('save')) {
             $chosen = array_map('intval', $request->request->all('inbounds'));
             $count = 0;
             foreach ($options as $option) {

@@ -107,7 +107,7 @@ class VpnPanelCrudController extends AbstractCrudController
             ->displayIf(fn (VpnPanel $panel): bool => 'sanaei_3xui' === $panel->getType());
 
         $syncInbounds = Action::new('syncInbounds', 'action.sync_inbounds')
-            ->linkToRoute('admin_vpn_panel_sync_inbounds', fn (VpnPanel $panel): array => ['id' => $panel->getId()])
+            ->linkToUrl(fn (VpnPanel $panel): string => $this->generateUrl('admin_vpn_panel_sync_inbounds', ['id' => $panel->getId()]))
             ->setCssClass('btn btn-primary')
             ->displayIf(fn (VpnPanel $panel): bool => 'sanaei_3xui' === $panel->getType() && !$panel->isModern());
 
@@ -117,6 +117,8 @@ class VpnPanelCrudController extends AbstractCrudController
             ->setCssClass('btn btn-info');
 
         return $actions
+            // Its services would keep their clients on the panel with no panel here (and could not be deleted there).
+            ->disable(Action::DELETE, Action::BATCH_DELETE)
             ->update(Crud::PAGE_INDEX, Action::NEW, static fn (Action $action): Action => $action->linkToRoute('admin_panel_setup_new'))
             ->update(Crud::PAGE_INDEX, Action::EDIT, static fn (Action $action): Action => $action->linkToRoute('admin_panel_setup_edit', static fn (VpnPanel $panel): array => ['id' => $panel->getId()]))
             ->update(Crud::PAGE_DETAIL, Action::EDIT, static fn (Action $action): Action => $action->linkToRoute('admin_panel_setup_edit', static fn (VpnPanel $panel): array => ['id' => $panel->getId()]))

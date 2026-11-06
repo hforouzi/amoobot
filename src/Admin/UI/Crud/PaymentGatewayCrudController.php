@@ -132,9 +132,10 @@ final class PaymentGatewayCrudController extends AbstractCrudController
             ->displayIf(fn (PaymentGateway $gateway): bool => $this->moduleRegistry->supports($gateway->getType()));
 
         return $actions
+            // Open payments would lose the gateway that verifies them (payment.gateway_id is SET NULL): deactivate it instead.
+            ->disable(Action::DELETE, Action::BATCH_DELETE)
             ->remove(Crud::PAGE_INDEX, Action::NEW)
             ->update(Crud::PAGE_INDEX, Action::EDIT, fn (Action $action): Action => $action->setLabel('common.edit'))
-            ->update(Crud::PAGE_INDEX, Action::DELETE, fn (Action $action): Action => $action->setLabel('common.delete'))
             ->add(Crud::PAGE_INDEX, $installGateway)
             ->add(Crud::PAGE_INDEX, Action::DETAIL)
             ->add(Crud::PAGE_INDEX, $editConfig)

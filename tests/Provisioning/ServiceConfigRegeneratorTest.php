@@ -7,6 +7,7 @@ namespace App\Tests\Provisioning;
 use App\Entity\AdminUser;
 use App\Provisioning\Application\ServiceConfigRegeneration;
 use App\Provisioning\Application\ServiceConfigRegenerator;
+use App\Tests\Support\AdminForms;
 use App\Tests\Support\IntegrationTestCase;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 
@@ -16,6 +17,8 @@ use Symfony\Bundle\FrameworkBundle\KernelBrowser;
  */
 final class ServiceConfigRegeneratorTest extends IntegrationTestCase
 {
+    use AdminForms;
+
     public function testAServiceWithoutAClientIdentityIsLeftAlone(): void
     {
         $service = $this->createActiveService($this->createUser('8721'), $this->createTestInbound());
@@ -42,7 +45,7 @@ final class ServiceConfigRegeneratorTest extends IntegrationTestCase
         $client = new KernelBrowser(self::$kernel);
         $client->disableReboot();
         $client->loginUser($admin, 'main');
-        $client->request('GET', '/admin/vpn-service/'.$viaWeb->getId().'/regenerate-config');
+        $this->confirmAction($client, '/admin/vpn-service/'.$viaWeb->getId().'/regenerate-config');
         self::assertSame(302, $client->getResponse()->getStatusCode());
 
         $this->em->clear();
