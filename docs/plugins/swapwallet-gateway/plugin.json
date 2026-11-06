@@ -6,7 +6,7 @@
     "fa": "سواپ‌ولت",
     "en": "SwapWallet"
   },
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": {
     "fa": "درگاه پرداخت ارز دیجیتال SwapWallet برای آموبات.",
     "en": "SwapWallet crypto payment gateway for Amoobot."

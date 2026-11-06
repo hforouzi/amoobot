@@ -13,6 +13,7 @@ use App\Payment\Plugin\PluginPaymentGatewayDriverAdapter;
 use App\Plugin\PaymentPluginDoctor;
 use App\Plugin\PluginAutoloader;
 use App\Plugin\PluginRegistry;
+use App\Shared\Application\BrandDomain;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
 
@@ -43,6 +44,7 @@ final class PaymentGatewayRegistry
         private readonly string $environment = 'prod',
         #[Autowire('%kernel.debug%')]
         private readonly bool $debug = false,
+        private readonly ?BrandDomain $brand = null,
     ) {
         foreach ($drivers as $driver) {
             $type = trim($driver->getType());
@@ -194,6 +196,6 @@ final class PaymentGatewayRegistry
         }
 
         // Testing shortcuts (e.g. the demo plugin's auto_confirm_for_testing) only outside production.
-        return new PluginPaymentGatewayDriverAdapter($plugin, $instance, self::testingShortcutsAllowed($this->environment, $this->debug));
+        return new PluginPaymentGatewayDriverAdapter($plugin, $instance, self::testingShortcutsAllowed($this->environment, $this->debug), $this->brand?->base());
     }
 }

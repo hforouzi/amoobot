@@ -386,8 +386,9 @@ final class SwapWalletGatewayPlugin implements PaymentGatewayPluginInterface
      */
     private function successUrl(Payment $payment, array $config): ?string
     {
-        // The core return page identifies the payment only by its unguessable return token.
-        $baseUrl = $this->stringOrNull($config['callback_base_url'] ?? null);
+        // The core return page identifies the payment only by its unguessable return token. It follows the shop's brand
+        // domain when the core passes one; the webhook keeps callback_base_url.
+        $baseUrl = $this->stringOrNull($config['_amoobot_return_base_url'] ?? null) ?? $this->stringOrNull($config['callback_base_url'] ?? null);
         if (null !== $baseUrl) {
             return PaymentReturnUrl::returnUrl($baseUrl, $payment);
         }
