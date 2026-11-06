@@ -637,6 +637,51 @@ The settings, under `Settings → Plans → Moving existing services to a new in
 - `plans.inbound_move_detach_grace_hours` (24, 0–168): the grace period of a new run; a run keeps the value it was
   created with.
 
+**Adding an inbound to existing services (`--kind=add`, command line and scheduled task only).** A plan's additional
+inbound reaches new sales at once. `--kind=add` brings the plan's existing services to it: each client gets the one
+inbound C on top of what it has. The primary, UUID, subscription id and URL, expiry, limits and usage do not change, and
+neither does any other inbound. There is no page for this yet.
+
+The plan changes first: **add C to the plan** (Plans → the plan → additional inbounds), then run the command. A run never
+writes the plan. It needs both `plans.inbound_move_enabled` and `plans.multi_inbound_enabled`, an active C on the panel of
+the plan's primary, and a plan that is not a trial's backing plan. One run is one inbound: two inbounds are two runs, one
+after the other.
+
+1. **Dry run first** (it writes nothing, and works with the switches off):
+   `php bin/console app:plan:apply-inbounds <planId> --kind=add --inbound=<inboundId>`. One read per service, and for each
+   one the inbounds on the panel now, the inbounds after, and "add" or "skip" with the reason. `--json` carries `action`,
+   `inbounds_now`, `inbounds_after` and `note`.
+2. **One service**: add `--service=<serviceId> --apply`. Check it on the panel, update the subscription on a test phone,
+   and connect to the old inbound and to C.
+3. **The rest**: the same with `--apply`. `--from-inbound`, `--include-suspended`, `--include-expired`, `--limit`,
+   `--after-id`, `--batch-size` and `--pause` work as for a move. `--keep-old`, `--grace-hours`, `--retire-now` and
+   `--include-trials` are refused: an add has no old inbound to keep or remove, and trials are never part of one.
+
+What the customer sees: the new server at the next subscription update, and C's link on the bot, `/s/{token}` and in the
+Mini App after the refresh. Everything keeps working meanwhile, and the links are never hidden for an add. Customers get
+no message.
+
+The scheduled task, `--resume`, `--pause-run`, `--cancel`, retries, the alerts and the pause after 5 failed panel reads
+work as for a move; the run knows its kind, so these need no `--kind`. A service that is already on C on the panel gets its
+row with nothing sent. After the add, the row is an ordinary attached row: `attach-inbounds` keeps it, and attaches C again
+if it is removed by hand.
+
+**If the plan changes during a run.** At the start of each pass the run checks that C is still one of the plan's additional
+inbounds. If not, it **pauses** with a reason and one alert, and does not touch a service. Put C back in the plan and
+`--resume`, or `--cancel`. `--resume` with C still out of the plan pauses it again. Only services that have not started
+wait for this: links still to refresh are finished.
+
+**Undo** (`--undo=<runId>`, with `plans.inbound_move_enabled` alone, in case you have to turn the other switch off): C comes
+off each client this run put it on, done services included, and the row goes. The links are hidden until they are refreshed.
+Services already on C before the run are left alone, and the output counts them. Services not started are cancelled.
+A failure keeps the row held so the timer does not attach C again: run `--undo` again. Undo is refused for a run that is
+not the plan's latest, of any kind, since a later run may have built on it. The plan is not changed: it **still sells C**,
+so take C out of the plan as well if that is what you want, or the drift count will show those services as missing it.
+
+Skip reasons of an add, besides those above: `is_primary` (C is the service's primary), `no_primary` (the service's primary
+inbound was deleted in the bot, so the plan rules cannot be checked), `already_on_target` (it has the row already). Undo
+adds `last_inbound`: C is the only inbound the client has on the panel, so it stays, and so does the row.
+
 The command has been tested against a simulated panel only, not against a real 3x-ui panel: try one service first.
 Design: [plan-inbound-change.md](../design/plan-inbound-change.md).
 

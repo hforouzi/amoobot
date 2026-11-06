@@ -11,6 +11,7 @@ declare(strict_types=1);
  * - resume <runId>        app:plan:apply-inbounds <its plan> --resume=<runId>; prints "exit=<code>" and the output
  * - runner <runId>        InboundMoveRunner::process() itself, without the command's lock (a second runner on one item:
  *                         only the claims stand in its way); prints each outcome, then "exit=0" and the run's status
+ * - undo <runId>          InboundMoveRunner::undo() itself (kind=add, PR P11b); prints each outcome, then "exit=0"
  * - task <runId>          app:automation:run --only=inbound-moves; prints "exit=<code>" and the output (the id only
  *                         names the service a <block> probes)
  * - suspend <serviceId>   ServiceAdministration::suspend(); prints the outcome
@@ -51,7 +52,7 @@ if ((int) $delayMs > 0) {
 if ('-' !== $block && '' !== $block) {
     [$when, $pattern, $nth] = explode('|', $block) + ['', '', '1'];
     $seen = 0;
-    $serviceId = in_array($mode, ['resume', 'runner', 'task'], true)
+    $serviceId = in_array($mode, ['resume', 'runner', 'undo', 'task'], true)
         ? (int) $own->fetchOne('SELECT service_id FROM service_inbound_move WHERE run_id = ? ORDER BY id LIMIT 1', [(int) $id])
         : (int) $id;
     $fake->onRequest = static function (string $phase, string $method, string $path) use ($when, $pattern, $nth, &$seen, $dir, $own, $serviceId): void {
@@ -101,6 +102,14 @@ if ('resume' === $mode) {
 
 if ('runner' === $mode) {
     $pass = $container->get(InboundMoveRunner::class)->process((int) $id, onItem: static function (InboundMoveItem $item): void {
+        printf("Service #%d: %s: \n", $item->serviceId, $item->outcome);
+    });
+    echo 'exit=0 '.$pass->runStatus."\n";
+
+    return;
+}
+if ('undo' === $mode) {
+    $pass = $container->get(InboundMoveRunner::class)->undo((int) $id, static function (InboundMoveItem $item): void {
         printf("Service #%d: %s: \n", $item->serviceId, $item->outcome);
     });
     echo 'exit=0 '.$pass->runStatus."\n";

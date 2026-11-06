@@ -16,6 +16,8 @@ final readonly class InboundMoveItem
     public const SKIPPED = 'skipped';
     /** Claimed by another runner meanwhile, or no longer due: nothing done. */
     public const BUSY = 'busy';
+    /** kind=add: the client is on the inbound and the service has its row. Never SWITCHED: there is nothing to retire. */
+    public const ADDED = 'added';
     /** Switched earlier; only its links were refreshed now. */
     public const SNAPSHOT = 'snapshot';
     /** The client's UUID, subId or remote id changed between the claim and the write (a link reset): nothing written. */
