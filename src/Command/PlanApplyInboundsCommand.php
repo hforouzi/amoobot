@@ -33,13 +33,13 @@ use Symfony\Component\Console\Style\SymfonyStyle;
  * Moves a plan's existing services to the plan's current primary inbound (docs/design/plan-inbound-change.md 4.3,
  * 5.2, 5.4, 6.2; PR P4 phase 1, PR P6 phase 2 and the run controls): attach the new inbound, switch the service to it,
  * refresh its links; after the grace period remove the old inbound. With --kind=add (PR P11b, docs/design/
- * plan-inbound-add-remove.md) it puts them on one of the plan's additional inbounds instead. Dry run unless --apply. See
- * the help text.
+ * plan-inbound-add-remove.md) it puts them on one of the plan's additional inbounds instead, and with --kind=remove
+ * (PR P11c) it takes an inbound the plan no longer sells off them. Dry run unless --apply. See the help text.
  *
  * Exit codes: 0 every service moved or skipped; 1 some failed (or the run paused, or an undo is incomplete); 2 could
  * not start.
  */
-#[AsCommand(name: 'app:plan:apply-inbounds', description: 'Move a plan\'s existing services to its current inbound (attach, switch, refresh links; the old inbound removed after a grace period), or add one of its additional inbounds to them (--kind=add); dry run unless --apply')]
+#[AsCommand(name: 'app:plan:apply-inbounds', description: 'Move a plan\'s existing services to its current inbound (attach, switch, refresh links; the old inbound removed after a grace period), add one of its additional inbounds to them (--kind=add), or take an inbound it no longer sells off them (--kind=remove); dry run unless --apply')]
 final class PlanApplyInboundsCommand extends Command
 {
     private const EXIT_FAILED = 1;
@@ -65,8 +65,8 @@ final class PlanApplyInboundsCommand extends Command
     {
         $this
             ->addArgument('planId', InputArgument::REQUIRED, 'The plan whose existing services are moved to its current primary inbound')
-            ->addOption('kind', null, InputOption::VALUE_REQUIRED, 'primary: move to the plan\'s primary inbound; add: put the services on --inbound as well', InboundMoveRun::KIND_PRIMARY)
-            ->addOption('inbound', null, InputOption::VALUE_REQUIRED, 'With --kind=add: the inbound to add (one of the plan\'s additional inbounds)')
+            ->addOption('kind', null, InputOption::VALUE_REQUIRED, 'primary: move to the plan\'s primary inbound; add: put the services on --inbound as well; remove: take --inbound off them', InboundMoveRun::KIND_PRIMARY)
+            ->addOption('inbound', null, InputOption::VALUE_REQUIRED, 'With --kind=add: the inbound to add (one of the plan\'s additional inbounds). With --kind=remove: the inbound to remove (no longer in the plan)')
             ->addOption('apply', null, InputOption::VALUE_NONE, 'Create the run and move the services (without it: a dry run, nothing is written)')
             ->addOption('service', null, InputOption::VALUE_REQUIRED, 'Only this service (the recommended first test)')
             ->addOption('from-inbound', null, InputOption::VALUE_REQUIRED, 'Only services now on this (old) inbound id')
@@ -79,7 +79,7 @@ final class PlanApplyInboundsCommand extends Command
             ->addOption('after-id', null, InputOption::VALUE_REQUIRED, 'Only services with a higher id (to continue a dry run or a partial pass)')
             ->addOption('resume', null, InputOption::VALUE_REQUIRED, 'Continue this open run of the plan (paused, interrupted, or with old inbounds due for removal); it writes, like --apply')
             ->addOption('keep-old', null, InputOption::VALUE_NONE, 'With --apply: never remove the old inbound automatically (only --retire-now does)')
-            ->addOption('grace-hours', null, InputOption::VALUE_REQUIRED, sprintf('With --apply: hours between the switch and the removal of the old inbound (%d-%d; default: the setting %s)', InboundMoveSettings::MIN_DETACH_GRACE_HOURS, InboundMoveSettings::MAX_DETACH_GRACE_HOURS, InboundMoveSettings::DETACH_GRACE_HOURS))
+            ->addOption('grace-hours', null, InputOption::VALUE_REQUIRED, sprintf('With --apply: hours between the switch and the removal of the old inbound (%d-%d; default: the setting %s). With --kind=remove: hours before the inbound is removed (default: 0)', InboundMoveSettings::MIN_DETACH_GRACE_HOURS, InboundMoveSettings::MAX_DETACH_GRACE_HOURS, InboundMoveSettings::DETACH_GRACE_HOURS))
             ->addOption('retire-now', null, InputOption::VALUE_OPTIONAL, 'Make the removal of the old inbound due now for the moved services of this run (default: the plan\'s latest run); with --service only that one. Add --resume=<runId> to remove them in the same command', false)
             ->addOption('pause-run', null, InputOption::VALUE_REQUIRED, 'Pause this run: a pass working on it finishes the service in hand and takes no other')
             ->addOption('cancel', null, InputOption::VALUE_REQUIRED, 'Cancel this run: services not moved yet will not be moved; services in the middle of a step finish it')
@@ -153,6 +153,22 @@ final class PlanApplyInboundsCommand extends Command
                 put it back and --resume, or --cancel. --undo takes the inbound off the services this run added it to
                 (not those that had it before, and only for the plan's latest run), and leaves the plan as it is.
 
+                Removing an inbound (--kind=remove --inbound=<id>): change the plan FIRST, so that it no longer sells the
+                inbound (not its primary and not an additional one: to change a primary, use a move). New sales then
+                leave it out, and this takes it off the existing services. plans.multi_inbound_enabled must be on as well.
+                The service's row leaves "attached" before the panel is called, so the attach timer never puts the
+                client back; then the inbound is detached, the row is deleted, and the links are refreshed from the
+                panel (the stored links are hidden until that succeeds). A service never loses its primary or its
+                client's last inbound: those are skipped, and keep the inbound. The primary, UUID, subscription, expiry,
+                limits and traffic stay as they are. A dry run shows what each client is on now and after.
+                --grace-hours=N (0-168, default 0: the setting of a move is not read) waits before the removal: a window to
+                --cancel. --retire-now=<runId> makes the removal due now, and tries a failed or given-up service again.
+                --resume, --pause-run, --cancel and the scheduled task work as for a move; --cancel leaves a service that
+                was started alone (a failed one stays held until --retire-now or --undo). If the plan sells the inbound
+                again the run pauses: take it off and --resume, or --cancel, or --undo. --undo puts the inbound back,
+                also for a finished service (only for the plan's latest run), and leaves the plan as it is.
+                --from-inbound, --keep-old and --include-trials do not apply.
+
                 The output lists service ids and inbound titles only: never links, UUIDs, tokens or customers.
                 Exit codes: 0 done (moved or skipped), 1 some failed, the run paused or an undo is incomplete,
                 2 could not start.
@@ -197,15 +213,29 @@ final class PlanApplyInboundsCommand extends Command
         }
         $retire = false !== $retireNow;
         $kind = (string) $input->getOption('kind');
-        if (InboundMoveRun::KIND_REMOVE === $kind) {
-            return $this->fail($io, $output, $json, '--kind=remove is not available yet: use --kind=primary or --kind=add.');
-        }
         if (!in_array($kind, InboundMoveRun::RUNNABLE_KINDS, true)) {
-            return $this->fail($io, $output, $json, '--kind must be primary or add.');
+            return $this->fail($io, $output, $json, '--kind must be primary, add or remove.');
         }
         $add = InboundMoveRun::KIND_ADD === $kind;
-        if (!$add && null !== $ints['inbound']) {
-            return $this->fail($io, $output, $json, '--inbound goes with --kind=add only: a move always goes to the plan\'s primary inbound.');
+        $remove = InboundMoveRun::KIND_REMOVE === $kind;
+        if (!$add && !$remove && null !== $ints['inbound']) {
+            return $this->fail($io, $output, $json, '--inbound goes with --kind=add or --kind=remove only: a move always goes to the plan\'s primary inbound.');
+        }
+        if ($remove) {
+            if (null === $ints['inbound']) {
+                return $this->fail($io, $output, $json, '--kind=remove needs --inbound=<id>: the inbound to remove.');
+            }
+            $given = array_merge(
+                array_filter(['keep-old', 'include-trials'], static fn (string $o): bool => (bool) $input->getOption($o)),
+                array_filter(['from-inbound'], static fn (string $o): bool => null !== $ints[$o]),
+            );
+            if ([] !== $given) {
+                return $this->fail($io, $output, $json, sprintf('--%s does not apply to --kind=remove: it takes the services with a row for the inbound, and a trial\'s backing plan takes no remove.', implode(', --', $given)));
+            }
+            $named = array_filter(['resume', 'pause-run', 'cancel', 'undo'], static fn (string $o): bool => null !== $ints[$o]);
+            if ($retire || [] !== $named) {
+                return $this->fail($io, $output, $json, sprintf('A run keeps the kind and inbound it was created with: --%s takes neither --kind nor --inbound.', implode(', --', [...($retire ? ['retire-now'] : []), ...$named])));
+            }
         }
         if ($add) {
             if (null === $ints['inbound']) {
@@ -260,7 +290,7 @@ final class PlanApplyInboundsCommand extends Command
         }
 
         $target = null;
-        if ($add) {
+        if ($add || $remove) {
             $target = $this->entityManager->find(VpnInbound::class, (int) $ints['inbound']);
             if (!$target instanceof VpnInbound) {
                 return $this->fail($io, $output, $json, sprintf('There is no inbound #%d.', (int) $ints['inbound']));
@@ -307,7 +337,7 @@ final class PlanApplyInboundsCommand extends Command
             }
             $result = $this->controls->retireNow($runId, $ints['service']);
             if (!$result['ok'] || null === $ints['resume']) {
-                return $this->control($result + ['next' => $result['ok'] ? sprintf('The old inbounds are removed by the next pass: --resume=%d', $runId) : null], $io, $output, $json);
+                return $this->control($result + ['next' => $result['ok'] ? sprintf(InboundMoveRun::KIND_REMOVE === $this->runKind($runId) ? 'The inbound is removed by the next pass: --resume=%d' : 'The old inbounds are removed by the next pass: --resume=%d', $runId) : null], $io, $output, $json);
             }
             if (!$json) {
                 $io->writeln($result['message']);
@@ -321,7 +351,29 @@ final class PlanApplyInboundsCommand extends Command
                 : $this->resume($plan, (int) $ints['resume'], $ints['batch-size'], $ints['pause'], $io, $output, $json);
         }
         if (!$apply) {
-            return $target instanceof VpnInbound ? $this->dryRunAdd($plan, $target, $scope, $io, $output, $json) : $this->dryRun($plan, $scope, $io, $output, $json);
+            return match (true) {
+                $remove => $this->dryRunRemove($plan, $target, $scope, $io, $output, $json),
+                $target instanceof VpnInbound => $this->dryRunAdd($plan, $target, $scope, $io, $output, $json),
+                default => $this->dryRun($plan, $scope, $io, $output, $json),
+            };
+        }
+        if ($remove) {
+            $grace = $ints['grace-hours'] ?? 0;
+            $created = $this->planner->createRemove($plan, $target, $scope, $grace);
+            if (is_string($created)) {
+                return $this->fail($io, $output, $json, $created);
+            }
+            [$runId, $candidates] = $created;
+            if (!$json) {
+                $io->title(sprintf('Plan #%d "%s": removing %s from existing services (run #%d, %s)', (int) $plan->getId(), mb_substr($plan->getTitle(), 0, 60), self::inbound($target), $runId, 0 === $grace ? 'at once' : sprintf('after %d hour(s)', $grace)));
+                foreach ($candidates as $candidate) {
+                    if (InboundMoveCandidate::ACTION_SKIP === $candidate->action) {
+                        $io->writeln(sprintf('Service #%d (%s): skipped: %s', $candidate->serviceId, $candidate->status, (string) $candidate->skipText));
+                    }
+                }
+            }
+
+            return $this->process($plan, $runId, $ints['batch-size'], $ints['pause'], $io, $output, $json, $candidates);
         }
         if ($target instanceof VpnInbound) {
             $created = $this->planner->createAdd($plan, $target, $scope);
@@ -468,6 +520,60 @@ final class PlanApplyInboundsCommand extends Command
         return Command::SUCCESS;
     }
 
+    /** A dry run of --kind=remove: per service, what the client is on now and after. Only GETs; nothing is written. */
+    private function dryRunRemove(Plan $plan, VpnInbound $target, InboundMoveScope $scope, SymfonyStyle $io, OutputInterface $output, bool $json): int
+    {
+        $notes = array_values(array_filter([
+            $this->planner->removeTargetProblem($plan, $target),
+            $this->settings->enabled() ? null : sprintf('The switch %s is off: --apply would be refused (this dry run works without it).', InboundMoveSettings::ENABLED),
+            $this->multiInbound->enabled() ? null : sprintf('The switch %s is off: --apply would be refused (this dry run works without it).', MultiInboundSettings::ENABLED),
+            null === ($open = $this->planner->openRunId((int) $plan->getId())) ? null : InboundMovePlanner::openRunRefusal($open),
+        ]));
+        if (!$json) {
+            $io->title(sprintf('Plan #%d "%s": dry run, removing %s from existing services (nothing is written)', (int) $plan->getId(), mb_substr($plan->getTitle(), 0, 60), self::inbound($target)));
+        }
+        $candidates = $this->planner->removeCandidates($plan, $target, $scope, true);
+        $removing = count(array_filter($candidates, static fn (InboundMoveCandidate $c): bool => InboundMoveCandidate::ACTION_REMOVE === $c->action));
+        $summary = ['services' => count($candidates), 'would_remove' => $removing, 'skipped' => count($candidates) - $removing];
+        if ($json) {
+            $output->writeln((string) json_encode([
+                'plan_id' => $plan->getId(),
+                'plan' => $plan->getTitle(),
+                'kind' => InboundMoveRun::KIND_REMOVE,
+                'target_inbound_id' => $target->getId(),
+                'target_inbound' => $target->getTitle(),
+                'dry_run' => true,
+                'notes' => $notes,
+                'services' => array_map(static fn (InboundMoveCandidate $c): array => $c->toArray(), $candidates),
+                'summary' => $summary,
+            ], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+
+            return Command::SUCCESS;
+        }
+        if ([] === $candidates) {
+            $io->writeln('No service of this plan (in this scope) has this inbound: nothing to remove.');
+        } else {
+            $list = static fn (?array $titles): string => null === $titles ? '?' : implode(', ', $titles);
+            $io->table(
+                ['Service', 'Status', 'Now on panel', 'After', 'Action', 'Note'],
+                array_map(static fn (InboundMoveCandidate $c): array => [
+                    '#'.$c->serviceId,
+                    $c->status,
+                    $list($c->inboundsNow),
+                    $list($c->inboundsAfter),
+                    InboundMoveCandidate::ACTION_REMOVE === $c->action ? 'remove' : 'skip',
+                    (string) ($c->skipText ?? $c->panelNote ?? ''),
+                ], $candidates),
+            );
+        }
+        foreach ($notes as $note) {
+            $io->note($note);
+        }
+        $io->writeln(sprintf('%d service(s): %d would lose the inbound, %d skipped. Nothing was changed. Test ONE service first: --service=<id> --apply.', ...array_values($summary)));
+
+        return Command::SUCCESS;
+    }
+
     private function resume(Plan $plan, int $runId, ?int $batchSize, ?int $pause, SymfonyStyle $io, OutputInterface $output, bool $json): int
     {
         $runPlan = $this->entityManager->getConnection()->fetchOne('SELECT plan_id FROM inbound_move_run WHERE id = ?', [$runId]);
@@ -478,7 +584,11 @@ final class PlanApplyInboundsCommand extends Command
             return $this->fail($io, $output, $json, sprintf('Moving services is switched off (%s): the run is not continued.', InboundMoveSettings::ENABLED));
         }
         if (!$json) {
-            $io->title(sprintf(InboundMoveRun::KIND_ADD === $this->runKind($runId) ? 'Plan #%d "%s": continuing run #%d (services not reached yet, and links not refreshed yet)' : 'Plan #%d "%s": continuing run #%d (moves not done yet, and old inbounds due for removal)', (int) $plan->getId(), mb_substr($plan->getTitle(), 0, 60), $runId));
+            $io->title(sprintf(match ($this->runKind($runId)) {
+                InboundMoveRun::KIND_ADD => 'Plan #%d "%s": continuing run #%d (services not reached yet, and links not refreshed yet)',
+                InboundMoveRun::KIND_REMOVE => 'Plan #%d "%s": continuing run #%d (removals that are due, and links not refreshed yet)',
+                default => 'Plan #%d "%s": continuing run #%d (moves not done yet, and old inbounds due for removal)',
+            }, (int) $plan->getId(), mb_substr($plan->getTitle(), 0, 60), $runId));
         }
 
         return $this->process($plan, $runId, $batchSize, $pause, $io, $output, $json);
@@ -513,6 +623,20 @@ final class PlanApplyInboundsCommand extends Command
             return $failed ? self::EXIT_FAILED : Command::SUCCESS;
         }
         $c = $pass->counts;
+        if (InboundMoveRun::KIND_REMOVE === $pass->kind) {
+            $io->writeln(sprintf('Run #%d is %s%s. Removed %d, failed %d, skipped %d, remaining %d (of %d).%s', $runId, $pass->runStatus, null === $pass->pauseReason ? '' : ' ('.$pass->pauseReason.')', $c['done'], $c['failed'], $c['skipped'], $c['remaining'], $c['planned'],
+                0 === $pass->retirePending ? '' : sprintf(' %d service(s) keep the inbound until their grace period ends (the first at %s); then the scheduled task removes it (or now: --retire-now=%d --resume=%d).', $pass->retirePending, (string) $pass->retireNextAt, $runId, $runId)));
+            if ($pass->snapshotsPending > 0) {
+                $io->warning(sprintf('%d service(s) lost the inbound, but their links are not refreshed yet: the stored ones are hidden until then. Run again with --resume=%d.', $pass->snapshotsPending, $runId));
+            }
+            if ('running' === $pass->runStatus) {
+                $io->note(sprintf('Run #%d is still open (services wait for their grace period, a retry or their links). Continue it later with: --resume=%d', $runId, $runId));
+            } elseif ('paused' === $pass->runStatus) {
+                $io->warning(sprintf('Run #%d is paused. Fix that, then: --resume=%d; or stop it: --cancel=%d, or put the inbound back: --undo=%d', $runId, $runId, $runId, $runId));
+            }
+
+            return $failed ? self::EXIT_FAILED : Command::SUCCESS;
+        }
         if (InboundMoveRun::KIND_ADD === $pass->kind) {
             $io->writeln(sprintf('Run #%d is %s%s. Added %d, failed %d, skipped %d, remaining %d (of %d).', $runId, $pass->runStatus, null === $pass->pauseReason ? '' : ' ('.$pass->pauseReason.')', $c['done'], $c['failed'], $c['skipped'], $c['remaining'], $c['planned']));
             if ($pass->snapshotsPending > 0) {
@@ -547,9 +671,15 @@ final class PlanApplyInboundsCommand extends Command
         if (!$this->settings->enabled()) {
             return $this->fail($io, $output, $json, sprintf('Moving services is switched off (%s): nothing was undone.', InboundMoveSettings::ENABLED));
         }
-        $add = InboundMoveRun::KIND_ADD === $this->runKind($runId);
+        $kind = $this->runKind($runId);
+        $add = InboundMoveRun::KIND_ADD === $kind;
+        $remove = InboundMoveRun::KIND_REMOVE === $kind;
         if (!$json) {
-            $io->title(sprintf($add ? 'Plan #%d "%s": undo of run #%d (the added inbound comes off the services)' : 'Plan #%d "%s": undo of run #%d (moved services back on their old inbound)', (int) $plan->getId(), mb_substr($plan->getTitle(), 0, 60), $runId));
+            $io->title(sprintf(match ($kind) {
+                InboundMoveRun::KIND_ADD => 'Plan #%d "%s": undo of run #%d (the added inbound comes off the services)',
+                InboundMoveRun::KIND_REMOVE => 'Plan #%d "%s": undo of run #%d (the removed inbound goes back on the services)',
+                default => 'Plan #%d "%s": undo of run #%d (moved services back on their old inbound)',
+            }, (int) $plan->getId(), mb_substr($plan->getTitle(), 0, 60), $runId));
         }
         $items = [];
         $pass = $this->runner->undo($runId, static function (InboundMoveItem $item) use (&$items, $io, $json): void {
@@ -575,7 +705,12 @@ final class PlanApplyInboundsCommand extends Command
 
             return $incomplete ? self::EXIT_FAILED : Command::SUCCESS;
         }
-        if ($add) {
+        if ($remove) {
+            $io->writeln(sprintf('Run #%d is %s%s. Inbound put back: %d; not undone: %d failed, %d skipped, %d in another process\'s hands; services not reached yet that keep it: %d.', $runId, $pass->runStatus, null === $pass->pauseReason ? '' : ' ('.$pass->pauseReason.')', $pass->undone, $pass->failed, $pass->skipped, $pass->busy, $pass->cancelled));
+            if ($pass->undone > 0 && !$this->planStillSells($plan, $runId)) {
+                $io->note('The plan still does not sell this inbound: new sales do not get it, and these services hold an extra inbound. An undo leaves the plan as it is.');
+            }
+        } elseif ($add) {
             $io->writeln(sprintf('Run #%d is %s%s. Inbound taken off: %d; not undone: %d failed, %d skipped, %d in another process\'s hands; services not reached yet that will not get it: %d; left alone: %d (they had it before the run).', $runId, $pass->runStatus, null === $pass->pauseReason ? '' : ' ('.$pass->pauseReason.')', $pass->undone, $pass->failed, $pass->skipped, $pass->busy, $pass->cancelled, $pass->leftAlone));
             if ($pass->undone > 0 && $this->planStillSells($plan, $runId)) {
                 $io->note('The plan still sells this inbound: new sales get it. An undo leaves the plan as it is.');

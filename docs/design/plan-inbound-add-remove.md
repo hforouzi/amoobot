@@ -1,7 +1,7 @@
 # Adding or removing one inbound on a plan's existing services (P11) — design
 
-Status: **design decided, P11a and P11b built** (sections 13.1, 13.2). `add` works from the command line and the
-scheduled task; `remove`, and `add` on the web and in the Mini App, are not reachable yet. The owner has decided
+Status: **design decided, P11a, P11b and P11c built** (sections 13.1 to 13.3). `add` and `remove` work from the command
+line and the scheduled task, and are not on the web or in the Mini App yet. The owner has decided
 Q1 to Q9 and Q11 as recommended in 12.2. Q10 (the real-panel checklist first) is still open. Persian summary:
 [docs/fa/design/plan-inbound-add-remove.md](../fa/design/plan-inbound-add-remove.md).
 
@@ -509,7 +509,7 @@ before and after:
 | # | Risk | Recommendation |
 |---|---|---|
 | R1 | `remove` is customer-visible with no warning: D stops working for a customer until they switch server in the app | State it on the confirmation page. Test one service first. Consider waiting for P10 before a large `remove` |
-| R2 | Rows of **deleted** services stay `detached` (fact 9) and are never in scope, so inbound D can still be refused for deletion after a full `remove` | A separate small fix, outside P11: delete those rows in `ServiceAdministration::delete()` and clean up the old ones |
+| R2 | Rows of **deleted** services stay `detached` (fact 9) and are never in scope, so inbound D can still be refused for deletion after a full `remove` | A separate small fix, outside P11: delete those rows in `ServiceAdministration::delete()` and clean up the old ones. **Done with P11c** (13.3), with no migration |
 | R3 | A plan's first `add` makes every one of its services readable by the attach timer: one GET per service per 6 hours | Bounded by the timer's existing batches and limits. Note it for a panel with thousands of services |
 | R4 | `attachForMove()` and `detachInbounds()` were written for moves and tested on the fake only | P11a's tests pin them for this use. Real-panel checklist before any production run |
 | R5 | A held `detached` row of a `failed` move shows "Servers: N − 1" while the client may still be on D | Accepted: the admin sees the failure, and a retry or Undo settles it |
@@ -604,3 +604,45 @@ Where it goes beyond the text above, or differs from it:
 - Tests: `InboundMoveAddTest`, `InboundMoveAddParallelTest` (`kill -9` at each `add` row of 5.4 and in the undo, "Retry
   attach" in both orders and at once, link reset, Regenerate, two runners), `InboundMoveAddRedactionTest`,
   `InboundMoveAddLockHoldTest` (real time), and mode `undo` in `tests/Support/bin/inbound-move.php`.
+
+### 13.3 P11c as built
+
+`--kind=remove --inbound=<id>` on `app:plan:apply-inbounds`, and the scheduled task. No migration, setting, timer or driver
+change. `RUNNABLE_KINDS` now holds all three kinds, so no real kind is inert any more. The web and the Mini App stay closed
+(`planRun()`, `planOfRun()`), and `retryFailed()` refuses a `remove` run.
+
+Where it goes beyond the text above, or differs from it:
+
+- **The hold (finding 2).** `claimRemove()` sets the row to `detached`, with the fixed text "being removed by run #N" in
+  `last_error`, in the claim's transaction and before any panel call. The timer and the attacher ignore `detached` rows, and
+  the timer's writes are conditional on the status it read, so a timer stopped between read and write loses. A held row is
+  recognised by status plus text. A `detached` row without the text is not this run's: `not_attached`.
+- **A fresh `pending` row is busy, not a skip.** The attacher owns it, so the move stays `planned` with no attempt counted,
+  and the next pass decides. A stale `pending` and a `failed` row are claimed like an `attached` one.
+- **A skip at a re-claim gives a held row back** as `attached`, with attempts 0 and `checked_at` NULL, whatever it was before
+  the hold. The timer heals it either way, including a row that was `failed` or `pending`.
+- **Undo claims the move in state `attaching`, not `detaching`.** So a pass never reads a cut-off undo as a remove cut off:
+  `removeOne()` answers busy ("an undo stopped here"), and only `--undo` finishes it. `releaseUndo()` takes the claimed state.
+- **Planned moves can hold a row** after `--retire-now` or a link reset put a started remove back in `planned`.
+  `cancel` and undo's "cancel what has not started" leave those out (`REMOVE_HELD_SQL`), count them in `left`, and undo
+  covers them. Cancelling one would strand a held row that nothing else settles.
+- **`--retire-now` settles a failed remove too** (R5): it needs no `--kind`, and `--kind=remove --retire-now` is refused, since
+  a run keeps its kind. `--resume`, `--pause-run`, `--cancel` and `--undo` likewise.
+- **New skip reasons:** `not_attached` (at dry run or claim) and `later_move` (undo: a later move of the service by any run,
+  which this plan's latest-run rule cannot see). `no_primary` applies as for `add`. `other_panel` keeps the row.
+- **Undo with D deleted or inactive** leaves the move as it was, with a failed item in the output: there is nothing to attach
+  to. `SET NULL` on `from_inbound_id` is why a deleted D is seen.
+- **Undo of a remove writes no stamp** (6.4): the stored links only gain D, so the guard is not needed.
+- **An inactive D may be removed**, since that is the usual case when retiring it.
+- **The grace default ignores `plans.inbound_move_detach_grace_hours`** (Q5): `--grace-hours` or 0.
+- **The known limit of 5.4 stands.** A Regenerate that read `subLinks` before the detach and stores after the run keeps D's
+  link stored until the next refresh. The subscription URL is live.
+- **R2 / Q11, as a separate commit.** `delete()` removes the rows and `markDetached()` is gone. There is no migration for old
+  rows: the usage check no longer counts rows of deleted services, and deleting an inbound or a panel clears them first
+  (`PlanInboundUsage::clearDeletedServiceRows()`).
+- **11.2:** `InboundMoveOtherKindsTest` could not stay unchanged a second time. Its inert tests now pin a kind nobody built
+  (`replace`), so `RUNNABLE_KINDS` itself stays pinned, and the page test covers `add` and `remove`.
+- Tests: `InboundMoveRemoveTest`, `InboundMoveRemoveParallelTest` (`kill -9` at each `remove` row of 5.4 and in the undo, the
+  timer stopped between read and write in both orders, "Retry attach" in both orders and at once, link reset, Regenerate, two
+  runners), `InboundMoveRemoveRedactionTest`, `InboundMoveRemoveLockHoldTest` (real time), `DeletedServiceRowsTest`, and mode
+  `timer` in `tests/Support/bin/inbound-move.php`.

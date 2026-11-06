@@ -80,10 +80,10 @@ final class ServiceAdministration
         if (!$this->onPanel($service, 'delete', static fn ($driver) => $driver->deleteService((string) $service->getRemoteId(), $service->getPanel()))) {
             return ServiceAdminOutcome::PANEL_FAILED;
         }
-        // del/{email} removed the client from every inbound: its additional inbound rows (plans with several inbounds).
-        $now = new \DateTimeImmutable();
+        // del/{email} removed the client from every inbound, so its additional inbound rows go too: a row of a deleted
+        // service would only stop that inbound from being deleted (RESTRICT, docs/design/plan-inbound-add-remove.md R2).
         foreach ($this->entityManager->getRepository(VpnServiceInbound::class)->findBy(['service' => $service]) as $row) {
-            $row->markDetached($now);
+            $this->entityManager->remove($row);
         }
 
         return $this->save($service->setStatus(VpnServiceStatus::DELETED));

@@ -35,8 +35,8 @@ class InboundMoveRun
     public const KIND_ADD = 'add';
     public const KIND_REMOVE = 'remove';
     public const KINDS = [self::KIND_PRIMARY, self::KIND_ADD, self::KIND_REMOVE];
-    /** The kinds a pass, a control or the scheduled task takes (P11b opened add; remove stays inert until P11c). */
-    public const RUNNABLE_KINDS = [self::KIND_PRIMARY, self::KIND_ADD];
+    /** The kinds a pass, a control or the scheduled task takes: all of them since P11c. */
+    public const RUNNABLE_KINDS = [self::KIND_PRIMARY, self::KIND_ADD, self::KIND_REMOVE];
 
     public const STATUS_PLANNED = 'planned';
     public const STATUS_RUNNING = 'running';

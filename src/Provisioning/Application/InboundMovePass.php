@@ -25,6 +25,8 @@ final class InboundMovePass
     public int $switched = 0;
     /** kind=add: services that got the inbound in this pass. */
     public int $added = 0;
+    /** kind=remove: services that lost the inbound in this pass. */
+    public int $removed = 0;
     public int $alreadyOnTarget = 0;
     public int $failed = 0;
     public int $skipped = 0;
@@ -90,6 +92,10 @@ final class InboundMovePass
             'counts' => $this->counts,
         ];
 
-        return InboundMoveRun::KIND_PRIMARY === $this->kind ? $array : $array + ['kind' => $this->kind, 'added' => $this->added, 'left_alone' => $this->leftAlone];
+        if (InboundMoveRun::KIND_PRIMARY === $this->kind) {
+            return $array;
+        }
+
+        return $array + ['kind' => $this->kind, 'added' => $this->added, 'left_alone' => $this->leftAlone] + (InboundMoveRun::KIND_REMOVE === $this->kind ? ['removed' => $this->removed] : []);
     }
 }

@@ -175,6 +175,21 @@ class InboundAttachAlerts
 
             return true;
         }
+        if (false !== $run && InboundMoveRun::KIND_REMOVE === $run['kind']) {
+            $inbound = null === $run['target_inbound_id'] ? '(deleted)' : sprintf('"%s" (#%d)', mb_substr((string) $run['title'], 0, 60), (int) $run['target_inbound_id']);
+            $this->deliver($chats, implode("\n", [
+                null === $pauseReason ? self::MOVE_FINISHED_FAILED_TITLE : self::MOVE_PAUSED_TITLE,
+                sprintf('Run ID: %d', $runId),
+                sprintf('Plan: %s (#%d)', mb_substr((string) $plan, 0, 80), $planId),
+                sprintf('Kind: remove, inbound %s', $inbound),
+                sprintf('Removed: %d, failed: %d, skipped: %d, remaining: %d (of %d)', $counts['done'] ?? 0, $counts['failed'] ?? 0, $counts['skipped'] ?? 0, $counts['remaining'] ?? 0, $counts['planned'] ?? 0),
+                null === $pauseReason
+                    ? sprintf('Some services still have the inbound, or may. Try them again: php bin/console app:plan:apply-inbounds %d --retire-now=%d --resume=%d; or put it back: --undo=%d', $planId, $runId, $runId, $runId)
+                    : sprintf('Paused: %s. Nothing changed for the customers not reached yet. Then: php bin/console app:plan:apply-inbounds %d --resume=%d', mb_substr($pauseReason, 0, 120), $planId, $runId),
+            ]));
+
+            return true;
+        }
         $lines = [
             null === $pauseReason ? self::MOVE_FINISHED_FAILED_TITLE : self::MOVE_PAUSED_TITLE,
             sprintf('Run ID: %d', $runId),
@@ -234,6 +249,19 @@ class InboundAttachAlerts
                 sprintf('Adding %s', $inbound($row['to_inbound_id'], $row['to_title'])),
                 'Last error: '.mb_substr(self::withoutClient(VpnServiceInbound::safeError((string) ($row['last_error'] ?? '-')), (string) ($row['client_email'] ?? '')), 0, 200),
                 sprintf('Gave up after %d attempt(s). The service keeps the inbounds it had and its links. Fix the panel, then check it with: php bin/console app:plan:apply-inbounds %d --kind=add --inbound=%d --service=%d', (int) $row['attempts'], (int) $row['plan_id'], (int) $row['to_inbound_id'], (int) $row['service_id']),
+            ]));
+
+            return true;
+        }
+        if (InboundMoveRun::KIND_REMOVE === $row['kind']) {
+            $this->deliver($chats, implode("\n", [
+                self::MOVE_GAVE_UP_TITLE,
+                sprintf('Service ID: %d', (int) $row['service_id']),
+                sprintf('Run ID: %d', (int) $row['run_id']),
+                sprintf('Plan: %s (#%d)', mb_substr((string) $row['plan_title'], 0, 80), (int) $row['plan_id']),
+                sprintf('Removing %s', $inbound($row['from_inbound_id'], $row['from_title'])),
+                'Last error: '.mb_substr(self::withoutClient(VpnServiceInbound::safeError((string) ($row['last_error'] ?? '-')), (string) ($row['client_email'] ?? '')), 0, 200),
+                sprintf('Gave up after %d attempt(s). The panel may still list the inbound; the attach timer leaves it alone until this is settled. Fix the panel, then: php bin/console app:plan:apply-inbounds %d --retire-now=%d --service=%d --resume=%d; or put it back: --undo=%d', (int) $row['attempts'], (int) $row['plan_id'], (int) $row['run_id'], (int) $row['service_id'], (int) $row['run_id'], (int) $row['run_id']),
             ]));
 
             return true;

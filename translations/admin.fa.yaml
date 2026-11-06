@@ -1605,6 +1605,8 @@ inbound_move:
   skip.is_primary: "این اینباند، اینباند اصلی سرویس است"
   skip.no_primary: "اینباند اصلی ندارد"
   skip.last_inbound: "تنها اینباند این کلاینت روی پنل است"
+  skip.not_attached: "این سرویس دیگر این اینباند را ندارد"
+  skip.later_move: "جابه‌جایی بعدی این سرویس را تغییر داده است"
   skip.already_on_panel: "از قبل روی پنل بوده است"
   skip.target_inactive: "اینباند مقصد غیرفعال است"
   action.pause: "توقف"

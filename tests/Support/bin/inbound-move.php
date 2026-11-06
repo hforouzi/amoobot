@@ -11,9 +11,11 @@ declare(strict_types=1);
  * - resume <runId>        app:plan:apply-inbounds <its plan> --resume=<runId>; prints "exit=<code>" and the output
  * - runner <runId>        InboundMoveRunner::process() itself, without the command's lock (a second runner on one item:
  *                         only the claims stand in its way); prints each outcome, then "exit=0" and the run's status
- * - undo <runId>          InboundMoveRunner::undo() itself (kind=add, PR P11b); prints each outcome, then "exit=0"
+ * - undo <runId>          InboundMoveRunner::undo() itself (PRs P11b, P11c); prints each outcome, then "exit=0"
  * - task <runId>          app:automation:run --only=inbound-moves; prints "exit=<code>" and the output (the id only
  *                         names the service a <block> probes)
+ * - timer <serviceId>     one run of the attach timer (InboundAttachScheduler::run()) (PR P11c); prints
+ *                         "attached=<n> removed=<n> alerts=<n>" (the id only names the service a <block> probes)
  * - suspend <serviceId>   ServiceAdministration::suspend(); prints the outcome
  * - renew <serviceId>     ServiceRenewalService::renew() for 30 days and 50 GB (an unsaved renewal order), then flush;
  *                         prints "renewed"
@@ -27,6 +29,7 @@ declare(strict_types=1);
 
 use App\Entity\Order;
 use App\Entity\VpnService;
+use App\Provisioning\Application\InboundAttachScheduler;
 use App\Provisioning\Application\InboundMoveItem;
 use App\Provisioning\Application\InboundMoveRunner;
 use App\Provisioning\Application\ServiceAdministration;
@@ -124,6 +127,14 @@ if ('task' === $mode) {
     $output = new BufferedOutput();
     $code = $application->run(new ArrayInput(['command' => 'app:automation:run', '--only' => 'inbound-moves']), $output);
     echo 'exit='.$code."\n".$output->fetch();
+
+    return;
+}
+
+if ('timer' === $mode) {
+    $run = $container->get(InboundAttachScheduler::class)->run(500, false, 50, 0);
+    printf("attached=%d removed=%d alerts=%d
+", $run->attached, $run->foundRemoved, $run->alertsSent);
 
     return;
 }

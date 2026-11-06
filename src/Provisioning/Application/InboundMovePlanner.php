@@ -45,6 +45,10 @@ use Psr\Log\LoggerInterface;
  * kind=add (docs/design/plan-inbound-add-remove.md 3, 4, PR P11b): addCandidates() and createAdd() list the plan's services
  * without an attached row for the target C. skipReason() stays the one rule set; addSkipReason() adds what only an add
  * needs (C must not be the primary, a primary must exist). addTargetProblem() is the plan rule.
+ *
+ * kind=remove (PR P11c): removeCandidates() and createRemove() list the services with a live row for the target D. The same
+ * rules apply (addSkipReason()), without the protocol check: a service that loses an inbound breaks none. Its moves name
+ * D as "from", with the panel id the service's row recorded, and have no "to". removeTargetProblem() is the plan rule.
  */
 final class InboundMovePlanner
 {
@@ -70,6 +74,10 @@ final class InboundMovePlanner
     public const SKIP_NO_PRIMARY = 'no_primary';
     /** Undo of an add: the driver refused, the target is the client's only inbound on the panel. */
     public const SKIP_LAST_INBOUND = 'last_inbound';
+    /** kind=remove: the service's row for the inbound went away after the run was created. */
+    public const SKIP_NOT_ATTACHED = 'not_attached';
+    /** Undo of a remove: a later move of the service exists, and it is left alone (docs/design/plan-inbound-add-remove.md 7). */
+    public const SKIP_LATER_MOVE = 'later_move';
     /** kind=add: not a skip but a note on a done move: the client was on the target before this run. Undo leaves it. */
     public const ALREADY_ON_PANEL = 'already_on_panel';
 
@@ -84,6 +92,9 @@ final class InboundMovePlanner
 
     /** States of a move that is not finished: another run must not take the service meanwhile (6.2). */
     private const UNFINISHED_SQL = "(m.state IN ('planned', 'attaching', 'detaching') OR (m.state = 'switched' AND m.detach_after IS NOT NULL) OR (m.state = 'failed' AND m.next_attempt_at IS NOT NULL))";
+
+    private const ROWS_NOT_ATTACHED = 'not_attached';
+    private const ROWS_LIVE = 'live';
 
     /** @var array<int, array<string, array<string, mixed>>|null> panel id => inbounds/options by remote id (null: not readable) */
     private array $options = [];
@@ -147,11 +158,13 @@ final class InboundMovePlanner
             self::SKIP_IS_PRIMARY => 'the inbound is this service\'s primary inbound',
             self::SKIP_NO_PRIMARY => 'the service has no primary inbound',
             self::SKIP_LAST_INBOUND => 'the inbound is the client\'s only one on the panel',
+            self::SKIP_NOT_ATTACHED => 'the service no longer has this inbound',
+            self::SKIP_LATER_MOVE => 'a later move changed this service: it is left alone',
             default => $reason,
         };
     }
 
-    /** skipText() for an add: --include-trials does not exist there (6.6). */
+    /** skipText() for an add or a remove: --include-trials does not exist there (6.6). */
     public static function addSkipText(string $reason, ?int $otherRunId = null): string
     {
         return self::SKIP_TRIAL === $reason ? 'trial service: out of scope' : self::skipText($reason, $otherRunId);
@@ -186,6 +199,23 @@ final class InboundMovePlanner
             !in_array((int) $target->getId(), $this->planAdditionalIds((int) $plan->getId()), true) => sprintf('The plan does not sell inbound %s as an additional inbound: add it to the plan first.', $name),
             !$target->isActive() => sprintf('The inbound %s is inactive: no run is created for an inactive target.', $name),
             null !== $primary && (int) $primary->getPanel()->getId() !== (int) $target->getPanel()->getId() => sprintf('The inbound %s is on another panel than the plan\'s primary inbound.', $name),
+            default => null,
+        };
+    }
+
+    /**
+     * The plan rule of kind=remove (docs/design/plan-inbound-add-remove.md 4), or null: the plan changes first, so the
+     * target must be neither its primary (Q4: that is what a move is for) nor one of its additional inbounds; a trial's
+     * backing plan takes no remove. An inactive inbound may be removed: that is one reason to remove it.
+     */
+    public function removeTargetProblem(Plan $plan, VpnInbound $target): ?string
+    {
+        $name = sprintf('"%s" (#%d)', mb_substr($target->getTitle(), 0, 60), (int) $target->getId());
+
+        return match (true) {
+            $this->trialBackingPlans->isBacking($plan) => sprintf('Plan #%d backs a trial: its inbounds are fixed, so no inbound is removed.', (int) $plan->getId()),
+            (int) $plan->getInbound()?->getId() === (int) $target->getId() => sprintf('The inbound %s is the plan\'s primary inbound: it is never removed. Change the plan\'s inbound and move the services instead (--kind=primary).', $name),
+            in_array((int) $target->getId(), $this->planAdditionalIds((int) $plan->getId()), true) => sprintf('The plan still sells inbound %s: remove it from the plan first.', $name),
             default => null,
         };
     }
@@ -264,7 +294,7 @@ final class InboundMovePlanner
     {
         $candidates = [];
         $readFailures = 0;
-        foreach ($this->serviceRows($plan, $target, $scope, true) as $row) {
+        foreach ($this->serviceRows($plan, $target, $scope, self::ROWS_NOT_ATTACHED) as $row) {
             $candidate = new InboundMoveCandidate(
                 (int) $row['id'],
                 (string) $row['status'],
@@ -385,6 +415,146 @@ final class InboundMovePlanner
             'skipped' => count($candidates) - $adding,
         ]);
         $this->logger->info('inbound_move_run_created', ['run_id' => $runId, 'plan_id' => $plan->getId(), 'kind' => InboundMoveRun::KIND_ADD, 'planned' => $adding, 'skipped' => count($candidates) - $adding]);
+
+        return [$runId, $candidates];
+    }
+
+    /**
+     * The services of $plan with a live row (attached, pending or failed) for $target, in order of id, each with "remove"
+     * or why not. A service whose primary is the target shows here as a skip, unlike a move's or an add's listing.
+     *
+     * @param bool                                       $readPanel dry run: GET each service's client (budgeted, read only)
+     * @param \Closure(InboundMoveCandidate): void|null $onEach    called per service
+     *
+     * @return list<InboundMoveCandidate>
+     */
+    public function removeCandidates(Plan $plan, VpnInbound $target, InboundMoveScope $scope, bool $readPanel = false, ?\Closure $onEach = null): array
+    {
+        $candidates = [];
+        $readFailures = 0;
+        foreach ($this->serviceRows($plan, $target, $scope, self::ROWS_LIVE) as $row) {
+            $candidate = new InboundMoveCandidate(
+                (int) $row['id'],
+                (string) $row['status'],
+                (int) $target->getId(),
+                '' === trim((string) $row['row_remote_id']) ? $target->getRemoteInboundId() : trim((string) $row['row_remote_id']),
+                mb_substr($target->getTitle(), 0, 60),
+                InboundMoveCandidate::ACTION_REMOVE,
+            );
+            [$reason, $otherRun] = $this->addSkipReason($row, $target, $scope, null);
+            if (null !== $reason) {
+                $candidate = $candidate->skipped($reason, self::addSkipText($reason, $otherRun));
+            } elseif ($readPanel) {
+                if ($readFailures >= self::MAX_READ_FAILURES_IN_A_ROW) {
+                    $candidate = $candidate->withPanelNote(sprintf('panel not read (stopped after %d failed reads in a row)', self::MAX_READ_FAILURES_IN_A_ROW));
+                } else {
+                    [$now, $after, $note, $failed] = $this->removePanelNote($row, (int) $candidate->fromRemoteInboundId);
+                    $readFailures = $failed ? $readFailures + 1 : 0;
+                    $candidate = $candidate->withInbounds($now, $after, $note);
+                }
+            }
+            $candidates[] = $candidate;
+            if (null !== $onEach) {
+                $onEach($candidate);
+            }
+        }
+
+        return $candidates;
+    }
+
+    /**
+     * Creates a kind=remove run with one move row per listed service, planned or skipped, in one transaction. A planned
+     * move is due once its detach_after has passed: now + $graceHours, frozen here. The default is 0: the setting
+     * plans.inbound_move_detach_grace_hours is a move's and is not read (docs/design/plan-inbound-add-remove.md 6.5).
+     * Refused with either switch off, against the plan rule, or while the plan has an open run of any kind.
+     *
+     * @return array{int, list<InboundMoveCandidate>}|string the run id and its services, or why it was not created
+     */
+    public function createRemove(Plan $plan, VpnInbound $target, InboundMoveScope $scope, int $graceHours = 0, ?int $requestedBy = null): array|string
+    {
+        if (!$this->settings->enabled()) {
+            return sprintf('Moving services is switched off (%s). Turn it on in Settings → Plans to use --apply; a dry run works without it.', InboundMoveSettings::ENABLED);
+        }
+        if (!$this->multiInbound->enabled()) {
+            return sprintf('Multi-inbound plans are switched off (%s): removing an inbound needs them. A dry run works without it.', MultiInboundSettings::ENABLED);
+        }
+        if ($scope->includeTrials) {
+            return '--include-trials does not apply to --kind=remove: a trial\'s backing plan takes no remove.';
+        }
+        if (null !== $scope->fromInboundId) {
+            return '--from-inbound does not apply to --kind=remove: the services are those with a row for the inbound.';
+        }
+        if ($graceHours < InboundMoveSettings::MIN_DETACH_GRACE_HOURS || $graceHours > InboundMoveSettings::MAX_DETACH_GRACE_HOURS) {
+            return sprintf('--grace-hours must be from %d to %d.', InboundMoveSettings::MIN_DETACH_GRACE_HOURS, InboundMoveSettings::MAX_DETACH_GRACE_HOURS);
+        }
+        $problem = $this->removeTargetProblem($plan, $target);
+        if (null !== $problem) {
+            return $problem;
+        }
+        $open = $this->openRunId((int) $plan->getId());
+        if (null !== $open) {
+            return self::openRunRefusal($open);
+        }
+        $candidates = $this->removeCandidates($plan, $target, $scope);
+
+        $db = $this->connection();
+        $at = new \DateTimeImmutable();
+        $now = $at->format('Y-m-d H:i:s');
+        $detachAfter = $at->modify(sprintf('+%d hours', $graceHours))->format('Y-m-d H:i:s');
+        $db->beginTransaction();
+        try {
+            $db->insert('inbound_move_run', [
+                'plan_id' => $plan->getId(),
+                'open_plan_id' => $plan->getId(),
+                'kind' => InboundMoveRun::KIND_REMOVE,
+                'target_inbound_id' => $target->getId(),
+                'scope' => (string) json_encode($scope->toArray()),
+                'status' => InboundMoveRun::STATUS_PLANNED,
+                'grace_hours' => $graceHours,
+                'keep_old' => 0,
+                'requested_by' => $requestedBy,
+                'created_at' => $now,
+                'planned_count' => 0, 'done_count' => 0, 'failed_count' => 0, 'skipped_count' => 0, 'remaining_count' => 0,
+            ]);
+            $runId = (int) $db->lastInsertId();
+            foreach ($candidates as $candidate) {
+                $remove = InboundMoveCandidate::ACTION_REMOVE === $candidate->action;
+                $db->insert('service_inbound_move', [
+                    'run_id' => $runId,
+                    'service_id' => $candidate->serviceId,
+                    'from_inbound_id' => $target->getId(),
+                    'from_remote_inbound_id' => $candidate->fromRemoteInboundId,
+                    'state' => $remove ? ServiceInboundMove::STATE_PLANNED : ServiceInboundMove::STATE_SKIPPED,
+                    'skip_reason' => $remove ? null : $candidate->skipReason,
+                    'attempts' => 0,
+                    'detach_after' => $remove ? $detachAfter : null,
+                    'created_at' => $now,
+                    'updated_at' => $now,
+                ]);
+            }
+            $db->commit();
+        } catch (UniqueConstraintViolationException) {
+            $db->rollBack();
+
+            return self::openRunRefusal($this->openRunId((int) $plan->getId()));
+        } catch (\Throwable $e) {
+            $db->rollBack();
+
+            throw $e;
+        }
+
+        $removing = count(array_filter($candidates, static fn (InboundMoveCandidate $c): bool => InboundMoveCandidate::ACTION_REMOVE === $c->action));
+        $this->refreshCounts($runId);
+        $this->auditLogger->record('plan.inbounds_apply_started', 'plan', (int) $plan->getId(), [
+            'run_id' => $runId,
+            'kind' => InboundMoveRun::KIND_REMOVE,
+            'target_inbound_id' => $target->getId(),
+            'grace_hours' => $graceHours,
+            'services' => count($candidates),
+            'planned' => $removing,
+            'skipped' => count($candidates) - $removing,
+        ]);
+        $this->logger->info('inbound_move_run_created', ['run_id' => $runId, 'plan_id' => $plan->getId(), 'kind' => InboundMoveRun::KIND_REMOVE, 'planned' => $removing, 'skipped' => count($candidates) - $removing]);
 
         return [$runId, $candidates];
     }
@@ -809,25 +979,11 @@ final class InboundMovePlanner
      */
     private function addPanelNote(array $row, VpnInbound $target): array
     {
-        if ($this->connection()->isTransactionActive()) {
-            return [null, null, 'panel not read (a transaction is open)', false];
+        $read = $this->readClientInbounds($row);
+        if (!is_array($read['ids'])) {
+            return [$read['now'], $read['now'], (string) $read['note'], $read['failed']];
         }
-        $panel = $this->entityManager->find(VpnPanel::class, (int) $row['panel_id']);
-        $driver = $panel instanceof VpnPanel ? $this->drivers->resolve($panel) : null;
-        if (!$driver instanceof InboundAttachDriverInterface) {
-            return [null, null, 'panel not read', false];
-        }
-        try {
-            $ids = $this->budget->within(self::STEP_BUDGET_SECONDS, fn (): ?array => $driver->clientInboundIds((string) $row['remote_id'], $panel, false));
-        } catch (\Throwable $e) {
-            $secrets = $this->panelSecrets($panel);
-            $this->logger->warning('inbound_move_dry_run_read_failed', ['service_id' => (int) $row['id'], 'error' => SafeText::of($e->getMessage(), (string) ($row['client_email'] ?? ''), 255, $secrets)]);
-
-            return [null, null, 'panel not read: '.SafeText::of($e->getMessage(), (string) ($row['client_email'] ?? ''), 120, $secrets), true];
-        }
-        if (null === $ids) {
-            return [[], [], 'no such client on the panel: would fail', false];
-        }
+        $ids = $read['ids'];
         $titles = $this->panelInboundTitles((int) $row['panel_id']);
         $title = static fn (int $id): string => $titles[$id] ?? '#'.$id;
         $now = array_map($title, $ids);
@@ -838,6 +994,65 @@ final class InboundMovePlanner
             !in_array((int) (self::remoteInboundOf($row) ?? 0), $ids, true) => [$now, $now, 'not on its primary inbound on the panel: would fail, nothing sent', false],
             default => [$now, [...$now, $title($to)], 'would attach the inbound', false],
         };
+    }
+
+    /**
+     * A remove's dry run: what the panel says about the client (one GET, budgeted, read only), in the order of the
+     * driver's own checks.
+     *
+     * @param array<string, mixed> $row
+     *
+     * @return array{list<string>|null, list<string>|null, string, bool} the inbounds now and after, the note, and whether the panel could not be read
+     */
+    private function removePanelNote(array $row, int $remote): array
+    {
+        $read = $this->readClientInbounds($row);
+        if (!is_array($read['ids'])) {
+            return [$read['now'], $read['now'], (string) $read['note'], $read['failed']];
+        }
+        $ids = $read['ids'];
+        $titles = $this->panelInboundTitles((int) $row['panel_id']);
+        $title = static fn (int $id): string => $titles[$id] ?? '#'.$id;
+        $now = array_map($title, $ids);
+        $on = in_array($remote, $ids, true);
+
+        return match (true) {
+            $on && [] === array_diff($ids, [$remote]) => [$now, $now, 'the client\'s only inbound on the panel: would be skipped, nothing sent', false],
+            !in_array((int) (self::remoteInboundOf($row) ?? 0), $ids, true) => [$now, $now, 'not on its primary inbound on the panel: would fail, nothing sent', false],
+            !$on => [$now, $now, 'not on the panel: only the row goes', false],
+            default => [$now, array_map($title, array_values(array_diff($ids, [$remote]))), 'would detach the inbound', false],
+        };
+    }
+
+    /**
+     * The client's inbounds on the panel for a dry run; "ids" is null when there is none to show, with the note why.
+     *
+     * @param array<string, mixed> $row
+     *
+     * @return array{ids: list<int>|null, now: list<string>|null, note: string|null, failed: bool}
+     */
+    private function readClientInbounds(array $row): array
+    {
+        if ($this->connection()->isTransactionActive()) {
+            return ['ids' => null, 'now' => null, 'note' => 'panel not read (a transaction is open)', 'failed' => false];
+        }
+        $panel = $this->entityManager->find(VpnPanel::class, (int) $row['panel_id']);
+        $driver = $panel instanceof VpnPanel ? $this->drivers->resolve($panel) : null;
+        if (!$driver instanceof InboundAttachDriverInterface) {
+            return ['ids' => null, 'now' => null, 'note' => 'panel not read', 'failed' => false];
+        }
+        try {
+            $ids = $this->budget->within(self::STEP_BUDGET_SECONDS, fn (): ?array => $driver->clientInboundIds((string) $row['remote_id'], $panel, false));
+        } catch (\Throwable $e) {
+            $secrets = $this->panelSecrets($panel);
+            $this->logger->warning('inbound_move_dry_run_read_failed', ['service_id' => (int) $row['id'], 'error' => SafeText::of($e->getMessage(), (string) ($row['client_email'] ?? ''), 255, $secrets)]);
+
+            return ['ids' => null, 'now' => null, 'note' => 'panel not read: '.SafeText::of($e->getMessage(), (string) ($row['client_email'] ?? ''), 120, $secrets), 'failed' => true];
+        }
+
+        return null === $ids
+            ? ['ids' => null, 'now' => [], 'note' => 'no such client on the panel: would fail', 'failed' => false]
+            : ['ids' => $ids, 'now' => null, 'note' => null, 'failed' => false];
     }
 
     /** @return array<int, string> the panel's inbounds known to the bot: remote id => title */
@@ -852,15 +1067,23 @@ final class InboundMovePlanner
     }
 
     /**
-     * @param bool $withoutAttachedRow kind=add: only services with no attached row for the target
+     * @param string|null $rows self::ROWS_NOT_ATTACHED (kind=add): only services with no attached row for the target;
+     *                          self::ROWS_LIVE (kind=remove): only services with a row for it that is not detached, with
+     *                          that row's panel id as row_remote_id, whatever their primary (a skip says so)
      *
      * @return list<array<string, mixed>>
      */
-    private function serviceRows(Plan $plan, VpnInbound $target, InboundMoveScope $scope, bool $withoutAttachedRow = false): array
+    private function serviceRows(Plan $plan, VpnInbound $target, InboundMoveScope $scope, ?string $rows = null): array
     {
-        $where = ['o.plan_id = :plan', 's.status <> :deleted', '(s.inbound_id IS NULL OR s.inbound_id <> :target)', 's.id > :after'];
+        $live = self::ROWS_LIVE === $rows;
+        $where = ['o.plan_id = :plan', 's.status <> :deleted', 's.id > :after'];
         $params = ['plan' => $plan->getId(), 'deleted' => VpnServiceStatus::DELETED, 'target' => $target->getId(), 'after' => $scope->afterId];
-        if ($withoutAttachedRow) {
+        if (!$live) {
+            $where[] = '(s.inbound_id IS NULL OR s.inbound_id <> :target)';
+        } else {
+            $params['detached'] = VpnServiceInbound::STATUS_DETACHED;
+        }
+        if (self::ROWS_NOT_ATTACHED === $rows) {
             $where[] = 'NOT EXISTS (SELECT 1 FROM vpn_service_inbound r WHERE r.service_id = s.id AND r.inbound_id = :attached_to AND r.status = :attached)';
             $params['attached_to'] = $target->getId();
             $params['attached'] = VpnServiceInbound::STATUS_ATTACHED;
@@ -876,9 +1099,11 @@ final class InboundMovePlanner
 
         return $this->connection()->fetchAllAssociative(
             sprintf(
-                'SELECT s.id, s.status, s.inbound_id, s.panel_id, s.remote_id, s.client_email, o.type AS order_type, i.title AS inbound_title, i.remote_inbound_id AS inbound_remote_id
-                 FROM vpn_service s JOIN `order` o ON o.id = s.order_id LEFT JOIN vpn_inbound i ON i.id = s.inbound_id
+                'SELECT s.id, s.status, s.inbound_id, s.panel_id, s.remote_id, s.client_email, o.type AS order_type, i.title AS inbound_title, i.remote_inbound_id AS inbound_remote_id%s
+                 FROM vpn_service s JOIN `order` o ON o.id = s.order_id LEFT JOIN vpn_inbound i ON i.id = s.inbound_id%s
                  WHERE %s ORDER BY s.id%s',
+                $live ? ', t.remote_inbound_id AS row_remote_id' : '',
+                $live ? ' JOIN vpn_service_inbound t ON t.service_id = s.id AND t.inbound_id = :target AND t.status <> :detached' : '',
                 implode(' AND ', $where),
                 null === $scope->limit ? '' : ' LIMIT '.max(1, $scope->limit),
             ),

@@ -7,6 +7,7 @@ namespace App\Provisioning\Application;
 use App\Entity\InboundMoveRun;
 use App\Entity\ServiceInboundMove;
 use App\Security\AdminAuditLogger;
+use Doctrine\DBAL\ArrayParameterType;
 use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
 use Doctrine\ORM\EntityManagerInterface;
 use Psr\Log\LoggerInterface;
@@ -81,18 +82,30 @@ final class InboundMoveControls
             return ['ok' => false, 'message' => sprintf('Run #%d is %s: nothing to cancel.', $runId, $run['status']), 'cancelled' => 0, 'open' => false];
         }
         $now = (new \DateTimeImmutable())->format('Y-m-d H:i:s');
-        $cancelled = (int) $this->db()->executeStatement(
-            "UPDATE service_inbound_move SET state = ?, claimed_at = NULL, next_attempt_at = NULL, updated_at = ?
-             WHERE run_id = ? AND (state = 'planned' OR (state = 'failed' AND detach_after IS NULL AND next_attempt_at IS NOT NULL))",
-            [ServiceInboundMove::STATE_CANCELLED, $now, $runId],
-        );
+        $remove = InboundMoveRun::KIND_REMOVE === $run['kind'];
+        if ($remove) {
+            // A planned move that holds its row is not "not started": see cancelNotStarted() of the runner. Read first: this
+            // UPDATE must not touch the rows of vpn_service_inbound against the lock order.
+            $ids = array_map('intval', $this->db()->fetchFirstColumn("SELECT m.id FROM service_inbound_move m WHERE m.run_id = ? AND m.state = 'planned' AND NOT ".InboundMoveRunner::REMOVE_HELD_SQL, [$runId]));
+            $cancelled = [] === $ids ? 0 : (int) $this->db()->executeStatement(
+                "UPDATE service_inbound_move SET state = ?, claimed_at = NULL, next_attempt_at = NULL, updated_at = ? WHERE state = 'planned' AND id IN (?)",
+                [ServiceInboundMove::STATE_CANCELLED, $now, $ids],
+                [2 => ArrayParameterType::INTEGER],
+            );
+        } else {
+            $cancelled = (int) $this->db()->executeStatement(
+                "UPDATE service_inbound_move SET state = ?, claimed_at = NULL, next_attempt_at = NULL, updated_at = ?
+                 WHERE run_id = ? AND (state = 'planned' OR (state = 'failed' AND detach_after IS NULL AND next_attempt_at IS NOT NULL))",
+                [ServiceInboundMove::STATE_CANCELLED, $now, $runId],
+            );
+        }
         $left = (int) $this->db()->fetchOne(
             "SELECT COUNT(*) FROM service_inbound_move m JOIN vpn_service s ON s.id = m.service_id WHERE m.run_id = ? AND (
                m.state IN ('attaching', 'detaching')
                OR (m.state = 'switched' AND m.detach_after IS NOT NULL)
                OR (m.state = 'failed' AND m.detach_after IS NOT NULL AND m.next_attempt_at IS NOT NULL)
                OR (m.state IN ('switched', 'done') AND s.inbound_changed_at IS NOT NULL AND (s.last_access_info_synced_at IS NULL OR s.last_access_info_synced_at < s.inbound_changed_at))
-               OR ".InboundMoveRunner::ADD_LINKS_DUE_SQL.')',
+               OR ".InboundMoveRunner::ADD_LINKS_DUE_SQL.($remove ? " OR (m.state = 'planned' AND ".InboundMoveRunner::REMOVE_HELD_SQL.')' : '').')',
             [$runId],
         );
         if (0 === $left) {
@@ -105,6 +118,16 @@ final class InboundMoveControls
         $this->auditLogger->record('plan.inbounds_apply_cancelled', 'plan', $run['plan_id'], ['run_id' => $runId, 'cancelled' => $cancelled, 'still_open' => $left > 0] + $this->planner->runDetails($runId) + $counts);
         $this->logger->info('inbound_move_run_cancelled', ['run_id' => $runId, 'plan_id' => $run['plan_id'], 'cancelled' => $cancelled, 'still_open' => $left > 0]);
 
+        if ($remove) {
+            return [
+                'ok' => true,
+                'message' => 0 === $left
+                    ? sprintf('Run #%d is cancelled: %d service(s) not reached yet keep the inbound.', $runId, $cancelled)
+                    : sprintf('Run #%d: %d service(s) not reached yet keep the inbound. %d service(s) were started (failed, in the middle of a step, or waiting for their links): the run stays open for that; continue with --resume=%d, or put the inbound back with --undo=%d.', $runId, $cancelled, $left, $runId, $runId),
+                'cancelled' => $cancelled,
+                'open' => $left > 0,
+            ];
+        }
         if (InboundMoveRun::KIND_ADD === $run['kind']) {
             return [
                 'ok' => true,
@@ -150,6 +173,7 @@ final class InboundMoveControls
                 return ['ok' => false, 'message' => sprintf('Run #%d is %s and the plan has another open run (#%d): finish or cancel that one first.', $runId, $run['status'], $open), 'due' => 0];
             }
         }
+        $remove = InboundMoveRun::KIND_REMOVE === $run['kind'];
         $now = (new \DateTimeImmutable())->format('Y-m-d H:i:s');
         $only = null === $serviceId ? '' : ' AND service_id = '.(int) $serviceId;
         $due = (int) $this->db()->executeStatement(
@@ -161,10 +185,10 @@ final class InboundMoveControls
         $due += (int) $this->db()->executeStatement(
             "UPDATE service_inbound_move SET state = ?, attempts = 0, next_attempt_at = NULL, detach_after = ?, alert_state = NULL, alerted_at = NULL, updated_at = ?
              WHERE run_id = ? AND state = 'failed' AND detach_after IS NOT NULL".$only,
-            [InboundMoveRun::KIND_REMOVE === $run['kind'] ? ServiceInboundMove::STATE_PLANNED : ServiceInboundMove::STATE_SWITCHED, $now, $now, $runId],
+            [$remove ? ServiceInboundMove::STATE_PLANNED : ServiceInboundMove::STATE_SWITCHED, $now, $now, $runId],
         );
         if (0 === $due) {
-            return ['ok' => false, 'message' => sprintf('Run #%d has no moved service%s whose old inbound is still attached.', $runId, null === $serviceId ? '' : ' #'.$serviceId), 'due' => 0];
+            return ['ok' => false, 'message' => sprintf($remove ? 'Run #%d has no service%s waiting for the removal of the inbound.' : 'Run #%d has no moved service%s whose old inbound is still attached.', $runId, null === $serviceId ? '' : ' #'.$serviceId), 'due' => 0];
         }
         if ($reopen) {
             try {
@@ -179,7 +203,7 @@ final class InboundMoveControls
         $this->planner->refreshCounts($runId);
         $this->logger->info('inbound_move_retire_now', ['run_id' => $runId, 'service_id' => $serviceId, 'due' => $due, 'reopened' => $reopen]);
 
-        return ['ok' => true, 'message' => sprintf('%d moved service(s) of run #%d are due for the removal of their old inbound now%s.', $due, $runId, $reopen ? ' (the finished run was reopened, paused)' : ''), 'due' => $due];
+        return ['ok' => true, 'message' => sprintf($remove ? '%d service(s) of run #%d are due for the removal of the inbound now%s.' : '%d moved service(s) of run #%d are due for the removal of their old inbound now%s.', $due, $runId, $reopen ? ' (the finished run was reopened, paused)' : ''), 'due' => $due];
     }
 
     /**
@@ -226,9 +250,9 @@ final class InboundMoveControls
         if (null === $run) {
             return ['ok' => false, 'message' => sprintf('There is no run #%d.', $runId), 'due' => 0, 'reopened' => false];
         }
-        if (InboundMoveRun::KIND_ADD === $run['kind']) {
+        if (InboundMoveRun::KIND_ADD === $run['kind'] || InboundMoveRun::KIND_REMOVE === $run['kind']) {
             // The buttons of the web and the Mini App, closed until P11d. It would also re-arm a move whose undo failed.
-            return ['ok' => false, 'message' => sprintf('Run #%d adds an inbound: it is handled from the command line (--resume, --undo).', $runId), 'due' => 0, 'reopened' => false];
+            return ['ok' => false, 'message' => sprintf(InboundMoveRun::KIND_ADD === $run['kind'] ? 'Run #%d adds an inbound: it is handled from the command line (--resume, --undo).' : 'Run #%d removes an inbound: it is handled from the command line (--retire-now, --resume, --undo).', $runId), 'due' => 0, 'reopened' => false];
         }
         if (!$enabled) {
             return ['ok' => false, 'message' => 'Moving services is switched off: nothing is retried.', 'due' => 0, 'reopened' => false];

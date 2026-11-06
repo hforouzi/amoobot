@@ -212,7 +212,7 @@ carries every attached inbound.
   is not attached: it attaches the missing inbounds to the existing client (it never creates a second client), refreshes
   the stored links, and is limited to 5 per service per 10 minutes. A second click while one runs says "in progress".
   It is refused while the switch is off or the panel is in legacy mode. Deleting the service removes the client from
-  every inbound and marks the rows detached.
+  every inbound and removes its rows, so they never stand in the way of deleting an inbound.
 - **Other operations** (renew, add traffic, suspend, resume, reset usage, usage sync, claim links, "reset my links")
   work on the one client and so on every inbound, as for any service. Resellers pay the plan's price.
 - **`app:service:verify-links <id>`** also checks that the client is on every inbound recorded as attached; the not
@@ -315,7 +315,7 @@ The optional ones are needed only if you will sell that combination.
    to the panel for them (3x-ui: the client is on the primary only). Turn the switch back on and click "Retry attach":
    both rows become "attached".
 10. **Required: delete.** Delete the test services from the admin panel: in 3x-ui the client is gone from every
-    inbound, and the rows show "detached". Then remove the deleted Trojan inbound from the test plan before syncing
+    inbound, and the service's additional inbound rows are gone. Then remove the deleted Trojan inbound from the test plan before syncing
     inbounds.
 11. **Required: reset links and claim.** On a new test service use "Reset links" in the bot, then a claim link to move
     the service to a second Telegram account: the client keeps its three inbounds, and the subscription imports three
@@ -681,6 +681,59 @@ so take C out of the plan as well if that is what you want, or the drift count w
 Skip reasons of an add, besides those above: `is_primary` (C is the service's primary), `no_primary` (the service's primary
 inbound was deleted in the bot, so the plan rules cannot be checked), `already_on_target` (it has the row already). Undo
 adds `last_inbound`: C is the only inbound the client has on the panel, so it stays, and so does the row.
+
+**Removing an inbound from existing services (`--kind=remove`, command line and scheduled task only).** Taking an additional
+inbound off a plan changes new sales only: existing services keep it. `--kind=remove` takes the one inbound D off the plan's
+existing services. The primary, every other inbound, UUID, subscription id and URL, expiry, limits and usage do not change.
+There is no page for this yet. A client is never left with zero inbounds, and a plan's primary is never removed: changing
+that is `--kind=primary`.
+
+The plan changes first: **take D out of the plan** (Plans → the plan → additional inbounds), then run the command. A run
+never writes the plan. It needs both `plans.inbound_move_enabled` and `plans.multi_inbound_enabled`, and a plan that is not a
+trial's backing plan. D may be inactive, and that is the usual case when you are retiring it. One run is one inbound.
+
+1. **Dry run first** (it writes nothing, and works with the switches off):
+   `php bin/console app:plan:apply-inbounds <planId> --kind=remove --inbound=<inboundId>`. One read per service, and for each
+   one the inbounds on the panel now, the inbounds after, and "remove" or "skip" with the reason. Only services with a row
+   for D are listed.
+2. **One service**: add `--service=<serviceId> --apply`. Check it on the panel, update the subscription on a test phone, and
+   connect through an inbound that stays.
+3. **The rest**: the same with `--apply`. `--include-suspended`, `--include-expired`, `--limit`, `--after-id`, `--batch-size`
+   and `--pause` work as for a move. `--from-inbound`, `--keep-old` and `--include-trials` are refused.
+
+What the customer sees: D's link disappears from the bot, `/s/{token}` and the Mini App when the panel's links are read again.
+If that read fails, the stored links are hidden until a retry succeeds. The phone keeps the server until the next subscription
+update, then loses it. D stops working for that client at the detach, so warn customers yourself if they need warning: no
+message is sent.
+
+**Grace period.** `--grace-hours=<0–168>` waits that long before the panel is touched, for each service. The default for a
+remove is **0**, whatever `plans.inbound_move_detach_grace_hours` says. `--retire-now=<runId>` ends the wait for a run
+(`--service=<id>` for one service), and the next pass removes the inbound. It takes no `--kind`.
+
+The scheduled task, `--resume`, `--pause-run`, `--cancel`, retries, the alerts and the pause after 5 failed panel reads work as
+for a move, and the run knows its kind. While a run works on a service, its row is held: it shows as `detached` with "being
+removed by run #N", and `attach-inbounds` and "Retry attach" leave it alone, so D is not put back. A remove that keeps failing
+stays held and raises one alert: settle it with `--retire-now=<runId>` and `--resume`, or undo it. `--cancel` stops what has
+not started and leaves those services alone; a remove that has started is not cancelled, because only a panel read can tell
+whether D left. Finish it, or use `--undo`.
+
+**If the plan changes during a run.** At the start of each pass the run checks that the plan no longer sells D. If the plan
+sells it again, or D became its primary, the run **pauses** with a reason and one alert, before any panel call. Take D out
+again and `--resume`, or `--cancel`.
+
+**Undo** (`--undo=<runId>`, with `plans.inbound_move_enabled` alone): D goes back on each client this run took it off, with the
+same UUID and usage, and the row comes back as attached. Services not started are cancelled. A failure leaves that service as
+it was: run `--undo` again. Undo needs D to still exist and be active: otherwise the service stays as it is and the output says
+so. It is refused for a run that is not the plan's latest. The plan is not changed: it **still does not sell D**, so the drift
+count shows those services as having an extra inbound until you add D to the plan again or remove it once more.
+
+Skip reasons of a remove, besides those above: `is_primary` (D is the service's primary), `no_primary` (the primary was deleted
+in the bot), `last_inbound` (D is the only inbound the client has on the panel, so it stays, and so does the row),
+`not_attached` (no row for D any more). Undo adds `later_move` (a later run changed that service, so it is left alone). If the
+client is not on its primary on the panel, the step fails with nothing sent: look at the client on the panel. A client already
+off D loses only the row.
+
+After a remove of every service, D can be deleted in the bot. Rows of **deleted** services no longer hold it.
 
 The command has been tested against a simulated panel only, not against a real 3x-ui panel: try one service first.
 Design: [plan-inbound-change.md](../design/plan-inbound-change.md).

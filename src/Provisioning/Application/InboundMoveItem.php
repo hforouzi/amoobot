@@ -18,6 +18,8 @@ final readonly class InboundMoveItem
     public const BUSY = 'busy';
     /** kind=add: the client is on the inbound and the service has its row. Never SWITCHED: there is nothing to retire. */
     public const ADDED = 'added';
+    /** kind=remove: the inbound is off the client and the service's row is gone. */
+    public const REMOVED = 'removed';
     /** Switched earlier; only its links were refreshed now. */
     public const SNAPSHOT = 'snapshot';
     /** The client's UUID, subId or remote id changed between the claim and the write (a link reset): nothing written. */
