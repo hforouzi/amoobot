@@ -1,0 +1,28 @@
+{
+  "manifestVersion": 1,
+  "type": "payment_gateway",
+  "code": "constrained_fixture",
+  "name": {
+    "en": "Constrained gateway (tests only)"
+  },
+  "version": "1.0.0",
+  "mainClass": "Amoobot\\Plugin\\ConstrainedGateway\\ConstrainedGatewayPlugin",
+  "category": "payment",
+  "permissions": [
+    "payment.create",
+    "payment.verify"
+  ],
+  "supportsWebhook": false,
+  "supportsOnlinePayment": true,
+  "supportsManualConfirmation": false,
+  "configSchema": [
+    {
+      "key": "api_key",
+      "type": "password",
+      "required": true,
+      "label": {
+        "en": "API key"
+      }
+    }
+  ]
+}

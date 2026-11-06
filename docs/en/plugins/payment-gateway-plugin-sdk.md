@@ -22,6 +22,32 @@ Do not define a duplicate interface inside the plugin.
 - `PaymentVerificationResult`: verification result, provider reference metadata and the verified `amount` + `currency` (required for automatic confirmation).
 - `PaymentWebhookResult`: webhook result when a plugin supports webhooks.
 
+## Optional: Constraints
+
+A plugin may also implement `App\Payment\Plugin\PaymentGatewayConstraintsInterface`, when the provider has limits the
+store should respect before the customer picks the method. Nothing else changes: a plugin without it is usable, accepts
+any amount and has no invoice lifetime, and core gateways are not affected.
+
+| Method | Meaning | Used by |
+|---|---|---|
+| `isUsable(array $config): bool` | May this gateway be offered with this config? Return `false` for a switch that is off or a value that is missing or invalid | Method lists and the customer guide (`getOfferableMethods()`) |
+| `acceptsAmount(int $toman): bool` | Does the provider take this payable amount, in Toman? | Method lists for an order |
+| `invoiceLifetimeSeconds(): ?int` | How long a provider invoice stays payable, or `null` for no limit | Declared only: nothing reads it yet |
+
+`StorePaymentMethodResolver` is the one place that lists methods for the bot and the Mini App, so a plugin needs no UI code.
+
+- A method that fails `isUsable()` is skipped with the reason `gateway_not_usable`.
+- An amount that fails `acceptsAmount()` is skipped with the reason `amount_out_of_range`, the same reason as the store
+  method's own range. `StorePaymentMethod` `minAmount` and `maxAmount` still apply on top, so admins can only narrow the
+  range. See the reasons with `php bin/console app:payment:debug-methods-for-order`.
+- **Fail closed.** If either method throws, or the plugin cannot be loaded, the method is skipped. The log has the gateway
+  id, the plugin code and the exception's class, never its message, because a message may quote the config. A throwing
+  check is reported as `gateway_not_usable`.
+- Both methods run on every listing, so they must not call the network. `isUsable()` receives the same config as
+  `createPayment()`.
+- Hiding a method is not a guarantee: `createPayment()` must still refuse an amount or config it cannot accept, because a
+  customer can act on an old list.
+
 ## Config Schema
 
 Fields use `key` or `name`, `type`, `required`, optional `default`, `label`, and optional `choices`.

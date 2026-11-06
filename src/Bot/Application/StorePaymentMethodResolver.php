@@ -7,17 +7,23 @@ namespace App\Bot\Application;
 use App\Entity\Order;
 use App\Entity\PaymentGateway;
 use App\Entity\StorePaymentMethod;
+use App\Payment\Domain\PaymentGatewayInterface;
 use App\Payment\Domain\PaymentGatewayType;
 use App\Payment\Infrastructure\PaymentGatewayRegistry;
+use App\Payment\Plugin\PaymentGatewayConstraintsInterface;
 use App\Payment\Plugin\PluginConfigSchemaValidator;
 use App\Plugin\PaymentPluginDoctor;
 use App\Plugin\PluginRegistry;
 use App\Shared\Infrastructure\SettingValueProvider;
 use App\Shop\Domain\OrderStatus;
 use Doctrine\ORM\EntityManagerInterface;
+use Psr\Log\LoggerInterface;
 
 final class StorePaymentMethodResolver
 {
+    private const GATEWAY_NOT_USABLE = 'gateway_not_usable';
+    private const AMOUNT_OUT_OF_RANGE = 'amount_out_of_range';
+
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
         private readonly PaymentGatewayRegistry $paymentGatewayRegistry,
@@ -25,6 +31,7 @@ final class StorePaymentMethodResolver
         private readonly PaymentPluginDoctor $pluginDoctor,
         private readonly PluginConfigSchemaValidator $schemaValidator,
         private readonly SettingValueProvider $settingValueProvider,
+        private readonly LoggerInterface $logger,
         private readonly string $paymentCardNumber = '',
         private readonly string $paymentCardHolder = '',
     ) {
@@ -56,8 +63,8 @@ final class StorePaymentMethodResolver
 
     /**
      * The methods a customer can be offered at all, whatever the order: active, on an active gateway that is configured
-     * and has its driver (plugin enabled and healthy). The order-dependent rules (currency, amount range, order state)
-     * are not applied. For the customer guide's list of payment methods, which shows their titles only.
+     * and has its driver (plugin enabled and healthy), and a plugin that declares constraints calls usable. The
+     * order-dependent rules (currency, amount range, order state) are not applied. For the customer guide's list of payment methods, which shows their titles only.
      *
      * @return list<StorePaymentMethod>
      */
@@ -66,8 +73,11 @@ final class StorePaymentMethodResolver
         $offerable = [];
         foreach ($this->allMethods() as $method) {
             $gateway = $method->getGateway();
-            if ($method->isActive() && $gateway->isActive() && null === $this->pluginStatusReason($gateway)
-                && null === $this->driverError($gateway) && $this->isGatewayConfiguredForResolver($gateway)) {
+            if (!$method->isActive() || !$gateway->isActive() || null !== $this->pluginStatusReason($gateway)) {
+                continue;
+            }
+            $driver = $this->driver($gateway);
+            if (!is_string($driver) && $this->isGatewayConfiguredForResolver($gateway) && !in_array(self::GATEWAY_NOT_USABLE, $this->constraintSkipReasons($driver, $gateway, null), true)) {
                 $offerable[] = $method;
             }
         }
@@ -197,10 +207,10 @@ final class StorePaymentMethodResolver
                 $skipReasons[] = $pluginStatusReason;
             }
 
-            $driverError = $this->driverError($gateway);
-            $hasDriver = null === $driverError;
-            if (!$hasDriver && null === $pluginStatusReason) {
-                $skipReasons[] = $driverError ?? 'gateway_driver_missing';
+            $driver = $this->driver($gateway);
+            $hasDriver = !is_string($driver);
+            if (is_string($driver) && null === $pluginStatusReason) {
+                $skipReasons[] = $driver;
             }
 
             $gatewayConfigured = $this->isGatewayConfiguredForResolver($gateway);
@@ -215,7 +225,11 @@ final class StorePaymentMethodResolver
             }
 
             if (!$method->isAmountAllowed($orderPayableAmount)) {
-                $skipReasons[] = 'amount_out_of_range';
+                $skipReasons[] = self::AMOUNT_OUT_OF_RANGE;
+            }
+
+            if (!is_string($driver)) {
+                $skipReasons = array_values(array_unique([...$skipReasons, ...$this->constraintSkipReasons($driver, $gateway, $orderPayableAmount)]));
             }
 
             if (
@@ -259,7 +273,10 @@ final class StorePaymentMethodResolver
         return $results;
     }
 
-    private function driverError(PaymentGateway $gateway): ?string
+    /**
+     * The gateway's driver, or the reason it has none.
+     */
+    private function driver(PaymentGateway $gateway): PaymentGatewayInterface|string
     {
         $gatewayType = trim($gateway->getType());
         if ('' === $gatewayType) {
@@ -267,15 +284,48 @@ final class StorePaymentMethodResolver
         }
 
         try {
-            $this->paymentGatewayRegistry->resolve($gateway);
-
-            return null;
+            return $this->paymentGatewayRegistry->resolve($gateway);
         } catch (\Throwable $exception) {
+            if (null !== $gateway->getPluginCode()) {
+                $this->logSkipped('The payment plugin could not be loaded; the method is skipped.', $gateway, $exception);
+            }
             $message = $exception->getMessage();
             $reason = trim((string) strtok($message, ':'));
 
             return '' === $reason ? 'gateway_driver_missing' : $reason;
         }
+    }
+
+    /**
+     * What a driver with constraints refuses (PaymentGatewayConstraintsInterface; nothing for any other driver). A
+     * check that throws refuses the method. $amount null: only isUsable().
+     *
+     * @return list<string>
+     */
+    private function constraintSkipReasons(PaymentGatewayInterface $driver, PaymentGateway $gateway, ?int $amount): array
+    {
+        if (!$driver instanceof PaymentGatewayConstraintsInterface) {
+            return [];
+        }
+
+        try {
+            $reasons = $driver->isUsable($gateway->getConfig() ?? []) ? [] : [self::GATEWAY_NOT_USABLE];
+            if (null !== $amount && !$driver->acceptsAmount($amount)) {
+                $reasons[] = self::AMOUNT_OUT_OF_RANGE;
+            }
+
+            return $reasons;
+        } catch (\Throwable $exception) {
+            $this->logSkipped('A payment plugin constraint check failed; the method is skipped.', $gateway, $exception);
+
+            return [self::GATEWAY_NOT_USABLE];
+        }
+    }
+
+    /** The exception's class only: its message may quote the gateway's config. */
+    private function logSkipped(string $message, PaymentGateway $gateway, \Throwable $exception): void
+    {
+        $this->logger->warning($message, ['gateway_id' => $gateway->getId(), 'plugin_code' => $gateway->getPluginCode(), 'error_class' => $exception::class]);
     }
 
     private function isGatewayConfiguredForResolver(PaymentGateway $gateway): bool

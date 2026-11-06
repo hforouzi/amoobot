@@ -16,7 +16,7 @@ use App\Payment\Domain\Webhook\RequestPayload;
 use App\Entity\PaymentGateway;
 use Symfony\Component\HttpFoundation\Request;
 
-final class PluginPaymentGatewayDriverAdapter implements PaymentGatewayInterface, NotificationAwareGatewayInterface
+final class PluginPaymentGatewayDriverAdapter implements PaymentGatewayInterface, NotificationAwareGatewayInterface, PaymentGatewayConstraintsInterface
 {
     /** Config key the core sets for every plugin call: true only outside production (test env or debug). */
     public const CONFIG_TESTING_SHORTCUTS = '_amoobot_testing_shortcuts_allowed';
@@ -60,6 +60,24 @@ final class PluginPaymentGatewayDriverAdapter implements PaymentGatewayInterface
     public function supportsWebhook(): bool
     {
         return $this->inner->supportsWebhook();
+    }
+
+    /**
+     * @param array<string, mixed> $config
+     */
+    public function isUsable(array $config): bool
+    {
+        return !$this->inner instanceof PaymentGatewayConstraintsInterface || $this->inner->isUsable($this->runtimeConfig($config));
+    }
+
+    public function acceptsAmount(int $toman): bool
+    {
+        return !$this->inner instanceof PaymentGatewayConstraintsInterface || $this->inner->acceptsAmount($toman);
+    }
+
+    public function invoiceLifetimeSeconds(): ?int
+    {
+        return $this->inner instanceof PaymentGatewayConstraintsInterface ? $this->inner->invoiceLifetimeSeconds() : null;
     }
 
     /**
