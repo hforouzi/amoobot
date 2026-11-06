@@ -43,9 +43,8 @@ including the Mini App and return pages, so links already sent keep working.
 
 | Stays on `DEFAULT_URI` | Moves to `BRAND_PUBLIC_BASE_URL` |
 |---|---|
-| Telegram webhook, EasyAdmin, subscription pages `/s/`, downloads `/d/` | Mini App pages, API and files (`/app`, `/miniapp/`) |
+| Telegram webhook, EasyAdmin, subscription pages `/s/`, downloads `/d/` | Mini App pages, API and files (`/app`, `/miniapp/`), including its admin section (`/app/admin`, `/app/api/admin`) |
 | Payment gateway callbacks and webhooks, delivery messages | Payment return page (`/payment/return/`) and the logo it shows |
-| The Mini App's admin section (`/app/admin`, `/app/api/admin`) | |
 
 On the brand host everything else answers 404, whatever the method or user. The application enforces this
 (`BrandHostGuard`) and the nginx example below repeats it.
@@ -61,10 +60,13 @@ changes host signs in again through Telegram, which happens by itself.
 
 ### What changes for admins
 
-Every Mini App link in Telegram opens the brand host, which has no admin section. Telegram sign-in only works when
-Telegram opens the page, and no bot button opens the main domain, so **the Mini App admin is not reachable with the brand
-active**. Use EasyAdmin on the main domain. Direct links such as `https://<main domain>/app/admin` opened in a browser do
-not sign in either.
+Every Mini App link in Telegram opens the brand host, and the Mini App's admin section works there as it does on the main
+domain: the same Telegram sign-in, and the same roles and permissions. Links it shows to operational pages, such as a
+service's subscription page, stay on the main domain.
+
+**EasyAdmin stays on the main domain only** and answers 404 on the brand host. Direct links such as
+`https://<main domain>/app/admin` opened in a browser do not sign in, because Telegram sign-in only works when Telegram
+opens the page.
 
 ### Set it up
 
@@ -136,9 +138,13 @@ curl -s -o /dev/null -w '%{http_code}\n' https://stacktunnel.net/app
 curl -s -o /dev/null -w '%{http_code}\n' https://stacktunnel.net/miniapp/app.js
 
 # Not served there: 404 each
-for path in /admin/login /telegram/webhook/x /s/x /d/1 /healthz /app/admin /app/api/admin/x /payment/callback/zibal; do
+for path in /admin/login /telegram/webhook/x /s/x /d/1 /healthz /payment/callback/zibal; do
   curl -s -o /dev/null -w "%{http_code} $path\n" "https://stacktunnel.net$path"
 done
+
+# The Mini App's admin section is there and asks for sign-in: 401
+curl -s -o /dev/null -w '%{http_code}
+' https://stacktunnel.net/app/admin
 
 # The main domain is unchanged: 200 each
 curl -s -o /dev/null -w '%{http_code}\n' https://<main domain>/healthz
@@ -150,7 +156,7 @@ curl -s -o /dev/null -w '%{http_code}\n' -H 'Host: other.example.com' https://<m
 
 Then, in Telegram: open the menu button and sign in, open a service and its subscription page (it opens on the main
 domain), and make a small real payment. After paying, the address bar should pass through the main domain and end on
-`https://stacktunnel.net/payment/return/...`.
+`https://stacktunnel.net/payment/return/...`. As an admin, open the admin section in the Mini App too.
 
 ### Roll back
 
