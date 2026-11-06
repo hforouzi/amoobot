@@ -20,6 +20,11 @@ final class PluginPaymentGatewayDriverAdapter implements PaymentGatewayInterface
 {
     /** Config key the core sets for every plugin call: true only outside production (test env or debug). */
     public const CONFIG_TESTING_SHORTCUTS = '_amoobot_testing_shortcuts_allowed';
+    /**
+     * Config key the core sets for every plugin call: the brand domain's base URL, or null. A plugin that gives the
+     * provider a direct return URL builds it on this base; its callback and webhook URLs stay on callback_base_url.
+     */
+    public const CONFIG_RETURN_BASE_URL = '_amoobot_return_base_url';
     /** Testing-only config keys removed from a plugin's config in production, whatever the admin stored. */
     public const TESTING_ONLY_CONFIG_KEYS = ['auto_confirm_for_testing'];
 
@@ -28,6 +33,7 @@ final class PluginPaymentGatewayDriverAdapter implements PaymentGatewayInterface
         private readonly PaymentGatewayPluginInterface $inner,
         // Fail closed: shortcuts are off unless the registry says this is a test/debug kernel.
         private readonly bool $testingShortcutsAllowed = false,
+        private readonly ?string $returnBaseUrl = null,
     ) {
     }
 
@@ -113,6 +119,7 @@ final class PluginPaymentGatewayDriverAdapter implements PaymentGatewayInterface
             }
         }
         $config[self::CONFIG_TESTING_SHORTCUTS] = $this->testingShortcutsAllowed;
+        $config[self::CONFIG_RETURN_BASE_URL] = $this->returnBaseUrl;
 
         return $config;
     }

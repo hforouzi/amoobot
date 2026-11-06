@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Subscription\Application;
 
 use App\Entity\AppDownload;
+use App\Shared\Application\BrandDomain;
+use App\Shared\Application\SiteUrls;
 use App\Subscription\Domain\ClientPlatform;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
@@ -17,6 +19,8 @@ final class AppDownloadCatalog
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
         private readonly UrlGeneratorInterface $urlGenerator,
+        private readonly SiteUrls $urls,
+        private readonly BrandDomain $brand,
     ) {
     }
 
@@ -75,14 +79,15 @@ final class AppDownloadCatalog
         return null;
     }
 
+    /** A link for a page: relative on one domain, absolute with a brand (the Mini App on its host links to /d/ elsewhere). */
     public function path(AppDownload $download): string
     {
-        return $this->urlGenerator->generate('app_download', ['id' => $download->getId()]);
+        return $this->brand->isActive() ? $this->absoluteUrl($download) : $this->urlGenerator->generate('app_download', ['id' => $download->getId()]);
     }
 
     public function absoluteUrl(AppDownload $download): string
     {
-        return $this->urlGenerator->generate('app_download', ['id' => $download->getId()], UrlGeneratorInterface::ABSOLUTE_URL);
+        return $this->urls->operational('app_download', ['id' => $download->getId()]);
     }
 }
 

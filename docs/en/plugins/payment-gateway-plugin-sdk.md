@@ -97,6 +97,8 @@ notifications).
    the way to find the payment.
 
 8. **Testing shortcuts only outside production.** Every config array Amoobot passes contains
+   `_amoobot_return_base_url` (the shop's brand domain, or null: a direct return URL for the provider goes on this base
+   when it is set, while callback and webhook URLs always stay on `callback_base_url`) and
    `_amoobot_testing_shortcuts_allowed` (true only in `dev`/`test` or with debug on); in production the
    core also removes `auto_confirm_for_testing`. Anything that trusts the request instead of the
    provider (like the demo plugin's `demo_paid`) must be gated on that flag.

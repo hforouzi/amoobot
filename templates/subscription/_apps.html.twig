@@ -51,7 +51,7 @@
                     {% if in_app %}
                         {# No subscription here: adding it happens on the subscription page. #}
                     {% elseif app.importUrl and bridge_token %}
-                        <a class="btn small" href="{{ url('subscription_app_bridge', {token: bridge_token, appId: app.id}) }}" data-open-link data-bridge>➕ {{ 'apps.add'|trans }}</a>
+                        <a class="btn small" href="{{ operational_url('subscription_app_bridge', {token: bridge_token, appId: app.id}) }}" data-open-link data-bridge>➕ {{ 'apps.add'|trans }}</a>
                     {% elseif app.importUrl %}
                         {# A plain link the user taps: no automatic redirect. If the in-app browser blocks the app's
                            scheme, the fallback below is shown (_script.html.twig). #}

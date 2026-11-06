@@ -42,7 +42,7 @@ class SetTelegramMenuButtonCommand extends Command
         } else {
             $url = $this->miniAppLinks->publicUrl();
             if (null === $url) {
-                $output->writeln('<error>The Mini App needs a public HTTPS address: set DEFAULT_URI to https://your-domain (see docs/en/miniapp.md).</error>');
+                $output->writeln('<error>The Mini App needs a public HTTPS address: set DEFAULT_URI (or BRAND_PUBLIC_BASE_URL) to https://your-domain (see docs/en/miniapp.md).</error>');
 
                 return Command::FAILURE;
             }

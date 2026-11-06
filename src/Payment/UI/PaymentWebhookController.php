@@ -11,6 +11,7 @@ use App\Payment\Application\Webhook\NotificationOutcome;
 use App\Payment\Domain\PaymentGatewayType;
 use App\Payment\Domain\PaymentReturnUrl;
 use App\Payment\Domain\Webhook\NotificationAwareGatewayInterface;
+use App\Shared\Application\BrandDomain;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\RedirectResponse;
@@ -30,7 +31,8 @@ use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
  * verifyPayment -> PaymentSettlementService).
  *
  * Browser callbacks that carry ?rt=<return token> then send the customer on to the return page
- * (/payment/return/{token}). The token is never used to find the payment being settled.
+ * (/payment/return/{token}), on the brand domain when there is one: callbacks themselves stay on DEFAULT_URI, where the
+ * gateways were told to send them. The token is never used to find the payment being settled.
  */
 final class PaymentWebhookController
 {
@@ -46,6 +48,7 @@ final class PaymentWebhookController
         private readonly EntityManagerInterface $entityManager,
         private readonly GatewayNotificationProcessor $processor,
         private readonly UrlGeneratorInterface $urlGenerator,
+        private readonly BrandDomain $brand,
     ) {
     }
 
@@ -140,7 +143,10 @@ final class PaymentWebhookController
         if (1 === preg_match('/^'.PaymentReturnUrl::TOKEN_PATTERN.'$/', $token)) {
             $payment = $this->entityManager->getRepository(Payment::class)->findOneBy(['returnToken' => $token]);
             if ($payment instanceof Payment) {
-                return new RedirectResponse($this->urlGenerator->generate('payment_return', ['token' => $token]), Response::HTTP_SEE_OTHER);
+                $brandBase = $this->brand->base();
+                $url = null === $brandBase ? $this->urlGenerator->generate('payment_return', ['token' => $token]) : PaymentReturnUrl::returnUrl($brandBase, $payment);
+
+                return new RedirectResponse($url, Response::HTTP_SEE_OTHER);
             }
         }
 

@@ -14,6 +14,7 @@ use App\Payment\Domain\PaymentGatewayType;
 use App\Payment\Domain\PaymentReturnUrl;
 use App\Payment\Domain\Webhook\GatewayNotification;
 use App\Payment\Domain\Webhook\NotificationAwareGatewayInterface;
+use App\Shared\Application\BrandDomain;
 use App\Shared\Infrastructure\SafeErrorLog;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Contracts\HttpClient\Exception\TransportExceptionInterface;
@@ -55,6 +56,7 @@ final class NowPaymentsGateway implements PaymentGatewayInterface, NotificationA
 
     public function __construct(
         private readonly HttpClientInterface $httpClient,
+        private readonly BrandDomain $brand,
     ) {
     }
 
@@ -106,9 +108,11 @@ final class NowPaymentsGateway implements PaymentGatewayInterface, NotificationA
         $orderId = (string) ($order->getTrackingCode() ?? $order->getId() ?? $payment->getId() ?? '');
         $description = trim((string) ($config['order_description'] ?? 'Amoobot VPN order'));
         $ipnCallbackUrl = $callbackBaseUrl.'/payment/webhook/nowpayments';
-        // The return page identifies the payment only by its unguessable return token.
-        $successUrl = PaymentReturnUrl::returnUrl($callbackBaseUrl, $payment);
-        $cancelUrl = PaymentReturnUrl::cancelUrl($callbackBaseUrl, $payment);
+        // The return page identifies the payment only by its unguessable return token. Only the customer's way back
+        // follows a brand domain; the IPN above stays on the gateway's callback address.
+        $returnBaseUrl = $this->brand->base() ?? $callbackBaseUrl;
+        $successUrl = PaymentReturnUrl::returnUrl($returnBaseUrl, $payment);
+        $cancelUrl = PaymentReturnUrl::cancelUrl($returnBaseUrl, $payment);
 
         $requestBody = [
             'price_amount' => $priceAmount,

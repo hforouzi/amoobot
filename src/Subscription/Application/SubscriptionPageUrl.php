@@ -6,22 +6,22 @@ namespace App\Subscription\Application;
 
 use App\Entity\VpnService;
 use App\Provisioning\Domain\PublicUrlPolicy;
-use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
+use App\Shared\Application\SiteUrls;
 
 /**
  * Absolute URL of a service's public subscription page (/s/{token}) on the shop's own domain (DEFAULT_URI outside a
- * request, e.g. in the bot).
+ * request, e.g. in the bot), never on a brand domain, even when asked from a request on it (SiteUrls).
  */
 final class SubscriptionPageUrl
 {
     public function __construct(
-        private readonly UrlGeneratorInterface $urlGenerator,
+        private readonly SiteUrls $urls,
     ) {
     }
 
     public function forService(VpnService $service): string
     {
-        return $this->urlGenerator->generate('subscription_page', ['token' => $service->getPublicToken()], UrlGeneratorInterface::ABSOLUTE_URL);
+        return $this->urls->operational('subscription_page', ['token' => $service->getPublicToken()]);
     }
 
     /**

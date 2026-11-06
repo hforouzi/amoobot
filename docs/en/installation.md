@@ -33,6 +33,137 @@ Common values:
 
 Set the public application URL wherever your deployment uses it for callbacks and panel links. Payment gateway `callback_base_url` fields are configured per gateway.
 
+- `BRAND_PUBLIC_BASE_URL`: optional customer-facing domain, see [Brand domain](#brand-domain-optional)
+
+## Brand domain (optional)
+
+A second, customer-facing domain can serve the Telegram Mini App and the payment return page, while everything else
+stays on `DEFAULT_URI`. One installation serves both hosts. The main domain is never removed: it keeps every route,
+including the Mini App and return pages, so links already sent keep working.
+
+| Stays on `DEFAULT_URI` | Moves to `BRAND_PUBLIC_BASE_URL` |
+|---|---|
+| Telegram webhook, EasyAdmin, subscription pages `/s/`, downloads `/d/` | Mini App pages, API and files (`/app`, `/miniapp/`) |
+| Payment gateway callbacks and webhooks, delivery messages | Payment return page (`/payment/return/`) and the logo it shows |
+| The Mini App's admin section (`/app/admin`, `/app/api/admin`) | |
+
+On the brand host everything else answers 404, whatever the method or user. The application enforces this
+(`BrandHostGuard`) and the nginx example below repeats it.
+
+`BRAND_PUBLIC_BASE_URL` is `https://` and a host with an optional port. It takes no path, not even a trailing slash, no
+query or fragment, and its host must be public and differ from the `DEFAULT_URI` host. Empty means one domain, exactly as
+before. An invalid value is ignored as a whole and logged once as a warning (again after a day or a cache clear); the
+shop then behaves as if it were empty, so check the log after setting it.
+
+With the value active, `trusted_hosts` holds exactly the two hosts, so a request for any other host gets 400. Monitors
+and scripts must call the app by one of these names, not by IP address. The hosts share no cookies, and a customer who
+changes host signs in again through Telegram, which happens by itself.
+
+### What changes for admins
+
+Every Mini App link in Telegram opens the brand host, which has no admin section. Telegram sign-in only works when
+Telegram opens the page, and no bot button opens the main domain, so **the Mini App admin is not reachable with the brand
+active**. Use EasyAdmin on the main domain. Direct links such as `https://<main domain>/app/admin` opened in a browser do
+not sign in either.
+
+### Set it up
+
+Run the steps in this order: links are published last, when the new host already works.
+
+1. **DNS**: point an `A` record (and `AAAA` only if the server is reachable over IPv6) for the brand domain to this
+   server.
+
+   ```bash
+   dig +short stacktunnel.net
+   ```
+
+2. **Payment gateways**: nothing to change in their panels for callbacks. `callback_base_url` stays on the main domain;
+   do not change it. Winapay's only return URL is its `CallbackURL`, so the Winapay panel keeps the main domain, and after
+   processing the callback the app redirects (303) the customer to the brand return page with only the opaque return
+   token. Zibal, NovinoPay and custom API callbacks work the same way. NOWPayments and SwapWallet receive the brand return
+   URL with each new payment; their IPN and webhook URLs stay on the main domain. SwapWallet needs plugin version 1.0.1 or
+   later, older versions keep returning to the main domain. Check your merchant account if a provider restricts return
+   domains. Invoices created earlier keep the return URL they were created with.
+
+3. **TLS**: get a separate certificate. Renewal runs on the same `certbot.timer`.
+
+   ```bash
+   sudo certbot certonly --nginx -d stacktunnel.net --deploy-hook "systemctl reload nginx"
+   ```
+
+4. **nginx**: install [`nginx-brand-domain.conf.example`](nginx-brand-domain.conf.example) as a site of its own. `deploy.sh`
+   rewrites only its own site, so this one survives a deploy.
+
+   ```bash
+   sudo cp docs/en/nginx-brand-domain.conf.example /etc/nginx/sites-available/amoobot-brand
+   sudo editor /etc/nginx/sites-available/amoobot-brand   # your domain, app directory and PHP version
+   sudo ln -s /etc/nginx/sites-available/amoobot-brand /etc/nginx/sites-enabled/amoobot-brand
+   sudo nginx -t && sudo systemctl reload nginx
+   ```
+
+5. **Environment**: add the value to the deploy env file, `/etc/amoobot/.env.prod.local`, then run your normal deploy.
+
+   ```bash
+   BRAND_PUBLIC_BASE_URL=https://stacktunnel.net
+   ```
+
+   Without a full deploy, add the same line to `.env.prod.local` in the app directory too, then:
+
+   ```bash
+   composer dump-env prod
+   php bin/console cache:clear
+   sudo systemctl reload php8.4-fpm
+   ```
+
+   Keep `DEFAULT_URI` as it is. Do not run `app:telegram:set-webhook` with the brand domain.
+
+6. **Telegram**: a setting cannot change what Telegram has stored, so update both places.
+
+   ```bash
+   php bin/console app:telegram:set-menu-button --dry-run   # must show the brand URL
+   php bin/console app:telegram:set-menu-button
+   ```
+
+   If you configured them in BotFather, send `https://stacktunnel.net/app` there too: `/mybots` → your bot → *Bot Settings*
+   → *Configure Mini App*, and → *Menu Button*, and the URL of any app made with `/newapp`. The bot's webhook does not
+   move. See [Mini App](miniapp.md).
+
+### Verify
+
+```bash
+# Served on the brand host: 200
+curl -s -o /dev/null -w '%{http_code}\n' https://stacktunnel.net/app
+curl -s -o /dev/null -w '%{http_code}\n' https://stacktunnel.net/miniapp/app.js
+
+# Not served there: 404 each
+for path in /admin/login /telegram/webhook/x /s/x /d/1 /healthz /app/admin /app/api/admin/x /payment/callback/zibal; do
+  curl -s -o /dev/null -w "%{http_code} $path\n" "https://stacktunnel.net$path"
+done
+
+# The main domain is unchanged: 200 each
+curl -s -o /dev/null -w '%{http_code}\n' https://<main domain>/healthz
+curl -s -o /dev/null -w '%{http_code}\n' https://<main domain>/admin/login
+
+# Another host: 400
+curl -s -o /dev/null -w '%{http_code}\n' -H 'Host: other.example.com' https://<main domain>/healthz
+```
+
+Then, in Telegram: open the menu button and sign in, open a service and its subscription page (it opens on the main
+domain), and make a small real payment. After paying, the address bar should pass through the main domain and end on
+`https://stacktunnel.net/payment/return/...`.
+
+### Roll back
+
+1. Remove `BRAND_PUBLIC_BASE_URL` from the env file(s), then deploy, or run `composer dump-env prod`, `cache:clear` and
+   reload PHP-FPM as above. New links are built on the main domain at once, and `trusted_hosts` and the application's
+   allowlist switch off.
+2. Run `php bin/console app:telegram:set-menu-button` and restore the BotFather URLs.
+3. Keep the nginx site and DNS for a while: payments and buttons created earlier still point to the brand domain, and the
+   nginx allowlist keeps everything else off it. A Mini App page opened on it in this state shows subscription and
+   download links on the brand host, which 404; removing the site once old links have expired ends that.
+
+Nothing is stored in the database, so a rollback needs no data change, and gateways need none either.
+
 ## Database
 
 ```bash
