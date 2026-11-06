@@ -7,7 +7,6 @@ namespace App\MiniApp\Navigation;
 use App\MiniApp\Reseller\MiniAppResellerAccess;
 use App\MiniApp\Security\MiniAppUser;
 use App\Security\AdminAccessPolicy;
-use App\Shared\Application\BrandDomain;
 use Symfony\Component\DependencyInjection\Attribute\AutowireIterator;
 
 /**
@@ -28,8 +27,6 @@ final class MiniAppSections
         private readonly AdminAccessPolicy $accessPolicy,
         // Null (a test's own registry): nobody is a reseller.
         private readonly ?MiniAppResellerAccess $resellers = null,
-        // Null (a test's own registry): one domain.
-        private readonly ?BrandDomain $brand = null,
     ) {
     }
 
@@ -58,9 +55,7 @@ final class MiniAppSections
 
         return match ($section->audience) {
             MiniAppAudience::CUSTOMER => [] === $section->anyOf || $this->accessPolicy->canAny($user->admin, $section->anyOf),
-            // The brand host serves no admin section (BrandHostGuard): no menu entry that leads to a 404.
-            MiniAppAudience::ADMIN => !($this->brand?->isBrandRequest() ?? false)
-                && [] !== $this->accessPolicy->permissions($user->admin)
+            MiniAppAudience::ADMIN => [] !== $this->accessPolicy->permissions($user->admin)
                 && ([] === $section->anyOf || $this->accessPolicy->canAny($user->admin, $section->anyOf)),
             MiniAppAudience::RESELLER => null !== $this->resellers?->resellerOf($user),
         };
