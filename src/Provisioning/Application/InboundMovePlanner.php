@@ -317,7 +317,9 @@ final class InboundMovePlanner
     /**
      * The cached counters of a run (5.1), by an autocommit UPDATE (never while a service row is locked, 5.3):
      * planned = every move row; done = moved (switched, detaching or done: phase 1 finished); failed; skipped;
-     * remaining = planned or attaching. Undone and cancelled moves count only in planned.
+     * remaining = planned or attaching. Undone and cancelled moves count only in planned. A remove has no phase 1: its
+     * detaching move is still to come, so done = done and remaining includes detaching
+     * (docs/design/plan-inbound-add-remove.md 3.3).
      */
     public function refreshCounts(int $runId): void
     {
@@ -325,14 +327,16 @@ final class InboundMovePlanner
         foreach ($this->connection()->fetchAllAssociative('SELECT state, COUNT(*) AS n FROM service_inbound_move WHERE run_id = ? GROUP BY state', [$runId]) as $row) {
             $by[(string) $row['state']] = (int) $row['n'];
         }
+        $detaching = $by[ServiceInboundMove::STATE_DETACHING] ?? 0;
+        $remove = InboundMoveRun::KIND_REMOVE === $this->connection()->fetchOne('SELECT kind FROM inbound_move_run WHERE id = ?', [$runId]);
         $this->connection()->executeStatement(
             'UPDATE inbound_move_run SET planned_count = ?, done_count = ?, failed_count = ?, skipped_count = ?, remaining_count = ? WHERE id = ?',
             [
                 array_sum($by),
-                ($by[ServiceInboundMove::STATE_SWITCHED] ?? 0) + ($by[ServiceInboundMove::STATE_DETACHING] ?? 0) + ($by[ServiceInboundMove::STATE_DONE] ?? 0),
+                ($by[ServiceInboundMove::STATE_SWITCHED] ?? 0) + ($remove ? 0 : $detaching) + ($by[ServiceInboundMove::STATE_DONE] ?? 0),
                 $by[ServiceInboundMove::STATE_FAILED] ?? 0,
                 $by[ServiceInboundMove::STATE_SKIPPED] ?? 0,
-                ($by[ServiceInboundMove::STATE_PLANNED] ?? 0) + ($by[ServiceInboundMove::STATE_ATTACHING] ?? 0),
+                ($by[ServiceInboundMove::STATE_PLANNED] ?? 0) + ($by[ServiceInboundMove::STATE_ATTACHING] ?? 0) + ($remove ? $detaching : 0),
                 $runId,
             ],
         );
@@ -402,9 +406,7 @@ final class InboundMovePlanner
     /**
      * The 4.4 "protocol mix" check of the service's inbounds after the switch: B, its additional rows (not detached;
      * B's own row goes) and A when A stays one of the plan's additional inbounds. A single inbound is always fine. With
-     * several, the D1 rules of PlanInboundsValidator: known protocols only; one Shadowsocks method; a VLESS vision
-     * primary only with flow-capable VLESS additional inbounds. The last two read the panel's inbounds/options once per
-     * panel (GET, budgeted, recordHealth=false), only when they matter. Never call it inside a transaction.
+     * several, protocolRulesBroken(). Never call it inside a transaction.
      *
      * @param bool $readPanel false: never read the panel; null when the answer would need it (the web dry run)
      *
@@ -430,19 +432,36 @@ final class InboundMovePlanner
                 $additional[] = $inbound;
             }
         }
-        $all = [$target, ...$additional];
+
+        return $this->protocolRulesBroken($target, $additional, $readPanel);
+    }
+
+    /**
+     * The D1 rules of PlanInboundsValidator for a primary inbound and its additional inbounds: known protocols only; one
+     * Shadowsocks method; a VLESS vision primary only with flow-capable VLESS additional inbounds. The last two read the
+     * panel's inbounds/options once per panel (GET, budgeted, recordHealth=false), only when they matter. Never call it
+     * inside a transaction.
+     *
+     * @param list<VpnInbound> $additional
+     * @param bool             $readPanel  false: never read the panel; null when the answer would need it
+     *
+     * @return bool|null true: the mix breaks a rule; false: fine; null: the panel could not be read
+     */
+    public function protocolRulesBroken(VpnInbound $primary, array $additional, bool $readPanel = true): ?bool
+    {
+        $all = [$primary, ...$additional];
         foreach ($all as $inbound) {
             if (!in_array(PlanInboundsValidator::protocol($inbound), PlanInboundsValidator::PROTOCOLS, true)) {
                 return true;
             }
         }
         $shadowsocks = array_values(array_filter($all, static fn (VpnInbound $i): bool => 'shadowsocks' === PlanInboundsValidator::protocol($i)));
-        $vision = 'vless' === PlanInboundsValidator::protocol($target) && str_contains(strtolower((string) $target->getFlow()), 'vision');
+        $vision = 'vless' === PlanInboundsValidator::protocol($primary) && str_contains(strtolower((string) $primary->getFlow()), 'vision');
         $vless = array_values(array_filter($additional, static fn (VpnInbound $i): bool => 'vless' === PlanInboundsValidator::protocol($i)));
         if (count($shadowsocks) < 2 && (!$vision || [] === $vless)) {
             return false;
         }
-        $options = $readPanel ? $this->panelOptions($target->getPanel()) : null;
+        $options = $readPanel ? $this->panelOptions($primary->getPanel()) : null;
         if (null === $options) {
             return null;
         }

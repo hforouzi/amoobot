@@ -18,7 +18,8 @@ use Doctrine\ORM\Mapping as ORM;
  * - toInbound / toRemoteInboundId: the target B, frozen the same way;
  * - the retry columns have the names and meaning of vpn_service_inbound (5.4): attempts, nextAttemptAt, alertState,
  *   alertedAt; claimedAt for the stale-claim takeover; lastError is masked (VpnServiceInbound::safeError());
- * - detachAfter: when the old inbound is due to be removed (NULL with keep-old); detachedAt: when it was (5.6).
+ * - detachAfter: when the old inbound is due to be removed (NULL with keep-old); detachedAt: when it was (5.6). The kinds
+ *   add and remove use these columns differently: docs/design/plan-inbound-add-remove.md 3.2.
  *
  * One move per service per run (unique run_id, service_id). Removed with its run (and so with its plan) or its service
  * (ON DELETE CASCADE). An inbound reference becomes NULL when that inbound is deleted, so a move row never blocks

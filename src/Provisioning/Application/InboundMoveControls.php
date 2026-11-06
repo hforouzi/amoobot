@@ -91,7 +91,8 @@ final class InboundMoveControls
                m.state IN ('attaching', 'detaching')
                OR (m.state = 'switched' AND m.detach_after IS NOT NULL)
                OR (m.state = 'failed' AND m.detach_after IS NOT NULL AND m.next_attempt_at IS NOT NULL)
-               OR (m.state IN ('switched', 'done') AND s.inbound_changed_at IS NOT NULL AND (s.last_access_info_synced_at IS NULL OR s.last_access_info_synced_at < s.inbound_changed_at)))",
+               OR (m.state IN ('switched', 'done') AND s.inbound_changed_at IS NOT NULL AND (s.last_access_info_synced_at IS NULL OR s.last_access_info_synced_at < s.inbound_changed_at))
+               OR ".InboundMoveRunner::ADD_LINKS_DUE_SQL.')',
             [$runId],
         );
         if (0 === $left) {
@@ -137,13 +138,15 @@ final class InboundMoveControls
         $now = (new \DateTimeImmutable())->format('Y-m-d H:i:s');
         $only = null === $serviceId ? '' : ' AND service_id = '.(int) $serviceId;
         $due = (int) $this->db()->executeStatement(
-            "UPDATE service_inbound_move SET detach_after = ?, updated_at = ? WHERE run_id = ? AND state = 'switched'".$only,
+            // A remove waits in "planned" for its detach_after (docs/design/plan-inbound-add-remove.md 3.2); a primary
+            // move in "planned" has none.
+            "UPDATE service_inbound_move SET detach_after = ?, updated_at = ? WHERE run_id = ? AND (state = 'switched' OR (state = 'planned' AND detach_after IS NOT NULL))".$only,
             [$now, $now, $runId],
         );
         $due += (int) $this->db()->executeStatement(
             "UPDATE service_inbound_move SET state = ?, attempts = 0, next_attempt_at = NULL, detach_after = ?, alert_state = NULL, alerted_at = NULL, updated_at = ?
              WHERE run_id = ? AND state = 'failed' AND detach_after IS NOT NULL".$only,
-            [ServiceInboundMove::STATE_SWITCHED, $now, $now, $runId],
+            [InboundMoveRun::KIND_REMOVE === $run['kind'] ? ServiceInboundMove::STATE_PLANNED : ServiceInboundMove::STATE_SWITCHED, $now, $now, $runId],
         );
         if (0 === $due) {
             return ['ok' => false, 'message' => sprintf('Run #%d has no moved service%s whose old inbound is still attached.', $runId, null === $serviceId ? '' : ' #'.$serviceId), 'due' => 0];
@@ -261,7 +264,7 @@ final class InboundMoveControls
         );
     }
 
-    /** @return array{plan_id: int, status: string}|null */
+    /** @return array{plan_id: int, status: string, kind: string}|null */
     private function run(int $runId): ?array
     {
         $run = $this->db()->fetchAssociative('SELECT plan_id, status, kind FROM inbound_move_run WHERE id = ?', [$runId]);
@@ -269,7 +272,7 @@ final class InboundMoveControls
             return null;
         }
 
-        return ['plan_id' => (int) $run['plan_id'], 'status' => (string) $run['status']];
+        return ['plan_id' => (int) $run['plan_id'], 'status' => (string) $run['status'], 'kind' => (string) $run['kind']];
     }
 
     /** @return array{planned: int, done: int, failed: int, skipped: int, remaining: int} */

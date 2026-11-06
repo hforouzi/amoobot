@@ -88,6 +88,13 @@ final class InboundMoveRunner
     private const NOT_DUE = 'not_due';
     private const KEPT = 'kept';
 
+    /**
+     * On alias m: a kind=add move on the panel with its links not refreshed yet (docs/design/plan-inbound-add-remove.md
+     * 3.2). It is due and holds its run open; an add never writes inbound_changed_at, so LINKS_PENDING_SQL cannot see it.
+     * A primary move in "switched" with no detach_after is a keep-old move, which is finished.
+     */
+    public const ADD_LINKS_DUE_SQL = "(m.state = 'switched' AND EXISTS (SELECT 1 FROM inbound_move_run add_run WHERE add_run.id = m.run_id AND add_run.kind = 'add'))";
+
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
         private readonly VpnPanelDriverRegistry $drivers,
@@ -209,6 +216,10 @@ final class InboundMoveRunner
     /** The moves of a run that a pass would look at now (--dry-run of the scheduled task; at most 1000). */
     public function dueCount(int $runId): int
     {
+        if (InboundMoveRun::KIND_PRIMARY !== $this->db()->fetchOne('SELECT kind FROM inbound_move_run WHERE id = ?', [$runId])) {
+            return 0;
+        }
+
         return count($this->dueMoveIds($runId, 0, 1000));
     }
 
@@ -1179,7 +1190,8 @@ final class InboundMoveRunner
         $stale = $now->modify(ServiceInboundAttacher::STALE_CLAIM)->format('Y-m-d H:i:s');
 
         return match ($row['state']) {
-            ServiceInboundMove::STATE_PLANNED => true,
+            // A primary move has no detach_after yet; a remove waits for it (docs/design/plan-inbound-add-remove.md 3.2).
+            ServiceInboundMove::STATE_PLANNED => null === $row['detach_after'] || (string) $row['detach_after'] <= $now->format('Y-m-d H:i:s'),
             ServiceInboundMove::STATE_ATTACHING => null === $row['claimed_at'] || (string) $row['claimed_at'] < $stale,
             ServiceInboundMove::STATE_FAILED => null === $row['detach_after'] && $this->failedDue($row, $now),
             default => false,
@@ -1236,13 +1248,15 @@ final class InboundMoveRunner
             sprintf(
                 "SELECT m.id FROM service_inbound_move m JOIN vpn_service s ON s.id = m.service_id
                  WHERE m.run_id = :run AND m.id > :after AND (
-                   m.state = 'planned'
+                   (m.state = 'planned' AND (m.detach_after IS NULL OR m.detach_after <= :now))
                    OR (m.state IN ('attaching', 'detaching') AND (m.claimed_at IS NULL OR m.claimed_at < :stale))
                    OR (m.state = 'failed' AND m.next_attempt_at IS NOT NULL AND m.next_attempt_at <= :now AND m.attempts < :max)
                    OR (m.state = 'switched' AND m.detach_after IS NOT NULL AND m.detach_after <= :now)
-                   OR (m.state IN ('switched', 'done') AND %s))
+                   OR (m.state IN ('switched', 'done') AND %s)
+                   OR %s)
                  ORDER BY m.id LIMIT %d",
                 self::LINKS_PENDING_SQL,
+                self::ADD_LINKS_DUE_SQL,
                 max(1, $limit),
             ),
             ['run' => $runId, 'after' => $afterId, 'stale' => $now->modify(ServiceInboundAttacher::STALE_CLAIM)->format('Y-m-d H:i:s'), 'now' => $now->format('Y-m-d H:i:s'), 'max' => $this->retries->maxAttempts()],
@@ -1299,8 +1313,10 @@ final class InboundMoveRunner
                      m.state IN ('planned', 'attaching', 'detaching')
                      OR (m.state = 'failed' AND m.next_attempt_at IS NOT NULL AND m.attempts < ?)
                      OR (m.state = 'switched' AND m.detach_after IS NOT NULL)
-                     OR (m.state IN ('switched', 'done') AND %s)))",
+                     OR (m.state IN ('switched', 'done') AND %s)
+                     OR %s))",
                 self::LINKS_PENDING_SQL,
+                self::ADD_LINKS_DUE_SQL,
             ),
             [InboundMoveRun::STATUS_DONE, self::now(), $runId, InboundMoveRun::STATUS_RUNNING, $runId, $this->retries->maxAttempts()],
         );
@@ -1385,6 +1401,7 @@ final class InboundMoveRunner
      */
     private function titles(array $move): array
     {
+        $kind = $this->db()->fetchOne('SELECT kind FROM inbound_move_run WHERE id = ?', [(int) $move['run_id']]);
         $title = function (mixed $id, mixed $remote): string {
             if (null === $id) {
                 return sprintf('(deleted inbound, panel id %s)', null === $remote ? '?' : (string) $remote);
@@ -1394,7 +1411,11 @@ final class InboundMoveRunner
             return sprintf('"%s" (#%d)', mb_substr((string) $title, 0, 60), (int) $id);
         };
 
-        return [$title($move['from_inbound_id'], $move['from_remote_inbound_id']), $title($move['to_inbound_id'], $move['to_remote_inbound_id'])];
+        // An add has no old inbound and a remove no new one (docs/design/plan-inbound-add-remove.md 3.2).
+        return [
+            InboundMoveRun::KIND_ADD === $kind ? '-' : $title($move['from_inbound_id'], $move['from_remote_inbound_id']),
+            InboundMoveRun::KIND_REMOVE === $kind ? '-' : $title($move['to_inbound_id'], $move['to_remote_inbound_id']),
+        ];
     }
 
     private static function refreshText(PanelLinkRefresh $refresh): string

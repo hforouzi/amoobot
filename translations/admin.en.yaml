@@ -1545,6 +1545,8 @@ inbound_move:
   run.heading: "Moving existing services"
   run.none: "No run yet: this plan's existing services were never moved to a new inbound."
   run.title: "Run #%run%"
+  run.title_add: "Run #%run%: add an inbound"
+  run.title_remove: "Run #%run%: remove an inbound"
   run.pause_reason: "Paused because:"
   run.target: "Target inbound"
   run.target_deleted: "(deleted)"

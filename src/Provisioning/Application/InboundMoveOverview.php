@@ -64,17 +64,20 @@ final class InboundMoveOverview
             return null;
         }
         $runId = (int) $run['id'];
+        $kind = (string) $run['kind'];
+        $targetId = null === $run['target_inbound_id'] ? null : (int) $run['target_inbound_id'];
+        // A remove waits in "planned" for its detach_after; a primary move in "planned" has none.
         $sum = $this->db()->fetchAssociative(
-            "SELECT COALESCE(SUM(state = 'done'), 0) AS retired,
-                    COALESCE(SUM(state = 'switched' AND detach_after IS NOT NULL), 0) AS waiting_retire,
-                    MIN(CASE WHEN state = 'switched' THEN detach_after END) AS next_retire,
+            sprintf("SELECT COALESCE(SUM(%s), 0) AS retired,
+                    COALESCE(SUM(state IN ('switched', 'planned') AND detach_after IS NOT NULL), 0) AS waiting_retire,
+                    MIN(CASE WHEN state IN ('switched', 'planned') THEN detach_after END) AS next_retire,
                     COALESCE(SUM(state = 'failed'), 0) AS failed,
                     COALESCE(SUM(state = 'failed' AND next_attempt_at IS NULL), 0) AS given_up,
                     COALESCE(SUM(state = 'undone'), 0) AS undone,
                     COALESCE(SUM(state = 'cancelled'), 0) AS cancelled,
-                    COALESCE(SUM(state IN ('switched', 'detaching') OR (state = 'failed' AND detach_after IS NOT NULL) OR (state = 'undone' AND next_attempt_at IS NOT NULL)), 0) AS undoable,
+                    COALESCE(SUM(%s), 0) AS undoable,
                     COALESCE(SUM(state = 'planned' OR (state = 'failed' AND detach_after IS NULL AND next_attempt_at IS NOT NULL)), 0) AS not_started
-             FROM service_inbound_move WHERE run_id = ?",
+             FROM service_inbound_move WHERE run_id = ?", self::retiredSql($kind), self::undoableSql($kind)),
             [$runId],
         ) ?: [];
         $skipped = [];
@@ -87,12 +90,13 @@ final class InboundMoveOverview
 
         return [
             'id' => $runId,
+            'kind' => $kind,
             'status' => $status,
             'open' => $open,
             'pause_reason' => null === $run['pause_reason'] ? null : mb_substr((string) $run['pause_reason'], 0, 255),
-            'target_id' => null === $run['target_inbound_id'] ? null : (int) $run['target_inbound_id'],
+            'target_id' => $targetId,
             'target_title' => null === $run['target_title'] ? null : mb_substr((string) $run['target_title'], 0, 60),
-            'plan_changed' => (null === $run['target_inbound_id'] ? null : (int) $run['target_inbound_id']) !== $planInboundId,
+            'plan_changed' => self::planChanged($kind, $targetId, $planInboundId, InboundMoveRun::KIND_PRIMARY === $kind ? [] : $this->planAdditionalIds($planId)),
             'keep_old' => 1 === (int) $run['keep_old'],
             'grace_hours' => (int) $run['grace_hours'],
             'started_by' => null === $run['requested_by'] ? null : ['id' => (int) $run['requested_by'], 'email' => null === $run['admin_email'] ? null : (string) $run['admin_email']],
@@ -122,6 +126,46 @@ final class InboundMoveOverview
                 'retry' => $int('failed') > 0 && InboundMoveRun::STATUS_CANCELLED !== $status,
             ],
         ];
+    }
+
+    /** Which of a run's moves count as "retired" (SQL on service_inbound_move): done. An add removes nothing. */
+    public static function retiredSql(string $kind): string
+    {
+        return InboundMoveRun::KIND_ADD === $kind ? '0' : "state = 'done'";
+    }
+
+    /**
+     * Which of a run's moves undo can still put back (SQL on service_inbound_move). A done add or remove can, unlike a
+     * retired primary move: docs/design/plan-inbound-add-remove.md 7.
+     */
+    public static function undoableSql(string $kind): string
+    {
+        return match ($kind) {
+            InboundMoveRun::KIND_ADD => "state IN ('switched', 'done', 'failed') AND (skip_reason IS NULL OR skip_reason <> 'already_on_panel')",
+            InboundMoveRun::KIND_REMOVE => "state IN ('detaching', 'failed', 'done')",
+            default => "state IN ('switched', 'detaching') OR (state = 'failed' AND detach_after IS NOT NULL) OR (state = 'undone' AND next_attempt_at IS NOT NULL)",
+        };
+    }
+
+    /**
+     * Whether the plan no longer agrees with the run: a primary run's target is not the plan's primary, an add's target
+     * left the plan, a remove's target is in the plan again (docs/design/plan-inbound-add-remove.md 4).
+     *
+     * @param list<int> $planAdditional the plan's additional inbound ids (unused for a primary run)
+     */
+    public static function planChanged(string $kind, ?int $targetId, ?int $planInboundId, array $planAdditional): bool
+    {
+        return match ($kind) {
+            InboundMoveRun::KIND_ADD => !in_array($targetId, $planAdditional, true),
+            InboundMoveRun::KIND_REMOVE => $targetId === $planInboundId || in_array($targetId, $planAdditional, true),
+            default => $targetId !== $planInboundId,
+        };
+    }
+
+    /** @return list<int> */
+    private function planAdditionalIds(int $planId): array
+    {
+        return array_map('intval', $this->db()->fetchFirstColumn('SELECT inbound_id FROM plan_additional_inbound WHERE plan_id = ?', [$planId]));
     }
 
     /**
