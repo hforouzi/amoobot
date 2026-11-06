@@ -1,7 +1,7 @@
 # Adding or removing one inbound on a plan's existing services (P11) — design
 
-Status: **design decided, P11a to P11d built** (sections 13.1 to 13.4). `add` and `remove` work from the command line, the
-scheduled task and the web panel, and are not in the Mini App yet. The owner has decided
+Status: **design decided, P11a to P11e built** (sections 13.1 to 13.5). `add` and `remove` work from the command line, the
+scheduled task, the web panel and the Mini App admin. The owner has decided
 Q1 to Q9 and Q11 as recommended in 12.2. Q10 (the real-panel checklist first) is still open. Persian summary:
 [docs/fa/design/plan-inbound-add-remove.md](../fa/design/plan-inbound-add-remove.md).
 
@@ -670,3 +670,15 @@ Where it goes beyond the text above, or differs from it:
 - **Tests changed because they pinned the closure:** `InboundMoveOtherKindsTest` (`testThePagesTakeARunOfEitherKind`),
   `InboundMoveAddTest` (`testRetryNowMakesAFailedAddDueWithItsAttemptsFromZero`), `InboundMoveRemoveTest`
   (`testRetryNowMakesAFailedRemoveDueAndKeepsItsRowHeld`). New: `InboundMoveAddRemoveWebTest`.
+
+### 13.5 P11e as built
+
+- **No logic in the Mini App.** The controller gained one digit field (`inbound`) and `InboundMoveActions::confirmKey()` for the
+  confirm step's text. Kinds, targets, switches and refusals all come from `InboundMoveActions`.
+- **The screens are the web's**, in the web's texts (admin domain) and with the same `data-*` hooks: chips for the kind, the
+  target select, the confirm block, the kind-aware run block, and the service block with `move.line`, `state_label` and
+  `retryable`.
+- **The empty chooser has no link to the plan.** The Mini App's plan form does not edit additional inbounds, so the screen says
+  they are edited on the web panel.
+- **Double tap and CSRF** are `AdminActions`', unchanged. A run made here equals one made by the command with the same options.
+- Tests: `MiniAppAdminInboundAddRemoveTest`.

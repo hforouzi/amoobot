@@ -637,7 +637,7 @@ The settings, under `Settings → Plans → Moving existing services to a new in
 - `plans.inbound_move_detach_grace_hours` (24, 0–168): the grace period of a new run; a run keeps the value it was
   created with.
 
-**Adding an inbound to existing services (`--kind=add`, or on the web: see "On the web panel" below).** A plan's additional
+**Adding an inbound to existing services (`--kind=add`, or on the web and in the Mini App: see "On the web panel" below).** A plan's additional
 inbound reaches new sales at once. `--kind=add` brings the plan's existing services to it: each client gets the one
 inbound C on top of what it has. The primary, UUID, subscription id and URL, expiry, limits and usage do not change, and
 neither does any other inbound.
@@ -682,7 +682,7 @@ Skip reasons of an add, besides those above: `is_primary` (C is the service's pr
 inbound was deleted in the bot, so the plan rules cannot be checked), `already_on_target` (it has the row already). Undo
 adds `last_inbound`: C is the only inbound the client has on the panel, so it stays, and so does the row.
 
-**Removing an inbound from existing services (`--kind=remove`, or on the web: see "On the web panel" below).** Taking an additional
+**Removing an inbound from existing services (`--kind=remove`, or on the web and in the Mini App: see "On the web panel" below).** Taking an additional
 inbound off a plan changes new sales only: existing services keep it. `--kind=remove` takes the one inbound D off the plan's
 existing services. The primary, every other inbound, UUID, subscription id and URL, expiry, limits and usage do not change.
 A client is never left with zero inbounds, and a plan's primary is never removed: changing
@@ -757,7 +757,11 @@ service page names the inbound ("Inbound added: C", "Inbound removed: D"), with 
 offered for an add whose undo stopped, because it would put the inbound back: run undo again. `--retire-now` is on the command
 line only.
 
-The command and the pages have been tested against a simulated panel only, not against a real 3x-ui panel: try one service
+**In the Mini App admin.** The same on the plan's "Apply to existing services" screen, with the same permissions, rules,
+switches and refusals: the kind is a chip, numbers may be typed with Persian digits, cancel and undo are confirmed first, and
+a double tap is one request. A plan's additional inbounds are edited on the web panel only, so change the plan there first.
+
+The command, the pages and the Mini App have been tested against a simulated panel only, not against a real 3x-ui panel: try one service
 first. Design: [plan-inbound-change.md](../design/plan-inbound-change.md).
 
 ## Branding (customer pages)

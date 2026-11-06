@@ -3,15 +3,25 @@
 {# MiniAppAdminInboundMoveController::apply: "Apply to existing services" of a plan in the Mini App admin
    (docs/design/plan-inbound-change.md 5.2, 6.2, 8.1; PR P9; the web's is admin/inbound_move/apply.html.twig, P7).
    Step 1 is the dry run (counted locally, no panel call), step 2 (?step=confirm) the confirmation whose POST creates
-   the run, planned. The texts are the web's (admin domain); service ids, statuses and inbound titles only (D5). #}
+   the run, planned. The texts are the web's (admin domain); service ids, statuses and inbound titles only (D5). The kind
+   (docs/design/plan-inbound-add-remove.md 9.1, PR P11e) is a GET too: ?kind=add or ?kind=remove, with ?inbound=<id>. #}
 {% block section %}admin{% endblock %}
 {% block title %}{{ 'inbound_move.apply.link'|trans }}{% endblock %}
-{% block attributes %} data-back data-plan-id="{{ plan.id }}" data-step="{{ confirm ? 'confirm' : 'dry_run' }}"{% endblock %}
+{% block attributes %} data-back data-plan-id="{{ plan.id }}" data-step="{{ confirm ? 'confirm' : 'dry_run' }}" data-kind="{{ kind }}"{% endblock %}
 {% block content %}
+    {% set suffix = kind == 'primary' ? '' : '_' ~ kind %}
     <section class="card">
         <h1>{{ 'inbound_move.apply.title'|trans({'%plan%': plan.title}) }}</h1>
-        <p class="muted small-print">{{ 'inbound_move.apply.intro'|trans }}</p>
+        <p class="muted small-print">{{ ('inbound_move.apply.intro' ~ suffix)|trans }}</p>
+        {% if kinds|length > 1 and not confirm %}
+            <div class="chips" data-kind-selector>
+                {% for option in kinds %}
+                    <a class="chip{{ option == kind ? ' active' : '' }}" href="{{ path('miniapp_admin_plan_apply_inbounds', option == 'primary' ? {id: plan.id} : {id: plan.id, kind: option}) }}" data-nav data-replace data-kind-option="{{ option }}">{{ ('inbound_move.kind.' ~ option)|trans }}</a>
+                {% endfor %}
+            </div>
+        {% endif %}
         {% if not enabled %}<p class="notice-line" data-switch-off>{{ 'inbound_move.apply.switch_off'|trans }}</p>{% endif %}
+        {% if multiOff %}<p class="notice-line" data-multi-off>{{ 'inbound_move.apply.switch_off_multi'|trans }}</p>{% endif %}
         {% if targetProblem %}<p class="notice-line bad" data-target-problem="{{ targetProblem }}">{{ ('inbound_move.apply.' ~ targetProblem)|trans({'%inbound%': target ? target.title : ''}) }}</p>{% endif %}
         {% if openRun %}<p class="notice-line" data-open-run="{{ openRun }}">{{ 'inbound_move.apply.open_run'|trans({'%run%': openRun}) }}</p>{% endif %}
     </section>
@@ -21,30 +31,48 @@
     {% if not confirm %}
         <form class="card form" data-search="{{ path('miniapp_admin_plan_apply_inbounds', {id: plan.id}) }}" data-scope-form novalidate>
             <h2>{{ 'inbound_move.apply.scope'|trans }}</h2>
+            {% if kind != 'primary' %}
+                <input type="hidden" name="kind" value="{{ kind }}">
+                {% if targets is empty and form.inbound is null %}
+                    <p class="muted small-print" data-no-targets>{{ ('inbound_move.apply.no_targets' ~ suffix)|trans }} {{ 'admin.inbound_move.plan_on_web'|trans({}, 'miniapp') }}</p>
+                {% else %}
+                    <label class="field">
+                        <span>{{ ('inbound_move.apply.inbound' ~ suffix)|trans }}</span>
+                        <select class="input" name="inbound" data-target-select>
+                            <option value="">{{ 'inbound_move.apply.inbound_choose'|trans }}</option>
+                            {% for inbound in targets %}<option value="{{ inbound.id }}"{% if form.inbound == inbound.id %} selected{% endif %}>{{ inbound.title }} (#{{ inbound.id }}){% if not inbound.active %} - {{ 'inbound_move.apply.inbound_inactive'|trans }}{% endif %}</option>{% endfor %}
+                        </select>
+                    </label>
+                {% endif %}
+            {% endif %}
             <label class="field">
                 <span>{{ 'inbound_move.apply.service'|trans }}</span>
                 <input class="input ltr" type="text" name="service" value="{{ form.service }}" inputmode="numeric" autocomplete="off" maxlength="12">
                 <span class="muted small-print">{{ 'inbound_move.apply.service_help'|trans }}</span>
             </label>
-            <label class="field">
-                <span>{{ 'inbound_move.apply.from_inbound'|trans }}</span>
-                <select class="input" name="from_inbound">
-                    <option value="">{{ 'inbound_move.apply.from_any'|trans }}</option>
-                    {% for inbound in fromInbounds %}<option value="{{ inbound.id }}"{% if form.fromInbound == inbound.id %} selected{% endif %}>{{ inbound.title }} (#{{ inbound.id }})</option>{% endfor %}
-                </select>
-            </label>
-            {% for flag, field in {include_suspended: 'includeSuspended', include_expired: 'includeExpired', include_trials: 'includeTrials', keep_old: 'keepOld'} %}
+            {% if kind != 'remove' %}
+                <label class="field">
+                    <span>{{ 'inbound_move.apply.from_inbound'|trans }}</span>
+                    <select class="input" name="from_inbound">
+                        <option value="">{{ 'inbound_move.apply.from_any'|trans }}</option>
+                        {% for inbound in fromInbounds %}<option value="{{ inbound.id }}"{% if form.fromInbound == inbound.id %} selected{% endif %}>{{ inbound.title }} (#{{ inbound.id }})</option>{% endfor %}
+                    </select>
+                </label>
+            {% endif %}
+            {% for flag, field in kind == 'primary' ? {include_suspended: 'includeSuspended', include_expired: 'includeExpired', include_trials: 'includeTrials', keep_old: 'keepOld'} : {include_suspended: 'includeSuspended', include_expired: 'includeExpired'} %}
                 <label class="switch-field">
                     <input type="checkbox" name="{{ flag }}" value="1"{% if attribute(form, field) %} checked{% endif %}>
                     <span class="switch" aria-hidden="true"></span>
                     <span class="switch-label">{{ ('inbound_move.apply.' ~ flag)|trans }}</span>
                 </label>
             {% endfor %}
-            <label class="field">
-                <span>{{ 'inbound_move.apply.grace_hours'|trans }}</span>
-                <input class="input ltr" type="text" name="grace_hours" value="{{ form.graceHours }}" inputmode="numeric" autocomplete="off" maxlength="3">
-                <span class="muted small-print">{{ 'inbound_move.apply.grace_help'|trans({'%default%': defaultGrace}) }}</span>
-            </label>
+            {% if kind != 'add' %}
+                <label class="field">
+                    <span>{{ ('inbound_move.apply.grace_hours' ~ suffix)|trans }}</span>
+                    <input class="input ltr" type="text" name="grace_hours" value="{{ form.graceHours }}" inputmode="numeric" autocomplete="off" maxlength="3">
+                    <span class="muted small-print">{{ ('inbound_move.apply.grace_help' ~ suffix)|trans({'%default%': defaultGrace}) }}</span>
+                </label>
+            {% endif %}
             <button type="submit" class="btn secondary small">{{ 'inbound_move.apply.show'|trans }}</button>
         </form>
     {% endif %}
@@ -56,10 +84,10 @@
     {% if summary is not null %}
         <section class="card" data-dry-run>
             <h2>{{ (confirm ? 'inbound_move.confirm.title' : 'inbound_move.apply.dry_run')|trans }}</h2>
-            <p data-target="{{ target.id }}">{{ 'inbound_move.apply.target'|trans }} <strong><bdi>{{ target.title }}</bdi></strong> <span class="muted ltr">#{{ target.id }}</span></p>
+            <p data-target="{{ target.id }}">{{ ('inbound_move.apply.target' ~ suffix)|trans }} <strong><bdi>{{ target.title }}</bdi></strong> <span class="muted ltr">#{{ target.id }}</span></p>
             <div data-summary>
-                <p class="small-print" data-total="{{ summary.total }}">{{ 'inbound_move.apply.total'|trans({'%count%': summary.total}) }}</p>
-                <p data-would-move="{{ summary.move }}"><strong>{{ 'inbound_move.apply.would_move'|trans({'%count%': summary.move}) }}</strong></p>
+                <p class="small-print" data-total="{{ summary.total }}">{{ ('inbound_move.apply.total' ~ suffix)|trans({'%count%': summary.total}) }}</p>
+                <p data-would-move="{{ summary.move }}"><strong>{{ ('inbound_move.apply.would_move' ~ suffix)|trans({'%count%': summary.move}) }}</strong></p>
                 <p class="small-print" data-skipped="{{ summary.skipped }}">{{ 'inbound_move.apply.skipped'|trans({'%count%': summary.skipped}) }}</p>
                 {% for reason, n in summary.byReason %}
                     <p class="small-print" data-skip-reason="{{ reason }}" data-skip-count="{{ n }}">· {{ ('inbound_move.skip.' ~ reason)|trans }}: {{ n }}</p>
@@ -70,12 +98,19 @@
 
             {% if confirm %}
                 <div class="notice-line" data-phases>
-                    <p><strong>{{ 'inbound_move.confirm.phase1_title'|trans }}</strong> {{ 'inbound_move.confirm.phase1'|trans({'%inbound%': target.title}) }}</p>
-                    <p><strong>{{ 'inbound_move.confirm.phase2_title'|trans }}</strong> {{ form.keepOld ? 'inbound_move.confirm.phase2_keep_old'|trans : 'inbound_move.confirm.phase2'|trans({'%hours%': form.graceHours}) }}</p>
+                    {% if kind == 'primary' %}
+                        <p><strong>{{ 'inbound_move.confirm.phase1_title'|trans }}</strong> {{ 'inbound_move.confirm.phase1'|trans({'%inbound%': target.title}) }}</p>
+                        <p><strong>{{ 'inbound_move.confirm.phase2_title'|trans }}</strong> {{ form.keepOld ? 'inbound_move.confirm.phase2_keep_old'|trans : 'inbound_move.confirm.phase2'|trans({'%hours%': form.graceHours}) }}</p>
+                    {% else %}
+                        <p>{{ ('inbound_move.confirm.what' ~ suffix)|trans({'%inbound%': target.title}) }}</p>
+                        <p data-customer-sees><strong>{{ 'inbound_move.confirm.customer_title'|trans }}</strong> {{ ('inbound_move.confirm.customer' ~ suffix)|trans({'%inbound%': target.title}) }}</p>
+                        {% if kind == 'remove' %}<p data-grace="{{ form.graceHours }}">{{ 'inbound_move.confirm.grace_remove'|trans({'%hours%': form.graceHours}) }}</p>{% endif %}
+                        <p data-plan-note>{{ ('inbound_move.confirm.plan_note' ~ suffix)|trans }}</p>
+                    {% endif %}
                     <p>{{ 'inbound_move.confirm.task'|trans }}</p>
                 </div>
                 {% if form.service is null %}<p class="notice-line" data-one-first>{{ 'inbound_move.confirm.one_first'|trans }}</p>{% endif %}
-                {% if enabled and not openRun and not targetProblem and can.miniapp_admin_plan_apply_inbounds_create %}
+                {% if canCreate and can.miniapp_admin_plan_apply_inbounds_create %}
                     <form class="form spaced" data-submit="{{ path('miniapp_admin_plan_apply_inbounds_create', {id: plan.id}) }}" data-create-form novalidate>
                         {% for name, value in form.query %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endfor %}
                         <p class="field-error" data-form-error hidden></p>
@@ -83,7 +118,7 @@
                     </form>
                 {% endif %}
                 <a class="btn secondary small" href="{{ path('miniapp_admin_plan_apply_inbounds', {id: plan.id}|merge(form.query)) }}" data-nav data-replace data-back-to-dry-run>{{ 'inbound_move.confirm.back'|trans }}</a>
-            {% elseif enabled and not openRun and not targetProblem and summary.move > 0 and can.miniapp_admin_plan_apply_inbounds_create %}
+            {% elseif canCreate and summary.move > 0 and can.miniapp_admin_plan_apply_inbounds_create %}
                 <a class="btn small" href="{{ path('miniapp_admin_plan_apply_inbounds', {id: plan.id, step: 'confirm'}|merge(form.query)) }}" data-nav data-continue>{{ 'inbound_move.apply.continue'|trans }}</a>
             {% endif %}
         </section>
@@ -91,11 +126,11 @@
         {% for list in [{key: 'moving', rows: summary.moving, count: summary.move}, {key: 'skipped', rows: summary.skippedList, count: summary.skipped}] %}
             {% if list.rows is not empty %}
                 <section class="card" data-list="{{ list.key }}">
-                    <h2>{{ ('inbound_move.apply.list_' ~ list.key)|trans({'%count%': list.count}) }}</h2>
+                    <h2>{{ ('inbound_move.apply.list_' ~ list.key ~ (list.key == 'moving' ? suffix : ''))|trans({'%count%': list.count}) }}</h2>
                     {% if list.count > listLimit %}<p class="muted small-print">{{ 'inbound_move.apply.list_limited'|trans({'%count%': listLimit}) }}</p>{% endif %}
                     <div class="list">
                         {% for c in list.rows %}
-                            {% set line %}<span class="list-main"><strong class="ltr">#{{ c.serviceId }}</strong> <span class="muted">· {{ ('admin.service.status.' ~ c.status)|trans({}, 'miniapp') }} · <bdi>{{ c.fromTitle }}</bdi>{% if list.key == 'skipped' %} · {{ ('inbound_move.skip.' ~ c.skipReason)|trans }}{% endif %}</span></span>{% endset %}
+                            {% set line %}<span class="list-main"><strong class="ltr">#{{ c.serviceId }}</strong> <span class="muted">· {{ ('admin.service.status.' ~ c.status)|trans({}, 'miniapp') }} · {% if kind != 'primary' and list.key == 'moving' %}{% set change = inbounds[c.serviceId] %}<span data-inbounds-now="{{ change.now|join(', ') }}" data-inbounds-after="{{ change.after|join(', ') }}"><bdi>{{ change.now|join(', ') }}</bdi> → <bdi>{{ change.after|join(', ') }}</bdi></span>{% else %}<bdi>{{ c.fromTitle }}</bdi>{% endif %}{% if list.key == 'skipped' %} · {{ ('inbound_move.skip.' ~ c.skipReason)|trans }}{% endif %}</span></span>{% endset %}
                             {% if can.miniapp_admin_service %}
                                 <a class="list-item" href="{{ path('miniapp_admin_service', {id: c.serviceId}) }}" data-nav data-service-id="{{ c.serviceId }}">{{ line }}<span class="chevron" aria-hidden="true">›</span></a>
                             {% else %}

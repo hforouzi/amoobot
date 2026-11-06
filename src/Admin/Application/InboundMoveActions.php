@@ -426,6 +426,12 @@ final class InboundMoveActions
     /**
      * The end of a key of the admin domain for a kind: nothing for a primary run, "_add" or "_remove" otherwise.
      */
+    /** The admin-domain key that asks before cancelling or undoing this run, in its kind's own wording (the web's text). */
+    public function confirmKey(int $runId, string $action): string
+    {
+        return 'inbound_move.confirm.'.$action.self::suffix($this->runKind($runId));
+    }
+
     private static function suffix(string $kind): string
     {
         return InboundMoveRun::KIND_PRIMARY === $kind ? '' : '_'.$kind;

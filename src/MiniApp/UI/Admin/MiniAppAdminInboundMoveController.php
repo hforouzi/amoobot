@@ -41,6 +41,9 @@ use Symfony\Contracts\Translation\TranslatorInterface;
  *   scheduled task works at its next pass.
  * - The service's "Retry now": its failed move is due again; limiter admin_service_move per service, as on the web.
  *
+ * Adding or removing one inbound (docs/design/plan-inbound-add-remove.md 9.1, PR P11e) is the same screen with ?kind= and
+ * ?inbound=: the kinds, the target rules, both switches and the refusals are InboundMoveActions', so nothing is decided here.
+ *
  * No GET changes anything; the screens show service ids and inbound titles only (D5: never a link, UUID, token,
  * customer or reseller owner); no order, payment, wallet, user or reseller row is locked or written here. The audit
  * entries are the command's (plan.inbounds_apply_*), with this admin as the actor (source miniapp).
@@ -113,7 +116,7 @@ final class MiniAppAdminInboundMoveController extends AbstractController
         if ($this->moves->planOfRun($runId) !== $id) {
             throw new NotFoundHttpException();
         }
-        $confirm = in_array($action, ['cancel', 'undo'], true) ? $this->text($request, 'inbound_move.confirm.'.$action) : null;
+        $confirm = in_array($action, ['cancel', 'undo'], true) ? $this->text($request, $this->moves->confirmKey($runId, $action)) : null;
 
         return $this->actions->run($request, $user, $runId, $confirm, function () use ($request, $runId, $action): array {
             $result = $this->moves->act($runId, $action);
@@ -148,7 +151,7 @@ final class MiniAppAdminInboundMoveController extends AbstractController
      */
     private static function digits(array $input): array
     {
-        foreach (['service', 'from_inbound', 'grace_hours'] as $name) {
+        foreach (['service', 'from_inbound', 'inbound', 'grace_hours'] as $name) {
             if (is_string($input[$name] ?? null)) {
                 $input[$name] = AdminText::latinDigits($input[$name]);
             }
