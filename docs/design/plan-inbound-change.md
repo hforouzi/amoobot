@@ -444,6 +444,10 @@ No panel call happens on view (rule 9.1 stays).
 
 ### 6.4 Additional inbounds (`kind=add|remove`, the old M3/M4)
 
+**Superseded by [plan-inbound-add-remove.md](plan-inbound-add-remove.md)** (owner decision Q6). There the run does its
+own attach step instead of leaving `pending` rows to the attach timer, and a removed row is deleted, not kept
+`detached`, because a `detached` row blocks deleting the inbound. The text below is the original plan.
+
 - **add:**
   - creates `pending` `vpn_service_inbound` rows with `last_error` "added by run #N" and `next_attempt_at = now`;
   - the existing `InboundAttachScheduler` / `ServiceInboundAttacher` attach them, with no new attach code;
@@ -619,7 +623,7 @@ and M2e suites):
 | **P8** | Scheduled task `inbound-moves` (lifecycle group), CLI/task mutual lock | `AutomationRunCommand`, `deploy.sh` manifest + allowlist, ops tests | P-8, ops manifest tests | **new timer → full deploy** |
 | **P9** | Mini App admin: the same actions as P7 | `MiniAppAdminPlanController`, templates, `miniapp` translations | Mini App tests | none |
 | **P10** | Optional customer notice (P5 decision) | `PaymentDeliveryLog`-style claim, translations | T12 | none |
-| **P11** | `kind=add` (M3) and `kind=remove` (M4) on the same runner | runner, `ServiceInboundAttacher` reuse | 6.4 tests | none |
+| **P11** | `kind=add` (M3) and `kind=remove` (M4) on the same runner. Split into P11a to P11e: [plan-inbound-add-remove.md](plan-inbound-add-remove.md) section 13 | runner, `ServiceInboundAttacher` reuse | 6.4 tests | none |
 
 Order: P1 → P2 → P3 → P4 → P5 → P6 → P7 → P8 → P9 → (P10, P11). P1 is independent and can ship at once. P2–P6 change
 no customer-visible behaviour while the switch is off. Each PR follows the repository's process: phpunit and phpstan

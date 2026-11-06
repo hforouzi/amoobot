@@ -1,6 +1,8 @@
 # Adding or removing one inbound on a plan's existing services (P11) — design
 
-Status: **design for review. Nothing here is built.** No code, no migration.
+Status: **design decided, P11a built** (section 13.1). `add` and `remove` are not reachable yet. The owner has decided
+Q1 to Q9 and Q11 as recommended in 12.2. Q10 (the real-panel checklist first) is still open. Persian summary:
+[docs/fa/design/plan-inbound-add-remove.md](../fa/design/plan-inbound-add-remove.md).
 
 This document continues [plan-inbound-change.md](plan-inbound-change.md) (called "the move design" below), section 6.4
 and the row P11 of its section 9. Where the two disagree, this document overrides 6.4. The differences are listed in
@@ -549,3 +551,20 @@ timer, so each is an app-only deploy. Nothing changes for anyone until an admin 
 
 Order: P11a → P11b → P11c → P11d → P11e. P11b and P11c can each ship and be used from the command line alone. P10 is
 independent and can come at any point.
+
+### 13.1 P11a as built
+
+No behaviour change: no migration, setting, timer or driver change, and every filter of fact 2 stays closed.
+`InboundMoveRunner::dueCount()` gained the same filter, so a run of another kind is never reported as due.
+
+- Due rule: a `planned` move waits for its `detach_after`, in `dueMoveIds()` and `due()`.
+- `InboundMoveRunner::ADD_LINKS_DUE_SQL`: a `switched` move of an `add` run is due and holds its run open. It is also
+  read by `finishRun()` and `InboundMoveControls::cancel()`. The step from `switched` to `done` is P11b.
+- `refreshCounts()`: for `remove`, `detaching` counts as remaining, not done.
+- `InboundMoveOverview::planRun()`: `kind`, and per kind `retiredSql()`, `undoableSql()` and `planChanged()`.
+- `retireNow()`: makes waiting `planned` moves due. A failed `remove` goes back to `planned`, not `switched`.
+- `InboundMovePlanner::protocolRulesBroken()`: takes a primary and a list of additional inbounds. `protocolMix()` works
+  out that list for a primary move and calls it.
+- `titles()` in the runner, and the run block's title in the web and Mini App templates, per kind (fa and en). The page
+  texts of 9.1 need the kind selector, so they come with P11d. `pass->keptOld` is not kind-aware yet: P11b.
+- Tests: `tests/Shop/InboundMove/InboundMoveOtherKindsTest.php`. `tests/Shop/InboundMove` is otherwise unchanged.
