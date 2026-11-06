@@ -157,12 +157,6 @@ parameters:
 			path: src/Bot/Application/StorePaymentMethodResolver.php
 
 		-
-			message: '#^Variable \$driverError on left side of \?\? always exists and is not nullable\.$#'
-			identifier: nullCoalesce.variable
-			count: 1
-			path: src/Bot/Application/StorePaymentMethodResolver.php
-
-		-
 			message: '#^Instanceof between App\\Entity\\StorePaymentMethod and App\\Entity\\StorePaymentMethod will always evaluate to true\.$#'
 			identifier: instanceof.alwaysTrue
 			count: 1
