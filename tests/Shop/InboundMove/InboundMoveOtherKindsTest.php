@@ -21,7 +21,8 @@ use Twig\Environment;
 /**
  * PR P11a (docs/design/plan-inbound-add-remove.md 3.3, 13): the preparation for kind=add and kind=remove, with neither
  * reachable yet. A run row of such a kind stays inert: no pass, control, page or dry run takes it, and it is never due.
- * The kind-aware rules are pinned here on the rows they read, for P11b and P11c to open.
+ * The kind-aware rules are pinned here on the rows they read, for P11b and P11c to open. P11b opened add for the
+ * command line and the scheduled task: the "inert" tests below go on for remove, and the web stays closed to add.
  */
 final class InboundMoveOtherKindsTest extends IntegrationTestCase
 {
@@ -40,7 +41,13 @@ final class InboundMoveOtherKindsTest extends IntegrationTestCase
         yield 'remove' => [InboundMoveRun::KIND_REMOVE];
     }
 
-    #[DataProvider('otherKinds')]
+    /** @return iterable<string, array{string}> */
+    public static function closedKinds(): iterable
+    {
+        yield 'remove' => [InboundMoveRun::KIND_REMOVE];
+    }
+
+    #[DataProvider('closedKinds')]
     public function testARunOfAnotherKindIsNeverProcessedNorShownAsDue(string $kind): void
     {
         $runId = $this->planned($kind);
@@ -59,7 +66,7 @@ final class InboundMoveOtherKindsTest extends IntegrationTestCase
         self::assertSame([], $this->panelWrites());
     }
 
-    #[DataProvider('otherKinds')]
+    #[DataProvider('closedKinds')]
     public function testNoControlOrPageTakesARunOfAnotherKind(string $kind): void
     {
         $runId = $this->planned($kind);
@@ -76,6 +83,15 @@ final class InboundMoveOtherKindsTest extends IntegrationTestCase
         self::assertNull(self::getContainer()->get(InboundMoveOverview::class)->planRun($plan, null));
 
         self::assertSame($before, $this->rows($runId));
+    }
+
+    #[DataProvider('otherKinds')]
+    public function testNoPageTakesARunOfAnotherKind(string $kind): void
+    {
+        $runId = $this->planned($kind);
+
+        self::assertNull(self::getContainer()->get(InboundMoveActions::class)->planOfRun($runId));
+        self::assertNull(self::getContainer()->get(InboundMoveOverview::class)->planRun((int) $this->gold->getId(), null));
     }
 
     public function testAPlannedMoveIsDueOnceItsDetachAfterHasPassed(): void

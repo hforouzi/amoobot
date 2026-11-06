@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Provisioning\Application;
 
+use App\Entity\InboundMoveRun;
+
 /**
  * What one pass of InboundMoveRunner::process() did to a run (for the console and the tests). Counts and fixed texts
  * only: no credential, link, owner or panel address.
@@ -14,12 +16,15 @@ final class InboundMovePass
     public const RAN = 'ran';
     /** plans.inbound_move_enabled is off: nothing was done. */
     public const SWITCHED_OFF = 'switched_off';
-    /** The run does not exist, is not open (done, cancelled), or is not a primary move. */
+    /** The run does not exist, is not open (done, cancelled), or is of a kind that is not open yet. */
     public const NOT_OPEN = 'not_open';
-    /** Called inside a transaction: nothing was done (panel calls never run under someone's locks). */
+    /** Called inside a transaction, or an undo of a run that is not the plan's latest: nothing was done. */
     public const REFUSED = 'refused';
 
+    public string $kind = InboundMoveRun::KIND_PRIMARY;
     public int $switched = 0;
+    /** kind=add: services that got the inbound in this pass. */
+    public int $added = 0;
     public int $alreadyOnTarget = 0;
     public int $failed = 0;
     public int $skipped = 0;
@@ -38,6 +43,8 @@ final class InboundMovePass
     public int $undone = 0;
     public int $alreadyRetired = 0;
     public int $busy = 0;
+    /** --undo of an add: services that were on the inbound before the run. */
+    public int $leftAlone = 0;
     /** --undo / --cancel: services not moved yet that will not be moved any more. */
     public int $cancelled = 0;
     /** The runner paused the run in this pass (5 failed panel reads in a row). */
@@ -58,7 +65,7 @@ final class InboundMovePass
      */
     public function toArray(): array
     {
-        return [
+        $array = [
             'outcome' => $this->outcome,
             'message' => $this->message,
             'run_status' => $this->runStatus,
@@ -82,5 +89,7 @@ final class InboundMovePass
             'out_of_time' => $this->outOfTime,
             'counts' => $this->counts,
         ];
+
+        return InboundMoveRun::KIND_PRIMARY === $this->kind ? $array : $array + ['kind' => $this->kind, 'added' => $this->added, 'left_alone' => $this->leftAlone];
     }
 }

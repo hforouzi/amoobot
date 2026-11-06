@@ -57,7 +57,7 @@ final class InboundMoveControls
             return ['ok' => false, 'message' => sprintf('Run #%d is %s: only a planned or running run can be paused.', $runId, $run['status'])];
         }
         $counts = $this->counts($runId);
-        $this->auditLogger->record('plan.inbounds_apply_paused', 'plan', $run['plan_id'], ['run_id' => $runId, 'by' => 'admin'] + $counts);
+        $this->auditLogger->record('plan.inbounds_apply_paused', 'plan', $run['plan_id'], ['run_id' => $runId, 'by' => 'admin'] + $this->planner->runDetails($runId) + $counts);
         $this->logger->warning('inbound_move_run_paused', ['run_id' => $runId, 'plan_id' => $run['plan_id'], 'reason' => self::PAUSED_BY_ADMIN]);
         $this->alerts->moveRunEnded($runId, $run['plan_id'], $counts, self::PAUSED_BY_ADMIN);
 
@@ -102,8 +102,19 @@ final class InboundMoveControls
             );
         }
         $counts = $this->counts($runId);
-        $this->auditLogger->record('plan.inbounds_apply_cancelled', 'plan', $run['plan_id'], ['run_id' => $runId, 'cancelled' => $cancelled, 'still_open' => $left > 0] + $counts);
+        $this->auditLogger->record('plan.inbounds_apply_cancelled', 'plan', $run['plan_id'], ['run_id' => $runId, 'cancelled' => $cancelled, 'still_open' => $left > 0] + $this->planner->runDetails($runId) + $counts);
         $this->logger->info('inbound_move_run_cancelled', ['run_id' => $runId, 'plan_id' => $run['plan_id'], 'cancelled' => $cancelled, 'still_open' => $left > 0]);
+
+        if (InboundMoveRun::KIND_ADD === $run['kind']) {
+            return [
+                'ok' => true,
+                'message' => 0 === $left
+                    ? sprintf('Run #%d is cancelled: %d service(s) not reached yet will not get the inbound.', $runId, $cancelled)
+                    : sprintf('Run #%d: %d service(s) not reached yet will not get the inbound. %d service(s) still wait for their links (or are in the middle of a step): the run stays open for that; continue with --resume=%d, or take the inbound off with --undo=%d.', $runId, $cancelled, $left, $runId, $runId),
+                'cancelled' => $cancelled,
+                'open' => $left > 0,
+            ];
+        }
 
         return [
             'ok' => true,
@@ -127,6 +138,10 @@ final class InboundMoveControls
         $run = $this->run($runId);
         if (null === $run) {
             return ['ok' => false, 'message' => sprintf('There is no run #%d.', $runId), 'due' => 0];
+        }
+        if (InboundMoveRun::KIND_ADD === $run['kind']) {
+            // Never a detach_after on an add's move: the runner would read it as a retire of the service's primary.
+            return ['ok' => false, 'message' => sprintf('Run #%d adds an inbound: --retire-now is only for a move.', $runId), 'due' => 0];
         }
         $reopen = !in_array($run['status'], InboundMoveRun::OPEN_STATUSES, true);
         if ($reopen) {
@@ -211,6 +226,10 @@ final class InboundMoveControls
         if (null === $run) {
             return ['ok' => false, 'message' => sprintf('There is no run #%d.', $runId), 'due' => 0, 'reopened' => false];
         }
+        if (InboundMoveRun::KIND_ADD === $run['kind']) {
+            // The buttons of the web and the Mini App, closed until P11d. It would also re-arm a move whose undo failed.
+            return ['ok' => false, 'message' => sprintf('Run #%d adds an inbound: it is handled from the command line (--resume, --undo).', $runId), 'due' => 0, 'reopened' => false];
+        }
         if (!$enabled) {
             return ['ok' => false, 'message' => 'Moving services is switched off: nothing is retried.', 'due' => 0, 'reopened' => false];
         }
@@ -268,7 +287,7 @@ final class InboundMoveControls
     private function run(int $runId): ?array
     {
         $run = $this->db()->fetchAssociative('SELECT plan_id, status, kind FROM inbound_move_run WHERE id = ?', [$runId]);
-        if (false === $run || InboundMoveRun::KIND_PRIMARY !== $run['kind']) {
+        if (false === $run || !in_array($run['kind'], InboundMoveRun::RUNNABLE_KINDS, true)) {
             return null;
         }
 

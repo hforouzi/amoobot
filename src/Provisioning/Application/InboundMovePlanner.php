@@ -20,7 +20,9 @@ use App\Provisioning\Infrastructure\Sanaei3xui\Sanaei3xuiRemoteIdParser;
 use App\Provisioning\Infrastructure\VpnPanelDriverRegistry;
 use App\Security\AdminAuditLogger;
 use App\Shop\Application\Catalog\PlanInboundsValidator;
+use App\Shop\Application\Catalog\TrialBackingPlans;
 use App\Shop\Application\InboundMoveSettings;
+use App\Shop\Application\MultiInboundSettings;
 use App\Shop\Domain\OrderType;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
@@ -39,6 +41,10 @@ use Psr\Log\LoggerInterface;
  * service's row lock (4.3 step 1). Checks needing the panel are separate: protocolMix() needs inbounds/options (only for
  * a service with several inbounds, D1), the dry run's panelNote() reads the client (GET only). Both are made outside any
  * transaction, within a PanelCallBudget pass and with recordHealth=false.
+ *
+ * kind=add (docs/design/plan-inbound-add-remove.md 3, 4, PR P11b): addCandidates() and createAdd() list the plan's services
+ * without an attached row for the target C. skipReason() stays the one rule set; addSkipReason() adds what only an add
+ * needs (C must not be the primary, a primary must exist). addTargetProblem() is the plan rule.
  */
 final class InboundMovePlanner
 {
@@ -58,6 +64,14 @@ final class InboundMovePlanner
     public const SKIP_INBOUND_CHANGED = 'inbound_changed';
     public const SKIP_TARGET_GONE = 'target_gone';
     public const SKIP_TARGET_INACTIVE = 'target_inactive';
+    /** kind=add: the target is the service's primary inbound: never a row of its own, never detached. */
+    public const SKIP_IS_PRIMARY = 'is_primary';
+    /** kind=add: the service's primary inbound is gone: no client to check the attach against. */
+    public const SKIP_NO_PRIMARY = 'no_primary';
+    /** Undo of an add: the driver refused, the target is the client's only inbound on the panel. */
+    public const SKIP_LAST_INBOUND = 'last_inbound';
+    /** kind=add: not a skip but a note on a done move: the client was on the target before this run. Undo leaves it. */
+    public const ALREADY_ON_PANEL = 'already_on_panel';
 
     /** Flap guard (6.2, 8.1): at most this many moves per service within MOVE_WINDOW_HOURS. */
     public const MAX_MOVES_PER_WINDOW = 3;
@@ -83,6 +97,8 @@ final class InboundMovePlanner
         private readonly AdminAuditLogger $auditLogger,
         private readonly LoggerInterface $logger,
         private readonly PanelCredentials $credentials,
+        private readonly MultiInboundSettings $multiInbound,
+        private readonly TrialBackingPlans $trialBackingPlans,
         private readonly Sanaei3xuiRemoteIdParser $remoteIdParser = new Sanaei3xuiRemoteIdParser(),
     ) {
     }
@@ -128,8 +144,17 @@ final class InboundMovePlanner
             self::SKIP_INBOUND_CHANGED => 'its inbound changed since the run was created',
             self::SKIP_TARGET_GONE => 'the target inbound was deleted',
             self::SKIP_TARGET_INACTIVE => 'the target inbound is inactive',
+            self::SKIP_IS_PRIMARY => 'the inbound is this service\'s primary inbound',
+            self::SKIP_NO_PRIMARY => 'the service has no primary inbound',
+            self::SKIP_LAST_INBOUND => 'the inbound is the client\'s only one on the panel',
             default => $reason,
         };
+    }
+
+    /** skipText() for an add: --include-trials does not exist there (6.6). */
+    public static function addSkipText(string $reason, ?int $otherRunId = null): string
+    {
+        return self::SKIP_TRIAL === $reason ? 'trial service: out of scope' : self::skipText($reason, $otherRunId);
     }
 
     /**
@@ -143,6 +168,24 @@ final class InboundMovePlanner
         return match (true) {
             null === $target => sprintf('Plan #%d has no primary inbound: nothing to move to.', (int) $plan->getId()),
             !$target->isActive() => sprintf('The plan\'s inbound "%s" (#%d) is inactive: no run is created for an inactive target.', mb_substr($target->getTitle(), 0, 60), (int) $target->getId()),
+            default => null,
+        };
+    }
+
+    /**
+     * The plan rule of kind=add (docs/design/plan-inbound-add-remove.md 4), or null: the target must be one of the plan's
+     * additional inbounds, active, on the panel of the plan's primary; a trial's backing plan takes no add.
+     */
+    public function addTargetProblem(Plan $plan, VpnInbound $target): ?string
+    {
+        $name = sprintf('"%s" (#%d)', mb_substr($target->getTitle(), 0, 60), (int) $target->getId());
+        $primary = $plan->getInbound();
+
+        return match (true) {
+            $this->trialBackingPlans->isBacking($plan) => sprintf('Plan #%d backs a trial: its inbounds are fixed, so no inbound is added.', (int) $plan->getId()),
+            !in_array((int) $target->getId(), $this->planAdditionalIds((int) $plan->getId()), true) => sprintf('The plan does not sell inbound %s as an additional inbound: add it to the plan first.', $name),
+            !$target->isActive() => sprintf('The inbound %s is inactive: no run is created for an inactive target.', $name),
+            null !== $primary && (int) $primary->getPanel()->getId() !== (int) $target->getPanel()->getId() => sprintf('The inbound %s is on another panel than the plan\'s primary inbound.', $name),
             default => null,
         };
     }
@@ -207,6 +250,159 @@ final class InboundMovePlanner
         }
 
         return $candidates;
+    }
+
+    /**
+     * The services of $plan with no attached row for $target, in order of id, each with "add" or why not.
+     *
+     * @param bool                                       $readPanel dry run: GET each service's client (budgeted, read only)
+     * @param \Closure(InboundMoveCandidate): void|null $onEach    called per service
+     *
+     * @return list<InboundMoveCandidate>
+     */
+    public function addCandidates(Plan $plan, VpnInbound $target, InboundMoveScope $scope, bool $readPanel = false, ?\Closure $onEach = null): array
+    {
+        $candidates = [];
+        $readFailures = 0;
+        foreach ($this->serviceRows($plan, $target, $scope, true) as $row) {
+            $candidate = new InboundMoveCandidate(
+                (int) $row['id'],
+                (string) $row['status'],
+                null === $row['inbound_id'] ? null : (int) $row['inbound_id'],
+                self::remoteInboundOf($row),
+                null === $row['inbound_title'] ? '(deleted inbound)' : mb_substr((string) $row['inbound_title'], 0, 60),
+                InboundMoveCandidate::ACTION_ADD,
+            );
+            [$reason, $otherRun] = $this->addSkipReason($row, $target, $scope, null);
+            if (null === $reason) {
+                $mix = $this->addProtocolMix((int) $row['id'], $target);
+                if (true === $mix) {
+                    $reason = self::SKIP_PROTOCOL_MIX;
+                } elseif (null === $mix) {
+                    $candidate = $candidate->withPanelNote('protocol rules not checked: inbounds/options could not be read');
+                }
+            }
+            if (null !== $reason) {
+                $candidate = $candidate->skipped($reason, self::addSkipText($reason, $otherRun));
+            } elseif ($readPanel) {
+                if ($readFailures >= self::MAX_READ_FAILURES_IN_A_ROW) {
+                    $candidate = $candidate->withPanelNote(sprintf('panel not read (stopped after %d failed reads in a row)', self::MAX_READ_FAILURES_IN_A_ROW));
+                } else {
+                    [$now, $after, $note, $failed] = $this->addPanelNote($row, $target);
+                    $readFailures = $failed ? $readFailures + 1 : 0;
+                    $candidate = $candidate->withInbounds($now, $after, $note);
+                }
+            }
+            $candidates[] = $candidate;
+            if (null !== $onEach) {
+                $onEach($candidate);
+            }
+        }
+
+        return $candidates;
+    }
+
+    /**
+     * Creates a kind=add run with one move row per listed service, planned or skipped, in one transaction. Moves have no
+     * "from" (a client keeps what it has) and no detach_after (nothing is retired). Refused with either switch off,
+     * against the plan rule, or while the plan has an open run of any kind.
+     *
+     * @return array{int, list<InboundMoveCandidate>}|string the run id and its services, or why it was not created
+     */
+    public function createAdd(Plan $plan, VpnInbound $target, InboundMoveScope $scope, ?int $requestedBy = null): array|string
+    {
+        if (!$this->settings->enabled()) {
+            return sprintf('Moving services is switched off (%s). Turn it on in Settings → Plans to use --apply; a dry run works without it.', InboundMoveSettings::ENABLED);
+        }
+        if (!$this->multiInbound->enabled()) {
+            return sprintf('Multi-inbound plans are switched off (%s): adding an inbound needs them. A dry run works without it.', MultiInboundSettings::ENABLED);
+        }
+        if ($scope->includeTrials) {
+            return '--include-trials does not apply to --kind=add: a trial\'s backing plan takes no add.';
+        }
+        $problem = $this->addTargetProblem($plan, $target);
+        if (null !== $problem) {
+            return $problem;
+        }
+        $open = $this->openRunId((int) $plan->getId());
+        if (null !== $open) {
+            return self::openRunRefusal($open);
+        }
+        // Read outside the transaction: the protocol rules may read the panel (GET, budgeted).
+        $candidates = $this->addCandidates($plan, $target, $scope);
+
+        $db = $this->connection();
+        $now = (new \DateTimeImmutable())->format('Y-m-d H:i:s');
+        $db->beginTransaction();
+        try {
+            $db->insert('inbound_move_run', [
+                'plan_id' => $plan->getId(),
+                'open_plan_id' => $plan->getId(),
+                'kind' => InboundMoveRun::KIND_ADD,
+                'target_inbound_id' => $target->getId(),
+                'scope' => (string) json_encode($scope->toArray()),
+                'status' => InboundMoveRun::STATUS_PLANNED,
+                'grace_hours' => 0,
+                'keep_old' => 0,
+                'requested_by' => $requestedBy,
+                'created_at' => $now,
+                'planned_count' => 0, 'done_count' => 0, 'failed_count' => 0, 'skipped_count' => 0, 'remaining_count' => 0,
+            ]);
+            $runId = (int) $db->lastInsertId();
+            foreach ($candidates as $candidate) {
+                $add = InboundMoveCandidate::ACTION_ADD === $candidate->action;
+                $db->insert('service_inbound_move', [
+                    'run_id' => $runId,
+                    'service_id' => $candidate->serviceId,
+                    'to_inbound_id' => $target->getId(),
+                    'to_remote_inbound_id' => $target->getRemoteInboundId(),
+                    'state' => $add ? ServiceInboundMove::STATE_PLANNED : ServiceInboundMove::STATE_SKIPPED,
+                    'skip_reason' => $add ? null : $candidate->skipReason,
+                    'attempts' => 0,
+                    'created_at' => $now,
+                    'updated_at' => $now,
+                ]);
+            }
+            $db->commit();
+        } catch (UniqueConstraintViolationException) {
+            $db->rollBack();
+
+            return self::openRunRefusal($this->openRunId((int) $plan->getId()));
+        } catch (\Throwable $e) {
+            $db->rollBack();
+
+            throw $e;
+        }
+
+        $adding = count(array_filter($candidates, static fn (InboundMoveCandidate $c): bool => InboundMoveCandidate::ACTION_ADD === $c->action));
+        $this->refreshCounts($runId);
+        $this->auditLogger->record('plan.inbounds_apply_started', 'plan', (int) $plan->getId(), [
+            'run_id' => $runId,
+            'kind' => InboundMoveRun::KIND_ADD,
+            'target_inbound_id' => $target->getId(),
+            'services' => count($candidates),
+            'planned' => $adding,
+            'skipped' => count($candidates) - $adding,
+        ]);
+        $this->logger->info('inbound_move_run_created', ['run_id' => $runId, 'plan_id' => $plan->getId(), 'kind' => InboundMoveRun::KIND_ADD, 'planned' => $adding, 'skipped' => count($candidates) - $adding]);
+
+        return [$runId, $candidates];
+    }
+
+    /**
+     * What an audit entry or a log line of a run says about its kind: nothing for a primary run, whose entries stay as
+     * they were.
+     *
+     * @return array<string, mixed>
+     */
+    public function runDetails(int $runId): array
+    {
+        $run = $this->connection()->fetchAssociative('SELECT kind, target_inbound_id FROM inbound_move_run WHERE id = ?', [$runId]);
+        if (false === $run || InboundMoveRun::KIND_PRIMARY === $run['kind']) {
+            return [];
+        }
+
+        return ['kind' => (string) $run['kind'], 'target_inbound_id' => null === $run['target_inbound_id'] ? null : (int) $run['target_inbound_id']];
     }
 
     /**
@@ -404,6 +600,51 @@ final class InboundMovePlanner
     }
 
     /**
+     * skipReason() for kind=add, on a service row as read (or as locked by the runner): C must not be the service's
+     * primary, by local id or by the panel's id (a service whose inbound row was deleted), and a primary must exist.
+     *
+     * @param array<string, mixed> $service id, status, inbound_id, panel_id, remote_id, order_type
+     *
+     * @return array{string|null, int|null} as skipReason()
+     */
+    public function addSkipReason(array $service, VpnInbound $target, InboundMoveScope $scope, ?int $ownRunId): array
+    {
+        [$reason, $otherRun] = $this->skipReason($service, $target, $scope, $ownRunId);
+        if (null !== $reason) {
+            return [$reason, $otherRun];
+        }
+        if ((int) ($service['inbound_id'] ?? 0) === (int) $target->getId() || self::remoteInboundOf($service) === trim($target->getRemoteInboundId())) {
+            return [self::SKIP_IS_PRIMARY, null];
+        }
+
+        return null === $service['inbound_id'] ? [self::SKIP_NO_PRIMARY, null] : [null, null];
+    }
+
+    /**
+     * The 4.4 "protocol mix" check for kind=add: the service's primary, its additional rows (not detached) and C. Never
+     * call it inside a transaction.
+     *
+     * @return bool|null true: the mix breaks a rule (skip); false: fine; null: the panel could not be read
+     */
+    public function addProtocolMix(int $serviceId, VpnInbound $target): ?bool
+    {
+        $primaryId = $this->connection()->fetchOne('SELECT inbound_id FROM vpn_service WHERE id = ?', [$serviceId]);
+        $primary = null === $primaryId || false === $primaryId ? null : $this->entityManager->find(VpnInbound::class, (int) $primaryId);
+        if (!$primary instanceof VpnInbound) {
+            return false;
+        }
+        $additional = [$target];
+        foreach ($this->connection()->fetchFirstColumn('SELECT inbound_id FROM vpn_service_inbound WHERE service_id = ? AND status <> ? ORDER BY id', [$serviceId, VpnServiceInbound::STATUS_DETACHED]) as $id) {
+            $inbound = (int) $id === (int) $target->getId() ? null : $this->entityManager->find(VpnInbound::class, (int) $id);
+            if ($inbound instanceof VpnInbound) {
+                $additional[] = $inbound;
+            }
+        }
+
+        return $this->protocolRulesBroken($primary, $additional);
+    }
+
+    /**
      * The 4.4 "protocol mix" check of the service's inbounds after the switch: B, its additional rows (not detached;
      * B's own row goes) and A when A stays one of the plan's additional inbounds. A single inbound is always fine. With
      * several, protocolRulesBroken(). Never call it inside a transaction.
@@ -560,12 +801,70 @@ final class InboundMovePlanner
     }
 
     /**
+     * An add's dry run: what the panel says about the client (one GET, budgeted, read only).
+     *
+     * @param array<string, mixed> $row
+     *
+     * @return array{list<string>|null, list<string>|null, string, bool} the inbounds now and after, the note, and whether the panel could not be read
+     */
+    private function addPanelNote(array $row, VpnInbound $target): array
+    {
+        if ($this->connection()->isTransactionActive()) {
+            return [null, null, 'panel not read (a transaction is open)', false];
+        }
+        $panel = $this->entityManager->find(VpnPanel::class, (int) $row['panel_id']);
+        $driver = $panel instanceof VpnPanel ? $this->drivers->resolve($panel) : null;
+        if (!$driver instanceof InboundAttachDriverInterface) {
+            return [null, null, 'panel not read', false];
+        }
+        try {
+            $ids = $this->budget->within(self::STEP_BUDGET_SECONDS, fn (): ?array => $driver->clientInboundIds((string) $row['remote_id'], $panel, false));
+        } catch (\Throwable $e) {
+            $secrets = $this->panelSecrets($panel);
+            $this->logger->warning('inbound_move_dry_run_read_failed', ['service_id' => (int) $row['id'], 'error' => SafeText::of($e->getMessage(), (string) ($row['client_email'] ?? ''), 255, $secrets)]);
+
+            return [null, null, 'panel not read: '.SafeText::of($e->getMessage(), (string) ($row['client_email'] ?? ''), 120, $secrets), true];
+        }
+        if (null === $ids) {
+            return [[], [], 'no such client on the panel: would fail', false];
+        }
+        $titles = $this->panelInboundTitles((int) $row['panel_id']);
+        $title = static fn (int $id): string => $titles[$id] ?? '#'.$id;
+        $now = array_map($title, $ids);
+        $to = (int) $target->getRemoteInboundId();
+
+        return match (true) {
+            in_array($to, $ids, true) => [$now, $now, 'already on the panel: only the row would be written, nothing sent', false],
+            !in_array((int) (self::remoteInboundOf($row) ?? 0), $ids, true) => [$now, $now, 'not on its primary inbound on the panel: would fail, nothing sent', false],
+            default => [$now, [...$now, $title($to)], 'would attach the inbound', false],
+        };
+    }
+
+    /** @return array<int, string> the panel's inbounds known to the bot: remote id => title */
+    private function panelInboundTitles(int $panelId): array
+    {
+        $titles = [];
+        foreach ($this->connection()->fetchAllAssociative('SELECT remote_inbound_id, title FROM vpn_inbound WHERE panel_id = ?', [$panelId]) as $row) {
+            $titles[(int) $row['remote_inbound_id']] = mb_substr((string) $row['title'], 0, 60);
+        }
+
+        return $titles;
+    }
+
+    /**
+     * @param bool $withoutAttachedRow kind=add: only services with no attached row for the target
+     *
      * @return list<array<string, mixed>>
      */
-    private function serviceRows(Plan $plan, VpnInbound $target, InboundMoveScope $scope): array
+    private function serviceRows(Plan $plan, VpnInbound $target, InboundMoveScope $scope, bool $withoutAttachedRow = false): array
     {
         $where = ['o.plan_id = :plan', 's.status <> :deleted', '(s.inbound_id IS NULL OR s.inbound_id <> :target)', 's.id > :after'];
         $params = ['plan' => $plan->getId(), 'deleted' => VpnServiceStatus::DELETED, 'target' => $target->getId(), 'after' => $scope->afterId];
+        if ($withoutAttachedRow) {
+            $where[] = 'NOT EXISTS (SELECT 1 FROM vpn_service_inbound r WHERE r.service_id = s.id AND r.inbound_id = :attached_to AND r.status = :attached)';
+            $params['attached_to'] = $target->getId();
+            $params['attached'] = VpnServiceInbound::STATUS_ATTACHED;
+        }
         if (null !== $scope->serviceId) {
             $where[] = 's.id = :service';
             $params['service'] = $scope->serviceId;

@@ -185,7 +185,12 @@ final class InboundMoveOverview
         if (false === $move) {
             return null;
         }
-        $title = static fn (mixed $title, mixed $remote): string => null !== $title ? mb_substr((string) $title, 0, 60) : '#'.mb_substr((string) $remote, 0, 20);
+        // An add has no old inbound (from NULL): shown as a dash, not as "#".
+        $title = static fn (mixed $title, mixed $remote): string => match (true) {
+            null !== $title => mb_substr((string) $title, 0, 60),
+            null === $remote => '-',
+            default => '#'.mb_substr((string) $remote, 0, 20),
+        };
 
         return [
             'id' => (int) $move['id'],

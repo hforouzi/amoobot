@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Provisioning\Application;
 
 use App\Bot\Infrastructure\TelegramApiClient;
+use App\Entity\InboundMoveRun;
 use App\Entity\Order;
 use App\Entity\VpnService;
 use App\Entity\VpnServiceInbound;
@@ -158,6 +159,22 @@ class InboundAttachAlerts
             return false;
         }
         $plan = $this->entityManager->getConnection()->fetchOne('SELECT title FROM plan WHERE id = ?', [$planId]);
+        $run = $this->entityManager->getConnection()->fetchAssociative('SELECT r.kind, r.target_inbound_id, t.title FROM inbound_move_run r LEFT JOIN vpn_inbound t ON t.id = r.target_inbound_id WHERE r.id = ?', [$runId]);
+        if (false !== $run && InboundMoveRun::KIND_ADD === $run['kind']) {
+            $targetId = (int) $run['target_inbound_id'];
+            $this->deliver($chats, implode("\n", [
+                null === $pauseReason ? self::MOVE_FINISHED_FAILED_TITLE : self::MOVE_PAUSED_TITLE,
+                sprintf('Run ID: %d', $runId),
+                sprintf('Plan: %s (#%d)', mb_substr((string) $plan, 0, 80), $planId),
+                sprintf('Kind: add, inbound "%s" (#%d)', mb_substr((string) $run['title'], 0, 60), $targetId),
+                sprintf('Added: %d, failed: %d, skipped: %d, remaining: %d (of %d)', $counts['done'] ?? 0, $counts['failed'] ?? 0, $counts['skipped'] ?? 0, $counts['remaining'] ?? 0, $counts['planned'] ?? 0),
+                null === $pauseReason
+                    ? sprintf('Some services did not get the inbound: they keep the inbounds they had and their links. See: php bin/console app:plan:apply-inbounds %d --kind=add --inbound=%d (dry run).', $planId, $targetId)
+                    : sprintf('Paused: %s. Nothing changed for the customers not reached yet. Then: php bin/console app:plan:apply-inbounds %d --resume=%d', mb_substr($pauseReason, 0, 120), $planId, $runId),
+            ]));
+
+            return true;
+        }
         $lines = [
             null === $pauseReason ? self::MOVE_FINISHED_FAILED_TITLE : self::MOVE_PAUSED_TITLE,
             sprintf('Run ID: %d', $runId),
@@ -194,7 +211,7 @@ class InboundAttachAlerts
             return false;
         }
         $row = $connection->fetchAssociative(
-            'SELECT m.run_id, m.service_id, m.attempts, m.last_error, m.detach_after, m.from_inbound_id, m.to_inbound_id, fi.title AS from_title, ti.title AS to_title, p.id AS plan_id, p.title AS plan_title, s.client_email
+            'SELECT m.run_id, m.service_id, m.attempts, m.last_error, m.detach_after, m.from_inbound_id, m.to_inbound_id, fi.title AS from_title, ti.title AS to_title, p.id AS plan_id, p.title AS plan_title, s.client_email, r.kind
              FROM service_inbound_move m
              JOIN inbound_move_run r ON r.id = m.run_id
              JOIN plan p ON p.id = r.plan_id
@@ -208,6 +225,19 @@ class InboundAttachAlerts
             return false;
         }
         $inbound = static fn (mixed $id, mixed $title): string => null === $id ? '(deleted)' : sprintf('"%s" (#%d)', mb_substr((string) $title, 0, 60), (int) $id);
+        if (InboundMoveRun::KIND_ADD === $row['kind']) {
+            $this->deliver($chats, implode("\n", [
+                self::MOVE_GAVE_UP_TITLE,
+                sprintf('Service ID: %d', (int) $row['service_id']),
+                sprintf('Run ID: %d', (int) $row['run_id']),
+                sprintf('Plan: %s (#%d)', mb_substr((string) $row['plan_title'], 0, 80), (int) $row['plan_id']),
+                sprintf('Adding %s', $inbound($row['to_inbound_id'], $row['to_title'])),
+                'Last error: '.mb_substr(self::withoutClient(VpnServiceInbound::safeError((string) ($row['last_error'] ?? '-')), (string) ($row['client_email'] ?? '')), 0, 200),
+                sprintf('Gave up after %d attempt(s). The service keeps the inbounds it had and its links. Fix the panel, then check it with: php bin/console app:plan:apply-inbounds %d --kind=add --inbound=%d --service=%d', (int) $row['attempts'], (int) $row['plan_id'], (int) $row['to_inbound_id'], (int) $row['service_id']),
+            ]));
+
+            return true;
+        }
         $this->deliver($chats, implode("\n", [
             self::MOVE_GAVE_UP_TITLE,
             sprintf('Service ID: %d', (int) $row['service_id']),
