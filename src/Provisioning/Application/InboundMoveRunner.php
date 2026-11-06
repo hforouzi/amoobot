@@ -81,6 +81,18 @@ use Psr\Log\LoggerInterface;
  * plans.multi_inbound_enabled at the start of each pass, and pauses when the plan no longer sells C and work has not
  * started (Q7). Its moves have no detach_after: never a retire. undo() takes C off again (see undoAddOne()); a client
  * that had C before the run (already_on_panel) is left alone.
+ *
+ * A kind=remove run (docs/design/plan-inbound-add-remove.md 5.2, 7; PR P11c) takes one additional inbound D off each
+ * service. Its moves have from = D (with the panel id of the service's row), no "to", and a detach_after set when the run
+ * is created. Once that has passed: (1) a claim under the same locks sets the row "detached" BEFORE any panel call, so
+ * the attach timer, which re-attaches an attached row missing on the panel, can never put the client back meanwhile;
+ * (2) detachInbounds(), whose guards refuse the primary and the client's last inbound; (3) under the locks, with the
+ * identity check, the row is deleted, the move is "done" and the display guard is on; (4) the links are refreshed, and the
+ * run stays open until the guard clears. A failure leaves the move "failed" and the row held (detached, with
+ * REMOVE_HOLD as its last_error), and every later step starts with a read: the back-off, --retire-now, --undo. Refused
+ * outcomes end skipped with the row attached again. It needs plans.multi_inbound_enabled at the start of each pass, and
+ * pauses when the plan sells D again and work has not started (Q7). undo() attaches D again if missing and writes the
+ * row back (see undoRemoveOne()), also for a done move, and leaves the plan alone.
  */
 final class InboundMoveRunner
 {
@@ -94,7 +106,13 @@ final class InboundMoveRunner
     public const NOT_ON_PRIMARY = 'Not added: the client is not on its primary inbound on the panel (changed by hand?): nothing sent.';
     public const UNDO_ADD_HOLD = 'being removed by undo of run #%d';
     public const PLAN_DROPPED = 'the plan no longer sells inbound #%d: put it back, then --resume; or --cancel';
+    public const REMOVE_HOLD = 'being removed by run #%d';
+    public const REMOVE_NOT_ON_PRIMARY = 'The client is not on its primary inbound on the panel (changed by hand?): nothing sent.';
+    public const PLAN_SELLS_AGAIN = 'the plan sells inbound #%d again: take it off the plan, then --resume; or --cancel, or --undo to put it back';
     public const NOT_LATEST = 'Run #%d is not the plan\'s latest run: undo the later run first, so that its work is not taken away under it.';
+
+    private const REMOVE_UNDONE = 'the inbound is back on the client';
+    private const ADD_UNDONE = 'the inbound is off the client';
 
     private const CLAIMED = 'claimed';
     /** The claim found a reason not to go on (skipped, or an error for --undo): written under the locks, reported. */
@@ -108,6 +126,13 @@ final class InboundMoveRunner
      * A primary move in "switched" with no detach_after is a keep-old move, which is finished.
      */
     public const ADD_LINKS_DUE_SQL = "(m.state = 'switched' AND EXISTS (SELECT 1 FROM inbound_move_run add_run WHERE add_run.id = m.run_id AND add_run.kind = 'add'))";
+
+    /**
+     * On alias m: a kind=remove move whose service's row is held by its own run (REMOVE_HOLD). Such a move has been
+     * started, even in "planned" (--retire-now, or a link reset, puts it there), so cancel and undo must not treat it as
+     * "not started": they would leave the row detached with nobody to settle it.
+     */
+    public const REMOVE_HELD_SQL = "EXISTS (SELECT 1 FROM vpn_service_inbound held WHERE held.service_id = m.service_id AND held.inbound_id = m.from_inbound_id AND held.status = 'detached' AND held.last_error = CONCAT('being removed by run #', m.run_id))";
 
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
@@ -148,7 +173,8 @@ final class InboundMoveRunner
             return new InboundMovePass(InboundMovePass::NOT_OPEN, false === $run ? sprintf('There is no run #%d.', $runId) : sprintf('Run #%d is %s: nothing to do.', $runId, (string) $run['status']));
         }
         $add = InboundMoveRun::KIND_ADD === $run['kind'];
-        if ($add && !$this->retries->enabled()) {
+        $remove = InboundMoveRun::KIND_REMOVE === $run['kind'];
+        if (($add || $remove) && !$this->retries->enabled()) {
             return new InboundMovePass(InboundMovePass::SWITCHED_OFF, sprintf('Multi-inbound plans are switched off (%s): nothing was done.', MultiInboundSettings::ENABLED));
         }
         $planId = (int) $run['plan_id'];
@@ -164,16 +190,18 @@ final class InboundMoveRunner
 
         $pass = new InboundMovePass();
         $pass->kind = (string) $run['kind'];
-        if ($add && $this->planDropped($runId, $planId, $run['target_inbound_id'])) {
-            $this->pause($runId, $planId, sprintf(self::PLAN_DROPPED, (int) $run['target_inbound_id']), $pass);
+        if (($add || $remove) && $this->planDropped($runId, $planId, $pass->kind, $run['target_inbound_id'])) {
+            $this->pause($runId, $planId, sprintf($add ? self::PLAN_DROPPED : self::PLAN_SELLS_AGAIN, (int) $run['target_inbound_id']), $pass);
             $pass->paused = true;
             $this->finishPass($runId, $pass);
 
             return $pass;
         }
-        $step = $add
-            ? fn (int $moveId): InboundMoveItem => $this->addOne($moveId, $scope, $runId)
-            : fn (int $moveId): InboundMoveItem => $this->one($moveId, $planId, $scope, $runId, $graceHours);
+        $step = match (true) {
+            $add => fn (int $moveId): InboundMoveItem => $this->addOne($moveId, $scope, $runId),
+            $remove => fn (int $moveId): InboundMoveItem => $this->removeOne($moveId, $scope, $runId),
+            default => fn (int $moveId): InboundMoveItem => $this->one($moveId, $planId, $scope, $runId, $graceHours),
+        };
         $lastId = 0;
         $readFailures = 0;
         while (true) {
@@ -246,7 +274,7 @@ final class InboundMoveRunner
     public function dueCount(int $runId): int
     {
         $kind = $this->db()->fetchOne('SELECT kind FROM inbound_move_run WHERE id = ?', [$runId]);
-        if (!in_array($kind, InboundMoveRun::RUNNABLE_KINDS, true) || (InboundMoveRun::KIND_ADD === $kind && !$this->retries->enabled())) {
+        if (!in_array($kind, InboundMoveRun::RUNNABLE_KINDS, true) || (InboundMoveRun::KIND_PRIMARY !== $kind && !$this->retries->enabled())) {
             return 0;
         }
 
@@ -272,7 +300,9 @@ final class InboundMoveRunner
             return new InboundMovePass(InboundMovePass::NOT_OPEN, sprintf('There is no run #%d to undo.', $runId));
         }
         $planId = (int) $run['plan_id'];
-        $add = InboundMoveRun::KIND_ADD === $run['kind'];
+        $kind = (string) $run['kind'];
+        $add = InboundMoveRun::KIND_ADD === $kind;
+        $remove = InboundMoveRun::KIND_REMOVE === $kind;
         // A primary run after a primary run keeps its rule (a service moved again is skipped); an add or remove in between
         // changes what the earlier run would put back (docs/design/plan-inbound-add-remove.md 7).
         if (false !== $this->db()->fetchOne("SELECT id FROM inbound_move_run WHERE plan_id = ? AND id > ? AND (kind <> 'primary' OR ? <> 'primary') LIMIT 1", [$planId, $runId, $run['kind']])) {
@@ -287,22 +317,27 @@ final class InboundMoveRunner
             );
         }
         $pass = new InboundMovePass();
-        $pass->kind = (string) $run['kind'];
-        $pass->cancelled = $this->cancelNotStarted($runId, $add);
+        $pass->kind = $kind;
+        $pass->cancelled = $this->cancelNotStarted($runId, $kind);
+        $step = match (true) {
+            $add => fn (int $moveId): InboundMoveItem => $this->undoAddOne($moveId, $runId),
+            $remove => fn (int $moveId): InboundMoveItem => $this->undoRemoveOne($moveId, $runId),
+            default => fn (int $moveId): InboundMoveItem => $this->undoOne($moveId, $planId),
+        };
 
         $lastId = 0;
         $readFailures = 0;
         $pausedForPanel = null;
         while (null === $pausedForPanel) {
-            $ids = $this->undoMoveIds($runId, $lastId, $this->settings->batchSize(), $add);
+            $ids = $this->undoMoveIds($runId, $lastId, $this->settings->batchSize(), $kind);
             if ([] === $ids) {
                 break;
             }
             foreach ($ids as $moveId) {
                 $lastId = $moveId;
-                $item = $add ? $this->undoAddOne($moveId, $runId) : $this->undoOne($moveId, $planId);
+                $item = $step($moveId);
                 if (InboundMoveItem::IDENTITY_CHANGED === $item->outcome) {
-                    $item = $add ? $this->undoAddOne($moveId, $runId) : $this->undoOne($moveId, $planId);
+                    $item = $step($moveId);
                 }
                 match ($item->outcome) {
                     InboundMoveItem::UNDONE => ++$pass->undone,
@@ -330,7 +365,7 @@ final class InboundMoveRunner
         if ($add) {
             // An add removes nothing, so nothing is "already retired"; these clients had C before the run.
             $pass->leftAlone = (int) $this->db()->fetchOne('SELECT COUNT(*) FROM service_inbound_move WHERE run_id = ? AND skip_reason = ?', [$runId, InboundMovePlanner::ALREADY_ON_PANEL]);
-        } else {
+        } elseif (!$remove) {
             $pass->alreadyRetired = (int) $this->db()->fetchOne('SELECT COUNT(*) FROM service_inbound_move WHERE run_id = ? AND state = ?', [$runId, ServiceInboundMove::STATE_DONE]);
         }
         $inFlight = (int) $this->db()->fetchOne(
@@ -338,7 +373,7 @@ final class InboundMoveRunner
             [$runId, $stale],
         );
         $pass->busy += $inFlight;
-        $left = count($this->undoMoveIds($runId, 0, 1000, $add));
+        $left = count($this->undoMoveIds($runId, 0, 1000, $kind));
         $reason = $pausedForPanel;
         if ($open) {
             if (0 === $left && 0 === $inFlight && null === $pausedForPanel) {
@@ -805,17 +840,7 @@ final class InboundMoveRunner
         }
         if (ServiceInboundMove::STATE_UNDONE === $move['state']) {
             // Off the client already; only the links are left (an earlier --undo could not finish them).
-            $claimedAt = self::now();
-            $stale = (new \DateTimeImmutable())->modify(ServiceInboundAttacher::STALE_CLAIM)->format('Y-m-d H:i:s');
-            $taken = $this->db()->executeStatement(
-                'UPDATE service_inbound_move SET claimed_at = ? WHERE id = ? AND state = ? AND next_attempt_at IS NOT NULL AND (claimed_at IS NULL OR claimed_at < ?)',
-                [$claimedAt, $moveId, ServiceInboundMove::STATE_UNDONE, $stale],
-            );
-            if (1 !== $taken) {
-                return new InboundMoveItem($moveId, $serviceId, $from, $to, InboundMoveItem::BUSY, 'claimed by another process meanwhile: run --undo again');
-            }
-
-            return $this->budget->within(InboundMovePlanner::STEP_BUDGET_SECONDS, fn (): InboundMoveItem => $this->finishUndoAdd($service, $move, $claimedAt, $from, $to));
+            return $this->undoLinksOnly($service, $move, self::ADD_UNDONE, $from, $to);
         }
         $claim = $this->claimUndoAdd($move, $runId);
         if (self::NOT_DUE === $claim['result']) {
@@ -975,7 +1000,7 @@ final class InboundMoveRunner
         }
         $this->logger->info('inbound_move_add_undone', ['run_id' => (int) $move['run_id'], 'service_id' => $serviceId, 'to_inbound_id' => $move['to_inbound_id']]);
 
-        return $this->finishUndoAdd($service, $move, $written, $from, $to);
+        return $this->finishUndoLinks($service, $move, $written, self::ADD_UNDONE, $from, $to);
     }
 
     /**
@@ -1020,12 +1045,32 @@ final class InboundMoveRunner
     }
 
     /**
-     * The refresh after an add's undo. The move is finished only when the links are the panel's again (the guard is off):
-     * otherwise --undo is pressed again, for the links alone.
+     * An undone add or remove with its links still owed: claimed here, then finishUndoLinks().
      *
      * @param array<string, mixed> $move
      */
-    private function finishUndoAdd(VpnService $service, array $move, string $claimedAt, string $from, string $to): InboundMoveItem
+    private function undoLinksOnly(VpnService $service, array $move, string $what, string $from, string $to): InboundMoveItem
+    {
+        $claimedAt = self::now();
+        $stale = (new \DateTimeImmutable())->modify(ServiceInboundAttacher::STALE_CLAIM)->format('Y-m-d H:i:s');
+        $taken = $this->db()->executeStatement(
+            'UPDATE service_inbound_move SET claimed_at = ? WHERE id = ? AND state = ? AND next_attempt_at IS NOT NULL AND (claimed_at IS NULL OR claimed_at < ?)',
+            [$claimedAt, (int) $move['id'], ServiceInboundMove::STATE_UNDONE, $stale],
+        );
+        if (1 !== $taken) {
+            return new InboundMoveItem((int) $move['id'], (int) $service->getId(), $from, $to, InboundMoveItem::BUSY, 'claimed by another process meanwhile: run --undo again');
+        }
+
+        return $this->budget->within(InboundMovePlanner::STEP_BUDGET_SECONDS, fn (): InboundMoveItem => $this->finishUndoLinks($service, $move, $claimedAt, $what, $from, $to));
+    }
+
+    /**
+     * The refresh after an add's or a remove's undo. The move is finished only when the links are the panel's again (the
+     * guard is off): otherwise --undo is pressed again, for the links alone.
+     *
+     * @param array<string, mixed> $move
+     */
+    private function finishUndoLinks(VpnService $service, array $move, string $claimedAt, string $what, string $from, string $to): InboundMoveItem
     {
         $moveId = (int) $move['id'];
         $refresh = $this->refreshLinks($service);
@@ -1037,10 +1082,10 @@ final class InboundMoveRunner
             [self::now(), $moveId, ServiceInboundMove::STATE_UNDONE, $claimedAt],
         );
         if (!$current) {
-            return new InboundMoveItem($moveId, (int) $service->getId(), $from, $to, InboundMoveItem::FAILED, 'the inbound is off the client; links '.self::refreshText($refresh).' (run --undo again)', false, false, $refresh->outcome);
+            return new InboundMoveItem($moveId, (int) $service->getId(), $from, $to, InboundMoveItem::FAILED, $what.'; links '.self::refreshText($refresh).' (run --undo again)', false, false, $refresh->outcome);
         }
 
-        return new InboundMoveItem($moveId, (int) $service->getId(), $from, $to, InboundMoveItem::UNDONE, 'the inbound is off the client; links '.self::refreshText($refresh), true, false, $refresh->outcome);
+        return new InboundMoveItem($moveId, (int) $service->getId(), $from, $to, InboundMoveItem::UNDONE, $what.'; links '.self::refreshText($refresh), true, false, $refresh->outcome);
     }
 
     /** An add's undo that ends without a removal: the state given, the held row attached again. */
@@ -1060,6 +1105,493 @@ final class InboundMoveRunner
                     [VpnServiceInbound::STATUS_ATTACHED, $now, $serviceId, (int) $inboundId, VpnServiceInbound::STATUS_DETACHED],
                 );
             }
+        });
+    }
+
+    /**
+     * kind=remove, one move: a link refresh still owed (done), or the removal. See the class comment.
+     */
+    private function removeOne(int $moveId, InboundMoveScope $scope, int $runId): InboundMoveItem
+    {
+        $move = $this->db()->fetchAssociative('SELECT * FROM service_inbound_move WHERE id = ?', [$moveId]);
+        if (false === $move) {
+            return new InboundMoveItem($moveId, 0, '-', '-', InboundMoveItem::BUSY, 'the move is gone');
+        }
+        $serviceId = (int) $move['service_id'];
+        [$from, $to] = $this->titles($move);
+        $service = $this->entityManager->find(VpnService::class, $serviceId);
+        if (!$service instanceof VpnService) {
+            return new InboundMoveItem($moveId, $serviceId, $from, $to, InboundMoveItem::BUSY, 'the service is gone');
+        }
+        if (ServiceInboundMove::STATE_DONE === $move['state']) {
+            $refresh = $this->budget->within(InboundMovePlanner::STEP_BUDGET_SECONDS, fn (): PanelLinkRefresh => $this->refreshLinks($service));
+
+            return new InboundMoveItem($moveId, $serviceId, $from, $to, InboundMoveItem::SNAPSHOT, self::refreshText($refresh), PanelLinkRefresh::FAILED !== $refresh->outcome, false, $refresh->outcome);
+        }
+        if (ServiceInboundMove::STATE_ATTACHING === $move['state']) {
+            return new InboundMoveItem($moveId, $serviceId, $from, $to, InboundMoveItem::BUSY, 'an undo stopped here: run --undo again');
+        }
+
+        $target = null === $move['from_inbound_id'] ? null : $this->entityManager->find(VpnInbound::class, (int) $move['from_inbound_id']);
+        $claim = $this->claimRemove($move, $target, $scope, $runId);
+        if (self::NOT_DUE === $claim['result']) {
+            return new InboundMoveItem($moveId, $serviceId, $from, $to, InboundMoveItem::BUSY, 'claimed by another process meanwhile, in the hands of an attach, or no longer due');
+        }
+        if (null !== $claim['skip']) {
+            return new InboundMoveItem($moveId, $serviceId, $from, $to, InboundMoveItem::SKIPPED, 'not removed: '.InboundMovePlanner::addSkipText($claim['skip'], $claim['otherRun']));
+        }
+        $this->entityManager->refresh($service);
+
+        return $this->budget->within(InboundMovePlanner::STEP_BUDGET_SECONDS, fn (): InboundMoveItem => $this->detachRemoved($service, $move, $claim, $runId, $from, $to));
+    }
+
+    /**
+     * Step 1 of a remove, in the lock order of the class comment: every rule again, then the row leaves "attached" BEFORE
+     * any panel call (docs/design/plan-inbound-add-remove.md 5.2). The attach timer and the attacher ignore a detached row,
+     * and a reconcile that read it before this writes nothing (its update is conditional on what it read). A fresh
+     * "pending" row is someone's attach in flight: nothing changes and the move stays due. The row is recognised as ours
+     * again by its text, after a failure, a crash or a link reset.
+     *
+     * @param array<string, mixed> $move
+     *
+     * @return array{result: string, skip: string|null, otherRun: int|null, claimedAt: string, attempts: int, identity: list<string|null>}
+     */
+    private function claimRemove(array $move, ?VpnInbound $target, InboundMoveScope $scope, int $runId): array
+    {
+        $moveId = (int) $move['id'];
+        $serviceId = (int) $move['service_id'];
+        $now = new \DateTimeImmutable();
+        $at = $now->format('Y-m-d H:i:s');
+
+        return $this->transactional(function (Connection $db) use ($moveId, $serviceId, $target, $scope, $runId, $now, $at): array {
+            $service = $db->fetchAssociative('SELECT id, status, inbound_id, panel_id, remote_id, client_uuid, sub_id, order_id FROM vpn_service WHERE id = ? FOR UPDATE', [$serviceId]);
+            $rows = $db->fetchAllAssociative('SELECT id, inbound_id, status, updated_at, last_error FROM vpn_service_inbound WHERE service_id = ? ORDER BY id FOR UPDATE', [$serviceId]);
+            $row = $db->fetchAssociative('SELECT * FROM service_inbound_move WHERE id = ? FOR UPDATE', [$moveId]);
+            $none = ['result' => self::NOT_DUE, 'skip' => null, 'otherRun' => null, 'claimedAt' => $at, 'attempts' => 0, 'identity' => []];
+            if (false === $service || false === $row || !$this->removeDue($row, $now)) {
+                return $none;
+            }
+            // A plain read (no lock): the order row is never locked by a move (5.3, 5.7).
+            $service['order_type'] = null === $service['order_id'] ? null : $db->fetchOne('SELECT type FROM `order` WHERE id = ?', [(int) $service['order_id']]);
+
+            $additional = null;
+            foreach ($rows as $one) {
+                if ((int) $one['inbound_id'] === (int) $row['from_inbound_id']) {
+                    $additional = $one;
+                }
+            }
+            $held = null !== $additional && self::heldByRun($additional, $runId);
+            [$skip, $otherRun] = [null, null];
+            if (!$target instanceof VpnInbound) {
+                $skip = InboundMovePlanner::SKIP_TARGET_GONE;
+            } else {
+                [$skip, $otherRun] = $this->planner->addSkipReason($service, $target, $scope, $runId);
+                if (null === $skip && (null === $additional || (VpnServiceInbound::STATUS_DETACHED === $additional['status'] && !$held))) {
+                    $skip = InboundMovePlanner::SKIP_NOT_ATTACHED;
+                } elseif (null === $skip && (!ctype_digit(trim((string) $row['from_remote_inbound_id'])) || (int) $row['from_remote_inbound_id'] <= 0)) {
+                    $skip = InboundMovePlanner::SKIP_REMOTE_ID;
+                }
+            }
+            if (null !== $skip) {
+                if ($held) {
+                    self::giveRowBack($db, $serviceId, $row['from_inbound_id'], $runId, $at);
+                }
+                $db->executeStatement(
+                    'UPDATE service_inbound_move SET state = ?, skip_reason = ?, claimed_at = NULL, next_attempt_at = NULL, updated_at = ? WHERE id = ?',
+                    [ServiceInboundMove::STATE_SKIPPED, $skip, $at, $moveId],
+                );
+
+                return ['result' => self::SETTLED, 'skip' => $skip, 'otherRun' => $otherRun] + $none;
+            }
+            $stale = $now->modify(ServiceInboundAttacher::STALE_CLAIM)->format('Y-m-d H:i:s');
+            if (VpnServiceInbound::STATUS_PENDING === $additional['status'] && (string) $additional['updated_at'] >= $stale) {
+                return $none;
+            }
+            $db->executeStatement(
+                'UPDATE vpn_service_inbound SET status = ?, last_error = ?, next_attempt_at = NULL, updated_at = ? WHERE id = ?',
+                [VpnServiceInbound::STATUS_DETACHED, self::holdText($runId), $at, $additional['id']],
+            );
+            $db->executeStatement(
+                'UPDATE service_inbound_move SET state = ?, claimed_at = ?, attempts = attempts + 1, updated_at = ? WHERE id = ?',
+                [ServiceInboundMove::STATE_DETACHING, $at, $at, $moveId],
+            );
+
+            return ['result' => self::CLAIMED, 'skip' => null, 'otherRun' => null, 'claimedAt' => $at, 'attempts' => (int) $row['attempts'] + 1, 'identity' => self::identity($service)];
+        });
+    }
+
+    /**
+     * Step 2 of a remove, then the write and the links. The driver acts on what the panel lists (5.3): it refuses the
+     * primary and the client's last inbound, and those end skipped with the row attached again, so a service never loses
+     * its last inbound. A failure backs off and keeps the row held: the panel may or may not list D, and the next step
+     * of any kind starts with a read.
+     *
+     * @param array<string, mixed>                                                                                                $move
+     * @param array{result: string, skip: string|null, otherRun: int|null, claimedAt: string, attempts: int, identity: list<string|null>} $claim
+     */
+    private function detachRemoved(VpnService $service, array $move, array $claim, int $runId, string $from, string $to): InboundMoveItem
+    {
+        $moveId = (int) $move['id'];
+        $serviceId = (int) $service->getId();
+        $panel = $service->getPanel();
+        $driver = $this->drivers->resolve($panel);
+        $failed = function (string $message, ?bool $panelRead) use ($service, $serviceId, $moveId, $claim, $from, $to, $panel, $move): InboundMoveItem {
+            $text = $this->fail($serviceId, $moveId, $claim['claimedAt'], $claim['attempts'], SafeText::forService($service, $message, 255, $this->planner->panelSecrets($panel)), ServiceInboundMove::STATE_DETACHING);
+            $this->logger->warning('inbound_move_remove_failed', ['run_id' => (int) $move['run_id'], 'service_id' => $serviceId, 'error' => $text]);
+
+            return new InboundMoveItem($moveId, $serviceId, $from, $to, InboundMoveItem::FAILED, 'not removed: '.$text, $panelRead);
+        };
+        $skip = function (string $reason) use ($serviceId, $moveId, $claim, $runId, $from, $to, $move): InboundMoveItem {
+            $this->releaseRemove($serviceId, $moveId, $claim['claimedAt'], $runId, $move['from_inbound_id'], ServiceInboundMove::STATE_SKIPPED, $reason);
+
+            return new InboundMoveItem($moveId, $serviceId, $from, $to, InboundMoveItem::SKIPPED, 'not removed: '.InboundMovePlanner::addSkipText($reason), true);
+        };
+        if (!$panel instanceof VpnPanel || !$driver instanceof InboundDetachDriverInterface || !$driver instanceof InboundMoveDriverInterface) {
+            return $skip(InboundMovePlanner::SKIP_NOT_MODERN);
+        }
+        self::assertNoTransaction($this->db());
+        $remote = (int) $move['from_remote_inbound_id'];
+        $how = null;
+        try {
+            $result = $driver->detachInbounds((string) $service->getRemoteId(), $service->getInbound(), [$this->inboundOf($move['from_inbound_id'], (string) $move['from_remote_inbound_id'], $panel, 'inbound to remove')], $panel, false);
+            if ($result->succeeded()) {
+                $how = InboundDetachResult::DONE === $result->outcome ? 'inbound removed' : 'the client was not on it: only the row was removed (nothing sent)';
+            } elseif (InboundDetachResult::FAILED === $result->outcome && InboundDetachResult::FAILED_PANEL === $result->reason) {
+                // 3x-ui refuses a detach of an inbound deleted on the panel: done only when inbounds/list confirms it is gone.
+                $has = $driver->panelHasInbound($panel, $remote, false);
+                if (false !== $has) {
+                    return $failed((string) $result->message.(null === $has ? ' (the panel\'s inbound list could not be read)' : ''), null !== $has);
+                }
+                $how = 'the inbound no longer exists on the panel (inbounds/list)';
+            }
+        } catch (\Throwable $e) {
+            return $failed('Panel step failed: '.$e->getMessage(), false);
+        }
+        if (null === $how) {
+            if (InboundDetachResult::REFUSED === $result->outcome && InboundDetachResult::REFUSED_NOT_MODERN === $result->reason) {
+                return $skip(InboundMovePlanner::SKIP_NOT_MODERN);
+            }
+            if (InboundDetachResult::REFUSED_PRIMARY === $result->reason) {
+                return $skip(InboundMovePlanner::SKIP_IS_PRIMARY);
+            }
+            if (InboundDetachResult::REFUSED_LAST_INBOUND === $result->reason) {
+                return $skip(InboundMovePlanner::SKIP_LAST_INBOUND);
+            }
+            if (InboundDetachResult::REFUSED_NOT_THIS_CLIENT === $result->reason && $this->identityChanged($serviceId, $claim['identity'])) {
+                $this->releaseRemove($serviceId, $moveId, $claim['claimedAt'], $runId, null, ServiceInboundMove::STATE_PLANNED, null);
+
+                return new InboundMoveItem($moveId, $serviceId, $from, $to, InboundMoveItem::IDENTITY_CHANGED, 'the client\'s credentials changed meanwhile (a link reset?): nothing sent, picked again', true);
+            }
+            if (InboundDetachResult::FAILED_NOT_ON_PRIMARY === $result->reason) {
+                return $failed(self::REMOVE_NOT_ON_PRIMARY, true);
+            }
+
+            return $failed((string) $result->message, InboundDetachResult::FAILED_UNREADABLE !== $result->reason);
+        }
+
+        $written = $this->writeRemove($serviceId, $move, $claim);
+        if (true !== $written) {
+            return match ($written) {
+                InboundMoveItem::IDENTITY_CHANGED => new InboundMoveItem($moveId, $serviceId, $from, $to, InboundMoveItem::IDENTITY_CHANGED, 'the client\'s credentials changed meanwhile (a link reset?): nothing written, picked again', true),
+                InboundMoveItem::SKIPPED => new InboundMoveItem($moveId, $serviceId, $from, $to, InboundMoveItem::SKIPPED, 'not removed: '.InboundMovePlanner::addSkipText(InboundMovePlanner::SKIP_DELETED), true),
+                default => new InboundMoveItem($moveId, $serviceId, $from, $to, InboundMoveItem::BUSY, 'the claim was taken over meanwhile: nothing written', true),
+            };
+        }
+        $this->logger->info('inbound_move_removed', ['run_id' => (int) $move['run_id'], 'service_id' => $serviceId, 'inbound_id' => $move['from_inbound_id']]);
+        $refresh = $this->refreshLinks($service);
+
+        return new InboundMoveItem($moveId, $serviceId, $from, $to, InboundMoveItem::REMOVED, $how.'; links '.self::refreshText($refresh), PanelLinkRefresh::FAILED !== $refresh->outcome, false, $refresh->outcome);
+    }
+
+    /**
+     * Step 3 of a remove, only under this claim and with the client's identity unchanged: the row deleted, the move "done",
+     * and the display guard on in the same transaction (the stored links hold D's, a dead link now). A link reset sends the
+     * move back to planned, row still held: it is picked again at once.
+     *
+     * @param array<string, mixed>                                $move
+     * @param array{claimedAt: string, identity: list<string|null>} $claim
+     *
+     * @return true|string true when written; InboundMoveItem::IDENTITY_CHANGED, SKIPPED or BUSY when not
+     */
+    private function writeRemove(int $serviceId, array $move, array $claim): bool|string
+    {
+        $moveId = (int) $move['id'];
+
+        return $this->transactional(function (Connection $db) use ($serviceId, $moveId, $move, $claim): bool|string {
+            $now = self::now();
+            $current = $db->fetchAssociative('SELECT id, status, inbound_id, remote_id, client_uuid, sub_id FROM vpn_service WHERE id = ? FOR UPDATE', [$serviceId]);
+            $db->fetchFirstColumn('SELECT id FROM vpn_service_inbound WHERE service_id = ? ORDER BY id FOR UPDATE', [$serviceId]);
+            $row = $db->fetchAssociative('SELECT state, claimed_at FROM service_inbound_move WHERE id = ? FOR UPDATE', [$moveId]);
+            if (false === $current || false === $row || ServiceInboundMove::STATE_DETACHING !== $row['state'] || (string) $row['claimed_at'] !== $claim['claimedAt']) {
+                return InboundMoveItem::BUSY;
+            }
+            if (VpnServiceStatus::DELETED === (string) $current['status']) {
+                $db->executeStatement(
+                    'UPDATE service_inbound_move SET state = ?, skip_reason = ?, claimed_at = NULL, next_attempt_at = NULL, updated_at = ? WHERE id = ?',
+                    [ServiceInboundMove::STATE_SKIPPED, InboundMovePlanner::SKIP_DELETED, $now, $moveId],
+                );
+
+                return InboundMoveItem::SKIPPED;
+            }
+            if (self::identity($current) !== $claim['identity']) {
+                $db->executeStatement('UPDATE service_inbound_move SET state = ?, claimed_at = NULL, updated_at = ? WHERE id = ?', [ServiceInboundMove::STATE_PLANNED, $now, $moveId]);
+
+                return InboundMoveItem::IDENTITY_CHANGED;
+            }
+            if (null !== $move['from_inbound_id']) {
+                $db->executeStatement('DELETE FROM vpn_service_inbound WHERE service_id = ? AND inbound_id = ? AND status = ?', [$serviceId, (int) $move['from_inbound_id'], VpnServiceInbound::STATUS_DETACHED]);
+            }
+            $db->executeStatement(
+                'UPDATE service_inbound_move SET state = ?, detached_at = ?, claimed_at = NULL, next_attempt_at = NULL, last_error = NULL, updated_at = ? WHERE id = ?',
+                [ServiceInboundMove::STATE_DONE, $now, $now, $moveId],
+            );
+            // Both stamps have one-second precision: see finishRetire().
+            $db->executeStatement('UPDATE vpn_service SET inbound_changed_at = ?, last_access_info_synced_at = NULL WHERE id = ?', [$now, $serviceId]);
+
+            return true;
+        });
+    }
+
+    /** A remove claim that ends without a removal: the state given, and with $inboundId the held row attached again. */
+    private function releaseRemove(int $serviceId, int $moveId, string $claimedAt, int $runId, mixed $inboundId, string $state, ?string $reason): void
+    {
+        $this->transactional(function (Connection $db) use ($serviceId, $moveId, $claimedAt, $runId, $inboundId, $state, $reason): void {
+            $now = self::now();
+            $db->fetchOne('SELECT id FROM vpn_service WHERE id = ? FOR UPDATE', [$serviceId]);
+            $db->fetchFirstColumn('SELECT id FROM vpn_service_inbound WHERE service_id = ? ORDER BY id FOR UPDATE', [$serviceId]);
+            $changed = $db->executeStatement(
+                'UPDATE service_inbound_move SET state = ?, skip_reason = ?, claimed_at = NULL, next_attempt_at = NULL, updated_at = ? WHERE id = ? AND state = ? AND claimed_at = ?',
+                [$state, $reason, $now, $moveId, ServiceInboundMove::STATE_DETACHING, $claimedAt],
+            );
+            if (1 === $changed && null !== $inboundId) {
+                self::giveRowBack($db, $serviceId, $inboundId, $runId, $now);
+            }
+        });
+    }
+
+    private static function holdText(int $runId): string
+    {
+        return VpnServiceInbound::safeError(sprintf(self::REMOVE_HOLD, $runId));
+    }
+
+    /** @param array<string, mixed> $row a row of vpn_service_inbound with status and last_error */
+    private static function heldByRun(array $row, int $runId): bool
+    {
+        return VpnServiceInbound::STATUS_DETACHED === $row['status'] && self::holdText($runId) === $row['last_error'];
+    }
+
+    /**
+     * A row this run held goes back to "attached", unchecked: the timer's next read compares it with the panel, and a
+     * client that is not on the inbound is put on it again, as for any attached row. Under the service's lock.
+     */
+    private static function giveRowBack(Connection $db, int $serviceId, mixed $inboundId, int $runId, string $now): void
+    {
+        $db->executeStatement(
+            'UPDATE vpn_service_inbound SET status = ?, attempts = 0, last_error = NULL, next_attempt_at = NULL, checked_at = NULL, updated_at = ? WHERE service_id = ? AND inbound_id = ? AND status = ? AND last_error = ?',
+            [VpnServiceInbound::STATUS_ATTACHED, $now, $serviceId, (int) $inboundId, VpnServiceInbound::STATUS_DETACHED, self::holdText($runId)],
+        );
+    }
+
+    /**
+     * --undo of a remove, one move: D on the client again if missing, then the row attached, then the links.
+     * docs/design/plan-inbound-add-remove.md 7: it works on a done move too (a plain attach), never writes
+     * inbound_changed_at, and leaves the plan as it is. No back-off: --undo is pressed again by hand. The move is
+     * "attaching" meanwhile, so that a pass of the run never reads it as a remove cut off in the middle.
+     */
+    private function undoRemoveOne(int $moveId, int $runId): InboundMoveItem
+    {
+        $move = $this->db()->fetchAssociative('SELECT * FROM service_inbound_move WHERE id = ?', [$moveId]);
+        if (false === $move) {
+            return new InboundMoveItem($moveId, 0, '-', '-', InboundMoveItem::BUSY, 'the move is gone');
+        }
+        $serviceId = (int) $move['service_id'];
+        [$from, $to] = $this->titles($move);
+        $service = $this->entityManager->find(VpnService::class, $serviceId);
+        if (!$service instanceof VpnService) {
+            return new InboundMoveItem($moveId, $serviceId, $from, $to, InboundMoveItem::BUSY, 'the service is gone');
+        }
+        if (ServiceInboundMove::STATE_UNDONE === $move['state']) {
+            // Back on the client already; only the links are left (an earlier --undo could not finish them).
+            return $this->undoLinksOnly($service, $move, self::REMOVE_UNDONE, $from, $to);
+        }
+        $claim = $this->claimUndoRemove($move, $runId);
+        if (self::NOT_DUE === $claim['result']) {
+            return new InboundMoveItem($moveId, $serviceId, $from, $to, InboundMoveItem::BUSY, 'claimed by another process meanwhile: run --undo again');
+        }
+        if (null !== $claim['skip']) {
+            return new InboundMoveItem($moveId, $serviceId, $from, $to, InboundMoveItem::SKIPPED, 'not undone: '.InboundMovePlanner::addSkipText($claim['skip']));
+        }
+        if (null !== $claim['error']) {
+            return new InboundMoveItem($moveId, $serviceId, $from, $to, InboundMoveItem::FAILED, 'not undone: '.$claim['error'].' (run --undo again)');
+        }
+        $this->entityManager->refresh($service);
+        $target = $this->entityManager->find(VpnInbound::class, (int) $move['from_inbound_id']);
+        $panel = $service->getPanel();
+        $driver = $this->drivers->resolve($panel);
+        $failed = function (string $message, ?bool $panelRead) use ($service, $serviceId, $moveId, $claim, $panel, $from, $to): InboundMoveItem {
+            $text = VpnServiceInbound::safeError(SafeText::forService($service, $message, 255, $this->planner->panelSecrets($panel)));
+            $this->releaseUndo($serviceId, $moveId, $claim['claimedAt'], $claim['previous'], $text, ServiceInboundMove::STATE_ATTACHING);
+
+            return new InboundMoveItem($moveId, $serviceId, $from, $to, InboundMoveItem::FAILED, 'not undone: '.$text.' (run --undo again)', $panelRead);
+        };
+        if (!$target instanceof VpnInbound || !$panel instanceof VpnPanel || !$driver instanceof InboundMoveDriverInterface) {
+            return $failed('the panel is not in modern mode, or the inbound is gone', null);
+        }
+
+        return $this->budget->within(InboundMovePlanner::STEP_BUDGET_SECONDS, function () use ($service, $serviceId, $target, $panel, $driver, $move, $moveId, $claim, $failed, $from, $to): InboundMoveItem {
+            self::assertNoTransaction($this->db());
+            try {
+                $attach = $driver->attachForMove((string) $service->getRemoteId(), $target, $panel, false);
+            } catch (\Throwable $e) {
+                return $failed('Panel step failed: '.$e->getMessage(), false);
+            }
+            if (!$attach->onTarget()) {
+                return $failed((string) $attach->message, !$attach->panelUnreadable);
+            }
+            $written = $this->writeUndoRemove($serviceId, $target, $move, $claim);
+            if (InboundMoveItem::IDENTITY_CHANGED === $written) {
+                return new InboundMoveItem($moveId, $serviceId, $from, $to, InboundMoveItem::IDENTITY_CHANGED, 'the client\'s credentials changed meanwhile: nothing written, picked again', true);
+            }
+            if (null === $written) {
+                return new InboundMoveItem($moveId, $serviceId, $from, $to, InboundMoveItem::BUSY, 'the claim was taken over meanwhile: nothing written', true);
+            }
+            $this->logger->info('inbound_move_remove_undone', ['run_id' => (int) $move['run_id'], 'service_id' => $serviceId, 'inbound_id' => $move['from_inbound_id']]);
+
+            return $this->finishUndoLinks($service, $move, $written, self::REMOVE_UNDONE, $from, $to);
+        });
+    }
+
+    /**
+     * The claim of a remove's undo, in the lock order of step 1. What may have taken D off the client can be undone: done,
+     * failed, a planned move that holds its row, or a claim that went stale. A deleted service is skipped, and so is one
+     * with a later move, or whose primary is D now. D deleted locally or inactive cannot be put back: the move stays.
+     *
+     * @param array<string, mixed> $move
+     *
+     * @return array{result: string, skip: string|null, error: string|null, claimedAt: string, previous: string, identity: list<string|null>}
+     */
+    private function claimUndoRemove(array $move, int $runId): array
+    {
+        $moveId = (int) $move['id'];
+        $serviceId = (int) $move['service_id'];
+        $now = new \DateTimeImmutable();
+        $at = $now->format('Y-m-d H:i:s');
+
+        return $this->transactional(function (Connection $db) use ($moveId, $serviceId, $runId, $now, $at): array {
+            $service = $db->fetchAssociative('SELECT id, status, inbound_id, remote_id, client_uuid, sub_id FROM vpn_service WHERE id = ? FOR UPDATE', [$serviceId]);
+            $rows = $db->fetchAllAssociative('SELECT id, inbound_id, status, updated_at, last_error FROM vpn_service_inbound WHERE service_id = ? ORDER BY id FOR UPDATE', [$serviceId]);
+            $row = $db->fetchAssociative('SELECT * FROM service_inbound_move WHERE id = ? FOR UPDATE', [$moveId]);
+            $none = ['result' => self::NOT_DUE, 'skip' => null, 'error' => null, 'claimedAt' => $at, 'previous' => ServiceInboundMove::STATE_FAILED, 'identity' => []];
+            if (false === $service || false === $row) {
+                return $none;
+            }
+            $additional = null;
+            foreach ($rows as $one) {
+                if ((int) $one['inbound_id'] === (int) $row['from_inbound_id']) {
+                    $additional = $one;
+                }
+            }
+            $held = null !== $additional && self::heldByRun($additional, $runId);
+            $stale = $now->modify(ServiceInboundAttacher::STALE_CLAIM)->format('Y-m-d H:i:s');
+            $unclaimed = null === $row['claimed_at'] || (string) $row['claimed_at'] < $stale;
+            $reversible = match ($row['state']) {
+                ServiceInboundMove::STATE_DONE, ServiceInboundMove::STATE_FAILED => true,
+                ServiceInboundMove::STATE_PLANNED => $held,
+                ServiceInboundMove::STATE_ATTACHING, ServiceInboundMove::STATE_DETACHING => $unclaimed,
+                default => false,
+            };
+            if (!$reversible) {
+                return $none;
+            }
+            $skip = null;
+            if (VpnServiceStatus::DELETED === (string) $service['status']) {
+                $skip = InboundMovePlanner::SKIP_DELETED;
+            } elseif (false !== $db->fetchOne('SELECT id FROM service_inbound_move WHERE service_id = ? AND id > ? LIMIT 1', [$serviceId, $moveId])) {
+                $skip = InboundMovePlanner::SKIP_LATER_MOVE;
+            } elseif (null !== $row['from_inbound_id'] && (int) $service['inbound_id'] === (int) $row['from_inbound_id']) {
+                $skip = InboundMovePlanner::SKIP_IS_PRIMARY;
+            }
+            if (null !== $skip) {
+                if ($held) {
+                    self::giveRowBack($db, $serviceId, $row['from_inbound_id'], $runId, $at);
+                }
+                $db->executeStatement(
+                    'UPDATE service_inbound_move SET state = ?, skip_reason = ?, claimed_at = NULL, next_attempt_at = NULL, updated_at = ? WHERE id = ?',
+                    [ServiceInboundMove::STATE_SKIPPED, $skip, $at, $moveId],
+                );
+
+                return ['result' => self::SETTLED, 'skip' => $skip] + $none;
+            }
+            $active = null === $row['from_inbound_id'] ? false : $db->fetchOne('SELECT is_active FROM vpn_inbound WHERE id = ?', [(int) $row['from_inbound_id']]);
+            if (false === $active) {
+                return ['result' => self::SETTLED, 'error' => 'the inbound was deleted in the bot: it cannot be put back'] + $none;
+            }
+            if (1 !== (int) $active) {
+                return ['result' => self::SETTLED, 'error' => InboundMovePlanner::skipText(InboundMovePlanner::SKIP_TARGET_INACTIVE).': it cannot be put back'] + $none;
+            }
+            if (null !== $additional && VpnServiceInbound::STATUS_PENDING === $additional['status'] && (string) $additional['updated_at'] >= $stale) {
+                return $none;
+            }
+            $db->executeStatement(
+                'UPDATE service_inbound_move SET state = ?, claimed_at = ?, updated_at = ? WHERE id = ?',
+                [ServiceInboundMove::STATE_ATTACHING, $at, $at, $moveId],
+            );
+            $previous = ServiceInboundMove::STATE_DONE === $row['state'] ? ServiceInboundMove::STATE_DONE : ServiceInboundMove::STATE_FAILED;
+
+            return ['result' => self::CLAIMED, 'skip' => null, 'error' => null, 'claimedAt' => $at, 'previous' => $previous, 'identity' => self::identity($service)];
+        });
+    }
+
+    /**
+     * The write of a remove's undo: D's row attached (checked_at NULL: the timer compares it with the panel), the move
+     * "undone" with its links still owed. vpn_service is not written (design 6.4).
+     *
+     * @param array<string, mixed>                                                  $move
+     * @param array{claimedAt: string, previous: string, identity: list<string|null>} $claim
+     *
+     * @return string|null the new claim, InboundMoveItem::IDENTITY_CHANGED, or null when the claim is gone
+     */
+    private function writeUndoRemove(int $serviceId, VpnInbound $target, array $move, array $claim): ?string
+    {
+        $moveId = (int) $move['id'];
+
+        return $this->transactional(function (Connection $db) use ($serviceId, $target, $moveId, $claim): ?string {
+            $now = self::now();
+            $current = $db->fetchAssociative('SELECT id, inbound_id, remote_id, client_uuid, sub_id FROM vpn_service WHERE id = ? FOR UPDATE', [$serviceId]);
+            $rows = $db->fetchAllAssociative('SELECT id, inbound_id FROM vpn_service_inbound WHERE service_id = ? ORDER BY id FOR UPDATE', [$serviceId]);
+            $row = $db->fetchAssociative('SELECT state, claimed_at FROM service_inbound_move WHERE id = ? FOR UPDATE', [$moveId]);
+            if (false === $current || false === $row || ServiceInboundMove::STATE_ATTACHING !== $row['state'] || (string) $row['claimed_at'] !== $claim['claimedAt']) {
+                return null;
+            }
+            if (self::identity($current) !== $claim['identity']) {
+                $db->executeStatement('UPDATE service_inbound_move SET state = ?, claimed_at = NULL, updated_at = ? WHERE id = ?', [$claim['previous'], $now, $moveId]);
+
+                return InboundMoveItem::IDENTITY_CHANGED;
+            }
+            $existing = array_values(array_filter($rows, static fn (array $r): bool => (int) $r['inbound_id'] === (int) $target->getId()))[0] ?? null;
+            if (null === $existing) {
+                $db->insert('vpn_service_inbound', [
+                    'service_id' => $serviceId,
+                    'inbound_id' => $target->getId(),
+                    'remote_inbound_id' => $target->getRemoteInboundId(),
+                    'status' => VpnServiceInbound::STATUS_ATTACHED,
+                    'attempts' => 0,
+                    'attached_at' => $now,
+                    'updated_at' => $now,
+                    'reattach_count' => 0,
+                ]);
+            } else {
+                $db->executeStatement(
+                    'UPDATE vpn_service_inbound SET status = ?, remote_inbound_id = ?, attempts = 0, last_error = NULL, next_attempt_at = NULL, alert_state = NULL, alerted_at = NULL, reattach_count = 0, reattach_since = NULL, attached_at = COALESCE(attached_at, ?), checked_at = NULL, updated_at = ? WHERE id = ?',
+                    [VpnServiceInbound::STATUS_ATTACHED, $target->getRemoteInboundId(), $now, $now, $existing['id']],
+                );
+            }
+            $db->executeStatement(
+                'UPDATE service_inbound_move SET state = ?, detach_after = NULL, detached_at = NULL, last_error = NULL, next_attempt_at = ?, claimed_at = ?, updated_at = ? WHERE id = ?',
+                [ServiceInboundMove::STATE_UNDONE, $now, $now, $now, $moveId],
+            );
+
+            return $now;
         });
     }
 
@@ -1711,25 +2243,36 @@ final class InboundMoveRunner
     }
 
     /** An undo claim given back before its write: the previous state again, the error stored masked. */
-    private function releaseUndo(int $serviceId, int $moveId, string $claimedAt, string $previous, string $error): void
+    private function releaseUndo(int $serviceId, int $moveId, string $claimedAt, string $previous, string $error, string $claimedState = ServiceInboundMove::STATE_DETACHING): void
     {
-        $this->transactional(function (Connection $db) use ($serviceId, $moveId, $claimedAt, $previous, $error): void {
+        $this->transactional(function (Connection $db) use ($serviceId, $moveId, $claimedAt, $previous, $error, $claimedState): void {
             $db->fetchOne('SELECT id FROM vpn_service WHERE id = ? FOR UPDATE', [$serviceId]);
             $db->fetchFirstColumn('SELECT id FROM vpn_service_inbound WHERE service_id = ? ORDER BY id FOR UPDATE', [$serviceId]);
             $db->executeStatement(
                 'UPDATE service_inbound_move SET state = ?, claimed_at = NULL, last_error = ?, updated_at = ? WHERE id = ? AND state = ? AND claimed_at = ?',
-                [$previous, VpnServiceInbound::safeError($error), self::now(), $moveId, ServiceInboundMove::STATE_DETACHING, $claimedAt],
+                [$previous, VpnServiceInbound::safeError($error), self::now(), $moveId, $claimedState, $claimedAt],
             );
         });
     }
 
     /**
      * Planned moves, and phase-1 failures waiting for a retry: cancelled (never moved now). An add's failed attach may
-     * have landed, so undo takes that one off instead (see undoMoveIds()).
+     * have landed, so undo takes that one off instead (see undoMoveIds()). A remove's failure is never "not started", and
+     * neither is a planned remove that holds its row (REMOVE_HELD_SQL).
      */
-    private function cancelNotStarted(int $runId, bool $add): int
+    private function cancelNotStarted(int $runId, string $kind): int
     {
-        if ($add) {
+        if (InboundMoveRun::KIND_REMOVE === $kind) {
+            // Read first: this UPDATE must not touch vpn_service_inbound against the lock order.
+            $ids = array_map('intval', $this->db()->fetchFirstColumn("SELECT m.id FROM service_inbound_move m WHERE m.run_id = ? AND m.state = 'planned' AND NOT ".self::REMOVE_HELD_SQL, [$runId]));
+
+            return [] === $ids ? 0 : (int) $this->db()->executeStatement(
+                "UPDATE service_inbound_move SET state = ?, claimed_at = NULL, next_attempt_at = NULL, updated_at = ? WHERE state = 'planned' AND id IN (?)",
+                [ServiceInboundMove::STATE_CANCELLED, self::now(), $ids],
+                [2 => \Doctrine\DBAL\ArrayParameterType::INTEGER],
+            );
+        }
+        if (InboundMoveRun::KIND_ADD === $kind) {
             return (int) $this->db()->executeStatement(
                 "UPDATE service_inbound_move SET state = ?, claimed_at = NULL, next_attempt_at = NULL, updated_at = ? WHERE run_id = ? AND state = 'planned'",
                 [ServiceInboundMove::STATE_CANCELLED, self::now(), $runId],
@@ -1746,14 +2289,30 @@ final class InboundMoveRunner
     /**
      * The moves --undo looks at, after $afterId: switched, a failed retire, a stale detaching claim, or undone with B
      * still to be removed. For an add: whatever may have put C on the client (switched, done, failed, a stale claim), or
-     * undone with its links still owed; never a client that had C before the run.
+     * undone with its links still owed; never a client that had C before the run. For a remove: whatever may have taken D
+     * off the client (done, failed, a planned move holding its row, a stale claim), or undone with its links still owed.
      *
      * @return list<int>
      */
-    private function undoMoveIds(int $runId, int $afterId, int $limit, bool $add): array
+    private function undoMoveIds(int $runId, int $afterId, int $limit, string $kind): array
     {
         $stale = (new \DateTimeImmutable())->modify(ServiceInboundAttacher::STALE_CLAIM)->format('Y-m-d H:i:s');
-        if ($add) {
+        if (InboundMoveRun::KIND_REMOVE === $kind) {
+            return array_map('intval', $this->db()->fetchFirstColumn(
+                sprintf(
+                    "SELECT m.id FROM service_inbound_move m WHERE m.run_id = :run AND m.id > :after AND (
+                       m.state IN ('done', 'failed')
+                       OR (m.state = 'planned' AND %s)
+                       OR (m.state IN ('attaching', 'detaching') AND (m.claimed_at IS NULL OR m.claimed_at < :stale))
+                       OR (m.state = 'undone' AND m.next_attempt_at IS NOT NULL AND (m.claimed_at IS NULL OR m.claimed_at < :stale)))
+                     ORDER BY m.id LIMIT %d",
+                    self::REMOVE_HELD_SQL,
+                    max(1, $limit),
+                ),
+                ['run' => $runId, 'after' => $afterId, 'stale' => $stale],
+            ));
+        }
+        if (InboundMoveRun::KIND_ADD === $kind) {
             return array_map('intval', $this->db()->fetchFirstColumn(
                 sprintf(
                     "SELECT m.id FROM service_inbound_move m WHERE m.run_id = :run AND m.id > :after AND COALESCE(m.skip_reason, '') <> :on_panel AND (
@@ -1865,6 +2424,24 @@ final class InboundMoveRunner
         };
     }
 
+    /**
+     * Whether a kind=remove move (as locked) may be claimed now: planned with detach_after passed; detaching with a stale
+     * claim; failed and due with attempts left. Its detach_after is always set, so due() and retireDue() do not fit.
+     *
+     * @param array<string, mixed> $row
+     */
+    private function removeDue(array $row, \DateTimeImmutable $now): bool
+    {
+        $stale = $now->modify(ServiceInboundAttacher::STALE_CLAIM)->format('Y-m-d H:i:s');
+
+        return match ($row['state']) {
+            ServiceInboundMove::STATE_PLANNED => null !== $row['detach_after'] && (string) $row['detach_after'] <= $now->format('Y-m-d H:i:s'),
+            ServiceInboundMove::STATE_DETACHING => null === $row['claimed_at'] || (string) $row['claimed_at'] < $stale,
+            ServiceInboundMove::STATE_FAILED => $this->failedDue($row, $now),
+            default => false,
+        };
+    }
+
     /** @param array<string, mixed> $row */
     private function failedDue(array $row, \DateTimeImmutable $now): bool
     {
@@ -1929,8 +2506,9 @@ final class InboundMoveRunner
             "SELECT COUNT(*) FROM service_inbound_move m JOIN vpn_service s ON s.id = m.service_id WHERE m.run_id = ? AND m.state IN ('switched', 'done') AND (".self::LINKS_PENDING_SQL.($add ? " OR m.state = 'switched'" : '').')',
             [$runId],
         );
+        // A remove waits in "planned" (its grace period): there is no phase before it.
         $later = $this->db()->fetchAssociative(
-            "SELECT COUNT(*) AS n, MIN(detach_after) AS first FROM service_inbound_move WHERE run_id = ? AND state = 'switched' AND detach_after IS NOT NULL",
+            sprintf("SELECT COUNT(*) AS n, MIN(detach_after) AS first FROM service_inbound_move WHERE run_id = ? AND state = '%s' AND detach_after IS NOT NULL", InboundMoveRun::KIND_REMOVE === $pass->kind ? ServiceInboundMove::STATE_PLANNED : ServiceInboundMove::STATE_SWITCHED),
             [$runId],
         ) ?: [];
         $pass->retirePending = (int) ($later['n'] ?? 0);
@@ -1982,17 +2560,18 @@ final class InboundMoveRunner
     }
 
     /**
-     * Q7: the plan no longer sells an add's target while work has not started (planned, or a failure with an attempt left).
-     * What is left over from before (links, a step cut off) adds nothing new and goes on, so a cancelled run can finish.
-     * A target deleted meanwhile is not this case: each move skips itself (target_gone).
+     * Q7: the plan contradicts the run (no longer sells an add's target, sells a remove's target again) while work has not
+     * started (planned, or a failure with an attempt left). What is left over from before (links, a step cut off) adds
+     * nothing new and goes on, so a cancelled run can finish. A target deleted meanwhile is not this case: each move skips
+     * itself (target_gone).
      */
-    private function planDropped(int $runId, int $planId, mixed $targetId): bool
+    private function planDropped(int $runId, int $planId, string $kind, mixed $targetId): bool
     {
         if (null === $targetId) {
             return false;
         }
         $planInbound = $this->db()->fetchOne('SELECT inbound_id FROM plan WHERE id = ?', [$planId]);
-        if (!InboundMoveOverview::planChanged(InboundMoveRun::KIND_ADD, (int) $targetId, null === $planInbound || false === $planInbound ? null : (int) $planInbound, $this->planner->planAdditionalIds($planId))) {
+        if (!InboundMoveOverview::planChanged($kind, (int) $targetId, null === $planInbound || false === $planInbound ? null : (int) $planInbound, $this->planner->planAdditionalIds($planId))) {
             return false;
         }
 
@@ -2049,6 +2628,10 @@ final class InboundMoveRunner
             case InboundMoveItem::ADDED:
                 ++$pass->added;
                 $pass->alreadyOnTarget += $item->attachSent ? 0 : 1;
+                break;
+            case InboundMoveItem::REMOVED:
+                ++$pass->removed;
+                $pass->snapshotsRefreshed += in_array($item->snapshot, [PanelLinkRefresh::UPDATED, PanelLinkRefresh::UNCHANGED, PanelLinkRefresh::CHANGED_MEANWHILE], true) ? 1 : 0;
                 break;
             case InboundMoveItem::FAILED:
                 ++$pass->failed;

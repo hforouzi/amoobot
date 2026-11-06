@@ -262,7 +262,6 @@ final class InboundMoveAddTest extends IntegrationTestCase
         yield 'no inbound' => [['--kind' => 'add'], '--inbound'];
         yield 'inbound with primary' => [['--inbound' => '1'], '--inbound'];
         yield 'unknown kind' => [['--kind' => 'other'], '--kind'];
-        yield 'remove is not built' => [['--kind' => 'remove', '--inbound' => '1'], 'remove'];
     }
 
     /**
@@ -993,11 +992,11 @@ final class InboundMoveAddTest extends IntegrationTestCase
         self::assertSame('attached', $this->nlRow($service)['status'] ?? null);
     }
 
-    public function testAnAddLeavesARunnerOfTheInertKindAlone(): void
+    public function testAnAddLeavesARunnerOfAKindNotBuiltAlone(): void
     {
         $this->goldService(1);
         $runId = $this->plannedAdd();
-        $this->em->getConnection()->update('inbound_move_run', ['kind' => InboundMoveRun::KIND_REMOVE], ['id' => $runId]);
+        $this->em->getConnection()->update('inbound_move_run', ['kind' => 'replace'], ['id' => $runId]);
 
         self::assertSame(InboundMovePass::NOT_OPEN, self::getContainer()->get(InboundMoveRunner::class)->process($runId)->outcome);
     }

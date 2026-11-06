@@ -6,14 +6,16 @@ namespace App\Provisioning\Application;
 
 /**
  * One service of a plan as a move run sees it (docs/design/plan-inbound-change.md 5.2): its id, current inbound, the
- * target, and either "move" ("add" for kind=add) or the skip reason (InboundMovePlanner::SKIP_*). panelNote is what a dry
- * run read on the panel (GET only), null when it did not read; an add's dry run also shows the client's inbounds now and
- * after, by title. Ids, titles and fixed texts only: never a link, UUID, subscription id, client email, owner or token.
+ * target, and either "move" ("add" for kind=add, "remove" for kind=remove) or the skip reason (InboundMovePlanner::SKIP_*).
+ * For a remove, "from" is the inbound D being removed, with the panel id of the service's row. panelNote is what a dry run
+ * read on the panel (GET only), null when it did not read; a dry run of an add or a remove also shows the client's
+ * inbounds now and after, by title. Ids, titles and fixed texts only: never a link, UUID, subscription id, client email, owner or token.
  */
 final readonly class InboundMoveCandidate
 {
     public const ACTION_MOVE = 'move';
     public const ACTION_ADD = 'add';
+    public const ACTION_REMOVE = 'remove';
     public const ACTION_SKIP = 'skip';
 
     public function __construct(
@@ -68,8 +70,8 @@ final readonly class InboundMoveCandidate
             'panel' => $this->panelNote,
         ];
 
-        // Only an add's: a primary move's JSON stays as it was.
-        return self::ACTION_ADD === $this->action
+        // Only an add's or a remove's: a primary move's JSON stays as it was.
+        return in_array($this->action, [self::ACTION_ADD, self::ACTION_REMOVE], true)
             ? $row + ['inbounds_now' => $this->inboundsNow, 'inbounds_after' => $this->inboundsAfter, 'note' => $this->panelNote]
             : $row;
     }

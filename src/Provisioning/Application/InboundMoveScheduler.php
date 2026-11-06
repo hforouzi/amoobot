@@ -97,7 +97,7 @@ final class InboundMoveScheduler
                 continue;
             }
             ++$task->runs;
-            $task->moved += $pass->switched + $pass->added;
+            $task->moved += $pass->switched + $pass->added + $pass->removed;
             $task->retired += $pass->retired;
             $task->failed += $pass->failed;
             $task->skipped += $pass->skipped;
@@ -116,7 +116,7 @@ final class InboundMoveScheduler
     private function openRunIds(): array
     {
         return array_map('intval', $this->entityManager->getConnection()->fetchFirstColumn(
-            'SELECT id FROM inbound_move_run WHERE status IN (?, ?) AND kind IN (?, ?) AND open_plan_id IS NOT NULL ORDER BY id',
+            'SELECT id FROM inbound_move_run WHERE status IN (?, ?) AND kind IN (?, ?, ?) AND open_plan_id IS NOT NULL ORDER BY id',
             [InboundMoveRun::STATUS_PLANNED, InboundMoveRun::STATUS_RUNNING, ...InboundMoveRun::RUNNABLE_KINDS],
         ));
     }

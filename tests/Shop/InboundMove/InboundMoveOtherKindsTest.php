@@ -21,8 +21,9 @@ use Twig\Environment;
 /**
  * PR P11a (docs/design/plan-inbound-add-remove.md 3.3, 13): the preparation for kind=add and kind=remove, with neither
  * reachable yet. A run row of such a kind stays inert: no pass, control, page or dry run takes it, and it is never due.
- * The kind-aware rules are pinned here on the rows they read, for P11b and P11c to open. P11b opened add for the
- * command line and the scheduled task: the "inert" tests below go on for remove, and the web stays closed to add.
+ * The kind-aware rules are pinned here on the rows they read, for P11b and P11c to open. P11b and P11c opened add and
+ * remove for the command line and the scheduled task, so the "inert" tests below now pin a kind nobody built, and the web
+ * stays closed to both.
  */
 final class InboundMoveOtherKindsTest extends IntegrationTestCase
 {
@@ -44,7 +45,7 @@ final class InboundMoveOtherKindsTest extends IntegrationTestCase
     /** @return iterable<string, array{string}> */
     public static function closedKinds(): iterable
     {
-        yield 'remove' => [InboundMoveRun::KIND_REMOVE];
+        yield 'a kind not built' => ['replace'];
     }
 
     #[DataProvider('closedKinds')]

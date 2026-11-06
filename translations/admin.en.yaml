@@ -1605,6 +1605,8 @@ inbound_move:
   skip.is_primary: "the inbound is its primary"
   skip.no_primary: "no primary inbound"
   skip.last_inbound: "it is the client's only inbound on the panel"
+  skip.not_attached: "the service no longer has this inbound"
+  skip.later_move: "a later move changed this service"
   skip.already_on_panel: "was already on the panel"
   skip.target_inactive: "the target inbound is inactive"
   action.pause: "Pause"
