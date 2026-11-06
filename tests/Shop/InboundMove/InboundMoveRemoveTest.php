@@ -872,16 +872,18 @@ final class InboundMoveRemoveTest extends IntegrationTestCase
         self::assertSame([], $this->fake->requests);
     }
 
-    public function testTheWebButtonsStayClosedToARemoveRun(): void
+    public function testRetryNowMakesAFailedRemoveDueAndKeepsItsRowHeld(): void
     {
         $service = $this->onBoth(1);
         $this->fake->script('POST', 'panel/api/clients/tg_p1_1/detach', Fake3xuiPanel::envelope(false, null, 'database is locked'));
         $this->remove(['--apply' => true]);
-        $before = $this->moves();
+        self::assertSame('failed', $this->moves()[0]['state']);
 
-        self::assertFalse(self::getContainer()->get(InboundMoveControls::class)->retryFailed((int) $this->runs()[0]['id'], true, (int) $service->getId())['ok']);
+        self::assertTrue(self::getContainer()->get(InboundMoveControls::class)->retryFailed((int) $this->runs()[0]['id'], true, (int) $service->getId())['ok']);
 
-        self::assertSame($before, $this->moves());
+        self::assertSame(0, (int) $this->moves()[0]['attempts']);
+        self::assertSame('detached', $this->nlRow($service)['status'] ?? null, 'nothing re-attaches it meanwhile');
+        self::assertSame(1, self::getContainer()->get(InboundMoveRunner::class)->dueCount((int) $this->runs()[0]['id']));
     }
 
     public function testThePauseAndResumeControlsTakeARemoveRun(): void

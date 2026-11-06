@@ -11,13 +11,19 @@
             <strong>{{ ({add: 'inbound_move.run.title_add', remove: 'inbound_move.run.title_remove'}[run.kind] ?? 'inbound_move.run.title')|trans({'%run%': run.id}) }}</strong>
             <span class="badge badge-{{ {planned: 'info', running: 'primary', paused: 'warning', done: 'success', cancelled: 'secondary'}[run.status] ?? 'secondary' }}" data-run-status="{{ run.status }}">{{ ('inbound_move.status.' ~ run.status)|trans }}</span>
         </p>
-        <p class="form-text mb-1">{{ ('inbound_move.status_help.' ~ run.status)|trans }}</p>
+        {% set kind_suffix = run.kind == 'primary' ? '' : '_' ~ run.kind %}
+        <p class="form-text mb-1">{{ ('inbound_move.status_help' ~ kind_suffix ~ '.' ~ run.status)|trans }}</p>
         {% if run.pause_reason %}<p class="mb-1" data-pause-reason>{{ 'inbound_move.run.pause_reason'|trans }} <bdi dir="ltr">{{ run.pause_reason }}</bdi></p>{% endif %}
         <dl class="row mb-1 admin-inbound-move-facts">
-            <dt class="col-sm-4">{{ 'inbound_move.run.target'|trans }}</dt>
+            <dt class="col-sm-4">{{ ('inbound_move.run.target' ~ kind_suffix)|trans }}</dt>
             <dd class="col-sm-8" data-run-target="{{ run.target_id }}">{% if run.target_title is not null %}<bdi>{{ run.target_title }}</bdi> (#{{ run.target_id }}){% else %}{{ 'inbound_move.run.target_deleted'|trans }}{% endif %}</dd>
-            <dt class="col-sm-4">{{ 'inbound_move.run.old_inbound'|trans }}</dt>
-            <dd class="col-sm-8">{{ run.keep_old ? 'inbound_move.run.keep_old'|trans : 'inbound_move.run.grace'|trans({'%hours%': run.grace_hours}) }}</dd>
+            {% if run.kind == 'primary' %}
+                <dt class="col-sm-4">{{ 'inbound_move.run.old_inbound'|trans }}</dt>
+                <dd class="col-sm-8">{{ run.keep_old ? 'inbound_move.run.keep_old'|trans : 'inbound_move.run.grace'|trans({'%hours%': run.grace_hours}) }}</dd>
+            {% elseif run.kind == 'remove' %}
+                <dt class="col-sm-4">{{ 'inbound_move.run.grace_title_remove'|trans }}</dt>
+                <dd class="col-sm-8" data-run-grace="{{ run.grace_hours }}">{{ 'inbound_move.run.grace_remove'|trans({'%hours%': run.grace_hours}) }}</dd>
+            {% endif %}
             <dt class="col-sm-4">{{ 'inbound_move.run.started_by'|trans }}</dt>
             <dd class="col-sm-8" data-started-by>{% if run.started_by is null %}{{ 'inbound_move.run.command_line'|trans }}{% else %}<bdi dir="ltr">{{ run.started_by.email ?? ('#' ~ run.started_by.id) }}</bdi>{% endif %}</dd>
             <dt class="col-sm-4">{{ 'inbound_move.run.created_at'|trans }}</dt>
@@ -30,25 +36,30 @@
             {% endif %}
         </dl>
         <ul class="list-unstyled mb-2" data-run-counts>
-            <li data-count-done="{{ run.counts.done }}">{{ 'inbound_move.count.done'|trans({'%n%': run.counts.done, '%planned%': run.counts.planned}) }}</li>
+            <li data-count-done="{{ run.counts.done }}">{{ ('inbound_move.count.done' ~ kind_suffix)|trans({'%n%': run.counts.done, '%planned%': run.counts.planned}) }}</li>
             <li data-count-failed="{{ run.counts.failed }}">{{ 'inbound_move.count.failed'|trans({'%n%': run.counts.failed, '%given_up%': run.given_up}) }}</li>
             <li data-count-skipped="{{ run.counts.skipped }}">{{ 'inbound_move.count.skipped'|trans({'%n%': run.counts.skipped}) }}{% if run.skipped_by_reason is not empty %}:
                 {% for reason, n in run.skipped_by_reason %}<span class="text-nowrap" data-skip-reason="{{ reason }}">{{ ('inbound_move.skip.' ~ reason)|trans }} ({{ n }})</span>{{ not loop.last ? 'inbound_move.separator'|trans : '' }}{% endfor %}{% endif %}</li>
-            <li data-count-remaining="{{ run.counts.remaining }}">{{ 'inbound_move.count.remaining'|trans({'%count%': run.counts.remaining}) }}</li>
-            <li data-count-retired="{{ run.retired }}">{{ 'inbound_move.count.retired'|trans({'%count%': run.retired}) }}{% if run.waiting_retire > 0 %} · {{ 'inbound_move.count.waiting_retire'|trans({'%count%': run.waiting_retire, '%at%': run.next_retire_at}) }}{% endif %}</li>
-            {% if run.undone > 0 or run.cancelled > 0 %}<li>{{ 'inbound_move.count.undone_cancelled'|trans({'%undone%': run.undone, '%cancelled%': run.cancelled}) }}</li>{% endif %}
+            <li data-count-remaining="{{ run.counts.remaining }}">{{ ('inbound_move.count.remaining' ~ kind_suffix)|trans({'%count%': run.counts.remaining}) }}</li>
+            {% if run.kind == 'primary' %}
+                <li data-count-retired="{{ run.retired }}">{{ 'inbound_move.count.retired'|trans({'%count%': run.retired}) }}{% if run.waiting_retire > 0 %} · {{ 'inbound_move.count.waiting_retire'|trans({'%count%': run.waiting_retire, '%at%': run.next_retire_at}) }}{% endif %}</li>
+            {% else %}
+                {% if run.kind == 'remove' and run.waiting_retire > 0 %}<li data-count-waiting="{{ run.waiting_retire }}">{{ 'inbound_move.count.waiting_remove'|trans({'%count%': run.waiting_retire, '%at%': run.next_retire_at}) }}</li>{% endif %}
+                {% if run.links_pending > 0 %}<li data-count-links="{{ run.links_pending }}">{{ ('inbound_move.count.links_pending' ~ kind_suffix)|trans({'%n%': run.links_pending}) }}</li>{% endif %}
+            {% endif %}
+            {% if run.undone > 0 or run.cancelled > 0 %}<li>{{ ('inbound_move.count.undone_cancelled' ~ kind_suffix)|trans({'%undone%': run.undone, '%cancelled%': run.cancelled}) }}</li>{% endif %}
         </ul>
         {% if run.plan_changed %}
-            <p class="alert alert-warning py-2" data-plan-changed>{{ (run.open ? 'inbound_move.run.plan_changed_open' : 'inbound_move.run.plan_changed')|trans({'%run%': run.id}) }}</p>
+            <p class="alert alert-warning py-2" data-plan-changed>{{ ((run.open ? 'inbound_move.run.plan_changed_open' : 'inbound_move.run.plan_changed') ~ kind_suffix)|trans({'%run%': run.id}) }}</p>
         {% endif %}
-        {% if run.retired > 0 %}
+        {% if run.retired > 0 and run.kind == 'primary' %}
             {# Undo cannot put these back (5.4): the command line's text. #}
             <p class="form-text" data-undo-retired="{{ run.retired }}">{{ 'inbound_move.undo_already_retired'|trans({'%count%': run.retired, '%plan%': plan.id}) }}</p>
         {% endif %}
         <div class="d-flex flex-wrap gap-2 mb-2" data-run-buttons>
             {% for action in ['pause', 'resume', 'retry', 'cancel', 'undo'] %}
-                {% if attribute(run.can, action) and (enabled or action in ['pause', 'cancel']) %}
-                    <form method="post" action="{{ path('admin_inbound_move_run_action', {id: run.id, action: action}) }}" data-run-action="{{ action }}"{% if action in ['cancel', 'undo'] %} onsubmit="return confirm('{{ ('inbound_move.confirm.' ~ action)|trans|e('js') }}')"{% endif %}>
+                {% if attribute(run.can, action) and (enabled or action in ['pause', 'cancel']) and not (run.multi_off and action in ['resume', 'retry']) %}
+                    <form method="post" action="{{ path('admin_inbound_move_run_action', {id: run.id, action: action}) }}" data-run-action="{{ action }}"{% if action in ['cancel', 'undo'] %} onsubmit="return confirm('{{ ('inbound_move.confirm.' ~ action ~ kind_suffix)|trans|e('js') }}')"{% endif %}>
                         <input type="hidden" name="_token" value="{{ csrf_token('inbound-move-run-' ~ run.id) }}">
                         <button type="submit" class="btn btn-sm {{ {pause: 'btn-secondary', resume: 'btn-primary', retry: 'btn-warning', cancel: 'btn-outline-danger', undo: 'btn-danger'}[action] }}">{{ ('inbound_move.action.' ~ action)|trans }}</button>
                     </form>
@@ -57,6 +68,8 @@
         </div>
         {% if not enabled and (run.can.resume or run.can.retry or run.can.undo) %}
             <p class="form-text" data-switch-off-buttons>{{ 'inbound_move.run.switch_off_buttons'|trans }}</p>
+        {% elseif run.multi_off and (run.can.resume or run.can.retry) %}
+            <p class="form-text" data-multi-off-buttons>{{ 'inbound_move.run.switch_off_multi'|trans }}</p>
         {% endif %}
     {% endif %}
     {% if problems.failed > 0 %}

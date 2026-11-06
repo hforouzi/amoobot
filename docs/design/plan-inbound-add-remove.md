@@ -1,7 +1,7 @@
 # Adding or removing one inbound on a plan's existing services (P11) — design
 
-Status: **design decided, P11a, P11b and P11c built** (sections 13.1 to 13.3). `add` and `remove` work from the command
-line and the scheduled task, and are not on the web or in the Mini App yet. The owner has decided
+Status: **design decided, P11a to P11d built** (sections 13.1 to 13.4). `add` and `remove` work from the command line, the
+scheduled task and the web panel, and are not in the Mini App yet. The owner has decided
 Q1 to Q9 and Q11 as recommended in 12.2. Q10 (the real-panel checklist first) is still open. Persian summary:
 [docs/fa/design/plan-inbound-add-remove.md](../fa/design/plan-inbound-add-remove.md).
 
@@ -646,3 +646,27 @@ Where it goes beyond the text above, or differs from it:
   timer stopped between read and write in both orders, "Retry attach" in both orders and at once, link reset, Regenerate, two
   runners), `InboundMoveRemoveRedactionTest`, `InboundMoveRemoveLockHoldTest` (real time), `DeletedServiceRowsTest`, and mode
   `timer` in `tests/Support/bin/inbound-move.php`.
+
+### 13.4 P11d as built
+
+- **Shared layer.** `InboundMoveActions` carries the kinds. `InboundMovePlanner` gives the rule as a code
+  (`addTargetIssue()`, `removeTargetIssue()`, `isBackingPlan()`), and the command's texts come from those codes, unchanged.
+- **GET asks no panel.** `addCandidates(..., localOnly: true)` and `addProtocolMix(..., readPanel: false)` count from the bot's
+  rows. What only the panel can answer shows as `data-unchecked` and is decided when the run is created, as the command's.
+- **The buttons are open to both kinds.** `planRun()` and `planOfRun()` take `RUNNABLE_KINDS`. `retryFailed()` lost its kind
+  refusal. `InboundMoveControls::RETRYABLE_SQL` is the one definition of what a retry may take, so the button, the count and
+  the action agree.
+- **An add whose undo stopped is not retryable.** Its row is held ("being removed by undo of run #N"), and a retry would attach
+  under the hold (`InboundMoveRunner::ADD_UNDO_HELD_SQL`). A failed remove is retryable: it starts with a read, and the row
+  stays held.
+- **`plans.multi_inbound_enabled` off** refuses create, resume and retry for `add` and `remove`. Pause, cancel and undo stay
+  (6.3), and undo needs `plans.inbound_move_enabled` alone.
+- **The Undo button** also counts moves whose undo was cut off or still owes links, since only undo finishes those.
+- **The text "undo cannot put back"** and the "retired" count are for `primary` only: a done `add` or `remove` can be undone.
+- **The dry-run summary counts everything that is not a skip**, not only `ACTION_MOVE`.
+- **`--retire-now` stays on the command line**: this PR adds no web button for it.
+- **Translation note.** A label beginning with one "Word:" and using `%count%` is read as a plural and cut, so those labels use
+  `%n%`.
+- **Tests changed because they pinned the closure:** `InboundMoveOtherKindsTest` (`testThePagesTakeARunOfEitherKind`),
+  `InboundMoveAddTest` (`testRetryNowMakesAFailedAddDueWithItsAttemptsFromZero`), `InboundMoveRemoveTest`
+  (`testRetryNowMakesAFailedRemoveDueAndKeepsItsRowHeld`). New: `InboundMoveAddRemoveWebTest`.

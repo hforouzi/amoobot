@@ -367,17 +367,18 @@ final class InboundMoveAddTest extends IntegrationTestCase
         self::assertSame([], $this->fake->requests);
     }
 
-    public function testTheWebButtonsStayClosedToAnAddRun(): void
+    public function testRetryNowMakesAFailedAddDueWithItsAttemptsFromZero(): void
     {
         $service = $this->goldService(1);
         $this->fake->script('POST', 'panel/api/clients/tg_p1_1/attach', Fake3xuiPanel::envelope(false, null, 'no such inbound'));
         $this->add(['--apply' => true]);
-        $before = $this->moves();
+        self::assertSame('failed', $this->moves()[0]['state']);
 
-        // A failed add shows on the service page, whose "Retry now" comes here. P11d opens it.
-        self::assertFalse(self::getContainer()->get(InboundMoveControls::class)->retryFailed((int) $this->runs()[0]['id'], true, (int) $service->getId())['ok']);
+        // A failed add shows on the service page, whose "Retry now" comes here (P11d).
+        self::assertTrue(self::getContainer()->get(InboundMoveControls::class)->retryFailed((int) $this->runs()[0]['id'], true, (int) $service->getId())['ok']);
 
-        self::assertSame($before, $this->moves());
+        self::assertSame(0, (int) $this->moves()[0]['attempts']);
+        self::assertSame(1, self::getContainer()->get(InboundMoveRunner::class)->dueCount((int) $this->runs()[0]['id']));
     }
 
     public function testAClientNotOnItsPrimaryFailsWithNothingSent(): void

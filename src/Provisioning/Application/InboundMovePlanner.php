@@ -90,6 +90,14 @@ final class InboundMovePlanner
     public const MAX_READ_FAILURES_IN_A_ROW = InboundAttachScheduler::MAX_CONSECUTIVE_FAILURES;
     public const SOURCE = 'inbound_move';
 
+    /** Why a plan refuses a target of kind=add or kind=remove (the plan rule): one code per rule, shown by each surface. */
+    public const TARGET_BACKING = 'backing';
+    public const TARGET_NOT_IN_PLAN = 'not_in_plan';
+    public const TARGET_INACTIVE = 'inactive';
+    public const TARGET_OTHER_PANEL = 'other_panel';
+    public const TARGET_IS_PRIMARY = 'is_primary';
+    public const TARGET_IN_PLAN = 'in_plan';
+
     /** States of a move that is not finished: another run must not take the service meanwhile (6.2). */
     private const UNFINISHED_SQL = "(m.state IN ('planned', 'attaching', 'detaching') OR (m.state = 'switched' AND m.detach_after IS NOT NULL) OR (m.state = 'failed' AND m.next_attempt_at IS NOT NULL))";
 
@@ -192,13 +200,26 @@ final class InboundMovePlanner
     public function addTargetProblem(Plan $plan, VpnInbound $target): ?string
     {
         $name = sprintf('"%s" (#%d)', mb_substr($target->getTitle(), 0, 60), (int) $target->getId());
+
+        return match ($this->addTargetIssue($plan, $target)) {
+            self::TARGET_BACKING => sprintf('Plan #%d backs a trial: its inbounds are fixed, so no inbound is added.', (int) $plan->getId()),
+            self::TARGET_NOT_IN_PLAN => sprintf('The plan does not sell inbound %s as an additional inbound: add it to the plan first.', $name),
+            self::TARGET_INACTIVE => sprintf('The inbound %s is inactive: no run is created for an inactive target.', $name),
+            self::TARGET_OTHER_PANEL => sprintf('The inbound %s is on another panel than the plan\'s primary inbound.', $name),
+            default => null,
+        };
+    }
+
+    /** addTargetProblem() as a code (TARGET_*), or null: the web and the Mini App show their own text for it. */
+    public function addTargetIssue(Plan $plan, VpnInbound $target): ?string
+    {
         $primary = $plan->getInbound();
 
         return match (true) {
-            $this->trialBackingPlans->isBacking($plan) => sprintf('Plan #%d backs a trial: its inbounds are fixed, so no inbound is added.', (int) $plan->getId()),
-            !in_array((int) $target->getId(), $this->planAdditionalIds((int) $plan->getId()), true) => sprintf('The plan does not sell inbound %s as an additional inbound: add it to the plan first.', $name),
-            !$target->isActive() => sprintf('The inbound %s is inactive: no run is created for an inactive target.', $name),
-            null !== $primary && (int) $primary->getPanel()->getId() !== (int) $target->getPanel()->getId() => sprintf('The inbound %s is on another panel than the plan\'s primary inbound.', $name),
+            $this->trialBackingPlans->isBacking($plan) => self::TARGET_BACKING,
+            !in_array((int) $target->getId(), $this->planAdditionalIds((int) $plan->getId()), true) => self::TARGET_NOT_IN_PLAN,
+            !$target->isActive() => self::TARGET_INACTIVE,
+            null !== $primary && (int) $primary->getPanel()->getId() !== (int) $target->getPanel()->getId() => self::TARGET_OTHER_PANEL,
             default => null,
         };
     }
@@ -212,12 +233,29 @@ final class InboundMovePlanner
     {
         $name = sprintf('"%s" (#%d)', mb_substr($target->getTitle(), 0, 60), (int) $target->getId());
 
-        return match (true) {
-            $this->trialBackingPlans->isBacking($plan) => sprintf('Plan #%d backs a trial: its inbounds are fixed, so no inbound is removed.', (int) $plan->getId()),
-            (int) $plan->getInbound()?->getId() === (int) $target->getId() => sprintf('The inbound %s is the plan\'s primary inbound: it is never removed. Change the plan\'s inbound and move the services instead (--kind=primary).', $name),
-            in_array((int) $target->getId(), $this->planAdditionalIds((int) $plan->getId()), true) => sprintf('The plan still sells inbound %s: remove it from the plan first.', $name),
+        return match ($this->removeTargetIssue($plan, $target)) {
+            self::TARGET_BACKING => sprintf('Plan #%d backs a trial: its inbounds are fixed, so no inbound is removed.', (int) $plan->getId()),
+            self::TARGET_IS_PRIMARY => sprintf('The inbound %s is the plan\'s primary inbound: it is never removed. Change the plan\'s inbound and move the services instead (--kind=primary).', $name),
+            self::TARGET_IN_PLAN => sprintf('The plan still sells inbound %s: remove it from the plan first.', $name),
             default => null,
         };
+    }
+
+    /** removeTargetProblem() as a code (TARGET_*), or null: the web and the Mini App show their own text for it. */
+    public function removeTargetIssue(Plan $plan, VpnInbound $target): ?string
+    {
+        return match (true) {
+            $this->trialBackingPlans->isBacking($plan) => self::TARGET_BACKING,
+            (int) $plan->getInbound()?->getId() === (int) $target->getId() => self::TARGET_IS_PRIMARY,
+            in_array((int) $target->getId(), $this->planAdditionalIds((int) $plan->getId()), true) => self::TARGET_IN_PLAN,
+            default => null,
+        };
+    }
+
+    /** Whether $plan is a trial's backing plan, which takes no add and no remove (6.6): the selectors do not show for it. */
+    public function isBackingPlan(Plan $plan): bool
+    {
+        return $this->trialBackingPlans->isBacking($plan);
     }
 
     /** The plan of a service (through its order), or null. */
@@ -287,11 +325,15 @@ final class InboundMovePlanner
      *
      * @param bool                                       $readPanel dry run: GET each service's client (budgeted, read only)
      * @param \Closure(InboundMoveCandidate): void|null $onEach    called per service
+     * @param bool                                       $localOnly no panel call at all (the page's dry run, P11d): as in
+     *                                                              candidates(), the protocol rules that need
+     *                                                              inbounds/options are not checked (a note says so)
      *
      * @return list<InboundMoveCandidate>
      */
-    public function addCandidates(Plan $plan, VpnInbound $target, InboundMoveScope $scope, bool $readPanel = false, ?\Closure $onEach = null): array
+    public function addCandidates(Plan $plan, VpnInbound $target, InboundMoveScope $scope, bool $readPanel = false, ?\Closure $onEach = null, bool $localOnly = false): array
     {
+        $readPanel = $readPanel && !$localOnly;
         $candidates = [];
         $readFailures = 0;
         foreach ($this->serviceRows($plan, $target, $scope, self::ROWS_NOT_ATTACHED) as $row) {
@@ -305,7 +347,7 @@ final class InboundMovePlanner
             );
             [$reason, $otherRun] = $this->addSkipReason($row, $target, $scope, null);
             if (null === $reason) {
-                $mix = $this->addProtocolMix((int) $row['id'], $target);
+                $mix = $this->addProtocolMix((int) $row['id'], $target, !$localOnly);
                 if (true === $mix) {
                     $reason = self::SKIP_PROTOCOL_MIX;
                 } elseif (null === $mix) {
@@ -794,9 +836,11 @@ final class InboundMovePlanner
      * The 4.4 "protocol mix" check for kind=add: the service's primary, its additional rows (not detached) and C. Never
      * call it inside a transaction.
      *
+     * @param bool $readPanel false: never read the panel; null when the answer would need it (the page's dry run)
+     *
      * @return bool|null true: the mix breaks a rule (skip); false: fine; null: the panel could not be read
      */
-    public function addProtocolMix(int $serviceId, VpnInbound $target): ?bool
+    public function addProtocolMix(int $serviceId, VpnInbound $target, bool $readPanel = true): ?bool
     {
         $primaryId = $this->connection()->fetchOne('SELECT inbound_id FROM vpn_service WHERE id = ?', [$serviceId]);
         $primary = null === $primaryId || false === $primaryId ? null : $this->entityManager->find(VpnInbound::class, (int) $primaryId);
@@ -811,7 +855,7 @@ final class InboundMovePlanner
             }
         }
 
-        return $this->protocolRulesBroken($primary, $additional);
+        return $this->protocolRulesBroken($primary, $additional, $readPanel);
     }
 
     /**
