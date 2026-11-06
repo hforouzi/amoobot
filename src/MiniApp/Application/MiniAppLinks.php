@@ -5,12 +5,12 @@ declare(strict_types=1);
 namespace App\MiniApp\Application;
 
 use App\Provisioning\Domain\PublicUrlPolicy;
+use App\Shared\Application\SiteUrls;
 use App\Shared\Infrastructure\SettingValueProvider;
-use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
 
 /**
- * Where the bot points its "Open app" buttons: the Mini App (/app) on the shop's own address (DEFAULT_URI outside a
- * request). Only while the setting miniapp.enabled is on (off by default) and only for a public HTTPS address:
+ * Where the bot points its "Open app" buttons: the Mini App (/app) on the brand domain when there is one, otherwise on
+ * the shop's own address (DEFAULT_URI outside a request). Every web_app URL comes from here. Only while the setting miniapp.enabled is on (off by default) and only for a public HTTPS address:
  * Telegram refuses a web_app button to anything else, and with it the whole message.
  */
 final class MiniAppLinks
@@ -19,7 +19,7 @@ final class MiniAppLinks
 
     public function __construct(
         private readonly SettingValueProvider $settings,
-        private readonly UrlGeneratorInterface $urlGenerator,
+        private readonly SiteUrls $urls,
     ) {
     }
 
@@ -43,7 +43,7 @@ final class MiniAppLinks
         if (!$this->isEnabled()) {
             return null;
         }
-        $url = $this->urlGenerator->generate('miniapp_entry', ['guide' => $slug], UrlGeneratorInterface::ABSOLUTE_URL);
+        $url = $this->urls->customer('miniapp_entry', ['guide' => $slug]);
 
         return null !== $this->publicUrl() && str_starts_with($url, 'https://') ? $url : null;
     }
@@ -54,7 +54,7 @@ final class MiniAppLinks
      */
     public function publicUrl(?int $serviceId = null): ?string
     {
-        $url = $this->urlGenerator->generate('miniapp_entry', null === $serviceId ? [] : ['service' => $serviceId], UrlGeneratorInterface::ABSOLUTE_URL);
+        $url = $this->urls->customer('miniapp_entry', null === $serviceId ? [] : ['service' => $serviceId]);
 
         return str_starts_with($url, 'https://') && PublicUrlPolicy::isPubliclyUsableUrl($url) ? $url : null;
     }
