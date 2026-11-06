@@ -69,15 +69,6 @@ server {
         try_files $uri /index.php$is_args$args;
     }
 
-    # The Mini App's admin section stays on the main domain. Longer prefixes win over /app/ above.
-    location ^~ /app/admin {
-        return 404;
-    }
-
-    location ^~ /app/api/admin {
-        return 404;
-    }
-
     # Static files of the Mini App, and only those. No try_files fallback to PHP.
     location ^~ /miniapp/ {
         try_files $uri =404;

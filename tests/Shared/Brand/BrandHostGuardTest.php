@@ -15,7 +15,8 @@ use Symfony\Component\DomCrawler\Crawler;
 use Symfony\Component\Routing\RouterInterface;
 
 /**
- * On the brand host only the Mini App (not its admin section) and the return page exist. The old host keeps everything.
+ * On the brand host only the Mini App (its admin section included) and the return page exist. The old host keeps
+ * everything.
  */
 final class BrandHostGuardTest extends IntegrationTestCase
 {
@@ -82,12 +83,11 @@ final class BrandHostGuardTest extends IntegrationTestCase
         yield 'old success page' => ['GET', '/payment/success'];
         yield 'old cancel page' => ['GET', '/payment/cancel'];
         yield 'health' => ['GET', '/healthz'];
-        yield 'mini app admin' => ['GET', '/app/admin'];
-        yield 'mini app admin page' => ['GET', '/app/admin/apps'];
-        yield 'mini app admin trailing slash' => ['GET', '/app/admin/'];
-        yield 'mini app admin api' => ['POST', '/app/api/admin/client-apps/check'];
-        yield 'mini app admin encoded' => ['GET', '/app/%61dmin/apps'];
-        yield 'mini app admin api encoded' => ['POST', '/app/api/%61dmin/client-apps/check'];
+        yield 'EasyAdmin encoded' => ['GET', '/%61dmin'];
+        yield 'admin login encoded' => ['GET', '/%61dmin/login'];
+        yield 'webhook encoded' => ['POST', '/telegram/%77ebhook/some-secret'];
+        yield 'subscription page encoded' => ['GET', '/%73/'.str_repeat('a', 43)];
+        yield 'download encoded' => ['GET', '/%64/1'];
         yield 'a short return token' => ['GET', '/payment/return/short'];
         yield 'after the return token' => ['GET', '/payment/return/'.self::TOKEN.'/other'];
         yield 'a logo name that is not one' => ['GET', '/brand/logo/logo.png'];
@@ -158,7 +158,32 @@ final class BrandHostGuardTest extends IntegrationTestCase
         self::assertStringContainsString("connect-src 'self'", $csp);
     }
 
-    public function testASignedInAdminGetsNoAdminSectionOnTheBrandHost(): void
+    /**
+     * @return iterable<string, array{string, string}>
+     */
+    public static function miniAppAdminPaths(): iterable
+    {
+        yield 'home' => ['GET', '/app/admin'];
+        yield 'page' => ['GET', '/app/admin/apps'];
+        yield 'api' => ['POST', '/app/api/admin/client-apps/check'];
+        yield 'home encoded' => ['GET', '/app/%61dmin'];
+        yield 'page encoded' => ['GET', '/app/%61dmin/apps'];
+        yield 'api encoded' => ['POST', '/app/api/%61dmin/client-apps/check'];
+    }
+
+    /** Past the guard and stopped by the Mini App's own sign-in, as on the main host. */
+    #[DataProvider('miniAppAdminPaths')]
+    public function testTheMiniAppAdminAsksForSignInOnTheBrandHost(string $method, string $path): void
+    {
+        $this->start();
+        $this->onHost('brand.example.org');
+
+        $this->client->request($method, $path);
+
+        $this->assertStatus(401);
+    }
+
+    public function testAnAdminUsesTheAdminSectionOnTheBrandHost(): void
     {
         $this->start();
         $this->linkedAdmin('brand@example.test', AdminUser::ROLE_SUPER_ADMIN, self::ADMIN);
@@ -168,20 +193,43 @@ final class BrandHostGuardTest extends IntegrationTestCase
         $session = $this->authenticate(self::ADMIN);
         $nav = new Crawler($this->appGet('/app/view/nav', $session));
         $this->assertStatus(200);
-        self::assertSame(0, $nav->filter('[href^="/app/admin"], [data-view="admin"], [data-section="admin"]')->count());
-        self::assertStringNotContainsString('/app/admin', (string) $this->client->getResponse()->getContent());
+        self::assertSame(1, $nav->filter('a[data-nav-key="admin"][href="/app/admin"]')->count());
 
         $this->appGet('/app/admin', $session);
-        $this->assertStatus(404);
+        $this->assertStatus(200);
         $this->appGet('/app/admin/apps', $session);
-        $this->assertStatus(404);
-
-        $this->onHost('cloud.example.net');
-        $session = $this->authenticate(self::ADMIN);
-        $body = $this->appGet('/app/view/nav', $session);
-        self::assertStringContainsString('/app/admin', $body, 'the old host keeps the admin section');
+        $this->assertStatus(200);
+        $this->appPost('/app/api/admin/client-apps/check', $session);
+        self::assertNotSame('Not Found', $this->client->getResponse()->getContent());
+        self::assertNotSame(401, $this->client->getResponse()->getStatusCode());
     }
 
+    public function testACustomerIsRefusedTheAdminSectionOnTheBrandHost(): void
+    {
+        $this->start();
+        $this->createUser(self::CUSTOMER);
+        $this->onHost('brand.example.org');
+
+        $session = $this->authenticate(self::CUSTOMER);
+
+        $this->appGet('/app/admin', $session);
+        $this->assertStatus(403);
+        $this->appGet('/app/admin/apps', $session);
+        $this->assertStatus(403);
+    }
+
+    public function testEasyAdminStaysClosedForASignedInAdminOnTheBrandHost(): void
+    {
+        $this->start();
+        $this->linkedAdmin('brand@example.test', AdminUser::ROLE_SUPER_ADMIN, self::ADMIN);
+        $this->createUser(self::ADMIN);
+        $this->onHost('brand.example.org');
+
+        $session = $this->authenticate(self::ADMIN);
+
+        self::assertSame('Not Found', $this->appGet('/admin', $session));
+        $this->assertStatus(404);
+    }
     public function testTheOperationalHostKeepsEverything(): void
     {
         $this->start();
@@ -225,20 +273,20 @@ final class BrandHostGuardTest extends IntegrationTestCase
 
         foreach (self::getContainer()->get(RouterInterface::class)->getRouteCollection() as $name => $route) {
             $path = $route->getPath();
-            $adminSection = str_starts_with($name, 'miniapp_admin') || str_starts_with((string) $route->getDefault('_miniapp_section'), 'admin');
 
             if (in_array($name, ['payment_return', 'payment_return_cancel', 'brand_logo'], true)) {
                 continue;
             }
-            if ($adminSection || !str_starts_with($name, 'miniapp_')) {
+            if (!str_starts_with($name, 'miniapp_')) {
                 self::assertFalse(BrandHostGuard::isServed($path), sprintf('%s (%s) must not be served on the brand host', $name, $path));
             } else {
-                self::assertTrue(BrandHostGuard::isServed($path), sprintf('%s (%s) belongs to the customer Mini App', $name, $path));
+                self::assertTrue(BrandHostGuard::isServed($path), sprintf('%s (%s) belongs to the Mini App', $name, $path));
                 $served[] = $name;
             }
         }
 
         self::assertContains('miniapp_entry', $served);
+        self::assertContains('miniapp_admin', $served);
         self::assertTrue(BrandHostGuard::isServed('/payment/return/'.self::TOKEN));
         self::assertTrue(BrandHostGuard::isServed('/payment/return/'.self::TOKEN.'/cancel'));
         self::assertTrue(BrandHostGuard::isServed('/brand/logo/'.str_repeat('a', 32).'.png'));

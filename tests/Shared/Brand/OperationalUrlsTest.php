@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Shared\Brand;
 
+use App\Entity\AdminUser;
 use App\Entity\User;
 use App\Entity\VpnService;
 use App\Payment\Application\PaymentCustomerNotifier;
@@ -32,6 +33,7 @@ final class OperationalUrlsTest extends IntegrationTestCase
     use MiniAppTestTrait;
 
     private const CUSTOMER = '9101';
+    private const ADMIN = '9102';
 
     protected function setUp(): void
     {
@@ -117,6 +119,28 @@ final class OperationalUrlsTest extends IntegrationTestCase
         $installs = $page->filter('a[href$="/d/'.$download->getId().'"]')->each(static fn (Crawler $c): string => (string) $c->attr('href'));
         self::assertNotEmpty($installs);
         self::assertSame([self::OPERATIONAL_BASE.'/d/'.$download->getId()], array_values(array_unique($installs)));
+    }
+
+    public function testTheMiniAppAdminOnTheBrandHostLinksTheSubscriptionPageToTheOperationalHost(): void
+    {
+        $this->em->getConnection()->executeStatement('DELETE FROM mini_app_session');
+        $this->em->getConnection()->executeStatement('DELETE FROM admin_audit_log');
+        $this->em->getConnection()->executeStatement('DELETE FROM admin_user');
+        $this->linkedAdmin('brand@example.test', AdminUser::ROLE_SUPER_ADMIN, self::ADMIN);
+        $this->createUser(self::ADMIN);
+        $service = $this->service($this->createUser(self::CUSTOMER));
+        $this->startMiniAppClient();
+        $this->client->setServerParameter('HTTP_HOST', 'brand.example.org');
+        $this->client->setServerParameter('HTTPS', 'on');
+
+        $html = $this->appGet('/app/admin/services/'.$service->getId(), $this->authenticate(self::ADMIN));
+
+        self::assertSame(200, $this->httpStatus());
+        $url = self::OPERATIONAL_BASE.'/s/'.$service->getPublicToken();
+        $page = new Crawler($html);
+        self::assertSame($url, $page->filter('a[data-page-link]')->attr('href'));
+        self::assertCount(1, $page->filter('button[data-copy="'.$url.'"]'));
+        self::assertStringNotContainsString('brand.example.org', $html);
     }
 
     private function requestOnTheBrandHost(): void
