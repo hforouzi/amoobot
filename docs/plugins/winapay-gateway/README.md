@@ -44,6 +44,54 @@ the Winapay panel (RefID is kept when Winapay sends one).
 `-18` (paid but Winapay could not update the merchant wallet) is treated as a retryable error: the money was
 taken, so check the Winapay panel if a payment stays pending with this message.
 
+## Payments whose browser never came back
+
+Winapay has no server-to-server notification. If the customer pays and closes the browser before the callback, nothing
+tells Amoobot, and the payment stays pending although the money was paid. `app:payments:winapay-reconcile` asks Winapay
+about those payments.
+
+```bash
+# dry-run (default): lists the payments. Winapay is not called, nothing is written
+php bin/console app:payments:winapay-reconcile
+
+# verify at Winapay and settle the paid ones
+php bin/console app:payments:winapay-reconcile --apply
+```
+
+| Option | Default | Meaning |
+|---|---|---|
+| `--min-age-minutes` | `10` | Only payments created at least this long ago |
+| `--max-age-hours` | `24` | Only payments created at most this long ago |
+| `--limit` | `100` | Max payments in one run, newest first. A warning says when more match |
+
+**The setting.** `--apply` does nothing unless `payments.winapay_reconcile_enabled` is on. It is off by default, and a
+missing, empty or unknown value counts as off. Run `php bin/console app:settings:seed` once to add the row (as `false`),
+then edit it in Admin > Settings. The dry-run also works with the setting off.
+
+**Why the dry-run does not call Winapay.** `PaymentVerification` answers `100` once and `101` after that (see below), so
+a verify in a preview would use up the proof that `--apply` needs.
+
+It selects pending payments of active Winapay gateways with a stored Authority. For each one:
+
+| Winapay answer | What the command does |
+|---|---|
+| `100` with `RefID` and exactly the expected `Amount` | Settles through `PaymentSettlementService`, like the callback. Source: `winapay_reconcile_command` |
+| `100` with another `Amount` | Does not settle, even within the gateway's tolerance. Logs an error |
+| `101`, or `100` without proof | Does not settle and does **not** park the payment in review. Logs an error |
+| Not paid, other codes, network errors, timeouts | Leaves it pending and logs it. The next run asks again |
+
+Payments are never marked failed. The exit code is non-zero only when the driver is unavailable or a settlement fails.
+There is no timer yet: the command runs only when someone runs it.
+
+**After an error in the log.** Compare the payment with the Winapay panel. Winapay answers `101` for it from then on, so
+the command will not settle it on a later run. After a mismatch, a `101` or a missing proof, decide by hand: approve the
+payment in Admin > Payments, or reject it. The log line has the payment id. Authority and MerchantID are never logged.
+
+**Callback and reconcile at the same time.** They cannot settle twice: both call the same `settle()`, which locks the
+order and the payment and does nothing unless the payment is still pending. One rare case ends in review instead of
+confirmed: the command gets the `100`, the callback gets the `101` and reaches the lock first. The command then logs an
+error saying that it holds the proof, and an admin can approve the payment.
+
 ## Setup in the Winapay panel
 
 1. Get your **MerchantID** from the Winapay panel.
