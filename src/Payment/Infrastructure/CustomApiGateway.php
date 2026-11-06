@@ -16,9 +16,9 @@ use App\Payment\Domain\Webhook\GatewayNotification;
 use App\Payment\Domain\Webhook\NotificationAwareGatewayInterface;
 use App\Payment\Domain\Webhook\RequestPayload;
 use App\Entity\PaymentGateway;
+use App\Shared\Application\SiteUrls;
 use App\Shared\Infrastructure\SafeErrorLog;
 use Symfony\Component\HttpFoundation\Request;
-use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
 use Symfony\Contracts\HttpClient\Exception\TransportExceptionInterface;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 
@@ -29,7 +29,7 @@ final class CustomApiGateway implements PaymentGatewayInterface, NotificationAwa
 
     public function __construct(
         private readonly HttpClientInterface $httpClient,
-        private readonly UrlGeneratorInterface $urlGenerator,
+        private readonly SiteUrls $urls,
         private readonly ArrayPathReader $arrayPathReader,
     ) {
     }
@@ -489,10 +489,10 @@ final class CustomApiGateway implements PaymentGatewayInterface, NotificationAwa
             'shop_currency' => AmountNormalizer::SHOP_CURRENCY,
             'order_id' => (string) ($order->getId() ?? 0),
             'payment_id' => (string) ($payment->getId() ?? 0),
-            'callback_url' => $gatewayId > 0 ? PaymentReturnUrl::withToken($this->urlGenerator->generate('payment_callback_custom_api', ['gatewayId' => $gatewayId], UrlGeneratorInterface::ABSOLUTE_URL), $payment) : '',
-            'return_url' => $this->urlGenerator->generate('payment_return', ['token' => $payment->ensureReturnToken()], UrlGeneratorInterface::ABSOLUTE_URL),
+            'callback_url' => $gatewayId > 0 ? PaymentReturnUrl::withToken($this->urls->operational('payment_callback_custom_api', ['gatewayId' => $gatewayId]), $payment) : '',
+            'return_url' => $this->urls->customer('payment_return', ['token' => $payment->ensureReturnToken()]),
             'return_token' => $payment->ensureReturnToken(),
-            'webhook_url' => $gatewayId > 0 ? $this->urlGenerator->generate('payment_webhook_custom_api', ['gatewayId' => $gatewayId], UrlGeneratorInterface::ABSOLUTE_URL) : '',
+            'webhook_url' => $gatewayId > 0 ? $this->urls->operational('payment_webhook_custom_api', ['gatewayId' => $gatewayId]) : '',
             'description' => $description,
             'transaction_id' => (string) ($transactionId ?? ''),
             'authority' => (string) ($authority ?? ''),
