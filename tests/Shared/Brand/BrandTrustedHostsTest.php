@@ -28,10 +28,10 @@ final class BrandTrustedHostsTest extends WebTestCase
 
         $client->request('GET', 'https://cloud.example.net/healthz');
         self::assertLessThan(500, $client->getResponse()->getStatusCode());
-        $client->request('GET', 'https://evil.example.com/healthz');
-        self::assertSame(400, $client->getResponse()->getStatusCode());
-        $client->request('GET', 'https://sub.brand.example.org/app');
-        self::assertSame(400, $client->getResponse()->getStatusCode());
+        foreach (['https://evil.example.com/healthz', 'https://sub.brand.example.org/app'] as $url) {
+            $client->request('GET', $url);
+            self::assertSame(400, $client->getResponse()->getStatusCode(), $url);
+        }
     }
 
     public function testNoBrandAndAnInvalidBrandKeepTheHostCheckOff(): void
@@ -52,9 +52,7 @@ final class BrandTrustedHostsTest extends WebTestCase
     public function testNoCookieDomainIsShared(): void
     {
         self::bootKernel();
-        $options = self::getContainer()->getParameter('session.storage.options');
 
-        self::assertIsArray($options);
-        self::assertEmpty($options['cookie_domain'] ?? null);
+        self::assertStringNotContainsString('cookie_domain', (string) json_encode(self::getContainer()->getParameter('session.storage.options')));
     }
 }
