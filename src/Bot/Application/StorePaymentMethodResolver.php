@@ -76,7 +76,7 @@ final class StorePaymentMethodResolver
             if (!$method->isActive() || !$gateway->isActive() || null !== $this->pluginStatusReason($gateway)) {
                 continue;
             }
-            $driver = $this->driver($gateway);
+            $driver = $this->driver($gateway, true);
             if (!is_string($driver) && $this->isGatewayConfiguredForResolver($gateway) && !in_array(self::GATEWAY_NOT_USABLE, $this->constraintSkipReasons($driver, $gateway, null), true)) {
                 $offerable[] = $method;
             }
@@ -207,7 +207,9 @@ final class StorePaymentMethodResolver
                 $skipReasons[] = $pluginStatusReason;
             }
 
-            $driver = $this->driver($gateway);
+            // A plugin with a status reason has no driver: resolving it would only add the registry's warning to every
+            // listing. Nor is a failure to load worth a warning on a method or gateway that is switched off.
+            $driver = $pluginStatusReason ?? $this->driver($gateway, $method->isActive() && $gateway->isActive());
             $hasDriver = !is_string($driver);
             if (is_string($driver) && null === $pluginStatusReason) {
                 $skipReasons[] = $driver;
@@ -274,9 +276,10 @@ final class StorePaymentMethodResolver
     }
 
     /**
-     * The gateway's driver, or the reason it has none.
+     * The gateway's driver, or the reason it has none. $logFailure: the method is on offer, so a plugin that does not
+     * load is unexpected.
      */
-    private function driver(PaymentGateway $gateway): PaymentGatewayInterface|string
+    private function driver(PaymentGateway $gateway, bool $logFailure): PaymentGatewayInterface|string
     {
         $gatewayType = trim($gateway->getType());
         if ('' === $gatewayType) {
@@ -286,7 +289,7 @@ final class StorePaymentMethodResolver
         try {
             return $this->paymentGatewayRegistry->resolve($gateway);
         } catch (\Throwable $exception) {
-            if (null !== $gateway->getPluginCode()) {
+            if ($logFailure && null !== $gateway->getPluginCode()) {
                 $this->logSkipped('The payment plugin could not be loaded; the method is skipped.', $gateway, $exception);
             }
             $message = $exception->getMessage();
