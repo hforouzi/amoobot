@@ -11,7 +11,7 @@
         <p class="muted" data-no-run>{{ 'inbound_move.run.none'|trans }}</p>
     {% else %}
         <div class="head">
-            <strong>{{ 'inbound_move.run.title'|trans({'%run%': run.id}) }}</strong>
+            <strong>{{ ({add: 'inbound_move.run.title_add', remove: 'inbound_move.run.title_remove'}[run.kind] ?? 'inbound_move.run.title')|trans({'%run%': run.id}) }}</strong>
             <span class="badge {{ {planned: 'order-processing', running: 'active', paused: 'limited', done: 'order-completed', cancelled: 'order-cancelled'}[run.status] ?? '' }}" data-run-status="{{ run.status }}">{{ ('inbound_move.status.' ~ run.status)|trans }}</span>
         </div>
         <p class="muted small-print">{{ ('inbound_move.status_help.' ~ run.status)|trans }}</p>

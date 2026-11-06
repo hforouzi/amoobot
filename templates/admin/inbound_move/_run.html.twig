@@ -8,7 +8,7 @@
         <p class="mb-2" data-no-run>{{ 'inbound_move.run.none'|trans }}</p>
     {% else %}
         <p class="mb-1">
-            <strong>{{ 'inbound_move.run.title'|trans({'%run%': run.id}) }}</strong>
+            <strong>{{ ({add: 'inbound_move.run.title_add', remove: 'inbound_move.run.title_remove'}[run.kind] ?? 'inbound_move.run.title')|trans({'%run%': run.id}) }}</strong>
             <span class="badge badge-{{ {planned: 'info', running: 'primary', paused: 'warning', done: 'success', cancelled: 'secondary'}[run.status] ?? 'secondary' }}" data-run-status="{{ run.status }}">{{ ('inbound_move.status.' ~ run.status)|trans }}</span>
         </p>
         <p class="form-text mb-1">{{ ('inbound_move.status_help.' ~ run.status)|trans }}</p>

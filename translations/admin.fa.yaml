@@ -1545,6 +1545,8 @@ inbound_move:
   run.heading: "انتقال سرویس‌های موجود"
   run.none: "هنوز اجرایی نیست: سرویس‌های موجود این پلن هرگز به اینباند جدید منتقل نشده‌اند."
   run.title: "اجرای #%run%"
+  run.title_add: "اجرای #%run%: افزودن اینباند"
+  run.title_remove: "اجرای #%run%: برداشتن اینباند"
   run.pause_reason: "دلیل توقف:"
   run.target: "اینباند مقصد"
   run.target_deleted: "(حذف‌شده)"
