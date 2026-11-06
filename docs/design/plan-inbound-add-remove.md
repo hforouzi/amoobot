@@ -1,6 +1,7 @@
 # Adding or removing one inbound on a plan's existing services (P11) — design
 
-Status: **design decided, P11a built** (section 13.1). `add` and `remove` are not reachable yet. The owner has decided
+Status: **design decided, P11a and P11b built** (sections 13.1, 13.2). `add` works from the command line and the
+scheduled task; `remove`, and `add` on the web and in the Mini App, are not reachable yet. The owner has decided
 Q1 to Q9 and Q11 as recommended in 12.2. Q10 (the real-panel checklist first) is still open. Persian summary:
 [docs/fa/design/plan-inbound-add-remove.md](../fa/design/plan-inbound-add-remove.md).
 
@@ -566,5 +567,40 @@ No behaviour change: no migration, setting, timer or driver change, and every fi
 - `InboundMovePlanner::protocolRulesBroken()`: takes a primary and a list of additional inbounds. `protocolMix()` works
   out that list for a primary move and calls it.
 - `titles()` in the runner, and the run block's title in the web and Mini App templates, per kind (fa and en). The page
-  texts of 9.1 need the kind selector, so they come with P11d. `pass->keptOld` is not kind-aware yet: P11b.
+  texts of 9.1 need the kind selector, so they come with P11d. `pass->keptOld` is kind-aware since P11b.
 - Tests: `tests/Shop/InboundMove/InboundMoveOtherKindsTest.php`. `tests/Shop/InboundMove` is otherwise unchanged.
+
+### 13.2 P11b as built
+
+`--kind=add --inbound=<id>` on `app:plan:apply-inbounds`, and the scheduled task. No migration, setting, timer or driver
+change. `InboundMoveRun::RUNNABLE_KINDS` opens `add` to `process()`, `undo()`, `dueCount()`, `InboundMoveControls` and
+the task; `remove` stays inert. The web and the Mini App stay closed (`planRun()`, `planOfRun()`), and
+`retryFailed()` refuses an `add` run, so the service page's "Retry now" cannot re-arm one.
+
+Where it goes beyond the text above, or differs from it:
+
+- **Skip reasons:** two more. `no_primary` (a service whose primary inbound row is gone: nothing to check the attach
+  against) and `last_inbound` (undo: 5.2's `REFUSED_LAST_INBOUND`).
+- **`already_on_panel` only on a first attempt.** 5.3 says any "already on target". A retry, or a takeover after a crash,
+  may be finding its own earlier attach, and undo must be able to take that off. So those end `done` with no note.
+- **The pause of 6.3 needs unstarted work:** a `planned` move, or a failed one with an attempt left. A link refresh or a
+  stale claim adds nothing new, and pausing for those would leave a cancelled run open for ever. A resume with the
+  plan still contradicting pauses again. A target deleted meanwhile does not pause: each move skips (`target_gone`).
+- **A `switched` move becomes `done` unless the panel could not be read.** An empty `subLinks` answer ends it too: the
+  stored links are true (6.4), and a panel with no links would otherwise hold the run open for good.
+- **Undo of an open run:** `planned` moves are cancelled, `failed` ones are undone, since a failed attach may have landed.
+  That is 7's "applies to", against the primary rule of cancelling them.
+- **Undo's rule for a later run (7):** refused when any later run of the plan exists, except a primary run followed
+  only by primary runs, which keeps its old behaviour.
+- **Undo of a finished move ends in `undone` only when the links are the panel's again.** Until then `next_attempt_at`
+  stays set, the display guard stays on, and pressing `--undo` again does the links alone.
+- **Audit:** `kind` and `target_inbound_id` are added to the entries of an `add` run only. A primary run's entries keep
+  their exact keys.
+- **The other way round of the known limit in 5.4.** A Regenerate that read `subLinks` before the attach and stores
+  after the run leaves C's link out until the next refresh, because an `add` changes neither the identity nor a stamp
+  that would discard that write. Those links are true, only incomplete, and the subscription URL is live.
+- **11.2:** `InboundMoveOtherKindsTest` could not stay unchanged, because P11a pinned `add` as inert "for P11b to open".
+  Its two inert tests now run for `remove`, and a new test keeps the pages closed to both kinds.
+- Tests: `InboundMoveAddTest`, `InboundMoveAddParallelTest` (`kill -9` at each `add` row of 5.4 and in the undo, "Retry
+  attach" in both orders and at once, link reset, Regenerate, two runners), `InboundMoveAddRedactionTest`,
+  `InboundMoveAddLockHoldTest` (real time), and mode `undo` in `tests/Support/bin/inbound-move.php`.
