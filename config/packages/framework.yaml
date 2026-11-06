@@ -1,6 +1,8 @@
 # see https://symfony.com/doc/current/reference/configuration/framework.html
 framework:
     secret: '%env(APP_SECRET)%'
+    # Both hosts while BRAND_PUBLIC_BASE_URL is active; empty (no host check) otherwise.
+    trusted_hosts: '%env(brand_trusted_hosts:default::BRAND_PUBLIC_BASE_URL)%'
     default_locale: '%env(APP_DEFAULT_LOCALE)%'
     enabled_locales: ['fa', 'en']
 
