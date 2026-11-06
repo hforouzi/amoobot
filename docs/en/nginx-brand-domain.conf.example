@@ -1,0 +1,122 @@
+# Example nginx site for the brand domain (BRAND_PUBLIC_BASE_URL). See docs/en/installation.md, "Brand domain".
+#
+# Install it as its own site, for example /etc/nginx/sites-available/amoobot-brand. deploy.sh rewrites only its own
+# site (/etc/nginx/sites-available/amoobot), so this file survives a deploy. Replace stacktunnel.net, /var/www/amoobot
+# and php8.4 with your values.
+#
+# This allowlist repeats the application's (BrandHostGuard) on purpose. Keep both: while BRAND_PUBLIC_BASE_URL is unset
+# or invalid the application serves this host like any other, so during a rollback this file is the only thing that
+# keeps EasyAdmin and the webhook off the brand domain.
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name stacktunnel.net;
+    server_tokens off;
+
+    # ACME http-01 challenges; same webroot as the main site.
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/letsencrypt;
+        default_type text/plain;
+    }
+
+    location = /app {
+        return 301 https://$host$request_uri;
+    }
+
+    location ^~ /app/ {
+        return 301 https://$host$request_uri;
+    }
+
+    location ^~ /payment/return/ {
+        return 301 https://$host$request_uri;
+    }
+
+    location / {
+        return 404;
+    }
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name stacktunnel.net;
+    server_tokens off;
+
+    ssl_certificate /etc/letsencrypt/live/stacktunnel.net/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/stacktunnel.net/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache shared:amoobot_ssl:10m;
+    ssl_session_timeout 1d;
+
+    root /var/www/amoobot/public;
+    index index.php;
+
+    # Payment receipts are uploaded through the Mini App.
+    client_max_body_size 50M;
+
+    # Deny by default: nothing below this line is served unless a location names it.
+    location / {
+        return 404;
+    }
+
+    location = /app {
+        try_files $uri /index.php$is_args$args;
+    }
+
+    location ^~ /app/ {
+        try_files $uri /index.php$is_args$args;
+    }
+
+    # The Mini App's admin section stays on the main domain. Longer prefixes win over /app/ above.
+    location ^~ /app/admin {
+        return 404;
+    }
+
+    location ^~ /app/api/admin {
+        return 404;
+    }
+
+    # Static files of the Mini App, and only those. No try_files fallback to PHP.
+    location ^~ /miniapp/ {
+        try_files $uri =404;
+    }
+
+    location ^~ /brand/logo/ {
+        try_files $uri /index.php$is_args$args;
+    }
+
+    # The URL is a bearer secret: never written to the access log. fastcgi directly (no try_files), because an internal
+    # redirect to /index.php would be logged by that location instead.
+    location ^~ /payment/return/ {
+        access_log off;
+        include /etc/nginx/snippets/amoobot-maintenance.conf;
+        fastcgi_pass unix:/run/php/php8.4-fpm.sock;
+        include fastcgi_params;
+        fastcgi_param SCRIPT_FILENAME $realpath_root/index.php;
+        fastcgi_param SCRIPT_NAME /index.php;
+        fastcgi_param DOCUMENT_ROOT $realpath_root;
+    }
+
+    # internal: /index.php/admin typed by a visitor does not reach PHP.
+    location ~ ^/index\.php(/|$) {
+        fastcgi_pass unix:/run/php/php8.4-fpm.sock;
+        fastcgi_split_path_info ^(.+\.php)(/.*)$;
+        include fastcgi_params;
+        fastcgi_param SCRIPT_FILENAME $realpath_root$fastcgi_script_name;
+        fastcgi_param DOCUMENT_ROOT $realpath_root;
+        internal;
+    }
+
+    location ~ \.php$ {
+        return 404;
+    }
+
+    location ~ /\. {
+        return 404;
+    }
+
+    access_log /var/log/nginx/amoobot_brand_access.log;
+    error_log /var/log/nginx/amoobot_brand_error.log;
+}

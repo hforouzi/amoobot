@@ -32,7 +32,7 @@ Optional environment variable:
 
    ```bash
    php bin/console app:telegram:set-menu-button --dry-run   # shows what would be sent
-   php bin/console app:telegram:set-menu-button             # sets it to https://<DEFAULT_URI host>/app
+   php bin/console app:telegram:set-menu-button             # sets it to https://<DEFAULT_URI host>/app (or the brand domain)
    php bin/console app:telegram:set-menu-button --remove    # back to Telegram's default (the command list)
    ```
 
@@ -57,7 +57,8 @@ None of this is needed for the buttons above. If you also want the app in the bo
 - **Direct link** (`https://t.me/<bot>/<name>`): BotFather → `/newapp`, choose the bot, give a title, description and
   photo, then the URL `https://shop.example.com/app` and a short name.
 
-Use the same URL everywhere; it must match `DEFAULT_URI`.
+Use the same URL everywhere; it must match `DEFAULT_URI`, or `BRAND_PUBLIC_BASE_URL` when a
+[brand domain](installation.md#brand-domain-optional) is set.
 
 ## How sign-in works (security)
 

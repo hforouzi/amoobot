@@ -48,7 +48,8 @@ taken, so check the Winapay panel if a payment stays pending with this message.
 
 1. Get your **MerchantID** from the Winapay panel.
 2. **Register the callback domain**: it must be the host of `callback_base_url` (e.g. `shop.example.com`).
-   Otherwise Winapay answers `-10`.
+   Otherwise Winapay answers `-10`. With a brand domain (`BRAND_PUBLIC_BASE_URL`) nothing changes here: `callback_base_url`
+   stays on the main domain, and the core redirects the customer to the brand's return page after the callback.
 3. **Whitelist the server IP**: add the public outgoing IP of the server that runs Amoobot. Otherwise Winapay
    answers `-9`. Behind NAT or a proxy, use the address Winapay sees.
 4. Make sure the account is an active business account (`-7`, `-8`).
