@@ -145,7 +145,7 @@ whole provisioning, would block a paid customer over one secondary inbound.
 |---|---|
 | Renew, add traffic, suspend, resume (`updateAndVerify` by email) | Unchanged: one record |
 | Reset usage, usage sync | Unchanged: by email |
-| Delete | Unchanged: `del/{email}` (verify it clears every inbound); rows set `detached` |
+| Delete | Unchanged: `del/{email}` (verify it clears every inbound); rows set `detached` (since P11c: rows deleted, plan-inbound-add-remove.md R2) |
 | Regenerate links | Modern: re-read `links/{email}` + `subLinks`; `VpnAccessLinkGenerator` fallback loops over primary + attached rows (VLESS/VMess from the UUID; Trojan/SS need the password from the client GET). **[Hosts]** Replaced by 9.1: modern = `subLinks` only; no generator fallback for an inbound that has Hosts |
 | Panel doctor / health | Lists services with `failed`/`pending` attachments |
 

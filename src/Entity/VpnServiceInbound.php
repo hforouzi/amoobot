@@ -205,15 +205,6 @@ class VpnServiceInbound
     }
 
     /** The client was deleted on the panel (del/{email} removes it from every inbound). */
-    public function markDetached(\DateTimeImmutable $now): self
-    {
-        $this->status = self::STATUS_DETACHED;
-        $this->nextAttemptAt = null;
-        $this->updatedAt = $now;
-
-        return $this;
-    }
-
     /**
      * What last_error may hold (M2c F9): a panel message can quote the client's email (tg_<telegram id>_order_<id>),
      * so the customer's Telegram id and any access credential are masked before it is stored.

@@ -185,7 +185,7 @@ final class MultiInboundServiceOperationsTest extends IntegrationTestCase
 
         self::assertSame(['POST panel/api/clients/del/'.$email, 'GET panel/api/clients/get/'.$email], $this->fake->requestLines(), 'one delete by email');
         self::assertSame([], $this->fake->clients);
-        self::assertSame(['detached', 'detached'], $this->statuses());
+        self::assertSame([], $this->statuses(), 'its rows go with it: they would only hold the inbounds (R2)');
     }
 
     /**

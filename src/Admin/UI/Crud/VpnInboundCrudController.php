@@ -52,6 +52,7 @@ class VpnInboundCrudController extends AbstractCrudController
 
                 return;
             }
+            $this->inboundUsage->clearDeletedServiceRows([(int) $entityInstance->getId()]);
         }
         parent::deleteEntity($entityManager, $entityInstance);
     }

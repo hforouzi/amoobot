@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Shop\Application\Catalog;
 
 use App\Entity\Plan;
+use App\Provisioning\Domain\VpnServiceStatus;
 use Doctrine\DBAL\ArrayParameterType;
 use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\ORM\Query;
@@ -126,6 +127,7 @@ final class PlanInboundUsage implements ResetInterface
     /**
      * Why these inbounds (one, or all of a panel) cannot be deleted, as an admin flash (key and parameters), or null.
      * Only the additional-inbound rows refuse: deleting a plan's primary inbound stays as before (the plan loses it).
+     * Rows of deleted services do not count: see clearDeletedServiceRows().
      *
      * @param list<int> $inboundIds
      *
@@ -141,12 +143,32 @@ final class PlanInboundUsage implements ResetInterface
             return null;
         }
         $services = (int) $this->entityManager->getConnection()->executeQuery(
-            'SELECT COUNT(DISTINCT service_id) FROM vpn_service_inbound WHERE inbound_id IN (?)',
-            [$inboundIds],
+            'SELECT COUNT(DISTINCT r.service_id) FROM vpn_service_inbound r JOIN vpn_service s ON s.id = r.service_id WHERE r.inbound_id IN (?) AND s.status <> ?',
+            [$inboundIds, VpnServiceStatus::DELETED],
             [ArrayParameterType::INTEGER],
         )->fetchOne();
 
         return $services > 0 ? ['key' => 'flash.inbound.held_by_services', 'parameters' => ['%count%' => $services]] : null;
+    }
+
+    /**
+     * Called just before these inbounds are deleted, once deletionProblem() found nothing: the rows that services deleted
+     * in the past left behind as "detached" (ServiceAdministration::delete() removes them since P11c). Nothing reads them
+     * and the client is gone from the panel, but the foreign key would refuse the delete. There is no migration for these
+     * old rows: they are removed here, at the only moment they matter.
+     *
+     * @param list<int> $inboundIds
+     */
+    public function clearDeletedServiceRows(array $inboundIds): void
+    {
+        if ([] === $inboundIds) {
+            return;
+        }
+        $this->entityManager->getConnection()->executeStatement(
+            'DELETE r FROM vpn_service_inbound r JOIN vpn_service s ON s.id = r.service_id WHERE r.inbound_id IN (?) AND s.status = ?',
+            [$inboundIds, VpnServiceStatus::DELETED],
+            [ArrayParameterType::INTEGER],
+        );
     }
 
     /**

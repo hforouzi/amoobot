@@ -212,7 +212,7 @@ carries every attached inbound.
   is not attached: it attaches the missing inbounds to the existing client (it never creates a second client), refreshes
   the stored links, and is limited to 5 per service per 10 minutes. A second click while one runs says "in progress".
   It is refused while the switch is off or the panel is in legacy mode. Deleting the service removes the client from
-  every inbound and marks the rows detached.
+  every inbound and removes its rows, so they never stand in the way of deleting an inbound.
 - **Other operations** (renew, add traffic, suspend, resume, reset usage, usage sync, claim links, "reset my links")
   work on the one client and so on every inbound, as for any service. Resellers pay the plan's price.
 - **`app:service:verify-links <id>`** also checks that the client is on every inbound recorded as attached; the not
@@ -315,7 +315,7 @@ The optional ones are needed only if you will sell that combination.
    to the panel for them (3x-ui: the client is on the primary only). Turn the switch back on and click "Retry attach":
    both rows become "attached".
 10. **Required: delete.** Delete the test services from the admin panel: in 3x-ui the client is gone from every
-    inbound, and the rows show "detached". Then remove the deleted Trojan inbound from the test plan before syncing
+    inbound, and the service's additional inbound rows are gone. Then remove the deleted Trojan inbound from the test plan before syncing
     inbounds.
 11. **Required: reset links and claim.** On a new test service use "Reset links" in the bot, then a claim link to move
     the service to a second Telegram account: the client keeps its three inbounds, and the subscription imports three
