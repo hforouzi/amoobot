@@ -3,6 +3,7 @@
     <p class="admin-page-subtitle">{{ 'plan_settings.subtitle'|trans }}</p>
 
     <form method="post" action="{{ path('admin_settings', {tab: 'plans'}) }}" class="admin-form-card admin-settings-form">
+        <input type="hidden" name="_token" value="{{ csrf_token(csrf) }}">
         <div class="admin-section">
             <h2>{{ 'plan_settings.sections.multi_inbound'|trans }}</h2>
             <div class="admin-checkbox-row">

@@ -10,6 +10,7 @@ use App\Entity\PlanAdditionalInbound;
 use App\Entity\VpnInbound;
 use App\Entity\VpnPanel;
 use App\Provisioning\Domain\SanaeiIntegrationMode;
+use App\Shop\Application\Catalog\PlanInboundUsage;
 use App\Shop\Application\MultiInboundSettings;
 use App\Tests\Support\Fake3xui\Fake3xuiPanel;
 use App\Tests\Support\IntegrationTestCase;
@@ -192,21 +193,20 @@ final class PlanAdminPagesTest extends IntegrationTestCase
         return $added;
     }
 
+    /** The web delete of both is off (their services' clients would stay on the panel); this guard stays behind it. */
     public function testAnInboundOrPanelAPlanSellsAsAnAdditionalOneIsNotDeleted(): void
     {
         $this->addAdditional($this->plan, $this->vmess);
 
-        $this->delete('/admin/vpn-inbound', (int) $this->vmess->getId());
+        foreach (['/admin/vpn-inbound/'.$this->vmess->getId(), '/admin/vpn-panel/'.$this->panel->getId()] as $path) {
+            $this->client->request('POST', $path.'/delete');
+            self::assertSame(403, $this->client->getResponse()->getStatusCode(), $path);
+        }
+
+        $problem = self::getContainer()->get(PlanInboundUsage::class)->deletionProblem([(int) $this->vmess->getId()], 'flash.inbound.used_by_plans');
+        self::assertStringContainsString('#'.$this->plan->getId().' Gold', implode(' ', array_map('strval', $problem['parameters'] ?? [])));
         self::assertNotFalse($this->em->getConnection()->fetchOne('SELECT id FROM vpn_inbound WHERE id = ?', [$this->vmess->getId()]));
-        self::assertStringContainsString('#'.$this->plan->getId().' Gold', $this->flashes());
-
-        $this->delete('/admin/vpn-panel', (int) $this->panel->getId());
         self::assertNotFalse($this->em->getConnection()->fetchOne('SELECT id FROM vpn_panel WHERE id = ?', [$this->panel->getId()]));
-        self::assertStringContainsString('#'.$this->plan->getId().' Gold', $this->flashes());
-
-        // An inbound no plan sells as an additional one is deleted as before.
-        $this->delete('/admin/vpn-inbound', (int) $this->trojan->getId());
-        self::assertFalse($this->em->getConnection()->fetchOne('SELECT id FROM vpn_inbound WHERE id = ?', [$this->trojan->getId()]));
     }
 
     public function testWithoutPlansManageThePlanFormIsClosed(): void
@@ -217,17 +217,6 @@ final class PlanAdminPagesTest extends IntegrationTestCase
         $support->request('GET', '/admin/plan/'.$this->plan->getId().'/edit');
 
         self::assertContains($support->getResponse()->getStatusCode(), [302, 403]);
-    }
-
-    private function delete(string $base, int $id): void
-    {
-        $index = $this->client->request('GET', $base);
-        $token = (string) $index->filter('input[name="token"]')->attr('value');
-        $this->client->request('POST', $base.'/'.$id.'/delete', ['token' => $token]);
-        while ($this->client->getResponse()->isRedirect()) {
-            $this->client->followRedirect();
-        }
-        $this->em->clear();
     }
 
     private function flashes(): string

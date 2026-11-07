@@ -9,6 +9,7 @@ use App\Entity\AdminUser;
 use App\Entity\Setting;
 use App\Shop\Application\InboundMoveSettings;
 use App\Shop\Application\MultiInboundSettings;
+use App\Tests\Support\AdminForms;
 use App\Tests\Support\IntegrationTestCase;
 use App\Tests\Support\SettingsFormCases;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
@@ -22,6 +23,8 @@ use Symfony\Component\DomCrawler\Field\ChoiceFormField;
  */
 final class InboundMoveSettingsTest extends IntegrationTestCase
 {
+    use AdminForms;
+
     private const KEYS = [InboundMoveSettings::ENABLED, InboundMoveSettings::DETACH_GRACE_HOURS, InboundMoveSettings::BATCH_SIZE, InboundMoveSettings::PAUSE_SECONDS];
 
     public function testDefaults(): void
@@ -143,7 +146,7 @@ final class InboundMoveSettingsTest extends IntegrationTestCase
         $client = $this->admin(AdminUser::ROLE_SUPER_ADMIN);
         $client->request('GET', '/admin/locale/en');
 
-        $client->request('POST', '/admin/settings?tab=plans', ['plans_inbound_move_enabled' => 'on', 'plans_inbound_move_batch_size' => '500']);
+        $this->saveSettings($client, 'plans', ['plans_inbound_move_enabled' => 'on', 'plans_inbound_move_batch_size' => '500']);
         if ($client->getResponse()->isRedirect()) {
             $client->followRedirect();
         }

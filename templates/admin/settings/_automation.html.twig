@@ -3,6 +3,7 @@
     <p class="admin-page-subtitle">{{ 'automation_settings.subtitle'|trans }}</p>
 
     <form method="post" action="{{ path('admin_settings', {tab: 'automation'}) }}" class="admin-form-card admin-settings-form">
+        <input type="hidden" name="_token" value="{{ csrf_token(csrf) }}">
         <div class="admin-section">
             <h2>{{ 'automation_settings.sections.tasks'|trans }}</h2>
 

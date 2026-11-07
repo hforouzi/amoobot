@@ -15,6 +15,7 @@ use App\Provisioning\Application\ServiceConfigRegenerator;
 use App\Provisioning\Application\VpnAccessLinkGenerator;
 use App\Provisioning\Domain\SanaeiIntegrationMode;
 use App\Provisioning\Infrastructure\Sanaei3xui\Sanaei3xuiRemoteIdParser;
+use App\Tests\Support\AdminForms;
 use App\Tests\Support\Fake3xui\Fake3xuiPanel;
 use App\Tests\Support\IntegrationTestCase;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
@@ -28,6 +29,8 @@ use Symfony\Component\HttpClient\Response\MockResponse;
  */
 final class PanelLinkSnapshotTest extends IntegrationTestCase
 {
+    use AdminForms;
+
     private const UUID = '7f3c9a10-5b2e-4c8d-9e1f-0a1b2c3d4e5f';
     private const EMAIL = 'tg_77_order_9';
     private const SUB_ID = 'sub0123456789abc';
@@ -172,7 +175,7 @@ final class PanelLinkSnapshotTest extends IntegrationTestCase
         $this->fake->addHostGroup('cdn', [1], ['cdn1.example.com', 'cdn2.example.com']);
         $client = $this->admin();
 
-        $client->request('GET', '/admin/vpn-service/'.$this->service->getId().'/regenerate-config');
+        $this->confirmAction($client, '/admin/vpn-service/'.$this->service->getId().'/regenerate-config');
         self::assertSame(302, $client->getResponse()->getStatusCode());
         $client->followRedirect();
         self::assertStringContainsString('2 لینک (قبلاً 1)', (string) $client->getResponse()->getContent(), 'the count change is shown');
@@ -193,7 +196,7 @@ final class PanelLinkSnapshotTest extends IntegrationTestCase
         $url = '/admin/vpn-inbound/'.$this->inbound->getId().'/regenerate-service-configs';
 
         $client->request('GET', $url);
-        self::assertSame(405, $client->getResponse()->getStatusCode(), 'a link (GET) no longer triggers panel calls');
+        self::assertSame(200, $client->getResponse()->getStatusCode(), 'a link (GET) shows the confirm page and triggers no panel calls');
         $client->request('POST', $url, ['_token' => 'forged']);
         self::assertSame(302, $client->getResponse()->getStatusCode());
         $client->request('POST', $url);
@@ -210,13 +213,9 @@ final class PanelLinkSnapshotTest extends IntegrationTestCase
         $this->em->flush();
         $client = $this->admin();
 
-        $this->pressInboundButton($client);
-
-        self::assertSame(302, $client->getResponse()->getStatusCode());
-        while ($client->getResponse()->isRedirect()) {
-            $client->followRedirect();
-        }
-        $page = html_entity_decode((string) $client->getResponse()->getContent());
+        // The confirm page says so, and offers nothing to press.
+        $page = html_entity_decode((string) $client->request('GET', '/admin/vpn-inbound/'.$this->inbound->getId().'/regenerate-service-configs')->filter('[data-action-confirm]')->html());
+        self::assertStringNotContainsString('<form', $page);
         self::assertStringContainsString('php bin/console app:inbound:regenerate-service-configs '.$this->inbound->getId().' --apply', $page);
         self::assertStringContainsString('11', $page, 'the number of services is named');
         self::assertSame([], $this->fake->requests, 'no panel call');
@@ -262,16 +261,16 @@ final class PanelLinkSnapshotTest extends IntegrationTestCase
         $this->em->clear();
     }
 
-    /** Submits the "regenerate service configs" form of the inbound, as the inbound list renders it. */
+    /** Presses "regenerate service configs" of the inbound in the inbound list, and confirms. */
     private function pressInboundButton(KernelBrowser $client): void
     {
         $crawler = $client->request('GET', '/admin/vpn-panel/'.$this->panel->getId().'/inbounds');
         if ($client->getResponse()->isRedirect()) {
             $crawler = $client->followRedirect();
         }
-        $form = $crawler->filter('form[action*="/vpn-inbound/'.$this->inbound->getId().'/regenerate-service-configs"]');
-        self::assertCount(1, $form, 'the inbound list renders the button as a POST form');
-        $client->submit($form->form());
+        $link = $crawler->filter('a[href*="/vpn-inbound/'.$this->inbound->getId().'/regenerate-service-configs"]');
+        self::assertCount(1, $link, 'the inbound list links to the confirm page');
+        $this->confirmAction($client, (string) $link->attr('href'));
     }
 
     private function admin(): KernelBrowser

@@ -47,6 +47,8 @@ final class AdminCrudPermissions
         'admin_claims_return' => AdminPermission::SERVICES_MANAGE,
         // "Retry now" of a service's inbound move (ServiceInboundsController): a service action, not a plan action.
         'admin_vpn_service_retry_move' => AdminPermission::SERVICES_MANAGE,
+        // A service's own links (VpnPanelInboundActionsController): support's job, not a panel admin's.
+        'admin_vpn_service_regenerate_config' => AdminPermission::SERVICES_ASSIST,
     ];
 
     /** Dashboard, login/logout, locale switch: any admin (access_control ^/admin). */
@@ -89,6 +91,8 @@ final class AdminCrudPermissions
             Crud\VpnServiceCrudController::class => $p(AdminPermission::SERVICES_VIEW, AdminPermission::SERVICES_MANAGE, AdminPermission::SERVICES_DELETE),
             // "New subscription page link" of a service.
             \App\Admin\UI\SubscriptionPageLinkController::class => $p(AdminPermission::SERVICES_MANAGE),
+            // "Delete on panel" of a service.
+            \App\Admin\UI\ServiceDeleteController::class => $p(AdminPermission::SERVICES_DELETE),
             // "Retry attach" of a service's additional inbounds.
             \App\Admin\UI\ServiceInboundsController::class => $p(AdminPermission::SERVICES_MANAGE),
             Crud\BroadcastMessageCrudController::class => $p(AdminPermission::BROADCAST_SEND),
@@ -109,7 +113,6 @@ final class AdminCrudPermissions
             Crud\VpnPanelCrudController::class => $p(AdminPermission::PANELS_MANAGE),
             Crud\VpnInboundCrudController::class => $p(AdminPermission::PANELS_MANAGE),
             PanelSetupController::class => $p(AdminPermission::PANELS_MANAGE),
-            // Also VpnService "regenerate config" (its route lives here).
             VpnPanelInboundActionsController::class => $p(AdminPermission::PANELS_MANAGE),
             Crud\PluginCrudController::class => $p(AdminPermission::PLUGINS_MANAGE),
             Crud\AdminUserCrudController::class => $p(AdminPermission::ADMINS_MANAGE),

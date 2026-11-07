@@ -73,6 +73,8 @@ class UserCrudController extends AbstractCrudController
             ->linkToUrl(fn (User $user): string => $this->generateUrl('admin_wallet_customer', ['id' => $user->getId()]));
 
         return $actions
+            // The row takes its services with it (ON DELETE CASCADE), with no panel call: their clients would stay.
+            ->disable(Action::DELETE, Action::BATCH_DELETE)
             ->add(Crud::PAGE_INDEX, Action::DETAIL)
             ->add(Crud::PAGE_DETAIL, $wallet)
             ->setPermission('customerWallet', AdminPermission::WALLETS_VIEW->value);

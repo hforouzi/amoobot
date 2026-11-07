@@ -9,6 +9,7 @@ use App\Entity\AdminUser;
 use App\Entity\PlanAdditionalInbound;
 use App\Entity\VpnInbound;
 use App\Shop\Application\MultiInboundSettings;
+use App\Tests\Support\AdminForms;
 use App\Tests\Support\IntegrationTestCase;
 use App\Tests\Support\SettingsFormCases;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
@@ -22,6 +23,8 @@ use Symfony\Component\DomCrawler\Form;
  */
 final class MultiInboundSettingsTest extends IntegrationTestCase
 {
+    use AdminForms;
+
     public function testOffByDefaultAndSavedOnTheirOwnTab(): void
     {
         self::assertFalse(self::getContainer()->get(MultiInboundSettings::class)->enabled());
@@ -57,7 +60,7 @@ final class MultiInboundSettingsTest extends IntegrationTestCase
         $this->em->flush();
         $client = $this->admin(AdminUser::ROLE_SUPER_ADMIN);
 
-        $client->request('POST', '/admin/settings?tab=plans', []);
+        $this->saveSettings($client, 'plans', []);
 
         self::assertSame('false', $this->setting());
         self::assertStringContainsString('#'.$plan->getId().' Gold multi', html_entity_decode((string) $client->getResponse()->getContent()));
@@ -87,7 +90,7 @@ final class MultiInboundSettingsTest extends IntegrationTestCase
         self::assertSame('12', $crawler->filter('input[name="plans_attach_max_attempts"]')->attr('value'));
         self::assertSame('5', $crawler->filter('input[name="plans_attach_retry_delay_minutes"]')->attr('value'));
 
-        $client->request('POST', '/admin/settings?tab=plans', ['plans_multi_inbound_enabled' => 'on', 'plans_attach_max_attempts' => '3', 'plans_attach_retry_delay_minutes' => '30']);
+        $this->saveSettings($client, 'plans', ['plans_multi_inbound_enabled' => 'on', 'plans_attach_max_attempts' => '3', 'plans_attach_retry_delay_minutes' => '30']);
 
         self::assertFalse($settings->attachRetryEnabled(), 'an unticked checkbox turns it off');
         self::assertFalse($settings->scheduledRetryOn());

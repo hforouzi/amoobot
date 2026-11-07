@@ -13,6 +13,7 @@ use App\Entity\VpnServiceInbound;
 use App\Provisioning\Application\FinalConfigLinkProvider;
 use App\Provisioning\Application\InboundMoveOverview;
 use App\Provisioning\Application\ServiceInboundCounts;
+use App\Provisioning\Domain\VpnServiceStatus;
 use App\Security\AdminPermission;
 use App\Shop\Application\Catalog\PlanInboundDrift;
 use App\Shop\Application\InboundMoveSettings;
@@ -129,7 +130,7 @@ class VpnServiceCrudController extends AbstractCrudController
     public function configureActions(Actions $actions): Actions
     {
         $regenerateConfig = Action::new('regenerateConfig', 'action.regenerate_config')
-            ->linkToRoute('admin_vpn_service_regenerate_config', fn (VpnService $service): array => ['id' => $service->getId()])
+            ->linkToUrl(fn (VpnService $service): string => $this->generateUrl('admin_vpn_service_regenerate_config', ['id' => $service->getId()]))
             ->setCssClass('btn btn-info');
 
         // A POST with a CSRF token; the old link of the customer's subscription page stops working.
@@ -157,16 +158,27 @@ class VpnServiceCrudController extends AbstractCrudController
             ->displayIf(fn (VpnService $service): bool => [] !== array_filter($this->inboundRowsOf($service), static fn (VpnServiceInbound $r): bool => VpnServiceInbound::STATUS_ATTACHED !== $r->getStatus() && VpnServiceInbound::STATUS_DETACHED !== $r->getStatus()))
             ->setCssClass('btn btn-warning');
 
+        // ServiceDeleteController: on the panel first, through ServiceAdministration.
+        $deleteOnPanel = Action::new('deleteOnPanel', 'action.delete_on_panel', 'fa fa-trash')
+            ->linkToUrl(fn (VpnService $service): string => $this->generateUrl('admin_vpn_service_delete_on_panel', ['id' => $service->getId()]))
+            ->displayIf(static fn (VpnService $service): bool => VpnServiceStatus::DELETED !== $service->getStatus())
+            ->setCssClass('btn btn-danger');
+
         return $actions
+            // A row made or removed here would not exist, or would stay, on the panel. Nothing in the form is editable
+            // (configureFields()), so the edit page only shows it.
+            ->disable(Action::NEW, Action::DELETE, Action::BATCH_DELETE, Action::SAVE_AND_RETURN, Action::SAVE_AND_CONTINUE)
             ->add(Action::INDEX, $regenerateConfig)
             ->add(Action::DETAIL, $regenerateConfig)
             ->add(Action::DETAIL, $rotatePageLink)
             ->add(Action::DETAIL, $retryAttach)
             ->add(Action::DETAIL, $claims)
+            ->add(Action::DETAIL, $deleteOnPanel)
             // ServiceInboundsController (SERVICES_MANAGE).
             ->setPermission('retryAttach', AdminPermission::SERVICES_MANAGE->value)
-            // Its route lives in VpnPanelInboundActionsController (PANELS_MANAGE).
-            ->setPermission('regenerateConfig', AdminPermission::PANELS_MANAGE->value)
+            // Its route lives in VpnPanelInboundActionsController (AdminCrudPermissions::ROUTES).
+            ->setPermission('regenerateConfig', AdminPermission::SERVICES_ASSIST->value)
+            ->setPermission('deleteOnPanel', AdminPermission::SERVICES_DELETE->value)
             // SubscriptionPageLinkController (SERVICES_MANAGE).
             ->setPermission('rotatePageLink', AdminPermission::SERVICES_MANAGE->value)
             ->setPermission('claims', AdminPermission::SERVICES_VIEW->value);
@@ -188,27 +200,29 @@ class VpnServiceCrudController extends AbstractCrudController
 
         return [
             IdField::new('id')->onlyOnIndex(),
-            AssociationField::new('user', 'field.customer'),
+            AssociationField::new('user', 'field.customer')->setDisabled(),
             AdminFormat::field('plan', static fn (mixed $v, ?VpnService $s): string => null === ($plan = $s?->getOrder()?->getPlan()) ? AdminFormat::NONE : AdminFormat::e($plan->getTitle()))->onlyOnIndex(),
-            AssociationField::new('order')->hideOnIndex(),
-            AssociationField::new('panel'),
-            AssociationField::new('inbound')->hideOnIndex(),
+            AssociationField::new('order')->hideOnIndex()->setDisabled(),
+            AssociationField::new('panel')->setDisabled(),
+            AssociationField::new('inbound')->hideOnIndex()->setDisabled(),
             ...$this->inboundNoticeField($pageName),
             ...$this->inboundMoveField($pageName),
             ...$this->inboundRowsField(),
-            TextField::new('status')->setTemplatePath(AdminFormat::TEMPLATE)->formatValue(fn (mixed $v, ?VpnService $s = null): string => $f->status($v).$this->notConnectedBadge($s)),
-            DateTimeField::new('expiresAt')->setTemplatePath(AdminFormat::TEMPLATE)->formatValue(fn (mixed $v): string => $f->expiry($v)),
+            TextField::new('status')->setTemplatePath(AdminFormat::TEMPLATE)->formatValue(fn (mixed $v, ?VpnService $s = null): string => $f->status($v).$this->notConnectedBadge($s))->setDisabled(),
+            DateTimeField::new('expiresAt')->setTemplatePath(AdminFormat::TEMPLATE)->formatValue(fn (mixed $v): string => $f->expiry($v))->setDisabled(),
             AdminFormat::field('traffic', static fn (mixed $v, ?VpnService $s): string => null === $s ? '' : $f->traffic($s->getTrafficUsedBytes(), $s->getTrafficLimitBytes()))->onlyOnIndex(),
             DateTimeField::new('lastUsageSyncedAt')->hideOnForm()->setTemplatePath(AdminFormat::TEMPLATE)->formatValue(fn (mixed $v): string => $f->relative($v)),
 
-            // Detail page and form.
-            TextField::new('remoteId')->hideOnIndex()->setTemplatePath(AdminFormat::TEMPLATE)->formatValue(fn (mixed $v): string => $f->copyable($v)),
-            TextField::new('username')->hideOnIndex()->setTemplatePath(AdminFormat::TEMPLATE)->formatValue(fn (mixed $v): string => $f->copyable($v)),
-            TextField::new('clientUuid')->hideOnIndex()->setTemplatePath(AdminFormat::TEMPLATE)->formatValue(fn (mixed $v): string => $f->copyable($v)),
-            TextField::new('clientEmail')->hideOnIndex(),
-            TextField::new('subId')->hideOnIndex(),
-            IntegerField::new('ipLimit')->hideOnIndex(),
-            TextareaField::new('subscriptionUrl')->hideOnIndex(),
+            // Detail page and form. Every field of the form is disabled (Symfony ignores what is posted for it): each one
+            // mirrors the panel or is ownership or money, and saving writes the row only. Suspend, delete and renewals go
+            // through ServiceAdministration, a change of owner through ServiceOwnership.
+            TextField::new('remoteId')->hideOnIndex()->setTemplatePath(AdminFormat::TEMPLATE)->formatValue(fn (mixed $v): string => $f->copyable($v))->setDisabled(),
+            TextField::new('username')->hideOnIndex()->setTemplatePath(AdminFormat::TEMPLATE)->formatValue(fn (mixed $v): string => $f->copyable($v))->setDisabled(),
+            TextField::new('clientUuid')->hideOnIndex()->setTemplatePath(AdminFormat::TEMPLATE)->formatValue(fn (mixed $v): string => $f->copyable($v))->setDisabled(),
+            TextField::new('clientEmail')->hideOnIndex()->setDisabled(),
+            TextField::new('subId')->hideOnIndex()->setDisabled(),
+            IntegerField::new('ipLimit')->hideOnIndex()->setDisabled(),
+            TextareaField::new('subscriptionUrl')->hideOnIndex()->setDisabled(),
             // The customer's public page (/s/{token}); "New subscription page link" replaces it.
             AdminFormat::field('subscriptionPage', fn (mixed $v, ?VpnService $s): string => null === $s ? '' : $f->copyable($this->pageUrl->forService($s), 64), 'field.subscription_page')->onlyOnDetail(),
             TextareaField::new('configText')
@@ -221,12 +235,13 @@ class VpnServiceCrudController extends AbstractCrudController
 
                     return [] !== $finalLinks ? implode("\n", $finalLinks) : (string) $value;
                 })
-                ->hideOnIndex(),
-            DateTimeField::new('startsAt')->hideOnIndex(),
-            IntegerField::new('trafficLimitGb')->hideOnIndex(),
-            IntegerField::new('trafficUsedGb')->hideOnIndex(),
-            IntegerField::new('trafficLimitBytes')->hideOnIndex(),
-            IntegerField::new('trafficUsedBytes')->hideOnIndex(),
+                ->hideOnIndex()
+                ->setDisabled(),
+            DateTimeField::new('startsAt')->hideOnIndex()->setDisabled(),
+            IntegerField::new('trafficLimitGb')->hideOnIndex()->setDisabled(),
+            IntegerField::new('trafficUsedGb')->hideOnIndex()->setDisabled(),
+            IntegerField::new('trafficLimitBytes')->hideOnIndex()->setDisabled(),
+            IntegerField::new('trafficUsedBytes')->hideOnIndex()->setDisabled(),
             DateTimeField::new('lastStatusCheckedAt')->hideOnForm()->hideOnIndex(),
             DateTimeField::new('lastAccessInfoSyncedAt')->hideOnForm()->hideOnIndex(),
             DateTimeField::new('createdAt')->hideOnForm()->hideOnIndex(),

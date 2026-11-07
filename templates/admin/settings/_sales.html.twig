@@ -1,6 +1,7 @@
 {# Settings page, "sales & renewal pricing" tab (was the renewal pricing settings page). #}
 {% trans_default_domain 'admin' %}
     <form method="post" action="{{ path('admin_settings', {tab: 'sales'}) }}" class="admin-form-card admin-settings-form">
+        <input type="hidden" name="_token" value="{{ csrf_token(csrf) }}">
         <div class="admin-section">
             <h2>{{ 'renewal_pricing_settings.sections.renewal'|trans }}</h2>
 

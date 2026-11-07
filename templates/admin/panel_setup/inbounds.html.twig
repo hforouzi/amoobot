@@ -13,10 +13,17 @@
                 <p class="mb-1">{{ ('panel_connection.failure.' ~ error.failure.value ~ '.fix')|trans }}</p>
                 <small class="text-muted" dir="ltr">{{ error.message }}</small>
             </div>
+        {% elseif options is null %}
+            <p class="text-muted">{{ 'panel_connection.inbounds.load_intro'|trans }}</p>
+            <form method="post">
+                <input type="hidden" name="_token" value="{{ csrf_token('panel_inbounds_' ~ panel.id) }}">
+                <button type="submit" class="btn btn-primary">{{ 'panel_connection.inbounds.load'|trans }}</button>
+            </form>
         {% else %}
             <p class="text-muted">{{ 'panel_connection.inbounds.intro'|trans }}</p>
             <form method="post">
                 <input type="hidden" name="_token" value="{{ csrf_token('panel_inbounds_' ~ panel.id) }}">
+                <input type="hidden" name="save" value="1">
                 <table class="table table-sm">
                     <thead><tr>
                         <th></th>

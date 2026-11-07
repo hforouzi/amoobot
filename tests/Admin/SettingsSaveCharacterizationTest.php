@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Admin;
 
 use App\Entity\AdminUser;
+use App\Tests\Support\AdminForms;
 use App\Tests\Support\IntegrationTestCase;
 use App\Tests\Support\RestoresTables;
 use App\Tests\Support\SettingsFormCases;
@@ -18,6 +19,7 @@ use Symfony\Bundle\FrameworkBundle\KernelBrowser;
  */
 final class SettingsSaveCharacterizationTest extends IntegrationTestCase
 {
+    use AdminForms;
     use RestoresTables;
 
     private const PREFIXES = ['renewal.', 'pricing.', 'traffic_addon.', 'sales.', 'automation.', 'orders.'];
@@ -53,7 +55,7 @@ final class SettingsSaveCharacterizationTest extends IntegrationTestCase
     #[DataProvider('cases')]
     public function testTheWebSavesOrRefusesAsRecorded(string $tab, array $changes, ?string $error, array $stored): void
     {
-        $this->client->request('POST', '/admin/settings?tab='.$tab, SettingsFormCases::input($tab, $changes));
+        $this->saveSettings($this->client, $tab, SettingsFormCases::input($tab, $changes));
         self::assertSame(200, $this->client->getResponse()->getStatusCode());
         $html = (string) $this->client->getResponse()->getContent();
         $translator = self::getContainer()->get('translator');
