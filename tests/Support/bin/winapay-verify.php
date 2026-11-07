@@ -18,7 +18,13 @@ use Symfony\Component\HttpFoundation\Request;
 [$container, $entityManager] = require __DIR__.'/boot-test-kernel.php';
 require __DIR__.'/start-at.php';
 
-[, $side, $paymentId, $authority, $startAt] = $argv;
+// From $_SERVER['argv'], checked: phpstan cannot tell that $argv is defined here.
+$arguments = $_SERVER['argv'] ?? null;
+if (!is_array($arguments) || count($arguments) < 5) {
+    fwrite(STDERR, "usage: winapay-verify.php <callback|reconcile> <paymentId> <authority> <startAt>\n");
+    exit(2);
+}
+[, $side, $paymentId, $authority, $startAt] = array_map(strval(...), $arguments);
 waitForStartAt($startAt);
 
 if ('callback' === $side) {

@@ -1352,6 +1352,11 @@ class TelegramUpdateHandler
     private function createOrReuseNewServiceOrderPayment(Order $order, PaymentGateway $gateway, StorePaymentMethod $storePaymentMethod, string $chatId, ?string $callbackId = null): void
     {
         $start = $this->paymentStarter->start($order, $storePaymentMethod);
+        if (PaymentStart::KIND_ORDER_NOT_PAYABLE === $start->kind) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'سفارش نامعتبر است.', 'popup_invalid_payment_gateway_order');
+
+            return;
+        }
         if (PaymentStart::KIND_PLAN_INACTIVE === $start->kind) {
             $this->showPopupOrMessage($chatId, $callbackId, 'این پلن دیگر فعال نیست یا وجود ندارد.', 'popup_invalid_plan_select_payment_method_draft');
 
