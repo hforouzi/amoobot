@@ -192,9 +192,15 @@ class TelegramUpdateHandler
         }
 
         // "/start <payload>" from a deep link (claim_ now, ref_ later; StartPayloadRouter), read exactly as sent. Taken
-        // only by a handler of its prefix that is switched on; anything else goes on below as it always did.
+        // only by a handler of its prefix that is switched on; any other /start (an unknown or malformed payload such as
+        // "comeback", "/start@bot") is a plain /start, so the main menu and its keyboard replace an old cached one.
         $rawText = (string) ($message['text'] ?? '');
-        if (StartPayload::isStartCommand($rawText) && $this->startPayloadRouter->routeBot($account, $chatId, StartPayload::fromStartCommand($rawText))) {
+        if (StartPayload::isStartCommand($rawText)) {
+            if (!$this->startPayloadRouter->routeBot($account, $chatId, StartPayload::fromStartCommand($rawText))) {
+                $this->startPayloadRouter->logUnknownBotPayload($rawText);
+                $this->handleStart($account, $chatId, $isAdmin);
+            }
+
             return;
         }
 
