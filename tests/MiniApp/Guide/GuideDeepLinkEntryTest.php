@@ -21,8 +21,8 @@ use Symfony\Component\Routing\RouterInterface;
 /**
  * The entry points into the guide (G-4): t.me/<bot>?startapp=guide_<slug> (Mini App sign-in start_param), /start
  * guide_<slug> in the bot and /app?guide=<slug>. Only a fixed topic slug whose topic is shown now is taken; anything
- * else (unknown, hidden, odd characters, another case, too long) is ignored silently: the usual home in the app, the
- * usual answer in the bot, and the value never comes back. The payloads that existed before (claim links, a plain
+ * else (unknown, hidden, odd characters, another case, too long) is ignored silently: the usual home in the app, a
+ * plain /start in the bot, and the value never comes back. The payloads that existed before (claim links, a plain
  * start, malformed and unknown ones) behave exactly as before, with the guide handler on or off.
  */
 final class GuideDeepLinkEntryTest extends IntegrationTestCase
@@ -139,7 +139,7 @@ final class GuideDeepLinkEntryTest extends IntegrationTestCase
 
         $this->resetHttp();
         $this->sendText(self::CLAIMER, '/start guide_connect');
-        self::assertSame([$this->botText('bot.unknown_message')], $this->http->telegramTexts(), 'as any payload nobody takes');
+        self::assertSame([$this->botText('bot.welcome')], $this->http->telegramTexts(), 'as any payload nobody takes: a plain /start');
     }
 
     public function testStartInTheBotOffersTheAppAtThatTopic(): void
@@ -174,7 +174,7 @@ final class GuideDeepLinkEntryTest extends IntegrationTestCase
 
         $this->sendText(self::CLAIMER, $text);
 
-        self::assertSame([$this->botText('bot.unknown_message')], $this->http->telegramTexts());
+        self::assertSame([$this->botText('bot.welcome')], $this->http->telegramTexts());
         self::assertSame([], $this->webAppUrls());
         $slug = substr($text, 13);
         foreach ($this->http->requests() as $request) {
@@ -246,7 +246,7 @@ final class GuideDeepLinkEntryTest extends IntegrationTestCase
         $this->resetHttp();
 
         $this->sendText(self::CLAIMER, '/start claim_'.$token);
-        self::assertSame([$this->botText('bot.unknown_message')], $this->http->telegramTexts());
+        self::assertSame([$this->botText('bot.welcome')], $this->http->telegramTexts());
         self::assertNull($this->startTarget('claim_'.$token));
     }
 
@@ -263,13 +263,13 @@ final class GuideDeepLinkEntryTest extends IntegrationTestCase
     }
 
     #[DataProvider('otherPayloads')]
-    public function testRegressionUnknownAndMalformedPayloadsAreIgnoredAsBefore(string $payload): void
+    public function testRegressionUnknownAndMalformedPayloadsAreAPlainStart(string $payload): void
     {
         $this->miniAppOn();
         $this->resetHttp();
 
         $this->sendText(self::CLAIMER, '/start '.$payload);
-        self::assertSame([$this->botText('bot.unknown_message')], $this->http->telegramTexts());
+        self::assertSame([$this->botText('bot.welcome')], $this->http->telegramTexts(), 'a plain /start');
         self::assertNull($this->startTarget($payload));
     }
 

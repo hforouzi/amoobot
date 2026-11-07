@@ -253,10 +253,10 @@ final class ClaimBotTest extends IntegrationTestCase
         self::assertSame([$this->botText('bot.welcome')], array_slice($off, 0, 1));
         $this->setting(ResellerSettings::CLAIMS_ENABLED, 'false');
 
-        // /start claim_... is not routed: what any other unknown text gets, and the link does nothing.
+        // /start claim_... is not routed: a plain /start (the welcome), and the link does nothing.
         $this->resetHttp();
         $this->sendText(self::CLAIMER, '/start claim_'.$token);
-        self::assertSame([$this->botText('bot.unknown_message')], $this->http->telegramTexts());
+        self::assertSame($off, $this->http->telegramTexts());
         self::assertSame($this->user->getId(), $this->ownerOf($this->sold));
 
         // No claim-link buttons for the reseller, and the claim callbacks do nothing.

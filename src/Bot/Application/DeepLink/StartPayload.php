@@ -15,6 +15,8 @@ namespace App\Bot\Application\DeepLink;
 final class StartPayload
 {
     private const PATTERN = '/^([a-z]{1,16})_([A-Za-z0-9_-]{1,58})$/D';
+    /** Telegram's start alphabet and length: a payload the bot could have been sent through a t.me link. */
+    public const TELEGRAM_PATTERN = '/^[A-Za-z0-9_-]{1,64}$/D';
 
     private function __construct(
         public readonly string $prefix,
@@ -43,6 +45,19 @@ final class StartPayload
         }
 
         return self::parse($m[1]);
+    }
+
+    /**
+     * Whatever follows "/start " (or "/start@bot ") in a bot message, unchecked; null for a plain /start and for a text
+     * that is not a /start command.
+     */
+    public static function rawFromStartCommand(string $text): ?string
+    {
+        if (1 !== preg_match('/^\/start(?:@[A-Za-z0-9_]{5,32})? (.*)$/sD', $text, $m)) {
+            return null;
+        }
+
+        return $m[1];
     }
 
     /** Whether a bot message is a /start command (with or without a payload, well-formed or not). */

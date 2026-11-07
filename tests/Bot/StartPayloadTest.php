@@ -120,6 +120,31 @@ final class StartPayloadTest extends TestCase
         self::assertSame([$ignored, $ignored], $logger->records);
     }
 
+    public function testOnlyAnUnknownPayloadIsLoggedAndOnlyInTelegramsAlphabet(): void
+    {
+        $logger = new class extends AbstractLogger {
+            /** @var list<array{string, array<mixed>}> */
+            public array $records = [];
+
+            public function log($level, string|\Stringable $message, array $context = []): void
+            {
+                $this->records[] = [(string) $message, $context];
+            }
+        };
+        $router = new StartPayloadRouter([$this->handler('claim', true, null), $this->handler('ref', false, null)], $logger);
+
+        foreach (['/start', '/start@amoo_test_bot', '/started x', 'comeback', '/start claim_secretToken', '/start ref_secretCode'] as $silent) {
+            $router->logUnknownBotPayload($silent);
+        }
+        self::assertSame([], $logger->records, 'no payload, not /start, or a handled prefix (on or off)');
+
+        foreach (['/start comeback', '/start@amoo_test_bot zzz_abc', '/start Claim_abc', '/start '.str_repeat('a', 65), '/start come back', "/start comeback\n", '/start '] as $text) {
+            $router->logUnknownBotPayload($text);
+        }
+        self::assertSame(['comeback', 'zzz_abc', 'Claim_abc', '<invalid>', '<invalid>', '<invalid>', '<invalid>'], array_map(static fn (array $r): mixed => $r[1]['payload'], $logger->records));
+        self::assertSame(['start_payload_unknown'], array_values(array_unique(array_column($logger->records, 0))));
+    }
+
     /**
      * @return iterable<string, array{string, bool}>
      */

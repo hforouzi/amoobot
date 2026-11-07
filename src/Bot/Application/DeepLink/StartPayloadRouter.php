@@ -12,7 +12,8 @@ use Symfony\Component\DependencyInjection\Attribute\AutowireIterator;
  * The one router of deep-link payloads (docs/design/reseller-and-claim.md, 3.2 / 6.5), for the bot's "/start <payload>"
  * and the Mini App's start_param alike. Handlers register by prefix (StartPayloadHandler); referrals add "ref" the same
  * way. A payload that is malformed, has no handler, or whose handler is switched off is not routed: the caller then does
- * exactly what it does without one (the usual /start, the usual home). The payload's value is never logged.
+ * exactly what it does without one (the usual /start, the usual home). The value of a payload whose prefix has a
+ * handler is never logged; an unknown payload is (logUnknownBotPayload), to count returns through a shared link.
  */
 class StartPayloadRouter
 {
@@ -50,6 +51,25 @@ class StartPayloadRouter
         $handler->handleBot($account, $chatId, $payload->value);
 
         return true;
+    }
+
+    /**
+     * One info line for a bot "/start <payload>" that no handler took (e.g. "comeback" from a link shared to bring old
+     * users back), so returns can be counted. The payload is logged only when it fits Telegram's start alphabet and no
+     * handler owns its prefix: the value of a claim_ (or any other handled) payload may be a secret and is never logged,
+     * whether or not it was taken. Anything else is logged as "<invalid>".
+     */
+    public function logUnknownBotPayload(string $text): void
+    {
+        $raw = StartPayload::rawFromStartCommand($text);
+        if (null === $raw) {
+            return;
+        }
+        $payload = StartPayload::parse($raw);
+        if (null !== $payload && isset($this->handlers[$payload->prefix])) {
+            return;
+        }
+        $this->logger->info('start_payload_unknown', ['payload' => 1 === preg_match(StartPayload::TELEGRAM_PATTERN, $raw) ? $raw : '<invalid>']);
     }
 
     /** The first section of a Mini App opened with this start parameter, or null for the usual home. */
