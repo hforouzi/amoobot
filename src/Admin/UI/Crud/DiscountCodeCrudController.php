@@ -75,7 +75,11 @@ final class DiscountCodeCrudController extends AbstractCrudController
                 ->generateUrl())
             ->createAsGlobalAction();
 
-        return $actions->add(Crud::PAGE_INDEX, $usages);
+        return $actions
+            ->add(Crud::PAGE_INDEX, $usages)
+            // Its timestamps are on the detail page only.
+            ->add(Crud::PAGE_INDEX, Action::DETAIL)
+            ->add(Crud::PAGE_EDIT, Action::DETAIL);
     }
 
     /**

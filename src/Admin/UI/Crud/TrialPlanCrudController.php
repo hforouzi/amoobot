@@ -13,6 +13,8 @@ use App\Shop\Application\Catalog\PlanInboundWarnings;
 use App\Shop\Application\Catalog\TrialPlanAdminService;
 use App\Shop\Application\Catalog\TrialPlanDeletion;
 use Doctrine\ORM\EntityManagerInterface;
+use EasyCorp\Bundle\EasyAdminBundle\Config\Action;
+use EasyCorp\Bundle\EasyAdminBundle\Config\Actions;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Crud;
 use EasyCorp\Bundle\EasyAdminBundle\Controller\AbstractCrudController;
 use EasyCorp\Bundle\EasyAdminBundle\Field\AssociationField;
@@ -104,6 +106,14 @@ final class TrialPlanCrudController extends AbstractCrudController
     public function configureCrud(Crud $crud): Crud
     {
         return $crud->setDefaultSort(['sortOrder' => 'ASC', 'id' => 'ASC']);
+    }
+
+    /** Its backing plan is on the detail page only (configureFields()). */
+    public function configureActions(Actions $actions): Actions
+    {
+        return $actions
+            ->add(Crud::PAGE_INDEX, Action::DETAIL)
+            ->add(Crud::PAGE_EDIT, Action::DETAIL);
     }
 
     public function configureFields(string $pageName): iterable
