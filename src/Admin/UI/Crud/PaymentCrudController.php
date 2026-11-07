@@ -162,7 +162,10 @@ final class PaymentCrudController extends AbstractCrudController
         }
 
         // A payment is never deleted from the admin (the wallet ledger references it): reject it instead.
-        return $actions->disable(Action::DELETE, Action::BATCH_DELETE);
+        return $actions->disable(Action::DELETE, Action::BATCH_DELETE)
+            // The review, provisioning and crypto data are on the detail page only (configureFields()).
+            ->add(Crud::PAGE_INDEX, Action::DETAIL)
+            ->add(Crud::PAGE_EDIT, Action::DETAIL);
     }
 
     /**
