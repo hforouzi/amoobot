@@ -32,7 +32,7 @@ any amount and has no invoice lifetime, and core gateways are not affected.
 |---|---|---|
 | `isUsable(array $config): bool` | May this gateway be offered with this config? Return `false` for a switch that is off or a value that is missing or invalid | Method lists and the customer guide (`getOfferableMethods()`) |
 | `acceptsAmount(int $toman): bool` | Does the provider take this payable amount, in Toman? | Method lists for an order |
-| `invoiceLifetimeSeconds(): ?int` | How long a provider invoice stays payable, or `null` for no limit | Declared only: nothing reads it yet |
+| `invoiceLifetimeSeconds(): ?int` | How long a provider invoice stays payable, or `null` for no limit | `PaymentStarter`: see [Invoices with a lifetime](#invoices-with-a-lifetime) |
 
 `StorePaymentMethodResolver` is the one place that lists methods for the bot and the Mini App, so a plugin needs no UI code.
 
@@ -45,6 +45,26 @@ any amount and has no invoice lifetime, and core gateways are not affected.
   check is reported as `gateway_not_usable`.
 - Both methods run on every listing, so they must not call the network. `isUsable()` receives the same config as
   `createPayment()`.
+
+### Invoices with a lifetime
+
+A non-null `invoiceLifetimeSeconds()` makes one `Payment` row one provider invoice, for life. `PaymentStarter` decides under
+the order lock, and `createPayment()` then runs outside any lock:
+
+| The order's open payment | What the core does |
+|---|---|
+| Live invoice of this gateway, for this amount | Keeps the row and calls `createPayment()`. The plugin returns the stored link and calls no API |
+| Live invoice of another gateway, an expired invoice, or a changed amount | Closes the row as rejected with source `gateway_invoice_superseded`, and creates a new one |
+| Another start is creating the invoice | Refuses: the customer is asked to try again in a few seconds |
+| Nothing, or a row with no provider reference | Uses a new or the same row, with a reservation |
+
+- **Reservation.** Before `createPayment()` runs, `expiresAt` is set to 90 seconds from now. A row with an `expiresAt` and no
+  `gatewayTransactionId` is a reservation, so `createPayment()` must treat only a row with both as a live invoice.
+- **Expiry.** Set `expiresAt` in `createPayment()`. If the plugin leaves it, the core sets now plus the lifetime. An answer
+  without a `transactionId`, or an exception, clears the reservation, and the row is reused by the next start.
+- **Late money.** A closed invoice keeps its references, so a later paid verification reaches `settle()` and waits in admin
+  review. The same goes for `PaymentSettlementService::expireUnpaid()`, which a plugin's reconciler calls when the provider
+  says an invoice ran out unpaid. It changes only a pending payment and leaves the order open.
 - Hiding a method is not a guarantee: `createPayment()` must still refuse an amount or config it cannot accept, because a
   customer can act on an old list.
 

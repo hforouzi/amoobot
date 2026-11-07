@@ -38,14 +38,15 @@ final class PaymentDisplayState
 
     /**
      * The customer's view in the Mini App: as the return page, plus a sent card-to-card receipt waiting for an admin
-     * (review) and an order that expired unpaid (expired, not cancelled).
+     * (review), and an order or invoice that expired unpaid (expired, not cancelled). An invoice replaced by the
+     * customer's next start stays cancelled: it was given up, not timed out.
      */
     public static function forCustomer(Payment $payment): string
     {
         if (PaymentStatus::SUBMITTED === $payment->getStatus()) {
             return self::REVIEW;
         }
-        if ($payment->isRejectedByOrderExpiry()) {
+        if ($payment->isRejectedByOrderExpiry() || $payment->isGatewayInvoiceExpired()) {
             return self::EXPIRED;
         }
 

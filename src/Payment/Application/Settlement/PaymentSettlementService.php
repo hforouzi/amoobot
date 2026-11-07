@@ -311,6 +311,44 @@ class PaymentSettlementService
     }
 
     /**
+     * The provider invoice of a pending payment ran out unpaid. The order is left open, so the customer can start again;
+     * no message goes out, as for the order expiry job. A later "paid" goes to NEEDS_REVIEW (parkLatePayment). $source
+     * says which flow decided this, for the log; the payment's own confirmationSource is always the expiry source.
+     */
+    public function expireUnpaid(Payment $payment, string $source): SettlementResult
+    {
+        $paymentId = (int) $payment->getId();
+        $connection = $this->entityManager->getConnection();
+
+        try {
+            $connection->beginTransaction();
+            [$payment] = $this->lock($paymentId);
+            if (PaymentStatus::PENDING !== $payment->getStatus()) {
+                $connection->commit();
+
+                return new SettlementResult(SettlementOutcome::ALREADY_PROCESSED, sprintf('Payment is already %s.', $payment->getStatus()), $payment);
+            }
+
+            $payment
+                ->setStatus(PaymentStatus::REJECTED)
+                ->setAdminNote(Payment::NOTE_GATEWAY_INVOICE_EXPIRY)
+                ->setConfirmationSource(Payment::SOURCE_GATEWAY_INVOICE_EXPIRY);
+            $this->releaseWalletDebit($payment, null, 'gateway invoice expired');
+            $this->entityManager->flush();
+            $connection->commit();
+        } catch (\Throwable $e) {
+            $this->rollbackAndReset();
+            $this->logger->error('Expiring the gateway invoice failed.', ['payment_id' => $paymentId, 'source' => $source, 'error' => $e->getMessage()]);
+
+            return new SettlementResult(SettlementOutcome::ERROR, 'Payment state could not be updated; try again.');
+        }
+
+        $this->logger->info('Gateway invoice expired unpaid.', ['payment_id' => $paymentId, 'source' => $source]);
+
+        return new SettlementResult(SettlementOutcome::REJECTED, 'Gateway invoice expired unpaid.', $payment);
+    }
+
+    /**
      * @param list<string> $allowedStatuses
      */
     private function run(Payment $payment, VerifiedPayment $verified, string $source, array $allowedStatuses, bool $checkAmount): SettlementResult
@@ -677,17 +715,20 @@ class PaymentSettlementService
             $payment->setGatewayTransactionId($verified->transactionId);
         }
 
-        $cancelled = $payment->isCancelledByCustomer();
+        return $this->parkForReview($payment, sprintf('%s%s; the gateway now reports it paid. %s', Payment::REVIEW_PREFIX_LATE_PAYMENT, self::lateReason($payment, $order), $match->describe()), $source, $match);
+    }
 
-        return $this->parkForReview($payment, sprintf(
-            '%s%s: order #%d was %s (%s) and the payment rejected unpaid; the gateway now reports it paid. %s',
-            Payment::REVIEW_PREFIX_LATE_PAYMENT,
-            $cancelled ? 'cancel' : 'expiry',
-            $order->getId() ?? 0,
-            $cancelled ? 'cancelled by the customer' : 'expired',
-            $order->getStatus(),
-            $match->describe()
-        ), $source, $match);
+    /** What happened before the money came. After an invoice ran out or was replaced the order may still be open. */
+    private static function lateReason(Payment $payment, Order $order): string
+    {
+        $orderId = $order->getId() ?? 0;
+
+        return match (true) {
+            $payment->isGatewayInvoiceExpired() => sprintf('invoice expiry: the invoice ran out unpaid and the payment was rejected, order #%d stayed open (now %s)', $orderId, $order->getStatus()),
+            $payment->isGatewayInvoiceSuperseded() => sprintf('invoice replaced: the payment was closed unpaid for a newer one, order #%d stayed open (now %s)', $orderId, $order->getStatus()),
+            $payment->isCancelledByCustomer() => sprintf('cancel: order #%d was cancelled by the customer (%s) and the payment rejected unpaid', $orderId, $order->getStatus()),
+            default => sprintf('expiry: order #%d was expired (%s) and the payment rejected unpaid', $orderId, $order->getStatus()),
+        };
     }
 
     private function parkForReview(Payment $payment, string $reason, string $source, ?AmountMatch $match): SettlementResult

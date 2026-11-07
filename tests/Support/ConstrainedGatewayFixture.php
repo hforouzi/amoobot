@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Support;
 
 use Amoobot\Plugin\ConstrainedGateway\ConstrainedGatewayPlugin;
+use Amoobot\Plugin\ConstrainedGateway\InvoicingGatewayPlugin;
 use App\Entity\PaymentGateway;
 use App\Entity\Plugin;
 use App\Entity\StorePaymentMethod;
@@ -23,7 +24,9 @@ trait ConstrainedGatewayFixture
         $path = dirname(__DIR__).'/Support/plugins/constrained-gateway';
         require_once $path.'/src/UnconstrainedGatewayPlugin.php';
         require_once $path.'/src/ConstrainedGatewayPlugin.php';
+        require_once $path.'/src/InvoicingGatewayPlugin.php';
         ConstrainedGatewayPlugin::$throwIn = null;
+        InvoicingGatewayPlugin::reset();
         $this->em->getConnection()->executeStatement('DELETE FROM plugin WHERE code = ?', [self::PLUGIN_CODE]);
         $manifest = ['mainClass' => $mainClass] + json_decode((string) file_get_contents($path.'/plugin.json'), true, flags: JSON_THROW_ON_ERROR);
         $this->em->persist((new Plugin())
@@ -67,6 +70,9 @@ trait ConstrainedGatewayFixture
         $this->em->getConnection()->executeStatement('DELETE FROM plugin WHERE code = ?', [self::PLUGIN_CODE]);
         if (class_exists(ConstrainedGatewayPlugin::class, false)) {
             ConstrainedGatewayPlugin::$throwIn = null;
+        }
+        if (class_exists(InvoicingGatewayPlugin::class, false)) {
+            InvoicingGatewayPlugin::reset();
         }
     }
 }
