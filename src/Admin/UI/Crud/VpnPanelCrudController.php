@@ -122,6 +122,8 @@ class VpnPanelCrudController extends AbstractCrudController
             ->update(Crud::PAGE_INDEX, Action::NEW, static fn (Action $action): Action => $action->linkToRoute('admin_panel_setup_new'))
             ->update(Crud::PAGE_INDEX, Action::EDIT, static fn (Action $action): Action => $action->linkToRoute('admin_panel_setup_edit', static fn (VpnPanel $panel): array => ['id' => $panel->getId()]))
             ->update(Crud::PAGE_DETAIL, Action::EDIT, static fn (Action $action): Action => $action->linkToRoute('admin_panel_setup_edit', static fn (VpnPanel $panel): array => ['id' => $panel->getId()]))
+            // The inbound attachments and moves, and the last check, are on the detail page only (configureFields()).
+            ->add(Crud::PAGE_INDEX, Action::DETAIL)
             ->add(Action::INDEX, $testConnection)
             ->add(Action::INDEX, $syncInbounds)
             ->add(Action::INDEX, $viewInbounds)

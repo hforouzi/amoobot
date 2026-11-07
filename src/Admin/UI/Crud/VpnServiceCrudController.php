@@ -169,6 +169,9 @@ class VpnServiceCrudController extends AbstractCrudController
             // (configureFields()), so the edit page only shows it.
             ->disable(Action::NEW, Action::DELETE, Action::BATCH_DELETE, Action::SAVE_AND_RETURN, Action::SAVE_AND_CONTINUE)
             ->add(Action::INDEX, $regenerateConfig)
+            // The detail page holds the actions below and the inbound blocks (configureFields()).
+            ->add(Crud::PAGE_INDEX, Action::DETAIL)
+            ->add(Crud::PAGE_EDIT, Action::DETAIL)
             ->add(Action::DETAIL, $regenerateConfig)
             ->add(Action::DETAIL, $rotatePageLink)
             ->add(Action::DETAIL, $retryAttach)
