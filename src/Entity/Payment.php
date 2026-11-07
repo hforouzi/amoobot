@@ -18,6 +18,18 @@ class Payment
     /** confirmationSource / adminNote of a pending payment the customer cancelled (bot cancel buttons). */
     public const SOURCE_CUSTOMER_CANCEL = 'customer_cancel';
     public const NOTE_CUSTOMER_CANCEL = 'Cancelled by customer';
+    /**
+     * confirmationSource / adminNote of a pending payment whose provider invoice ran out (expireUnpaid()). The order stays
+     * open, so the customer can start again.
+     */
+    public const SOURCE_GATEWAY_INVOICE_EXPIRY = 'gateway_invoice_expiry';
+    public const NOTE_GATEWAY_INVOICE_EXPIRY = 'Gateway invoice expired unpaid';
+    /**
+     * confirmationSource / adminNote of a pending payment closed by the customer's next start (PaymentStarter): one row
+     * is one invoice, so another gateway or an expired invoice gets a new row. The old invoice may still be paid.
+     */
+    public const SOURCE_GATEWAY_INVOICE_SUPERSEDED = 'gateway_invoice_superseded';
+    public const NOTE_GATEWAY_INVOICE_SUPERSEDED = 'Gateway invoice replaced by a newer payment';
     /** Review reasons of payments paid after their cancel/expiry start with this. */
     public const REVIEW_PREFIX_LATE_PAYMENT = 'paid after ';
 
@@ -292,13 +304,14 @@ class Payment
     }
 
     /**
-     * Rejected while still unpaid, by the incomplete-order expiry job or by the customer cancelling
-     * (not by an admin, not reported failed by the gateway). The customer may still complete such a
-     * payment at the gateway, so a later "paid" must reach PaymentSettlementService (-> NEEDS_REVIEW).
+     * Rejected while still unpaid, by the incomplete-order expiry job, by the customer cancelling or
+     * because its provider invoice ran out or was replaced (not by an admin, not reported failed by the
+     * gateway). The customer may still complete such a payment at the gateway, so a later "paid" must
+     * reach PaymentSettlementService (-> NEEDS_REVIEW).
      */
     public function isRejectedUnpaid(): bool
     {
-        return $this->isRejectedByOrderExpiry() || $this->isCancelledByCustomer();
+        return $this->isRejectedByOrderExpiry() || $this->isCancelledByCustomer() || $this->isGatewayInvoiceExpired() || $this->isGatewayInvoiceSuperseded();
     }
 
     public function isRejectedByOrderExpiry(): bool
@@ -311,6 +324,16 @@ class Payment
     {
         return PaymentStatus::REJECTED === $this->status
             && (self::SOURCE_CUSTOMER_CANCEL === $this->confirmationSource || self::NOTE_CUSTOMER_CANCEL === $this->adminNote);
+    }
+
+    public function isGatewayInvoiceExpired(): bool
+    {
+        return PaymentStatus::REJECTED === $this->status && self::SOURCE_GATEWAY_INVOICE_EXPIRY === $this->confirmationSource;
+    }
+
+    public function isGatewayInvoiceSuperseded(): bool
+    {
+        return PaymentStatus::REJECTED === $this->status && self::SOURCE_GATEWAY_INVOICE_SUPERSEDED === $this->confirmationSource;
     }
 
     /**

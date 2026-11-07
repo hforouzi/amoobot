@@ -9,10 +9,12 @@ use App\Entity\Order;
 use App\Entity\Payment;
 use App\Entity\PaymentGateway;
 use App\Entity\StorePaymentMethod;
+use App\Payment\Domain\PaymentGatewayInterface;
 use App\Payment\Domain\PaymentGatewayType;
 use App\Payment\Domain\PaymentStatus;
 use App\Payment\Infrastructure\NowPaymentsGateway;
 use App\Payment\Infrastructure\PaymentGatewayRegistry;
+use App\Payment\Plugin\PaymentGatewayConstraintsInterface;
 use App\Shared\Infrastructure\SettingValueProvider;
 use App\Shop\Domain\OrderType;
 use Doctrine\DBAL\LockMode;
@@ -25,11 +27,28 @@ use Doctrine\ORM\EntityManagerInterface;
  * wallet payment is never reused, and while one holds its debit no gateway payment is started or reused
  * (KIND_WALLET_PAYMENT_PENDING, KIND_WALLET_PAYMENT_HELD). Nothing
  * here verifies or confirms a payment: that is PaymentSettlementService's, after the gateway says so.
+ *
+ * A gateway that declares an invoice lifetime (PaymentGatewayConstraintsInterface) keeps one invoice per row, and only
+ * such a row has an expiresAt: see invoiceState(). createPayment() runs outside the lock, so its claim writes a short
+ * reservation into expiresAt; the invoice replaces it. Every other gateway keeps reusing the open row.
  */
 final class PaymentStarter
 {
     /** The statuses in which a wallet payment holds its debit (heldWalletPayment()). */
     private const HELD_WALLET_STATUSES = [PaymentStatus::PENDING, PaymentStatus::SUBMITTED, PaymentStatus::NEEDS_REVIEW, PaymentStatus::PROVISIONING_FAILED];
+    /** How long a claim keeps the row for its createPayment(). After that nothing is running, or it crashed. */
+    private const RESERVATION_SECONDS = 90;
+    /** The answer while another start is creating this order's invoice. */
+    public const INVOICE_IN_PROGRESS_MESSAGE = 'پرداخت این سفارش در حال آماده‌سازی است. لطفاً چند ثانیه دیگر دوباره تلاش کنید.';
+
+    /** invoiceState(): start on the open row, or on a new row when there is none. */
+    private const INVOICE_START = 'start';
+    /** invoiceState(): another start is creating the row's invoice. */
+    private const INVOICE_RESERVED = 'reserved';
+    /** invoiceState(): the row's invoice can still be paid, so the gateway hands it out again. */
+    private const INVOICE_LIVE = 'live';
+    /** invoiceState(): the row's invoice is over or another gateway's, so a new row. */
+    private const INVOICE_REPLACE = 'replace';
 
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
@@ -106,15 +125,29 @@ final class PaymentStarter
             return new PaymentStart(PaymentStart::KIND_PLAN_INACTIVE, null, false, null, 0);
         }
 
-        $claimed = $this->claimPayment($order, $storePaymentMethod);
-        if (is_string($claimed)) {
-            return new PaymentStart($claimed, null, false, null, 0);
-        }
-        [$payment, $paymentWasCreated, $amount] = $claimed;
+        // A gateway that cannot be loaded has no lifetime: the claim goes on as ever, then the failure surfaces as ever.
+        $driver = $this->driver($gateway);
+        $lifetime = $driver instanceof PaymentGatewayConstraintsInterface ? $driver->invoiceLifetimeSeconds() : null;
 
-        $requestResult = $this->paymentGatewayRegistry
-            ->resolve($gateway)
-            ->createPayment($payment, $order);
+        $claimed = $this->claimPayment($order, $storePaymentMethod, $lifetime);
+        if ($claimed instanceof PaymentStart) {
+            return $claimed;
+        }
+        [$payment, $paymentWasCreated, $amount, $reservation] = $claimed;
+        if ($driver instanceof \Throwable) {
+            throw $driver;
+        }
+
+        try {
+            $requestResult = $driver->createPayment($payment, $order);
+        } catch (\Throwable $e) {
+            if (null !== $reservation && $this->entityManager->isOpen()) {
+                $this->endReservation($payment, $reservation, (int) $lifetime);
+                $this->entityManager->flush();
+            }
+
+            throw $e;
+        }
 
         if ($requestResult->rawResponse !== null) {
             $payment->setRequestPayload($requestResult->rawResponse);
@@ -133,6 +166,9 @@ final class PaymentStarter
             if (PaymentGatewayType::NOWPAYMENTS === $gateway->getType() && NowPaymentsGateway::BELOW_MINIMUM_USER_MESSAGE === $requestResult->message) {
                 $this->rejectBelowMinimum($payment, $paymentWasCreated);
             }
+        }
+        if (null !== $reservation) {
+            $this->endReservation($payment, $reservation, (int) $lifetime);
         }
         $this->entityManager->flush();
 
@@ -175,11 +211,13 @@ final class PaymentStarter
      * gateway payment reused or a new one, flushed. While a wallet payment of the order holds its debit (pending, in
      * review, or provisioning_failed) nothing is started or reused: that payment is never taken over (its method would
      * change and its debit could no longer be given back) and no second payment is started beside it, which would make
-     * the customer pay twice. Then the PaymentStart kind to answer (KIND_WALLET_PAYMENT_PENDING / _HELD).
+     * the customer pay twice. Then the refusal is answered (KIND_WALLET_PAYMENT_PENDING / _HELD). The same while another
+     * start is creating the invoice of the open row: a failed start of that row, for the customer to try again. KIND_ONLINE
+     * whatever the chosen method is, so that no caller shows a chosen manual card's details for a refused start.
      *
-     * @return array{Payment, bool, int}|string [payment, created, amount], or the refusal's PaymentStart kind
+     * @return array{Payment, bool, int, ?\DateTimeImmutable}|PaymentStart [payment, created, amount, reservation written], or the refusal
      */
-    private function claimPayment(Order $order, StorePaymentMethod $storePaymentMethod): array|string
+    private function claimPayment(Order $order, StorePaymentMethod $storePaymentMethod, ?int $lifetime): array|PaymentStart
     {
         $gateway = $storePaymentMethod->getGateway();
         $connection = $this->entityManager->getConnection();
@@ -194,11 +232,23 @@ final class PaymentStarter
             if ($held instanceof Payment) {
                 $connection->commit();
 
-                return PaymentStatus::PENDING === $held->getStatus() ? PaymentStart::KIND_WALLET_PAYMENT_PENDING : PaymentStart::KIND_WALLET_PAYMENT_HELD;
+                return new PaymentStart(PaymentStatus::PENDING === $held->getStatus() ? PaymentStart::KIND_WALLET_PAYMENT_PENDING : PaymentStart::KIND_WALLET_PAYMENT_HELD, null, false, null, 0);
             }
 
             $amount = $this->payableAmount($order);
-            $payment = $this->openPayment($order);
+            $payment = $this->lockedOpenPayment($order);
+            $now = new \DateTimeImmutable();
+            $state = $this->invoiceState($payment, $gateway, $lifetime, $amount, $now);
+            if (self::INVOICE_RESERVED === $state && $payment instanceof Payment) {
+                $connection->commit();
+
+                return new PaymentStart(PaymentStart::KIND_ONLINE, $payment, false, self::INVOICE_IN_PROGRESS_MESSAGE, $amount);
+            }
+            if (self::INVOICE_REPLACE === $state && $payment instanceof Payment) {
+                $this->supersede($payment);
+                $payment = null;
+            }
+
             if (!$payment instanceof Payment) {
                 $payment = (new Payment())
                     ->setOrder($order)
@@ -220,6 +270,15 @@ final class PaymentStarter
                     ->setMethod($gateway->getType())
                     ->setCurrency($gateway->getCurrency());
             }
+            $reservation = null === $lifetime || self::INVOICE_LIVE === $state ? null : $now->modify(sprintf('+%d seconds', self::RESERVATION_SECONDS));
+            if (self::INVOICE_LIVE !== $state) {
+                // Without a lifetime this also drops what a stale reservation left: the row is no invoice any more.
+                $payment->setExpiresAt($reservation);
+            }
+            if (null !== $reservation) {
+                // The invoice is created now, so at today's price, even on a reused row.
+                $payment->setAmount($amount)->setPayableAmount($amount);
+            }
             $this->entityManager->flush();
             $connection->commit();
         } catch (\Throwable $e) {
@@ -234,7 +293,78 @@ final class PaymentStarter
             throw $e;
         }
 
-        return [$payment, $paymentWasCreated, $amount];
+        return [$payment, $paymentWasCreated, $amount, $reservation];
+    }
+
+    private function driver(PaymentGateway $gateway): PaymentGatewayInterface|\Throwable
+    {
+        try {
+            return $this->paymentGatewayRegistry->resolve($gateway);
+        } catch (\Throwable $e) {
+            return $e;
+        }
+    }
+
+    /**
+     * One row, one invoice. A row with no expiresAt under a gateway with no lifetime is outside this and is started as
+     * ever. Otherwise, in this order:
+     *
+     * - no provider reference but an expiresAt: a reservation. Running while it lasts, whichever gateway the customer
+     *   chose now, because that start's invoice lands on this row; a stale one (a crash) means the row is free;
+     * - pending with no provider reference: nothing to protect, the row is free;
+     * - the chosen gateway's invoice, unexpired, for this amount: live;
+     * - anything else carries an invoice that is over or is another gateway's, which the customer can still pay, so it
+     *   must keep its references: a new row. That includes switching from a live invoice to a gateway with no lifetime.
+     *   So does a submitted row, whose receipt is an admin's to judge: replacing it leaves it as it is (supersede()).
+     */
+    private function invoiceState(?Payment $payment, PaymentGateway $gateway, ?int $lifetime, int $amount, \DateTimeImmutable $now): string
+    {
+        if (!$payment instanceof Payment) {
+            return self::INVOICE_START;
+        }
+        $expiresAt = $payment->getExpiresAt();
+        $transactionId = $payment->getGatewayTransactionId();
+        if (null === $lifetime && null === $expiresAt) {
+            return self::INVOICE_START;
+        }
+        if (null === $transactionId && null !== $expiresAt) {
+            return $expiresAt > $now ? self::INVOICE_RESERVED : self::INVOICE_START;
+        }
+        if (null === $transactionId && null === $payment->getAuthority() && PaymentStatus::PENDING === $payment->getStatus()) {
+            return self::INVOICE_START;
+        }
+        $live = null !== $lifetime
+            && null !== $transactionId
+            && null !== $expiresAt && $expiresAt > $now
+            && $payment->getGateway()?->getId() === $gateway->getId()
+            && $payment->getPayableAmount() === $amount;
+
+        return $live ? self::INVOICE_LIVE : self::INVOICE_REPLACE;
+    }
+
+    /** Closed unpaid, not failed; the order stays open and a later "paid" goes to review (PaymentSettlementService). */
+    private function supersede(Payment $payment): void
+    {
+        if (PaymentStatus::PENDING !== $payment->getStatus()) {
+            return;
+        }
+        $payment
+            ->setStatus(PaymentStatus::REJECTED)
+            ->setAdminNote(Payment::NOTE_GATEWAY_INVOICE_SUPERSEDED)
+            ->setConfirmationSource(Payment::SOURCE_GATEWAY_INVOICE_SUPERSEDED);
+    }
+
+    /**
+     * After createPayment(), whatever it answered: a row with an invoice has its expiry, the plugin's own or the lifetime
+     * from now; a row without one is free again.
+     */
+    private function endReservation(Payment $payment, \DateTimeImmutable $reservation, int $lifetime): void
+    {
+        if (null === $payment->getGatewayTransactionId()) {
+            $payment->setExpiresAt(null);
+        } elseif ($reservation === $payment->getExpiresAt()) {
+            $payment->setExpiresAt((new \DateTimeImmutable())->modify(sprintf('+%d seconds', $lifetime)));
+        }
     }
 
     /**
@@ -262,6 +392,22 @@ final class PaymentStarter
             ->setMaxResults(1)
             ->getQuery()
             ->getOneOrNullResult();
+    }
+
+    /**
+     * openPayment() as a plain read, then the row by primary key (order, then payment, as PaymentSettlementService::lock()).
+     * Under the order lock nothing else closes it, but the plain read may be older than that lock inside an outer
+     * transaction, and a managed entity keeps the fields it had: the locked row decides.
+     */
+    private function lockedOpenPayment(Order $order): ?Payment
+    {
+        $payment = $this->openPayment($order);
+        if (!$payment instanceof Payment) {
+            return null;
+        }
+        $this->entityManager->refresh($payment, LockMode::PESSIMISTIC_WRITE);
+
+        return in_array($payment->getStatus(), [PaymentStatus::PENDING, PaymentStatus::SUBMITTED], true) ? $payment : null;
     }
 
     /** NOWPayments refused the amount as below its minimum: the payment cannot be paid at all. */
