@@ -8,12 +8,14 @@ use Amoobot\Plugin\ConstrainedGateway\ConstrainedGatewayPlugin;
 use Amoobot\Plugin\ConstrainedGateway\UnconstrainedGatewayPlugin;
 use App\Bot\Application\StorePaymentMethodResolver;
 use App\Entity\Order;
+use App\Entity\Plugin;
 use App\Entity\StorePaymentMethod;
 use App\Payment\Domain\PaymentGatewayType;
 use App\Tests\Support\ConstrainedGatewayFixture;
 use App\Tests\Support\IntegrationTestCase;
 use App\Tests\Support\RecordingLogger;
 use PHPUnit\Framework\Attributes\DataProvider;
+use Psr\Log\LogLevel;
 
 /**
  * A plugin's constraints in StorePaymentMethodResolver: the method is hidden when the plugin says so, or cannot say.
@@ -21,6 +23,8 @@ use PHPUnit\Framework\Attributes\DataProvider;
 final class StorePaymentMethodConstraintsTest extends IntegrationTestCase
 {
     use ConstrainedGatewayFixture;
+
+    private const LOAD_FAILURE = 'The payment plugin could not be loaded; the method is skipped.';
 
     protected function setUp(): void
     {
@@ -173,6 +177,98 @@ final class StorePaymentMethodConstraintsTest extends IntegrationTestCase
         $log = $this->logger()->text();
         self::assertStringContainsString('The payment plugin could not be loaded', $log);
         self::assertStringNotContainsString(self::API_KEY, $log);
+    }
+
+    private function clearLog(): void
+    {
+        $this->logger()->records = [];
+    }
+
+    /**
+     * Both listings, with the warnings they logged.
+     *
+     * @return list<array{level: mixed, message: string, context: array<mixed>}>
+     */
+    private function warningsOfBothListings(Order $order): array
+    {
+        $this->clearLog();
+        $this->resolver()->getAvailableMethods($order);
+        $this->resolver()->getOfferableMethods();
+
+        return array_values(array_filter($this->logger()->records, static fn (array $record): bool => LogLevel::WARNING === $record['level']));
+    }
+
+    public function testADisabledPluginLogsNoWarningAndKeepsItsSkipReason(): void
+    {
+        $method = $this->constrainedMethod();
+        $order = $this->order(150000);
+        $plugin = $this->em->getRepository(Plugin::class)->findOneBy(['code' => self::PLUGIN_CODE]) ?? throw new \LogicException();
+        $plugin->setStatus(Plugin::STATUS_DISABLED);
+        $this->em->flush();
+
+        self::assertSame([], $this->warningsOfBothListings($order));
+        self::assertSame(['plugin_disabled', 'gateway_not_configured'], $this->skipReasons($order, $method));
+        self::assertFalse($this->resolver()->getDiagnostics($order)['methods'][0]['hasDriver']);
+    }
+
+    public function testAnInactiveMethodLogsNoWarning(): void
+    {
+        $method = $this->constrainedMethod()->setIsActive(false);
+        $this->em->flush();
+        $order = $this->order(150000);
+
+        self::assertSame([], $this->warningsOfBothListings($order));
+        self::assertSame(['method_inactive'], $this->skipReasons($order, $method));
+    }
+
+    public function testAnInactiveGatewayLogsNoWarning(): void
+    {
+        $method = $this->constrainedMethod();
+        $method->getGateway()->setIsActive(false);
+        $this->em->flush();
+        $order = $this->order(150000);
+
+        self::assertSame([], $this->warningsOfBothListings($order));
+        self::assertSame(['gateway_inactive'], $this->skipReasons($order, $method));
+    }
+
+    public function testAMethodSwitchedOffKeepsItsLoadFailureReasonButTheResolverDoesNotWarn(): void
+    {
+        $inactiveMethod = $this->constrainedMethod()->setIsActive(false);
+        $inactiveGateway = $this->constrainedMethod();
+        $inactiveGateway->getGateway()->setIsActive(false);
+        $this->em->flush();
+        $order = $this->order(150000);
+        ConstrainedGatewayPlugin::$throwIn = 'construct';
+
+        $messages = array_column($this->warningsOfBothListings($order), 'message');
+
+        self::assertNotContains(self::LOAD_FAILURE, $messages);
+        self::assertSame(['method_inactive', 'plugin_runtime_error'], $this->skipReasons($order, $inactiveMethod));
+        self::assertSame(['gateway_inactive', 'plugin_runtime_error'], $this->skipReasons($order, $inactiveGateway));
+    }
+
+    public function testAnActivePluginThatFailsToLoadLogsOncePerCallWithOnlyTheIds(): void
+    {
+        $method = $this->constrainedMethod();
+        $order = $this->order(150000);
+        ConstrainedGatewayPlugin::$throwIn = 'construct';
+        $failures = fn (): array => array_values(array_filter($this->logger()->records, static fn (array $record): bool => self::LOAD_FAILURE === $record['message']));
+
+        $this->clearLog();
+        $this->resolver()->getAvailableMethods($order);
+        self::assertCount(1, $failures());
+
+        $this->clearLog();
+        $this->resolver()->getOfferableMethods();
+        self::assertCount(1, $failures());
+
+        self::assertSame(LogLevel::WARNING, $failures()[0]['level']);
+        self::assertSame([
+            'gateway_id' => $method->getGateway()->getId(),
+            'plugin_code' => self::PLUGIN_CODE,
+            'error_class' => \RuntimeException::class,
+        ], $failures()[0]['context']);
     }
 
     public function testAPluginWithoutTheInterfaceIsOfferedForAnyAmount(): void
