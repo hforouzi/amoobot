@@ -82,3 +82,14 @@ framework:
             policy: fixed_window
             limit: 1
             interval: '1 hour'
+        # Tetraminator's notify endpoint (TetraminatorNotifyController), design decision 2: every request per client IP,
+        # wrong tokens and malformed URLs included; then each authenticated payment, so a valid URL cannot be used to
+        # hammer the provider's inquiry API.
+        payment_notify_ip:
+            policy: sliding_window
+            limit: 60
+            interval: '1 minute'
+        payment_notify_payment:
+            policy: sliding_window
+            limit: 6
+            interval: '10 minutes'

@@ -1,0 +1,18 @@
+{
+  "manifestVersion": 1,
+  "type": "payment_gateway",
+  "code": "tetraminator",
+  "name": {
+    "en": "Tetraminator, scripted answers (tests only)"
+  },
+  "version": "1.0.0",
+  "mainClass": "Amoobot\\Plugin\\TetraminatorScripted\\ScriptedTetraminatorPlugin",
+  "category": "payment",
+  "permissions": [
+    "payment.verify"
+  ],
+  "supportsWebhook": false,
+  "supportsOnlinePayment": true,
+  "supportsManualConfirmation": false,
+  "configSchema": []
+}

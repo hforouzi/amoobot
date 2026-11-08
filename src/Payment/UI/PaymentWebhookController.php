@@ -33,6 +33,10 @@ use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
  * Browser callbacks that carry ?rt=<return token> then send the customer on to the return page
  * (/payment/return/{token}), on the brand domain when there is one: callbacks themselves stay on DEFAULT_URI, where the
  * gateways were told to send them. The token is never used to find the payment being settled.
+ *
+ * Plugins with an endpoint of their own (OWN_ENDPOINT_PLUGINS) get a 404 here on every plugin route, before any lookup
+ * or verification: Tetraminator's webhook is authenticated only by its notify URL's token, so this pipeline (no rate
+ * limit, outcome codes in the answer, the adapter accepting unauthenticated callbacks) must not reach its verify.
  */
 final class PaymentWebhookController
 {
@@ -43,6 +47,9 @@ final class PaymentWebhookController
         'custom-api' => PaymentGatewayType::CUSTOM_API,
         'plugin' => 'plugin',
     ];
+
+    /** Plugin codes whose notifications reach the core only through their own controller (TetraminatorNotifyController). */
+    private const OWN_ENDPOINT_PLUGINS = ['tetraminator'];
 
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
@@ -91,13 +98,18 @@ final class PaymentWebhookController
     #[Route('/payment/callback/plugin/{code}', name: 'payment_callback_plugin', methods: ['GET', 'POST'])]
     public function pluginCallback(Request $request, string $code): Response
     {
+        if (self::hasOwnEndpoint('plugin', $code)) {
+            // Not browser(): its return-token lookup would run first.
+            return $this->html(new NotificationOutcome(404, 'gateway_not_found'));
+        }
+
         return $this->browser($request, $this->run($request, 'plugin', $code, NotificationAwareGatewayInterface::CHANNEL_CALLBACK));
     }
 
     private function run(Request $request, string $type, string $code, string $channel): NotificationOutcome
     {
         $gatewayType = self::TYPES[$type] ?? null;
-        if (null === $gatewayType) {
+        if (null === $gatewayType || self::hasOwnEndpoint($type, $code)) {
             return new NotificationOutcome(404, 'gateway_not_found');
         }
 
@@ -105,6 +117,12 @@ final class PaymentWebhookController
         $source = sprintf('%s_%s', 'plugin' === $gatewayType ? 'plugin_'.$code : $gatewayType, $channel);
 
         return $this->processor->process($gateways, $request, $channel, $source);
+    }
+
+    /** Compared like the database compares plugin codes (case-insensitive collation), so a case variant is closed too. */
+    private static function hasOwnEndpoint(string $type, string $code): bool
+    {
+        return 'plugin' === $type && in_array(strtolower(trim($code)), self::OWN_ENDPOINT_PLUGINS, true);
     }
 
     /**

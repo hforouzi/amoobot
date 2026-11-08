@@ -1063,6 +1063,13 @@ check "webhook location includes the maintenance switch" grep -qF 'include /etc/
 check "payment location includes the maintenance switch" grep -qF 'include /etc/nginx/snippets/amoobot-maintenance.conf;' <<< "$PAYMENT_BLOCK"
 check "webhook location goes to PHP directly (no try_files redirect)" bash -c \
   '! grep -q try_files <<< "$1" && grep -q "fastcgi_pass unix:/run/php/php8.4-fpm.sock;" <<< "$1" && grep -q "SCRIPT_FILENAME \$realpath_root/index.php;" <<< "$1"' _ "$WEBHOOK_BLOCK"
+NOTIFY_BLOCK="$(block '\/payment\/notify\/' "$APP_LOC")"
+check "notify location (gateway webhook token in the URL) includes the maintenance switch" grep -qF 'include /etc/nginx/snippets/amoobot-maintenance.conf;' <<< "$NOTIFY_BLOCK"
+check "notify location: access_log off, its own error_log at crit, PHP directly (no try_files redirect)" bash -c \
+  'grep -qx "        access_log off;" <<< "$1" && grep -qx "        error_log /var/log/nginx/amoobot_notify_error.log crit;" <<< "$1" &&
+   ! grep -q try_files <<< "$1" && grep -q "fastcgi_pass unix:/run/php/php8.4-fpm.sock;" <<< "$1" && grep -q "SCRIPT_FILENAME \$realpath_root/index.php;" <<< "$1"' _ "$NOTIFY_BLOCK"
+check "notify location is a ^~ prefix longer than /payment/ (nginx picks it), declared once" bash -c \
+  '[[ $(grep -c "location ^~ /payment/notify/ {" <<< "$1") -eq 1 && $(grep -c "location ^~ /payment/ {" <<< "$1") -eq 1 ]] && ! grep -qE "location (~|=) [^ ]*payment" <<< "$1"' _ "$APP_LOC"
 
 maint_case() {  # maint_case <state> <site includes 0|1> <nginx -t rc> -> MAINTENANCE_ON, file content, calls
   ( write_file() { cat > "$1"; }; warn() { echo "WARN: $*"; }; die() { echo "DIE: $*"; exit 1; }
@@ -1092,6 +1099,10 @@ check "failure without maintenance prints no maintenance text" not grep -q 503 <
 
 if can_dry_run; then
   OUT="$BASE_OUT"
+  # No certificate here, so the site it previews is the bootstrap one; with a certificate (a real server) --show-diff
+  # prints the HTTPS site, whose notify location is checked in group 5.
+  check "dry-run prepares the notify location's error log (640)" \
+    grep -qF '[dry-run] install -m 640 -o www-data -g adm /dev/null /var/log/nginx/amoobot_notify_error.log' <<< "$OUT"
   check "maintenance ON after pausing jobs and before the checkout" bash -c \
     'p=$(grep -n "pause scheduled jobs" <<< "$1" | cut -d: -f1); m=$(grep -n "webhook/payment maintenance on" <<< "$1" | cut -d: -f1); c=$(grep -n "\[dry-run\] check out" <<< "$1" | cut -d: -f1)
      [[ -n $p && -n $m && -n $c && $p -lt $m && $m -lt $c ]]' _ "$OUT"
@@ -1168,10 +1179,13 @@ $(app_locations)
     check "nginx: webhook answers 503 during maintenance" test "$(code -X POST "http://127.0.0.1:${NGX_PORT}/telegram/webhook/abc")" = 503
     check "nginx: ...with Retry-After" grep -qi '^Retry-After: 120' <<< "$(curl -s -m 5 -D - -o /dev/null -X POST "http://127.0.0.1:${NGX_PORT}/telegram/webhook/abc")"
     check "nginx: payment callback answers 503 during maintenance" test "$(code "http://127.0.0.1:${NGX_PORT}/payment/callback/zibal")" = 503
+    check "nginx: gateway notify URL answers 503 during maintenance" test "$(code "http://127.0.0.1:${NGX_PORT}/payment/notify/tetraminator/1/abc")" = 503
     check "nginx: other pages are not affected" test "$(code "http://127.0.0.1:${NGX_PORT}/admin/login")" != 503
     render_maintenance off > "$NGX/conf/maint.conf"; ngx_reload
     check "nginx: after lifting, the webhook reaches PHP again (502: no PHP-FPM here)" test "$(code -X POST "http://127.0.0.1:${NGX_PORT}/telegram/webhook/abc")" = 502
     check "nginx: after lifting, payment reaches PHP again" test "$(code "http://127.0.0.1:${NGX_PORT}/payment/callback/zibal")" = 502
+    check "nginx: after lifting, the notify URL reaches PHP again (502)" test "$(code "http://127.0.0.1:${NGX_PORT}/payment/notify/tetraminator/1/NOTIFYSECRET")" = 502
+    check "nginx: ...and its token is in no access log" bash -c '! grep -rqs NOTIFYSECRET "$1"/logs/*access*' _ "$NGX"
     ngx_stop
   else
     fail "nginx could not start the rendered site"; cat "$WORK/ngx/t.out" 2> /dev/null | head -5
@@ -1201,6 +1215,11 @@ check "webhook location: its own error_log at crit (upstream errors would log th
   grep -qx '        error_log /var/log/nginx/amoobot_webhook_error.log crit;' <<< "$WEBHOOK_BLOCK"
 check "  ...declared before fastcgi_pass, inside the webhook location only" bash -c \
   '[[ $(grep -c "amoobot_webhook_error.log" <<< "$2") -eq 1 ]] && e=$(grep -n error_log <<< "$1" | cut -d: -f1) && f=$(grep -n fastcgi_pass <<< "$1" | cut -d: -f1) && [[ $e -lt $f ]]' _ "$WEBHOOK_BLOCK" "$HTTPS"
+NOTIFY_BLOCK="$(block '\/payment\/notify\/' "$HTTPS")"
+check "HTTPS site (what a dry run on a server with a certificate previews) has the notify location, access_log off" bash -c \
+  'grep -qx "        access_log off;" <<< "$1" && grep -qx "        error_log /var/log/nginx/amoobot_notify_error.log crit;" <<< "$1" && grep -qF "include /etc/nginx/snippets/amoobot-maintenance.conf;" <<< "$1"' _ "$NOTIFY_BLOCK"
+check "  ...before the generic /payment/ location, once" bash -c \
+  'n=$(grep -n "location ^~ /payment/notify/ {" <<< "$1" | cut -d: -f1); p=$(grep -n "location ^~ /payment/ {" <<< "$1" | cut -d: -f1); [[ -n $n && -n $p && $n -lt $p && $(grep -c "location ^~ /payment/notify/ {" <<< "$1") -eq 1 ]]' _ "$HTTPS"
 rm -f "$HSTS_STATE_FILE"
 check "maintenance on, HSTS not yet verified -> no HSTS header in the include" not grep -q Strict-Transport-Security <<< "$(render_maintenance on)"
 touch "$HSTS_STATE_FILE"
@@ -1211,7 +1230,7 @@ rm -f "$HSTS_STATE_FILE"
 load_fn nginx_log_files
 out="$( (run() { echo "$*"; }; refuse_symlink() { :; }; WEB_USER=www-data; nginx_log_files) )"
 check "nginx log files are kept at mode 640" bash -c \
-  '[[ $(grep -cE "(chmod 640|install -m 640 -o www-data -g adm /dev/null) /var/log/nginx/amoobot_(access|error|webhook_error).log" <<< "$1") -eq 3 ]]' _ "$out"
+  '[[ $(grep -cE "(chmod 640|install -m 640 -o www-data -g adm /dev/null) /var/log/nginx/amoobot_(access|error|webhook_error|notify_error).log" <<< "$1") -eq 4 ]]' _ "$out"
 check "port 80 keeps ACME challenges reachable and redirects the rest" bash -c \
   'sed -n "/^server {/,/^}/p" <<< "$1" | head -20 | grep -q "acme-challenge" && grep -q "return 301 https://\$host\$request_uri;" <<< "$1"' _ "$HTTPS"
 check "no IPv6 on the host -> no [::] listeners" not grep -q 'listen \[::\]' <<< "$HTTPS"
