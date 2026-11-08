@@ -22,6 +22,11 @@ Do not define a duplicate interface inside the plugin.
 - `PaymentVerificationResult`: verification result, provider reference metadata and the verified `amount` + `currency` (required for automatic confirmation).
 - `PaymentWebhookResult`: webhook result when a plugin supports webhooks.
 
+**Account errors at create.** When the provider refuses an invoice because of the shop's own account, return a failed
+`PaymentRequestResult` with `rawResponse['error']` set to `unauthorized` (invalid key) or `store_disabled` (the store is
+disabled at the provider). `PaymentStarter` then alerts the admins in Telegram, at most once an hour per gateway
+(`PaymentGatewayCredentialAlert`). The alert text is fixed, so nothing the provider sent, such as a quoted key, reaches it.
+
 ## Optional: Constraints
 
 A plugin may also implement `App\Payment\Plugin\PaymentGatewayConstraintsInterface`, when the provider has limits the

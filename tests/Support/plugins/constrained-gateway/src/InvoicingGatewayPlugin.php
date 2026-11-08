@@ -13,10 +13,11 @@ use App\Payment\Plugin\PaymentGatewayConstraintsInterface;
  * Test only: a provider with invoices that last $lifetime seconds, or that never end when it is null. A live invoice of
  * the row is handed out again with no provider call, as a real plugin must. Every provider call is counted in $calls and,
  * for a test across processes, as a line in the file named by TEST_INVOICE_CALLS_FILE; it takes TEST_INVOICE_DELAY_MS.
- * $answer makes the provider refuse ('fail'), blow up ('throw') or answer without a reference ('no_reference'), and makes
- * the plugin's lifetime blow up ('lifetime_throws'). $stamp leaves the expiry to the core when false. $expiryAtCall is
- * what the row said when the provider was called. $onCall runs at each provider call (e.g. to see the open transactions),
- * $onLifetime when the core asks the lifetime: after the caller checked the order, before the claim locks it.
+ * $answer makes the provider refuse ('fail'; 'unauthorized' and 'store_disabled' as rawResponse.error), blow up
+ * ('throw') or answer without a reference ('no_reference'), and makes the plugin's lifetime blow up ('lifetime_throws').
+ * $stamp leaves the expiry to the core when false. $expiryAtCall is what the row said when the provider was called.
+ * $onCall runs at each provider call (e.g. to see the open transactions), $onLifetime when the core asks the lifetime:
+ * after the caller checked the order, before the claim locks it.
  */
 final class InvoicingGatewayPlugin extends UnconstrainedGatewayPlugin implements PaymentGatewayConstraintsInterface
 {
@@ -89,6 +90,10 @@ final class InvoicingGatewayPlugin extends UnconstrainedGatewayPlugin implements
             return new PaymentRequestResult(success: false, message: 'The provider refused.');
         }
 
+        if ('unauthorized' === self::$answer || 'store_disabled' === self::$answer) {
+            // The provider's own text may quote the key: the core's alert must not.
+            return new PaymentRequestResult(success: false, message: 'Refused for key '.($config['api_key'] ?? ''), rawResponse: ['error' => self::$answer]);
+        }
         if ('no_reference' === self::$answer) {
             return new PaymentRequestResult(success: true, paymentUrl: 'https://provider.test/no-reference');
         }
