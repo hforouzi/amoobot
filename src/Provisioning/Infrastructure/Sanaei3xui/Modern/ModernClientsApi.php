@@ -52,14 +52,17 @@ class ModernClientsApi
     /**
      * GET panel/api/clients/get/{email}.
      *
+     * @param bool $hideEmail true: logs and errors name the path as clients/get/{email} (bulk reads of clients the bot
+     *                        did not create, whose emails may be anything: app:panel:import-clients)
+     *
      * @return array<string, mixed>|null the client (normalised), null when the panel says there is no such client
      *
      * @throws PanelApiException when the panel cannot answer (unknown is never reported as "absent")
      */
-    public function getClient(VpnPanel $panel, string $email, bool $recordHealth = true): ?array
+    public function getClient(VpnPanel $panel, string $email, bool $recordHealth = true, bool $hideEmail = false): ?array
     {
         try {
-            $response = $this->http->get($panel, 'panel/api/clients/get/'.rawurlencode($email), [], null, null, $recordHealth);
+            $response = $this->http->get($panel, 'panel/api/clients/get/'.rawurlencode($email), [], null, $hideEmail ? 'panel/api/clients/get/{email}' : null, $recordHealth);
         } catch (PanelApiException $e) {
             if (self::isNotFound($e)) {
                 return null;
@@ -235,12 +238,13 @@ class ModernClientsApi
      * (it is a credential: it opens the subscription).
      *
      * @param bool $recordHealth false: a failure is not counted towards the panel's "degraded" state (bulk refreshes)
+     * @param bool $hideEmail    true: logs and errors name the path as clients/links/{email} (see getClient())
      *
      * @return array{links: list<string>, rejected: int, rejectedSchemes: array<string, int>}
      */
-    public function links(VpnPanel $panel, string $email, bool $recordHealth = true): array
+    public function links(VpnPanel $panel, string $email, bool $recordHealth = true, bool $hideEmail = false): array
     {
-        return ShareLinkPolicy::filter($this->http->get($panel, 'panel/api/clients/links/'.rawurlencode($email), [], self::LINKS_MAX_BYTES, null, $recordHealth)->obj);
+        return ShareLinkPolicy::filter($this->http->get($panel, 'panel/api/clients/links/'.rawurlencode($email), [], self::LINKS_MAX_BYTES, $hideEmail ? 'panel/api/clients/links/{email}' : null, $recordHealth)->obj);
     }
 
     /**

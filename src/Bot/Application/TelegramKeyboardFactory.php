@@ -600,6 +600,21 @@ class TelegramKeyboardFactory
     }
 
     /**
+     * Under "buy a new plan" for a service without a plan (renewal or extra traffic refused): the buy button and back.
+     *
+     * @return array<string, array<array<array<string, string>>>>
+     */
+    public function buyNewPlan(int $serviceId, bool $adminMode = false): array
+    {
+        return [
+            'inline_keyboard' => [
+                [['text' => $this->button('button.main.buy_service'), 'callback_data' => 'buy_service']],
+                [['text' => $this->button('button.common.back'), 'callback_data' => ($adminMode ? 'admin_service_view:' : 'service_view:').$serviceId]],
+            ],
+        ];
+    }
+
+    /**
      * @param list<int> $serviceIds
      *
      * @return array<string, array<array<array<string, string>>>>

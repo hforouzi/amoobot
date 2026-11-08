@@ -60,6 +60,9 @@ class ServiceManagementService
     public const STEP_WAITING_ADD_TRAFFIC_AMOUNT = 'waiting_add_traffic_amount';
     public const STEP_WAITING_DISCOUNT_DECISION = 'waiting_discount_decision';
     public const STEP_WAITING_DISCOUNT_CODE = 'waiting_discount_code';
+    /** A service without a plan (imported from the panel): what renewal and extra traffic answer instead. */
+    public const NO_PLAN_RENEWAL = 'این سرویس پلن ندارد. برای تمدید، یک پلن جدید بخرید.';
+    public const NO_PLAN_ADD_TRAFFIC = 'این سرویس پلن ندارد. برای حجم بیشتر، یک پلن جدید بخرید.';
 
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
@@ -469,6 +472,10 @@ class ServiceManagementService
             return;
         }
 
+        if ($this->offerNewPlanInstead($service, $chatId, $callbackId, self::NO_PLAN_RENEWAL, $adminMode)) {
+            return;
+        }
+
         $quote = $this->serviceOrderCheckout->renewalQuote($service);
         if (null === $quote) {
             $this->showPopupOrMessage($chatId, $callbackId, 'امکان تمدید خودکار برای این سرویس وجود ندارد. لطفاً با پشتیبانی تماس بگیرید.', 'renewal_package_missing');
@@ -524,6 +531,10 @@ class ServiceManagementService
             return;
         }
 
+        if ($this->offerNewPlanInstead($service, $chatId, $callbackId, self::NO_PLAN_RENEWAL, $adminMode)) {
+            return;
+        }
+
         $quote = $this->serviceOrderCheckout->renewalQuote($service);
         if (null === $quote) {
             $this->showPopupOrMessage($chatId, $callbackId, 'امکان تمدید خودکار برای این سرویس وجود ندارد. لطفاً با پشتیبانی تماس بگیرید.', 'renewal_confirm_package_missing');
@@ -572,6 +583,10 @@ class ServiceManagementService
         if (!$this->trafficAddonSettingsProvider->canPurchase()) {
             $this->showPopupOrMessage($chatId, $callbackId, 'خرید حجم اضافه فعال نیست.', 'traffic_addon_disabled');
 
+            return;
+        }
+
+        if ($this->offerNewPlanInstead($service, $chatId, $callbackId, self::NO_PLAN_ADD_TRAFFIC, false)) {
             return;
         }
 
@@ -707,6 +722,10 @@ class ServiceManagementService
         if (!$service instanceof VpnService || $service->getUser()->getId() !== $account->getUser()->getId() || VpnServiceStatus::DELETED === $service->getStatus()) {
             $this->showPopupOrMessage($chatId, $callbackId, 'سرویس معتبر نیست.', 'invalid_add_traffic_service_confirm');
 
+            return;
+        }
+
+        if ($this->offerNewPlanInstead($service, $chatId, $callbackId, self::NO_PLAN_ADD_TRAFFIC, false)) {
             return;
         }
 
@@ -1452,6 +1471,24 @@ class ServiceManagementService
 
         $this->acknowledgeCallback($callbackId);
         $this->telegramApiClient->sendMessage($chatId, implode("\n", $lines), $this->keyboardFactory->adminUserDetail($userId, $backServiceId));
+    }
+
+    /**
+     * A service without an order (imported from the panel, docs/design/panel-client-import.md, or one whose order was
+     * deleted) has no plan to price a renewal or extra traffic from: the customer is pointed at buying a new plan,
+     * with the buy button. False for every other service (nothing sent).
+     */
+    private function offerNewPlanInstead(VpnService $service, string $chatId, ?string $callbackId, string $text, bool $adminMode): bool
+    {
+        if (null !== $service->getOrder()) {
+            return false;
+        }
+
+        $this->acknowledgeCallback($callbackId);
+        $this->telegramApiClient->sendMessage($chatId, $text, $this->keyboardFactory->buyNewPlan((int) $service->getId(), $adminMode));
+        $this->debugLog(sprintf('service_without_plan_new_plan_offered service_id=%d imported=%s', $service->getId() ?? 0, $service->isImported() ? 'yes' : 'no'));
+
+        return true;
     }
 
     private function findServiceOrPopup(int $serviceId, string $chatId, ?string $callbackId, string $logKey): ?VpnService

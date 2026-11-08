@@ -58,23 +58,13 @@ final class ServiceNotificationService
         foreach ($services as $service) {
             ++$checked;
 
-            if (VpnServiceStatus::ACTIVE !== $service->getStatus()) {
-                ++$skipped;
-                continue;
-            }
-
+            $daysLeft = $this->expiryDaysLeft($service, $now);
             $expiresAt = $service->getExpiresAt();
-            if (!$expiresAt instanceof \DateTimeImmutable) {
+            if (null === $daysLeft || !$expiresAt instanceof \DateTimeImmutable) {
                 ++$skipped;
                 continue;
             }
 
-            if ($expiresAt <= $now) {
-                ++$skipped;
-                continue;
-            }
-
-            $daysLeft = (int) ceil(($expiresAt->getTimestamp() - $now->getTimestamp()) / 86400);
             $matched = false;
             foreach ($thresholds as $days) {
                 if ($daysLeft > $days) {
@@ -132,19 +122,14 @@ final class ServiceNotificationService
         foreach ($services as $service) {
             ++$checked;
 
-            if (VpnServiceStatus::DELETED === $service->getStatus()) {
+            $usagePercent = $this->trafficUsagePercent($service);
+            if (null === $usagePercent) {
                 ++$skipped;
                 continue;
             }
-
             $limitGb = $service->getTrafficLimitGb();
             $usedGb = $service->getTrafficUsedGb();
-            if (null === $limitGb || $limitGb <= 0 || null === $usedGb || $usedGb < 0) {
-                ++$skipped;
-                continue;
-            }
 
-            $usagePercent = ((float) $usedGb / (float) $limitGb) * 100;
             $matched = false;
             foreach ($thresholds as $threshold) {
                 if ($usagePercent < $threshold) {
@@ -207,14 +192,7 @@ final class ServiceNotificationService
         foreach ($services as $service) {
             ++$checked;
 
-            if (VpnServiceStatus::DELETED === $service->getStatus()) {
-                ++$skipped;
-                continue;
-            }
-
-            $isExpiredStatus = VpnServiceStatus::EXPIRED === $service->getStatus();
-            $isExpiredByTime = $service->getExpiresAt() instanceof \DateTimeImmutable && $service->getExpiresAt() < $now;
-            if (!$isExpiredStatus && !$isExpiredByTime) {
+            if (!$this->isExpiredForNotice($service, $now)) {
                 ++$skipped;
                 continue;
             }
@@ -248,6 +226,83 @@ final class ServiceNotificationService
         }
 
         return new NotificationSummary($checked, $sent, $skipped, $failed);
+    }
+
+    /**
+     * Records the notices the service's state would trigger now as already sent, without sending anything (the same
+     * rules as the three send runs). For a service created from a client already on a panel (app:panel:import-clients):
+     * one already expired, close to expiry or low on traffic is not messaged by the next run, so an import does not
+     * message every returning customer at once; thresholds reached later still notify. Persisted, not flushed.
+     *
+     * @return int how many notices were recorded
+     */
+    public function markCurrentStateNotified(VpnService $service, string $source): int
+    {
+        $now = new \DateTimeImmutable();
+        $keys = [];
+        $daysLeft = $this->expiryDaysLeft($service, $now);
+        if (null !== $daysLeft) {
+            foreach ($this->resolveThresholds(self::SETTING_EXPIRY_DAYS, $this->serviceNotifyExpiryDays, [3, 1], true) as $days) {
+                if ($daysLeft <= $days) {
+                    $keys[] = ['expiry_warning', sprintf('expiry_%d_days', $days)];
+                }
+            }
+        }
+        $usagePercent = $this->trafficUsagePercent($service);
+        if (null !== $usagePercent) {
+            foreach ($this->resolveThresholds(self::SETTING_TRAFFIC_THRESHOLDS, $this->serviceNotifyTrafficThresholds, [50, 80, 95, 100], false) as $threshold) {
+                if ($usagePercent >= $threshold) {
+                    $keys[] = [$threshold >= 100 ? 'traffic_exhausted' : 'traffic_warning', sprintf('traffic_%d', $threshold)];
+                }
+            }
+        }
+        if ($this->isExpiredForNotice($service, $now)) {
+            $keys[] = ['expired', 'expired'];
+        }
+
+        foreach ($keys as [$type, $keyName]) {
+            $this->entityManager->persist((new ServiceNotificationLog())
+                ->setService($service)
+                ->setUser($service->getUser())
+                ->setType($type)
+                ->setKeyName($keyName)
+                ->setSentAt($now)
+                ->setPayload(['source' => $source, 'sent' => false]));
+        }
+
+        return count($keys);
+    }
+
+    /** Whole days until expiry (rounded up) of an active service that expires later; null when no expiry warning applies. */
+    private function expiryDaysLeft(VpnService $service, \DateTimeImmutable $now): ?int
+    {
+        $expiresAt = $service->getExpiresAt();
+        if (VpnServiceStatus::ACTIVE !== $service->getStatus() || !$expiresAt instanceof \DateTimeImmutable || $expiresAt <= $now) {
+            return null;
+        }
+
+        return (int) ceil(($expiresAt->getTimestamp() - $now->getTimestamp()) / 86400);
+    }
+
+    /** Used traffic in percent of the limit; null for a deleted service or one without a limit or usage. */
+    private function trafficUsagePercent(VpnService $service): ?float
+    {
+        $limitGb = $service->getTrafficLimitGb();
+        $usedGb = $service->getTrafficUsedGb();
+        if (VpnServiceStatus::DELETED === $service->getStatus() || null === $limitGb || $limitGb <= 0 || null === $usedGb || $usedGb < 0) {
+            return null;
+        }
+
+        return ((float) $usedGb / (float) $limitGb) * 100;
+    }
+
+    private function isExpiredForNotice(VpnService $service, \DateTimeImmutable $now): bool
+    {
+        if (VpnServiceStatus::DELETED === $service->getStatus()) {
+            return false;
+        }
+
+        return VpnServiceStatus::EXPIRED === $service->getStatus() || ($service->getExpiresAt() instanceof \DateTimeImmutable && $service->getExpiresAt() < $now);
     }
 
     /**
