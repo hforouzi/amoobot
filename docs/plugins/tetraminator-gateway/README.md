@@ -20,8 +20,9 @@ paid. Amoobot does everything else: locking, amount check, provisioning and noti
    - `callback_url` is `{callback_base_url}/payment/notify/tetraminator/{paymentId}/{token}`. The token is 32 random
      bytes, base64url. Only its SHA-256 hex is stored, in the payment's `authority`.
    - On 201 (or 200) with `status === true`, a valid `pay_id` and a valid link: `pay_id` becomes the transaction id,
-     the expected amount is frozen (`IRT`), the payment expires in 3600 s, and the customer gets `url` (else
-     `payment_link`, else `gateway_link`). Only `status`, `message`, `pay_id` and `mini_app_link` are stored.
+     the expected amount is frozen (`IRT`), the payment expires in 3600 s, and the customer gets the link chosen by
+     `prefer_website_link` (see [Which link the customer gets](#which-link-the-customer-gets)). Only `status`, `message`,
+     `pay_id` and, when `use_mini_app_link` is on, `mini_app_link` are stored.
    - Nothing is retried: the API has no idempotency key.
 2. **Webhook**: Tetraminator's GET to `callback_url` is unsigned and carries nothing. It is handled by the core's own
    endpoint (PR 4), which only triggers step 3. The plugin's `handleWebhook()` returns `null`, and the generic plugin
@@ -89,9 +90,26 @@ one, is never linked for Tetraminator (it has no return URL).
 | `api_key` | password | yes | Sent as `X-API-KEY`. Never shown in messages, logs or stored responses |
 | `callback_base_url` | url | yes | Public `https` base URL of Amoobot, e.g. `https://shop.example.com`. A host, no user info, no query |
 | `send_chat_id` | boolean | no (default `false`) | Sends the customer's Telegram id to Tetraminator. The shop owner's decision: it hands a third party the customer's id, and our own bot already reports the result |
+| `prefer_website_link` | boolean | no (default `true`) | The customer gets `gateway_link` (the provider's website page) when present and valid, else `url`, else `payment_link`. Off: `url`, then `payment_link`, then `gateway_link`. New invoices only |
+| `use_mini_app_link` | boolean | no (default `false`) | Only when on is `mini_app_link` stored, so our Mini App opens the provider's Telegram mini app with `openTelegramLink`. Off: not stored, and our Mini App opens the payment link with `openLink`, as for other gateways. New invoices only |
 
 The method is offered (`isUsable()`) only when `enabled` is on, `api_key` is not empty and `callback_base_url` is valid.
 Missing, empty or non-boolean values count as off. To stop inquiries too, remove the key.
+
+### Which link the customer gets
+
+| `prefer_website_link` | `use_mini_app_link` | Bot and our Mini App open | Our Mini App opens with |
+|---|---|---|---|
+| on (default) | off (default) | `gateway_link`, else `url`, else `payment_link` | `openLink` (the website page, inside Telegram's browser) |
+| off | off | `url`, else `payment_link`, else `gateway_link` | `openLink` |
+| any | on | as above in the bot | `openTelegramLink` with `mini_app_link` when the provider sent a valid `t.me` link, else `openLink` with the payment link |
+
+- Every link is validated the same way (`https`, a host, no user info, no port). An invalid `gateway_link` is skipped and
+  the next link is used. A create answer with no valid link at all is a failed create.
+- A config saved before plugin 1.1.0 has neither key and gets the defaults: `prefer_website_link` is on unless it is
+  exactly `false`, and `use_mini_app_link` is off unless it is exactly `true`.
+- **A settings change applies to new invoices only.** A live invoice handed out again from the payment row keeps the link
+  chosen when it was created, with no API call.
 
 ## Amounts
 
@@ -149,6 +167,17 @@ php bin/console app:plugin:doctor tetraminator
 Then add the module in Admin > Payment Gateways, fill in the config, and create a store payment method that points to
 it. Keep `enabled` off until PR 5 is deployed (see the note at the top).
 
+### Upgrading an installed plugin (1.0.0 to 1.1.0)
+
+**Not supported by the core yet.** `app:plugin:install` refuses a plugin whose code is already installed ("Plugin
+already installed."), `PluginManager::uninstall()` throws ("Plugin uninstall is not available in this phase."), and
+`app:plugin:disable` / `app:plugin:enable` only switch the status of the files already installed under
+`var/plugins/tetraminator`. So there are no upgrade commands to run. The admin form reads the config fields from the
+manifest stored at install time, so the two new fields only appear after a real upgrade path exists in the core.
+
+Until then, an installed 1.0.0 keeps today's behaviour (`url` first, `mini_app_link` stored). The gateway's config lives
+in the payment gateway row, not in the plugin, so it is not touched by any of this.
+
 Unit tests (mocked HTTP, no network): `php bin/phpunit docs/plugins/tetraminator-gateway/tests`.
 
 ## Setup in the Tetraminator panel
@@ -170,4 +199,6 @@ The real-payment checklist is in `design.md` section 15.
 - کلید API (`api_key`) و توکن آدرس بازگشت هرگز در پیام‌ها، لاگ‌ها یا پاسخ ذخیره‌شده نمی‌آید. در مستندات به‌جای کلید `<API_KEY>` بنویسید.
 - خطای 401 (کلید نامعتبر) یا 403 (فروشگاه غیرفعال) هنگام ساخت فاکتور، حداکثر ساعتی یک بار برای هر درگاه به مدیران اطلاع داده می‌شود.
 - ارسال `chat_id` به‌طور پیش‌فرض خاموش است.
+- به‌طور پیش‌فرض مشتری صفحهٔ وب درگاه (`gateway_link`) را باز می‌کند، در ربات و در مینی‌اپ آموبات (`prefer_website_link` روشن، `use_mini_app_link` خاموش). تغییر این تنظیمات فقط روی فاکتورهای جدید اثر دارد.
+- ارتقای افزونهٔ نصب‌شده (از 1.0.0 به 1.1.0) هنوز در هستهٔ آموبات پشتیبانی نمی‌شود؛ بخش «Upgrading an installed plugin» را ببینید.
 - فرض‌های بخش «Pending provider answers» تا پاسخ تترامیناتور برقرارند.
