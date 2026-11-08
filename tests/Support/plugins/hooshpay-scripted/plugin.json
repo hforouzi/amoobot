@@ -1,0 +1,20 @@
+{
+  "manifestVersion": 1,
+  "type": "payment_gateway",
+  "code": "hooshpay",
+  "name": {
+    "en": "HooshPay, scripted answers (tests only)"
+  },
+  "version": "1.0.0",
+  "mainClass": "Amoobot\\Plugin\\HooshPayScripted\\ScriptedHooshPayPlugin",
+  "category": "payment",
+  "permissions": [
+    "payment.create",
+    "payment.verify",
+    "payment.webhook"
+  ],
+  "supportsWebhook": true,
+  "supportsOnlinePayment": true,
+  "supportsManualConfirmation": false,
+  "configSchema": []
+}

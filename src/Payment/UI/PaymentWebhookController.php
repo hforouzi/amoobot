@@ -37,6 +37,8 @@ use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
  * Plugins with an endpoint of their own (OWN_ENDPOINT_PLUGINS) get a 404 here on every plugin route, before any lookup
  * or verification: Tetraminator's webhook is authenticated only by its notify URL's token, so this pipeline (no rate
  * limit, outcome codes in the answer, the adapter accepting unauthenticated callbacks) must not reach its verify.
+ * HooshPay's signed webhook has its own endpoint (HooshPayWebhookController: unknown invoices answered 200, mismatches
+ * logged as security warnings), and its customers return to the core return page, so its plugin routes are closed too.
  */
 final class PaymentWebhookController
 {
@@ -48,8 +50,8 @@ final class PaymentWebhookController
         'plugin' => 'plugin',
     ];
 
-    /** Plugin codes whose notifications reach the core only through their own controller (TetraminatorNotifyController). */
-    private const OWN_ENDPOINT_PLUGINS = ['tetraminator'];
+    /** Plugin codes whose notifications reach the core only through their own controller (Tetraminator, HooshPay). */
+    private const OWN_ENDPOINT_PLUGINS = ['tetraminator', 'hooshpay'];
 
     public function __construct(
         private readonly EntityManagerInterface $entityManager,

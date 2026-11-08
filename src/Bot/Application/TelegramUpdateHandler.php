@@ -33,6 +33,7 @@ use App\Payment\Application\PaymentCustomerNotifier;
 use App\Payment\Application\Settlement\PaymentSettlementService;
 use App\Payment\Application\Settlement\SettlementOutcome;
 use App\Payment\Application\Settlement\VerifiedPayment;
+use App\Payment\Domain\GatewayPayableAmount;
 use App\Payment\Domain\PaymentGatewayType;
 use App\Payment\Domain\PaymentStatus;
 use App\Payment\Infrastructure\NowPaymentsGateway;
@@ -1399,7 +1400,7 @@ class TelegramUpdateHandler
             $this->acknowledgeCallback($callbackId);
             $this->telegramApiClient->sendMessage(
                 $chatId,
-                sprintf("برای پرداخت آنلاین روی دکمه زیر بزنید.\nکد پیگیری: %s", (string) ($order->getTrackingCode() ?? '-')),
+                sprintf("برای پرداخت آنلاین روی دکمه زیر بزنید.\nکد پیگیری: %s", (string) ($order->getTrackingCode() ?? '-')).GatewayPayableAmount::botLine($payment),
                 $this->keyboardFactory->paymentOnlineActionMenu((int) ($payment->getId() ?? 0), (int) ($order->getId() ?? 0), (string) $payment->getPaymentUrl())
             );
 
@@ -2229,7 +2230,7 @@ class TelegramUpdateHandler
         if ((in_array($gatewayType, [PaymentGatewayType::ZIBAL, PaymentGatewayType::CUSTOM_API], true) || null !== $gateway?->getPluginCode()) && null !== $payment->getPaymentUrl()) {
             $this->telegramApiClient->sendMessage(
                 $chatId,
-                sprintf("پرداخت آنلاین ناتمام شما آماده است.\nکد پیگیری: %s", (string) ($order->getTrackingCode() ?? '-')),
+                sprintf("پرداخت آنلاین ناتمام شما آماده است.\nکد پیگیری: %s", (string) ($order->getTrackingCode() ?? '-')).GatewayPayableAmount::botLine($payment),
                 $this->keyboardFactory->paymentOnlineActionMenu((int) ($payment->getId() ?? 0), (int) ($order->getId() ?? 0), (string) $payment->getPaymentUrl())
             );
 

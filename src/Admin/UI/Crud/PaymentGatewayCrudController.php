@@ -623,7 +623,7 @@ final class PaymentGatewayCrudController extends AbstractCrudController
      */
     private static function maskSensitiveConfigArray(array $config): array
     {
-        $sensitiveKeys = ['api_key', 'ipn_secret', 'api_token', 'password', 'proxy_password'];
+        $sensitiveKeys = ['api_key', 'api_secret', 'ipn_secret', 'api_token', 'password', 'proxy_password'];
         foreach ($config as $key => $value) {
             if (is_array($value)) {
                 $config[$key] = self::maskSensitiveConfigArray($value);
