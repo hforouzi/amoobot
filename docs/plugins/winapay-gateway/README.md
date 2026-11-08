@@ -168,6 +168,11 @@ Then go to Admin → Payment Gateways, add the `Winapay` module, fill in the con
 method that points to it. `php bin/console app:payment:test-plugin-gateway {gatewayId}` checks class loading
 without creating a payment.
 
+To upgrade an installed Winapay to a newer version, use `app:plugin:upgrade` (dry run, upgrade, PHP-FPM reload,
+doctor). The steps are in [Upgrading a plugin](../../en/plugins/payment-gateway-plugin-sdk.md#upgrading-a-plugin)
+(Persian: [ارتقای پلاگین](../../fa/plugins/payment-gateway-plugin-sdk.md)). Build with
+`sh docs/plugins/winapay-gateway/build.sh /tmp/winapay.zip` and use `winapay` as the code.
+
 Unit tests (mocked HTTP, no network): `php bin/phpunit docs/plugins/winapay-gateway/tests`.
 
 ## Test checklist

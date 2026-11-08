@@ -113,6 +113,57 @@ php bin/console app:plugin:doctor plugin_code
 php bin/console app:payment:test-plugin-gateway <gatewayId>
 ```
 
+## Upgrading a plugin
+
+An installed plugin is upgraded in place, from the CLI only (no web upload):
+`app:plugin:upgrade <zip> [--dry-run] [--accept-new-permissions]`. `app:plugin:install` still refuses a code that is
+already installed, and there is no uninstall.
+
+On the server (deploy defaults: `/var/www/amoobot`, PHP 8.4; use your `PHP_VERSION` in the FPM unit name). Run the
+console as `www-data`, like install, so the files belong to the same user:
+
+```bash
+cd /var/www/amoobot
+# 1. Build the new ZIP (example: Tetraminator; every plugin in docs/plugins has a build.sh)
+sudo -u www-data sh docs/plugins/tetraminator-gateway/build.sh /tmp/tetraminator.zip
+# 2. Check everything and print the plan; nothing is changed
+sudo -u www-data php bin/console app:plugin:upgrade /tmp/tetraminator.zip --dry-run --env=prod
+# 3. Upgrade (add --accept-new-permissions only if the plan lists added permissions you accept)
+sudo -u www-data php bin/console app:plugin:upgrade /tmp/tetraminator.zip --env=prod
+# 4. Reload PHP-FPM: it may keep the old plugin classes in OPcache until then
+sudo systemctl reload php8.4-fpm
+# 5. Check the plugin
+sudo -u www-data php bin/console app:plugin:doctor tetraminator --env=prod
+```
+
+What the command checks and does:
+
+- The ZIP goes through install's checks (safe paths, allowed folders, manifest, `configSchema`).
+- Its `code` must be installed, with the same `type`, and its `version` must be a strictly greater
+  [semantic version](https://semver.org) (`1.1.0` after `1.0.0`; an equal or lower one is refused). `mainClass` may
+  change if the new class loads.
+- **Permissions:** added ones are refused unless you pass `--accept-new-permissions`. They are printed. Removed ones are
+  fine.
+- **Config:** each payment gateway of this plugin is checked against the new schema. Stored keys the schema no longer
+  has are kept and listed. A field that becomes required with no default, and that a gateway lacks, refuses the
+  upgrade: fill it in first. Only gateway ids and field names are printed, never a value.
+- **Doctor first:** the new files are checked in a workspace (main class loads and implements the contract) before
+  anything live is touched. `--dry-run` stops here and prints the plan: old and new version, added and removed
+  permissions, added and removed config fields, and the gateways that use it.
+- **Switch:** it runs under the lock that install also takes, so two upgrades, or an upgrade and an install, never
+  overlap. `var/plugins/<code>` is moved to `var/plugins/.upgrade-backup/<code>-<old version>-<timestamp>`, the new
+  files take its place, and the plugin row gets the new version, name, description, main class, manifest and
+  permissions. Then the doctor runs again. If anything fails after the first move, the old files and the row are put
+  back. After a success only the latest backup of that plugin is kept.
+- **Unchanged:** the plugin's status (enabled stays enabled, disabled stays disabled), its install and enable dates,
+  and every gateway row and its config.
+- An admin audit entry `plugin.upgrade` records the code, the old and new version and the operating system user who
+  ran it (and the `sudo` user). It holds no config.
+- The command refuses symbolic links: in `var/plugins`, in the plugin's directory, and inside the old or new files.
+
+**OPcache.** PHP-FPM may keep running the old plugin classes until it reloads. The command reminds you at the end.
+`sudo amoobot-deploy --app-only` restarts PHP-FPM too, but an upgrade between deploys needs the reload above.
+
 ## Verification contract (strict)
 
 A plugin only answers: was this payment really made, how much, in which currency. Amoobot's
