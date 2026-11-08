@@ -558,7 +558,7 @@ final class PanelImportClientsCommandTest extends IntegrationTestCase
         $this->client('customer', '700000002');
         $this->client('customer-2', '700000002');
 
-        foreach (['60' => ['--dry-run' => true], '200' => []] as $columns => $options) {
+        foreach ([60 => ['--dry-run' => true], 200 => []] as $columns => $options) {
             putenv('COLUMNS='.$columns);
             $_SERVER['COLUMNS'] = $_ENV['COLUMNS'] = (string) $columns;
             [$code, $out] = $this->import($options);
@@ -567,7 +567,7 @@ final class PanelImportClientsCommandTest extends IntegrationTestCase
             self::assertConsoleContains('Most services for one owner: 21', $out);
             self::assertConsoleContains('One Telegram account would own 21 services: check that the panel\'s tgId values are the customers\' and not an admin\'s.', $out);
             self::assertConsoleNotContains(self::TG, $out);
-            if ('60' === $columns) {
+            if (60 === $columns) {
                 foreach (explode("\n", $out) as $line) {
                     self::assertLessThanOrEqual(60, mb_strlen(rtrim($line)), $line);
                 }
