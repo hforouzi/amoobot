@@ -1102,6 +1102,11 @@ class ServiceManagementService
     private function createOrReuseOrderPayment(Order $order, PaymentGateway $gateway, StorePaymentMethod $storePaymentMethod, string $chatId, ?string $callbackId): void
     {
         $start = $this->paymentStarter->start($order, $storePaymentMethod);
+        if (PaymentStart::KIND_ORDER_NOT_PAYABLE === $start->kind) {
+            $this->showPopupOrMessage($chatId, $callbackId, 'سفارش نامعتبر است.', 'popup_invalid_payment_gateway_order');
+
+            return;
+        }
         if (PaymentStart::KIND_WALLET_PAYMENT_PENDING === $start->kind) {
             $this->showPopupOrMessage($chatId, $callbackId, TelegramUpdateHandler::WALLET_PAYMENT_PENDING_TEXT, 'popup_wallet_payment_pending');
 

@@ -30,6 +30,11 @@ final class PaymentStart
      * until an admin retries or rejects it): no gateway payment was started, the customer must not pay again.
      */
     public const KIND_WALLET_PAYMENT_HELD = 'wallet_payment_held';
+    /**
+     * The order no longer awaits payment (another payment settled it, or it was cancelled or expired, after the caller
+     * read it): no payment was started and no gateway was asked. The callers answer as for an order they find unpayable.
+     */
+    public const KIND_ORDER_NOT_PAYABLE = 'order_not_payable';
 
     public function __construct(
         public readonly string $kind,

@@ -110,6 +110,11 @@ final class MiniAppCheckoutController extends AbstractController
         });
     }
 
+    /**
+     * Starts the payment with the chosen method. Runs once per Idempotency-Key with claimOnce(), not in once()'s outer
+     * transaction: PaymentStarter locks the order and commits on its own, and calls the gateway after that commit, so
+     * no lock is held during the provider's HTTP call. A parallel duplicate tap is refused (idempotency_in_progress).
+     */
     #[Route('/app/api/orders/{id}/pay', name: 'miniapp_order_pay_api', requirements: ['id' => '\d+'], defaults: ['_miniapp_section' => 'orders'], methods: ['POST'])]
     public function pay(Request $request, #[CurrentUser] MiniAppUser $user, int $id): JsonResponse
     {
@@ -121,7 +126,7 @@ final class MiniAppCheckoutController extends AbstractController
             }
 
             return ['redirect' => $this->generateUrl('miniapp_payment', ['id' => $start->payment?->getId()]), 'kind' => $start->kind];
-        });
+        }, commitsOnItsOwn: true);
     }
 
     /** A wallet top-up order of the chosen amount; the answer opens its payment page (the store methods). */
@@ -223,15 +228,19 @@ final class MiniAppCheckoutController extends AbstractController
 
     /**
      * Rate limit + idempotency around a call that creates something; its stored answer may be an error the gateway
-     * gave (a new key is needed to try again), a CheckoutFailure is never stored.
+     * gave (a new key is needed to try again), a CheckoutFailure is never stored. An action that locks and commits on
+     * its own ($commitsOnItsOwn) runs with claimOnce(), outside an outer transaction; any other with once().
      *
      * @param callable(): array<string, mixed> $action
      */
-    private function creating(Request $request, MiniAppUser $user, string $scope, callable $action): JsonResponse
+    private function creating(Request $request, MiniAppUser $user, string $scope, callable $action, bool $commitsOnItsOwn = false): JsonResponse
     {
-        return $this->guarded($request, function () use ($request, $user, $scope, $action): JsonResponse {
+        return $this->guarded($request, function () use ($request, $user, $scope, $action, $commitsOnItsOwn): JsonResponse {
             $this->limit($this->checkoutLimiter, $user);
-            $answer = $this->idempotency->once($user->customer(), $request->headers->get(CheckoutIdempotency::HEADER), $scope, $action);
+            $key = $request->headers->get(CheckoutIdempotency::HEADER);
+            $answer = $commitsOnItsOwn
+                ? $this->idempotency->claimOnce($user->customer(), $key, $scope, $action)
+                : $this->idempotency->once($user->customer(), $key, $scope, $action);
             $status = (int) ($answer['status'] ?? Response::HTTP_OK);
             unset($answer['status']);
 

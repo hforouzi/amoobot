@@ -180,6 +180,9 @@ final class MiniAppCheckout
         }
         $method = $this->paymentStarter->methodFor($order, $methodId) ?? throw new CheckoutFailure('method_invalid', 422);
         $start = $this->paymentStarter->start($order, $method);
+        if (PaymentStart::KIND_ORDER_NOT_PAYABLE === $start->kind) {
+            throw new CheckoutFailure('order_not_payable', 409);
+        }
         if (PaymentStart::KIND_PLAN_INACTIVE === $start->kind) {
             throw new CheckoutFailure('plan_unavailable', 404);
         }
