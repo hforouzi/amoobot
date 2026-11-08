@@ -1,0 +1,64 @@
+{
+  "manifestVersion": 1,
+  "type": "payment_gateway",
+  "code": "tetraminator",
+  "name": {
+    "fa": "تترامیناتور",
+    "en": "Tetraminator"
+  },
+  "version": "1.0.0",
+  "description": {
+    "fa": "درگاه پرداخت تومانی تترامیناتور برای آموبات.",
+    "en": "Tetraminator Toman payment gateway for Amoobot."
+  },
+  "mainClass": "Amoobot\\Plugin\\Tetraminator\\TetraminatorGatewayPlugin",
+  "category": "payment",
+  "permissions": [
+    "payment.create",
+    "payment.verify",
+    "http.outbound"
+  ],
+  "supportsWebhook": false,
+  "supportsOnlinePayment": true,
+  "supportsManualConfirmation": false,
+  "configSchema": [
+    {
+      "key": "enabled",
+      "type": "boolean",
+      "required": false,
+      "default": false,
+      "label": {
+        "fa": "فعال (فقط فاکتورهای جدید)",
+        "en": "Enabled (new invoices only)"
+      }
+    },
+    {
+      "key": "api_key",
+      "type": "password",
+      "required": true,
+      "label": {
+        "fa": "کلید API (X-API-KEY)",
+        "en": "API key (X-API-KEY)"
+      }
+    },
+    {
+      "key": "callback_base_url",
+      "type": "url",
+      "required": true,
+      "label": {
+        "fa": "آدرس پایه عمومی آموبات (فقط https)",
+        "en": "Public base URL of Amoobot (https only)"
+      }
+    },
+    {
+      "key": "send_chat_id",
+      "type": "boolean",
+      "required": false,
+      "default": false,
+      "label": {
+        "fa": "ارسال شناسه تلگرام مشتری به تترامیناتور",
+        "en": "Send the customer's Telegram id to Tetraminator"
+      }
+    }
+  ]
+}
