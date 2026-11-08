@@ -6,7 +6,8 @@ namespace App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http;
 
 /**
  * Removes credentials from any text that may reach a log, an exception, the admin UI or the console:
- * the exact secret values given, Authorization/Bearer and API key headers, and token/password-shaped key=value pairs.
+ * the exact secret values given, Authorization/Bearer and API key headers, token/password-shaped key=value pairs and the
+ * token part of a gateway notify URL (/payment/notify/...).
  */
 final class SecretRedactor
 {
@@ -24,6 +25,12 @@ final class SecretRedactor
 
     /** Telegram update objects whose "id" is a user's (or a chat's) id: "chat":{"id":N}, "from":{"id":N}, ... (M2e E4). */
     private const TELEGRAM_ID_OBJECTS = ['chat', 'from', 'user', 'sender_chat'];
+    /**
+     * A gateway notify URL's path after /payment/notify/ (Tetraminator: {code}/{paymentId}/{token}, the token being the
+     * credential), also with JSON-escaped (\/) or URL-encoded (%2F) slashes. A backstop: nothing should log that URL.
+     */
+    private const NOTIFY_PATH = '~((?:\\\\?/|%2[Ff])payment(?:\\\\?/|%2[Ff])notify(?:\\\\?/|%2[Ff]))[^\s"\'<>?#&]+~i';
+
     /** What forLog() writes instead of a line it could not process (a PCRE failure): never the raw line (M2e E3). */
     public const WITHHELD = '[log line withheld: it could not be redacted]';
 
@@ -40,6 +47,7 @@ final class SecretRedactor
      *   "(...)" (M2e, CI): argument values never reach a log, whatever their form (strings, ints, Object(...), Array)
      *   and whatever zend.exception_ignore_args / zend.exception_string_param_max_len say, so a trace reads the same
      *   in every php.ini.
+     * - a notify URL's path after /payment/notify/ (NOTIFY_PATH), which carries a webhook token.
      * Nothing else changes: other ids, amounts and ports keep their values. A text PCRE cannot process is replaced by
      * WITHHELD (fail closed).
      */
@@ -57,8 +65,9 @@ final class SecretRedactor
                 // the key starts a word, or follows a URL escape (%22chat_id, %26chat_id: "2", "6" are word characters)
                 '/('.$q.'(?:(?<=%[0-9A-Fa-f]{2})|\b)(?:'.$keys.')\b'.$q.$sep.$q.')-?\d{4,}/',
                 '/("(?:'.$objects.')"\s*:\s*\{[^{}]*?"id"\s*:\s*)-?\d{4,}/',
+                self::NOTIFY_PATH,
             ],
-            ['tg_'.self::MASK, 'tg_'.self::MASK, '$1'.self::MASK, '$1'.self::MASK],
+            ['tg_'.self::MASK, 'tg_'.self::MASK, '$1'.self::MASK, '$1'.self::MASK, '$1'.self::MASK],
             $text,
         );
         if (null === $text) {
@@ -109,6 +118,7 @@ final class SecretRedactor
         // An API key header or field (X-API-KEY: …, "api_key":"…", api_key=…, 'apikey' => '…'): a backstop for the
         // exact-value mask a gateway does itself (Tetraminator).
         $text = preg_replace('/(\b(?:X-)?API[_-]?KEY[\'"]?\s*(?:=>|[:=])\s*)([\'"]?)[^\s\'",}&]+/i', '$1$2'.self::MASK, $text) ?? $text;
+        $text = preg_replace(self::NOTIFY_PATH, '$1'.self::MASK, $text) ?? $text;
         $text = preg_replace('/([?&](?:api[_-]?token|access[_-]?token|token|password|passwd|session)=)[^&#\s]*/i', '$1'.self::MASK, $text) ?? $text;
         $text = preg_replace('/("?(?:password|passwd|token|api[_-]?token|cookie|secret|authorization)"?\s*[:=]\s*)"[^"]*"/i', '$1"'.self::MASK.'"', $text) ?? $text;
         $text = preg_replace('/\s+/', ' ', $text) ?? $text;

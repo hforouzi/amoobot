@@ -35,6 +35,10 @@ use Symfony\Component\Routing\Attribute\Route;
  * The service's access (subscription link, config links, the redirect to them) is shown only while the service still
  * belongs to the order's customer (OrderServiceAccess). After it changed owner (a claim link, "Return to reseller")
  * the page only says the payment went through: the payer never sees, or is redirected to, someone else's links.
+ *
+ * What the gateway's verification said is never shown: those messages are written for logs and admins (English, provider
+ * codes, HTTP statuses, raw provider text). The customer sees the display state's own text, plus NOWPayments' status word
+ * (waiting, confirming, ...) that NowPaymentsGateway stores on the payment.
  */
 final class PaymentReturnController extends AbstractController
 {
@@ -59,9 +63,8 @@ final class PaymentReturnController extends AbstractController
             return $this->notFound();
         }
 
-        $statusText = null;
         if ($payment->acceptsGatewayVerification() && $this->isVerifiable($payment)) {
-            [$payment, $statusText] = $this->verifyAndSettle($payment, $request);
+            $payment = $this->verifyAndSettle($payment, $request);
         }
 
         $order = $payment->getOrder();
@@ -91,7 +94,7 @@ final class PaymentReturnController extends AbstractController
             'ownedElsewhere' => $ownedElsewhere,
             'redirectEnabled' => 'paid' === $state && '' !== $subscriptionUrl,
             'refreshSeconds' => 'pending' === $state ? self::REFRESH_SECONDS : null,
-            'statusText' => $statusText ?? $payment->getCryptoPaymentStatus(),
+            'statusText' => self::customerStatusText($payment),
         ]);
     }
 
@@ -122,10 +125,13 @@ final class PaymentReturnController extends AbstractController
         return $this->page('payment/cancel.html.twig', ['payment' => null, 'order' => null]);
     }
 
-    /**
-     * @return array{Payment, ?string}
-     */
-    private function verifyAndSettle(Payment $payment, Request $request): array
+    /** NOWPayments' stored status word, for its payments only; nothing a gateway's verification message says. */
+    private static function customerStatusText(Payment $payment): ?string
+    {
+        return PaymentGatewayType::NOWPAYMENTS === $payment->getGatewayType() ? $payment->getCryptoPaymentStatus() : null;
+    }
+
+    private function verifyAndSettle(Payment $payment, Request $request): Payment
     {
         $source = sprintf('%s_return_page', $payment->getGatewayType() ?? 'gateway');
 
@@ -146,22 +152,18 @@ final class PaymentReturnController extends AbstractController
         } catch (\Throwable $e) {
             $this->logger->warning('Return page verification failed.', ['payment_id' => $payment->getId(), 'error' => $e->getMessage()]);
 
-            return [$payment, null];
+            return $payment;
         }
 
         if ($verification->success && $verification->paid) {
-            $result = $this->paymentSettlementService->settle($payment, VerifiedPayment::fromGateway($verification), $source);
-
-            return [$result->payment ?? $payment, $verification->message];
+            return $this->paymentSettlementService->settle($payment, VerifiedPayment::fromGateway($verification), $source)->payment ?? $payment;
         }
 
         if ($verification->success && $verification->failed) {
-            $result = $this->paymentSettlementService->recordGatewayFailure($payment, $source);
-
-            return [$result->payment ?? $payment, $verification->message];
+            return $this->paymentSettlementService->recordGatewayFailure($payment, $source)->payment ?? $payment;
         }
 
-        return [$payment, $verification->message];
+        return $payment;
     }
 
     /**

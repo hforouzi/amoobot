@@ -2099,6 +2099,20 @@ app_locations() {
         fastcgi_param DOCUMENT_ROOT \$realpath_root;
     }
 
+    # Gateway notify URLs (Tetraminator: /payment/notify/tetraminator/<id>/<token>) carry a per-payment token: like the
+    # Telegram webhook, never in the access log, error log at crit only, PHP directly. Longer prefix than /payment/
+    # below, so nginx picks this one. 503 while a deploy runs; the reconcile timer covers a webhook that is not retried.
+    location ^~ /payment/notify/ {
+        access_log off;
+        error_log /var/log/nginx/amoobot_notify_error.log crit;
+        include ${NGINX_MAINTENANCE_FILE};
+        fastcgi_pass unix:/run/php/php${PHP_VERSION}-fpm.sock;
+        include fastcgi_params;
+        fastcgi_param SCRIPT_FILENAME \$realpath_root/index.php;
+        fastcgi_param SCRIPT_NAME /index.php;
+        fastcgi_param DOCUMENT_ROOT \$realpath_root;
+    }
+
     # Payment callbacks and webhooks: same maintenance switch (gateways retry server-to-server notifications).
     location ^~ /payment/ {
         include ${NGINX_MAINTENANCE_FILE};
@@ -2208,7 +2222,7 @@ EOF
 # would create a missing log 0644. /var/log/nginx is root-owned, so these paths are not deploy-controlled.
 nginx_log_files() {
   local f
-  for f in /var/log/nginx/amoobot_access.log /var/log/nginx/amoobot_error.log /var/log/nginx/amoobot_webhook_error.log; do
+  for f in /var/log/nginx/amoobot_access.log /var/log/nginx/amoobot_error.log /var/log/nginx/amoobot_webhook_error.log /var/log/nginx/amoobot_notify_error.log; do
     refuse_symlink "$f"
     if [[ -e "$f" ]]; then run chmod 640 "$f"; else run install -m 640 -o "$WEB_USER" -g adm /dev/null "$f"; fi
   done
