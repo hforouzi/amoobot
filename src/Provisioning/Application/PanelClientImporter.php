@@ -66,6 +66,8 @@ final class PanelClientImporter
         $owners = [];
         /** @var array<string, true> $matched pre-existing accounts that got a service in this run */
         $matched = [];
+        /** @var array<string, int> $perOwner services imported in this run, by Telegram id (only counted, never shown) */
+        $perOwner = [];
 
         try {
             // Traffic (up/down) is only on clients/list: one request for the whole panel.
@@ -86,6 +88,10 @@ final class PanelClientImporter
                     }
                 }
                 $this->countOwners($planned, $owners, $matched, $summary);
+                foreach ($planned as $import) {
+                    $perOwner[$import['telegramId']] = ($perOwner[$import['telegramId']] ?? 0) + 1;
+                }
+                $summary->mostForOneOwner = [] === $perOwner ? 0 : max($perOwner);
                 if (!$dryRun && [] !== $planned) {
                     $panel = $this->write($panelId, $planned);
                 }
@@ -102,7 +108,7 @@ final class PanelClientImporter
 
         $this->logger->info('panel_client_import', ['panel_id' => $panelId, 'dry_run' => $dryRun, 'read' => $summary->read, 'imported' => $summary->imported,
             'new_users' => $summary->newUsers, 'existing_users' => $summary->existingUsers, 'already_known' => $summary->alreadyKnown, 'no_owner' => $summary->noOwner,
-            'unknown_inbound' => $summary->unknownInbound, 'invalid' => $summary->invalid, 'stopped' => $summary->stopped]);
+            'unknown_inbound' => $summary->unknownInbound, 'invalid' => $summary->invalid, 'most_for_one_owner' => $summary->mostForOneOwner, 'stopped' => $summary->stopped]);
 
         return $summary;
     }

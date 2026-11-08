@@ -550,6 +550,44 @@ final class PanelImportClientsCommandTest extends IntegrationTestCase
         }
     }
 
+    public function testManyServicesForOneOwnerAreCountedAndWarnedAbout(): void
+    {
+        for ($i = 1; $i <= 21; ++$i) {
+            $this->client('admin-made-'.$i, self::TG);
+        }
+        $this->client('customer', '700000002');
+        $this->client('customer-2', '700000002');
+
+        foreach (['60' => ['--dry-run' => true], '200' => []] as $columns => $options) {
+            putenv('COLUMNS='.$columns);
+            $_SERVER['COLUMNS'] = $_ENV['COLUMNS'] = (string) $columns;
+            [$code, $out] = $this->import($options);
+
+            self::assertSame(0, $code, $out);
+            self::assertConsoleContains('Most services for one owner: 21', $out);
+            self::assertConsoleContains('One Telegram account would own 21 services: check that the panel\'s tgId values are the customers\' and not an admin\'s.', $out);
+            self::assertConsoleNotContains(self::TG, $out);
+            if ('60' === $columns) {
+                foreach (explode("\n", $out) as $line) {
+                    self::assertLessThanOrEqual(60, mb_strlen(rtrim($line)), $line);
+                }
+            }
+        }
+    }
+
+    public function testTwentyServicesForOneOwnerAreNotWarnedAbout(): void
+    {
+        for ($i = 1; $i <= 20; ++$i) {
+            $this->client('family-'.$i, self::TG);
+        }
+
+        [$code, $out] = $this->import();
+
+        self::assertSame(0, $code, $out);
+        self::assertConsoleContains('Most services for one owner: 20', $out);
+        self::assertConsoleNotContains('would own', $out);
+    }
+
     /**
      * @param list<int>                 $inboundIds
      * @param array<string, mixed>      $fields
@@ -603,6 +641,7 @@ final class PanelImportClientsCommandTest extends IntegrationTestCase
         self::assertConsoleContains('No owner (no tgId): '.$noOwner, $out);
         self::assertConsoleContains('Unknown inbound: '.$unknownInbound, $out);
         self::assertConsoleContains('Invalid: '.$invalid, $out);
+        self::assertConsoleContains('Most services for one owner: ', $out);
     }
 
     private function assertNothingSold(): void

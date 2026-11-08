@@ -41,7 +41,8 @@ php bin/console app:panel:import-clients --panel=<panelId> [--limit=N] [--batch-
   failed panel read stops the run before anything of that page is written; earlier pages stay. A rerun continues: what
   was imported is "already known" (a second run imports 0). `--limit=N` stops after N services; run again to continue.
 - **Output**: counts only (clients read, imported, new users created, existing users matched, already known, no owner,
-  unknown inbound, invalid). Never a Telegram id, UUID, email, subId or link, also in errors and logs: the full-row and
+  unknown inbound, invalid, and the most services one owner got in this run). Above 20 for one owner the run warns
+  to check that the panel's tgId values are the customers' and not an admin's (a count only, never whose). Never a Telegram id, UUID, email, subId or link, also in errors and logs: the full-row and
   links reads log their path as `clients/get/{email}` / `clients/links/{email}`, and an unexpected error is reported by
   its class only.
 - **Nothing is sold**: no order, payment, wallet entry, invoice or discount usage is created, so imported services are

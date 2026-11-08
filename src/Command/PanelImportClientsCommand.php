@@ -89,9 +89,13 @@ final class PanelImportClientsCommand extends Command
             sprintf('No owner (no tgId): %d', $summary->noOwner),
             sprintf('Unknown inbound: %d', $summary->unknownInbound),
             sprintf('Invalid: %d', $summary->invalid),
+            sprintf('Most services for one owner: %d', $summary->mostForOneOwner),
         ]);
 
         $code = Command::SUCCESS;
+        if ($summary->mostForOneOwner > PanelClientImportSummary::MANY_FOR_ONE_OWNER) {
+            $io->warning(sprintf('One Telegram account would own %d services: check that the panel\'s tgId values are the customers\' and not an admin\'s.', $summary->mostForOneOwner));
+        }
         if ($summary->unknownInbound > 0) {
             $io->warning(sprintf('%d client(s) are on inbounds the bot does not know: run app:panel:sync-inbounds %d, then run this import again.', $summary->unknownInbound, $panelId));
         }

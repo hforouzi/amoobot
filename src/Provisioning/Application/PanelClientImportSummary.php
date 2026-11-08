@@ -16,6 +16,9 @@ final class PanelClientImportSummary
     /** The panel could not be read ($failure says how). */
     public const STOPPED_PANEL_READ = 'panel_read';
 
+    /** Above this, an admin's tgId on many clients is likelier than one customer's: the command warns. */
+    public const MANY_FOR_ONE_OWNER = 20;
+
     public int $read = 0;
     public int $imported = 0;
     public int $newUsers = 0;
@@ -24,6 +27,8 @@ final class PanelClientImportSummary
     public int $noOwner = 0;
     public int $unknownInbound = 0;
     public int $invalid = 0;
+    /** The most services one Telegram account got (would get) in this run: a count, never whose. */
+    public int $mostForOneOwner = 0;
     /** Whether any client row the panel returned had a tgId field at all (false: the panel does not report owners). */
     public bool $tgIdReported = false;
     /** Whether --limit stopped the run before every client was read. */
