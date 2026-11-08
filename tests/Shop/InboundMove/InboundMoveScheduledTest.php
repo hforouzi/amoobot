@@ -323,7 +323,7 @@ final class InboundMoveScheduledTest extends IntegrationTestCase
 
         [$code, $output] = $this->task(['--only' => 'inbound-move']);
         self::assertSame(1, $code);
-        self::assertConsoleContains('attach-inbounds, inbound-moves, all', $output);
+        self::assertConsoleContains('attach-inbounds, inbound-moves, tetraminator, all', $output);
     }
 
     public function testWhileAPassHoldsTheLockTheTaskSkipsQuietlyWithOneRedactedLogLine(): void

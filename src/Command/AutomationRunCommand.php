@@ -6,6 +6,8 @@ namespace App\Command;
 
 use App\Broadcast\BroadcastSender;
 use App\Payment\Application\MissingDeliveryResender;
+use App\Payment\Application\Reconcile\TetraminatorReconciler;
+use App\Payment\Application\Reconcile\TetraminatorRunSummary;
 use App\Payment\Application\StuckPaymentReminder;
 use App\Provisioning\Application\AutomationSettingsProvider;
 use App\Provisioning\Application\InboundAttachScheduler;
@@ -17,6 +19,7 @@ use App\Provisioning\Application\ServiceUsageSyncService;
 use App\Reseller\Application\ClaimMaintenance;
 use App\Shared\Infrastructure\TransactionRollback;
 use App\Shop\Application\IncompleteOrderExpiryService;
+use Psr\Clock\ClockInterface;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
@@ -43,6 +46,8 @@ final class AutomationRunCommand extends Command
         private readonly MissingDeliveryResender $missingDeliveryResender,
         private readonly TransactionRollback $transactionRollback,
         private readonly InboundMoveScheduler $inboundMoveScheduler,
+        private readonly TetraminatorReconciler $tetraminatorReconciler,
+        private readonly ClockInterface $clock,
     ) {
         parent::__construct();
     }
@@ -52,7 +57,7 @@ final class AutomationRunCommand extends Command
         $this
             ->addOption('dry-run', null, InputOption::VALUE_NONE, 'Show automation results without saving/sending')
             ->addOption('limit', null, InputOption::VALUE_REQUIRED, 'Max services to process per task; falls back to automation.batch_limit', null)
-            ->addOption('only', null, InputOption::VALUE_REQUIRED, 'Run only orders|sync|expiry|notifications|suspend|broadcasts|claims|attach-inbounds|inbound-moves|all', 'all');
+            ->addOption('only', null, InputOption::VALUE_REQUIRED, 'Run only orders|sync|expiry|notifications|suspend|broadcasts|claims|attach-inbounds|inbound-moves|tetraminator|all ("all" leaves out tetraminator)', 'all');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
@@ -60,10 +65,10 @@ final class AutomationRunCommand extends Command
         $io = new SymfonyStyle($input, $output);
         $dryRun = (bool) $input->getOption('dry-run');
         $only = strtolower(trim((string) $input->getOption('only')));
-        $onlyOptions = ['orders', 'sync', 'expiry', 'notifications', 'suspend', 'broadcasts', 'claims', 'attach-inbounds', 'inbound-moves', 'all'];
+        $onlyOptions = ['orders', 'sync', 'expiry', 'notifications', 'suspend', 'broadcasts', 'claims', 'attach-inbounds', 'inbound-moves', 'tetraminator', 'all'];
 
         if (!in_array($only, $onlyOptions, true)) {
-            $io->error('--only option must be one of: orders, sync, expiry, notifications, suspend, broadcasts, claims, attach-inbounds, inbound-moves, all.');
+            $io->error('--only option must be one of: orders, sync, expiry, notifications, suspend, broadcasts, claims, attach-inbounds, inbound-moves, tetraminator, all.');
 
             return Command::FAILURE;
         }
@@ -247,6 +252,27 @@ final class AutomationRunCommand extends Command
             }
         }
 
+        // Tetraminator payments (design: docs/plugins/tetraminator-gateway/design.md, decision 4): ask about the due
+        // ones, expire dead invoices. Only with --only=tetraminator, never in "all": its timer has a lock group of its
+        // own (two runs must never ask the provider at once) and its exit code means "an admin is needed".
+        // --limit does not apply: the task's own limits do (40 inquiries, 150 s, 3 errors in a row).
+        if ('tetraminator' === $only) {
+            try {
+                $run = $this->tetraminatorReconciler->runDue($this->clock->now(), $dryRun);
+                $checked += $run->due;
+                $updated += $run->settled + $run->review + $run->expired;
+                $skipped += $run->leftOver;
+                if ($run->needsAttention()) {
+                    ++$failed;
+                }
+                $this->logger->info('automation_task_completed', ['task' => 'tetraminator', 'summary' => $run->toArray()]);
+                $this->reportTetraminator($io, $run);
+            } catch (\Throwable $e) {
+                ++$failed;
+                $this->logger->error('automation_task_failed', ['task' => 'tetraminator', 'class' => $e::class]);
+            }
+        }
+
         $io->section('Summary');
         $io->listing([
             sprintf('checked: %d', $checked),
@@ -263,6 +289,31 @@ final class AutomationRunCommand extends Command
         }
 
         return $failed > 0 ? Command::FAILURE : Command::SUCCESS;
+    }
+
+    private function reportTetraminator(SymfonyStyle $io, TetraminatorRunSummary $run): void
+    {
+        $io->section('Tetraminator');
+        $io->listing([
+            sprintf('due: %d of %d', $run->due, $run->candidates),
+            sprintf('asked: %d', $run->asked),
+            sprintf('settled: %d, review: %d', $run->settled, $run->review),
+            sprintf('not paid: %d, expired: %d', $run->notPaid, $run->expired),
+            sprintf('errors: %d', $run->verifyFailed + $run->errors),
+            sprintf('left for the next run: %d', $run->leftOver),
+        ]);
+        if ($run->verifyFailed > 0) {
+            $io->warning(sprintf('%d inquiries failed (network, 5xx); asked again next run.', $run->verifyFailed));
+        }
+        if ($run->accountRefused) {
+            $io->error('Tetraminator refused the API key or the store (401/403). Check the gateway.');
+        }
+        if ($run->driverUnavailable) {
+            $io->error('The Tetraminator driver is unavailable while payments are open. Check the plugin.');
+        }
+        if ($run->overdueUnanswered > 0) {
+            $io->error(sprintf('%d open payments have no well-formed answer 1 h past their invoice.', $run->overdueUnanswered));
+        }
     }
 
     private function shouldRun(string $only, string $task): bool

@@ -1,6 +1,6 @@
 # Tetraminator Payment Gateway Plugin: Design
 
-Status: proposed. Nothing here is implemented. Plugin code: `tetraminator`.
+Status: PRs 1 to 5 of section 13 are implemented; PR 6 (Mini App link) is open. Plugin code: `tetraminator`.
 
 Installable Toman payment gateway plugin for Amoobot, following the strict verification contract in
 `docs/en/plugins/payment-gateway-plugin-sdk.md` and the layout of `docs/plugins/winapay-gateway/`. The plugin creates
@@ -236,6 +236,12 @@ needed.
 | Transport or 5xx errors | 0, with warnings |
 | A 401 or 403, or the driver is unavailable with open payments | 1 |
 | An open payment still has no answer 1 hour past `expiresAt` | 1 |
+
+**As implemented (PR 5).** `TetraminatorReconciler::runDue()` around `reconcile()`, with the schedule in
+`TetraminatorPollSchedule`. A run is placed on its 2-minute tick (now rounded down), so a run that starts late sees the same
+ages. An open payment at 24 hours gets one last inquiry: paid settles, anything else expires it (an error answer with an
+error log). `--only=all` does not run the task: it would bypass the `tetraminator` lock group and mix its exit code into the
+other tasks'.
 
 **`NEW` state.** A full `deploy.sh` installs the timer, and `amoobot-check-jobs` shows `NEW` until the first successful run.
 `--app-only` does not install it. The first run has nothing to do and exits 0, so the job turns `OK` without the plugin.

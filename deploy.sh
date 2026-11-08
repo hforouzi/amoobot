@@ -92,6 +92,11 @@ HSTS_STATE_FILE="${STATE_DIR}/hsts-enabled"
 # inbound-moves (moving existing services to a plan's new inbound, docs/design/plan-inbound-change.md 5.2) is in the
 # lifecycle group for the same reason. It stops starting services after InboundMoveScheduler::TIME_BUDGET_SECONDS (420 s),
 # well inside its 600 s timeout, and does nothing while plans.inbound_move_enabled is off. :21/:51 is a free slot.
+# tetraminator (the Tetraminator gateway's reconcile timer, docs/plugins/tetraminator-gateway/design.md decision 4) has a
+# lock group of its own: lifecycle can be held for up to 25 minutes by sync, longer than its back-off steps, and two
+# runs must never ask the provider at once. Every 2 minutes, because a lost webhook should cost the customer minutes. It
+# stops asking after TetraminatorReconciler::TIME_BUDGET_SECONDS (150 s); 240 s leaves room for one provisioning at the
+# end. With nothing to do (no Tetraminator payment, the plugin not installed) it exits 0.
 SCHEDULED_JOBS=(
   "broadcasts|broadcasts|*:0/2|600|120|app:automation:run --only=broadcasts"
   "orders|orders|*:0/10|300|600|app:automation:run --only=orders"
@@ -102,6 +107,7 @@ SCHEDULED_JOBS=(
   "claims|lifecycle|*:13/15|300|900|app:automation:run --only=claims"
   "attach-inbounds|lifecycle|*:25/30|300|1800|app:automation:run --only=attach-inbounds"
   "inbound-moves|lifecycle|*:21/30|600|1800|app:automation:run --only=inbound-moves"
+  "tetraminator|tetraminator|*:0/2|240|120|app:automation:run --only=tetraminator"
 )
 JOBS_LOG_DIR="/var/log/amoobot"
 JOBS_STATE_DIR="${STATE_DIR}/jobs"
@@ -1545,8 +1551,9 @@ for entry in "${SCHEDULED_JOBS[@]}"; do
     'app:automation:run --only=sync'|'app:automation:run --only=expiry'|\
     'app:automation:run --only=suspend'|'app:automation:run --only=notifications'|\
     'app:automation:run --only=claims'|'app:automation:run --only=attach-inbounds'|\
-    'app:automation:run --only=inbound-moves') ;;
-    *) die "SCHEDULED_JOBS: only the nine reviewed automation tasks may be scheduled." ;;
+    'app:automation:run --only=inbound-moves'|\
+    'app:automation:run --only=tetraminator') ;;
+    *) die "SCHEDULED_JOBS: only the ten reviewed automation tasks may be scheduled." ;;
   esac
   job_names+="$JOB_NAME "
 done

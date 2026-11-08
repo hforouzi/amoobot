@@ -59,6 +59,17 @@ if have flock; then
   AMOOBOT_JOBS_LOCK_WAIT=5 bash "$JOB" waited grp -- true > /dev/null; rc=$?
   check "lock released after the job ends" test "$rc" -eq 0 -a -e "$WORK/state/waited.last-success"
 
+  # Two Tetraminator timer runs: the second waits on the tetraminator group, then is skipped, so two runs never ask the
+  # provider at once; a lifecycle job is not held up by it.
+  bash "$JOB" tetraminator tetraminator -- sleep 3 > /dev/null &
+  sleep 0.5
+  AMOOBOT_JOBS_LOCK_WAIT=1 bash "$JOB" tetraminator tetraminator -- bash -c 'touch "$0"' "$WORK/tetra-second-ran" > /dev/null; rc=$?
+  check "tetraminator: a second run while one holds its group lock is skipped (exit 0, not run)" bash -c \
+    '[[ $1 -eq 0 && ! -e "$2" ]] && grep -q "SKIPPED tetraminator: lock \"tetraminator\" still busy" "$3"' _ "$rc" "$WORK/tetra-second-ran" "$WORK/log/tetraminator.log"
+  AMOOBOT_JOBS_LOCK_WAIT=1 bash "$JOB" lifecycle-job lifecycle -- true > /dev/null; rc=$?
+  check "  ...while a lifecycle job runs alongside it" test "$rc" -eq 0 -a -e "$WORK/state/lifecycle-job.last-success"
+  wait
+
   touch "$WORK/state/flaky.alerted"
   bash "$JOB" flaky grp -- true > /dev/null
   check "recovery notice after a previously alerted failure" grep -qx 'recovered flaky' "$WORK/alert-calls"
@@ -192,6 +203,21 @@ if [[ -e "$ROOT/bin/check-scheduled-jobs.sh" ]]; then
   touch -d '99 minutes ago' "$WORK/state/inbound-moves.last-success"
   out="$(bash "$CHECK" 2>&1)"; rc=$?
   check "  ...within 6000 s it is still OK: one skipped run tolerated" bash -c '[[ $1 -eq 0 ]] && grep -qE "^OK +inbound-moves" <<< "$2"' _ "$rc" "$out"
+  # The Tetraminator timer: max age 600 s (3 x 120 + 240). NEW after a full deploy, OK after its first run (which has
+  # nothing to do and exits 0), STALE after 10 minutes without a success.
+  printf 'tetraminator 600 *:0/2\n' > "$WORK/manifest"
+  rm -rf "$WORK/state"; mkdir -p "$WORK/state"; touch "$WORK/state/tetraminator.installed"
+  out="$(bash "$CHECK" 2>&1)"; rc=$?
+  check "tetraminator just installed -> NEW, exit 0" bash -c '[[ $1 -eq 0 ]] && grep -qE "^NEW +tetraminator +- .*schedule \*:0/2; installed [0-9]+s ago, first run pending" <<< "$2"' _ "$rc" "$out"
+  touch "$WORK/state/tetraminator.last-success"
+  out="$(bash "$CHECK" 2>&1)"; rc=$?
+  check "tetraminator after its first run -> OK, exit 0" bash -c '[[ $1 -eq 0 ]] && grep -qE "^OK +tetraminator" <<< "$2"' _ "$rc" "$out"
+  touch -d '11 minutes ago' "$WORK/state/tetraminator.last-success"
+  out="$(bash "$CHECK" 2>&1)"; rc=$?
+  check "tetraminator last success older than 600 s -> STALE, exit 2" bash -c '[[ $1 -eq 2 ]] && grep -qE "^STALE +tetraminator" <<< "$2"' _ "$rc" "$out"
+  touch -d '9 minutes ago' "$WORK/state/tetraminator.last-success"
+  out="$(bash "$CHECK" 2>&1)"; rc=$?
+  check "  ...within 600 s it is still OK: one skipped run tolerated" bash -c '[[ $1 -eq 0 ]] && grep -qE "^OK +tetraminator" <<< "$2"' _ "$rc" "$out"
   rm -rf "$WORK/state"; mkdir -p "$WORK/state"; touch "$WORK/state/fresh.last-success"
   printf '# comment\n\nfresh 600 *:0/2\nstale 600 *:0/2\nnever 600 *:0/2\nbroken 600 *:0/2\n' > "$WORK/manifest"
   printf '# empty manifest\n' > "$WORK/manifest"
@@ -248,8 +274,25 @@ echo "== job max ages and first-install stamp (deploy.sh)"
   (( ok ))
 ) && pass "attach-inbounds max age is 5700 s (3 x 1800 + 300): one skipped run tolerated" || fail "job max ages"
 check "manifest line of inbound-moves, in the lifecycle group" grep -qxF '  "inbound-moves|lifecycle|*:21/30|600|1800|app:automation:run --only=inbound-moves"' "$ROOT/deploy.sh"
-check "inbound-moves is on the allowlist" grep -qF "'app:automation:run --only=inbound-moves') ;;" "$ROOT/deploy.sh"
-check "the allowlist message counts nine tasks" grep -qF 'only the nine reviewed automation tasks' "$ROOT/deploy.sh"
+check "inbound-moves is on the allowlist" grep -qF "'app:automation:run --only=inbound-moves'|" "$ROOT/deploy.sh"
+check "the allowlist message counts ten tasks" grep -qF 'only the ten reviewed automation tasks' "$ROOT/deploy.sh"
+check "manifest line of tetraminator, in its own lock group" grep -qxF '  "tetraminator|tetraminator|*:0/2|240|120|app:automation:run --only=tetraminator"' "$ROOT/deploy.sh"
+check "tetraminator is on the allowlist" grep -qF "'app:automation:run --only=tetraminator') ;;" "$ROOT/deploy.sh"
+(
+  eval "$(sed -n '/^SCHEDULED_JOBS=(/,/^)/p' "$ROOT/deploy.sh")"
+  eval "$(sed -n '/^parse_job()/,/^}/p' "$ROOT/deploy.sh")"
+  others=0
+  for entry in "${SCHEDULED_JOBS[@]}"; do
+    parse_job "$entry"
+    [[ "$JOB_NAME" == tetraminator ]] || { [[ "$JOB_GROUP" != tetraminator ]] || others=1; continue; }
+    [[ "$JOB_GROUP" == tetraminator && "$JOB_TIMEOUT" == 240 && "$JOB_INTERVAL" == 120 && $((3 * JOB_INTERVAL + JOB_TIMEOUT)) == 600 ]] || exit 1
+    # The run's time budget, plus one provisioning (up to 60 s) after it, stays inside the job's timeout.
+    budget="$(sed -n 's/.*TIME_BUDGET_SECONDS = \([0-9]*\);.*/\1/p' "$ROOT/src/Payment/Application/Reconcile/TetraminatorReconciler.php")"
+    [[ "$budget" =~ ^[0-9]+$ ]] && (( budget + 60 < JOB_TIMEOUT )) || exit 1
+    found=1
+  done
+  [[ "${found:-0}" == 1 && $others == 0 ]]
+) && pass "tetraminator: own group, max age 600 s, time budget inside the 240 s timeout" || fail "tetraminator limits"
 (
   eval "$(sed -n '/^SCHEDULED_JOBS=(/,/^)/p' "$ROOT/deploy.sh")"
   eval "$(sed -n '/^parse_job()/,/^}/p' "$ROOT/deploy.sh")"
@@ -282,11 +325,12 @@ if have systemd-analyze; then
     out="$(systemd-analyze calendar "$JOB_CALENDAR" 2>&1)"
     check "OnCalendar '${JOB_CALENDAR}' (${JOB_NAME}) is valid" grep -q 'Next elapse' <<< "$out"
   done
-  check "9 jobs rendered" test "$(ls "$units"/*.timer | wc -l)" -eq 9
+  check "10 jobs rendered" test "$(ls "$units"/*.timer | wc -l)" -eq 10
+  check "tetraminator timer and service" bash -c 'grep -qxF "OnCalendar=*:0/2" "$1/amoobot-job-tetraminator.timer" && grep -qxF "TimeoutStartSec=240" "$1/amoobot-job-tetraminator.service" && grep -q "scheduled-job.sh tetraminator tetraminator -- .*app:automation:run --only=tetraminator " "$1/amoobot-job-tetraminator.service"' _ "$units"
   check "inbound-moves timer and service" bash -c 'grep -qxF "OnCalendar=*:21/30" "$1/amoobot-job-inbound-moves.timer" && grep -qxF "TimeoutStartSec=600" "$1/amoobot-job-inbound-moves.service" && grep -q "scheduled-job.sh inbound-moves lifecycle -- .*app:automation:run --only=inbound-moves " "$1/amoobot-job-inbound-moves.service"' _ "$units"
   check "no job schedules repair-stuck" bash -c '! grep -l repair-stuck "$1"/*.service' _ "$units"
-  check "every job runs as www-data" bash -c '[[ $(grep -l "^User=www-data$" "$1"/*.service | wc -l) -eq 9 ]]' _ "$units"
-  check "every job has OnFailure alert" bash -c '[[ $(grep -l "^OnFailure=amoobot-job-alert@%N.service$" "$1"/*.service | wc -l) -eq 9 ]]' _ "$units"
+  check "every job runs as www-data" bash -c '[[ $(grep -l "^User=www-data$" "$1"/*.service | wc -l) -eq 10 ]]' _ "$units"
+  check "every job has OnFailure alert" bash -c '[[ $(grep -l "^OnFailure=amoobot-job-alert@%N.service$" "$1"/*.service | wc -l) -eq 10 ]]' _ "$units"
   # verify: only diagnostics about our units count (the host's own units may warn), and complaints about
   # binaries/paths that exist on the server but not here are ignored.
   verify="$(cd "$units" && systemd-analyze verify --man=no ./*.timer ./*.service 2>&1 | grep 'amoobot-job' \
@@ -332,8 +376,10 @@ EOF
   check "dry-run manifest: attach-inbounds max age 5700" grep -q '+ attach-inbounds 5700 \*:25/30' <<< "$jobs_part"
   check "inbound-moves is in the dry-run job table" grep -qE '^  inbound-moves +\*:21/30 +lifecycle +600s +app:automation:run --only=inbound-moves$' <<< "$jobs_part"
   check "dry-run manifest: inbound-moves max age 6000" grep -q '+ inbound-moves 6000 \*:21/30' <<< "$jobs_part"
-  check "dry-run stamps every first-installed job" test "$(grep -c '\[dry-run\] install -m 644 -o www-data -g www-data /dev/null .*/jobs/.*\.installed' <<< "$jobs_part")" -eq 9
-  check "dry-run would enable every timer" test "$(grep -c 'systemctl enable --now amoobot-job-' <<< "$jobs_part")" -eq 9
+  check "tetraminator is in the dry-run job table, in its own group" grep -qE '^  tetraminator +\*:0/2 +tetraminator +240s +app:automation:run --only=tetraminator$' <<< "$jobs_part"
+  check "dry-run manifest: tetraminator max age 600" grep -q '+ tetraminator 600 \*:0/2' <<< "$jobs_part"
+  check "dry-run stamps every first-installed job" test "$(grep -c '\[dry-run\] install -m 644 -o www-data -g www-data /dev/null .*/jobs/.*\.installed' <<< "$jobs_part")" -eq 10
+  check "dry-run would enable every timer" test "$(grep -c 'systemctl enable --now amoobot-job-' <<< "$jobs_part")" -eq 10
   check "dry-run pauses jobs before the checkout" grep -q 'pause scheduled jobs' <<< "$out"
   leak=0
   while IFS='=' read -r k v; do
@@ -345,7 +391,7 @@ EOF
   check "preflight refuses to schedule repair-stuck" bash -c '[[ $1 -ne 0 ]] && grep -q "must never be scheduled" <<< "$2"' _ "$rc" "$out"
   sed 's/app:payments:repair-stuck --apply/app:plans:adjust-prices --percent=50/' "$WORK/deploy-bad.sh" > "$WORK/deploy-destructive.sh"
   out="$(dry_run "$WORK/deploy-destructive.sh" "$WORK/prod.env")"; rc=$?
-  check "preflight refuses other unreviewed commands" bash -c '[[ $1 -ne 0 ]] && grep -q "only the nine reviewed automation tasks" <<< "$2"' _ "$rc" "$out"
+  check "preflight refuses other unreviewed commands" bash -c '[[ $1 -ne 0 ]] && grep -q "only the ten reviewed automation tasks" <<< "$2"' _ "$rc" "$out"
 
   # write_file for real (as the current user): new -> changed, same content -> unchanged, edit -> changed.
   eval "$(sed -n '/^FILE_CHANGED=0$/,/^}/p' "$ROOT/deploy.sh")"
