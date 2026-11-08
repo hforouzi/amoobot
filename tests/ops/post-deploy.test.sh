@@ -86,7 +86,7 @@ stub ufw 'printf "%s\n" "${UFW_OUT}"'
 stub sshd 'printf "%s\n" "${SSHD_OUT}"'
 stub nginx 'exit "${NGINX_RC:-0}"'
 stub mariadb 'case "$*" in *sql_mode*) printf "%s\n" "${SQL_MODES}" ;; *bot_message_log*) printf "%s\n" "${LOGGED_ROWS:-1}" ;; esac'
-printf '#!/usr/bin/env bash\nprintf "%%s\n" "${JOBS_OUT:-OK: all 9 jobs ran successfully within their allowed age.}"\nexit "${JOBS_RC:-0}"\n' > "$WORK/check-jobs"; chmod +x "$WORK/check-jobs"
+printf '#!/usr/bin/env bash\nprintf "%%s\n" "${JOBS_OUT:-OK: all 10 jobs ran successfully within their allowed age.}"\nexit "${JOBS_RC:-0}"\n' > "$WORK/check-jobs"; chmod +x "$WORK/check-jobs"
 
 STRICT="STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION"
 webhook_info() {  # webhook_info <url> <last_error_message> <pending>
@@ -156,7 +156,7 @@ RECONCILE_RC=255 run_check
 check "reconcile cannot run -> an INFO WARNING only, RESULT still OK (exit 0)" bash -c \
   '[[ $1 -eq 0 ]] && grep -q "^RESULT: OK$" <<< "$2" && grep -qE "^INFO +wallet-reconcile +WARNING: app:wallet:reconcile could not run [(]exit 255[)]" <<< "$2"' _ "$RC" "$OUT"
 good_env
-JOBS_OUT=$'NEW       attach-inbounds  -             1h35m     schedule *:25/30; installed 2m ago, first run pending\n\nOK: no problems; 1 of 9 jobs newly installed, first run pending (WARN: NEW).' run_check
+JOBS_OUT=$'NEW       attach-inbounds  -             1h35m     schedule *:25/30; installed 2m ago, first run pending\n\nOK: no problems; 1 of 10 jobs newly installed, first run pending (WARN: NEW).' run_check
 check "a job installed by this deploy, not run yet -> PASS plus an INFO WARNING, RESULT OK" bash -c \
   '[[ $1 -eq 0 ]] && grep -q "^RESULT: OK$" <<< "$2" && grep -qE "^PASS +scheduled-jobs " <<< "$2" && grep -qE "^INFO +scheduled-jobs +WARNING: first run pending: attach-inbounds" <<< "$2"' _ "$RC" "$OUT"
 good_env; run_check

@@ -475,7 +475,7 @@ journalctl -u 'amoobot-*' --since '-30d' | grep -cE 'vless://|vmess://|trojan://
 - [ ] بکاپ‌ها به خارج از سرور منتقل می‌شوند
 - [ ] `systemctl list-timers certbot.timer` فعال است (`sudo certbot renew --dry-run` موفق است)
 - [ ] مانیتورینگ uptime روی `https://DOMAIN/healthz`
-- [ ] `systemctl list-timers 'amoobot-job-*'` شش timer نشان می‌دهد و ستون LAST یک ساعت بعد از deploy برای همه پر است
+- [ ] `systemctl list-timers 'amoobot-job-*'` ده timer نشان می‌دهد و ستون LAST یک ساعت بعد از deploy برای همه پر است
 - [ ] `sudo amoobot-check-jobs` دو ساعت بعد از deploy کد خروج `0` می‌دهد و `systemctl list-timers amoobot-check-jobs.timer` فعال است
 - [ ] `MONITOR_PING_URL` تنظیم شده و در سرویس مانیتورینگ برای هر کار (و `backup`) ping تازه دیده می‌شود (بخش ۸، «هشدار بدون تلگرام»)
 - [ ] Toggleهای اتوماسیون در پنل ادمین بررسی شده‌اند (به‌خصوص «تعلیق خودکار»؛ پیش‌فرض خاموش)
@@ -504,6 +504,7 @@ journalctl -u 'amoobot-*' --since '-30d' | grep -cE 'vless://|vmess://|trojan://
 | `expiry` | هر ۱۵ دقیقه، `*:5/15` | `app:service:check-expiry`؛ `src/Provisioning/Application/ServiceExpiryChecker.php::checkAll` | تغییر وضعیت سرویس منقضی‌شده پس از sync، بدون حذف سرویس |
 | `suspend` | هر ۱۵ دقیقه، `*:8/15` | `src/Command/AutomationRunCommand.php` بخش `suspend`؛ `src/Provisioning/Application/ServiceAutoSuspendService.php` | تعلیق اختیاری انقضا/اتمام ترافیک؛ هر دو toggle پیش‌فرض خاموش هستند |
 | `notifications` | هر ۳۰ دقیقه، `*:10/30` | `app:service:send-notifications`؛ `src/Command/ServiceSendNotificationsCommand.php` | اعلان نزدیک انقضا، مصرف و انقضای نهایی |
+| `tetraminator` | هر ۲ دقیقه، `*:0/2`، گروه قفل `tetraminator` | `src/Payment/Application/Reconcile/TetraminatorReconciler.php::runDue` | استعلام پرداخت‌های تترامیناتور وقتی وب‌هوک نمی‌رسد؛ منقضی کردن فاکتور مرده. timeout ۲۴۰ ثانیه، بیشینهٔ عمر در `amoobot-check-jobs` ۶۰۰ ثانیه |
 
 شاهد مشترک اجرای این شش کار: `src/Command/AutomationRunCommand.php` و [automation.md](automation.md).
 پیش‌فرض toggleها در `src/Provisioning/Application/AutomationSettingsProvider.php` است.
@@ -514,7 +515,7 @@ client حذف نمی‌شود و تمدید دوباره آن را فعال می
 (هر ۱۵ دقیقه، فقط پنل‌های سرویس‌های بررسی‌شده؛ پنل بدون سرویس بررسی نمی‌شود). `app:panel:test-login` یک ابزار دستی برای پنل مشخص است.
 دستورهای مستقل جدول جداگانه زمان‌بندی نمی‌شوند تا کارها دو بار اجرا نشوند. `app:broadcast:prepare/send/retry-failed` برای یک broadcast مشخص هستند.
 `app:payments:repair-stuck`، ابزارهای پرداخت/تعمیر/seed، تغییر قیمت، ایجاد client آزمایشی، حذف webhook و بازنویسی گروهی تنظیمات
-در زمان‌بندی نیستند؛ preflight فقط شش دستور جدول را می‌پذیرد.
+در زمان‌بندی نیستند؛ preflight فقط ده دستور فهرست مجاز را می‌پذیرد (کارهای `claims`، `attach-inbounds` و `inbound-moves` در [automation.md](automation.md) آمده‌اند).
 
 | چیز | محل |
 |---|---|
@@ -523,7 +524,7 @@ client حذف نمی‌شود و تمدید دوباره آن را فعال می
 | خروجی کامل | `/var/log/amoobot/<job>.log` (چرخش روزانه، ۱۴ روز: `/etc/logrotate.d/amoobot-jobs`) |
 | خلاصه‌ی هر اجرا | `journalctl -u amoobot-job-<job>` |
 | آخرین اجرا / آخرین موفقیت | `/var/lib/amoobot/jobs/<job>.last-run` و `<job>.last-success` |
-| قفل‌ها | `/run/amoobot/<گروه>.lock` (`sync`، `expiry`، `suspend`، `notifications`، `claims`، `attach-inbounds` و `inbound-moves` در گروه `lifecycle` هستند و هم‌زمان اجرا نمی‌شوند) |
+| قفل‌ها | `/run/amoobot/<گروه>.lock` (`sync`، `expiry`، `suspend`، `notifications`، `claims`، `attach-inbounds` و `inbound-moves` در گروه `lifecycle` هستند و هم‌زمان اجرا نمی‌شوند؛ `tetraminator` گروه خودش را دارد) |
 
 ### دیدن وضعیت آخرین اجرا
 
