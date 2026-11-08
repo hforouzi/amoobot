@@ -49,9 +49,11 @@ final class PanelClientImporter
     }
 
     /**
-     * @param int|null $limit stop once this many services were imported (would be, in a dry run)
+     * @param int|null       $limit    stop once this many services were imported (would be, in a dry run)
+     * @param list<int>|null $inbounds only clients on at least one of these inbounds (the panel's inbound ids,
+     *                                 VpnInbound::remoteInboundId), each imported with all its inbounds; null: every client
      */
-    public function import(VpnPanel $panel, bool $dryRun = false, ?int $limit = null, int $batchSize = self::DEFAULT_BATCH_SIZE): PanelClientImportSummary
+    public function import(VpnPanel $panel, bool $dryRun = false, ?int $limit = null, int $batchSize = self::DEFAULT_BATCH_SIZE, ?array $inbounds = null): PanelClientImportSummary
     {
         $summary = new PanelClientImportSummary($dryRun);
         if ('sanaei_3xui' !== $panel->getType() || !$panel->isModern()) {
@@ -60,6 +62,19 @@ final class PanelClientImporter
             return $summary;
         }
         $panelId = (int) $panel->getId();
+        $chosen = null;
+        if (null !== $inbounds) {
+            // Checked before any panel request: every chosen inbound must be one the bot knows on this panel.
+            $chosen = array_fill_keys(array_values(array_unique($inbounds)), true);
+            $synced = array_map('intval', $this->entityManager->getConnection()->fetchFirstColumn('SELECT remote_inbound_id FROM vpn_inbound WHERE panel_id = ?', [$panelId]));
+            $summary->unknownChosenInbounds = array_values(array_diff(array_keys($chosen), $synced));
+            if ([] !== $summary->unknownChosenInbounds) {
+                $summary->stopped = PanelClientImportSummary::STOPPED_UNKNOWN_CHOSEN_INBOUND;
+
+                return $summary;
+            }
+            $summary->notOnChosenInbounds = 0;
+        }
         $batchSize = max(1, min(ModernClientsApi::PAGE_SIZE_MAX, $batchSize));
         $known = $this->knownIdentities($panelId);
         /** @var array<string, true> $owners Telegram ids that have an account (or get one in this run) */
@@ -70,8 +85,10 @@ final class PanelClientImporter
         $perOwner = [];
 
         try {
-            // Traffic (up/down) is only on clients/list: one request for the whole panel.
-            $usage = array_map(static fn (array $client): ?int => ModernClientsApi::usedBytes($client), $this->api->listClients($panel));
+            // Traffic (up/down) is only on clients/list: one request for the whole panel. Its rows also name their
+            // inbounds, which decides --inbound when a paged row does not.
+            $listed = $this->api->listClients($panel);
+            $usage = array_map(static fn (array $client): ?int => ModernClientsApi::usedBytes($client), $listed);
             for ($page = 1; ; ++$page) {
                 $answer = $this->api->listPaged($panel, $page, $batchSize);
                 $planned = [];
@@ -81,7 +98,7 @@ final class PanelClientImporter
                         break;
                     }
                     ++$summary->read;
-                    $import = $this->readClient($panel, $item, $known, $usage, $summary);
+                    $import = $this->readClient($panel, $item, $known, $usage, $summary, $chosen, $listed);
                     if (null !== $import) {
                         $planned[] = $import;
                         $known->add($import['uuid'], $import['email'], $import['subId'], $panelId);
@@ -108,7 +125,7 @@ final class PanelClientImporter
 
         $this->logger->info('panel_client_import', ['panel_id' => $panelId, 'dry_run' => $dryRun, 'read' => $summary->read, 'imported' => $summary->imported,
             'new_users' => $summary->newUsers, 'existing_users' => $summary->existingUsers, 'already_known' => $summary->alreadyKnown, 'no_owner' => $summary->noOwner,
-            'unknown_inbound' => $summary->unknownInbound, 'invalid' => $summary->invalid, 'most_for_one_owner' => $summary->mostForOneOwner, 'stopped' => $summary->stopped]);
+            'unknown_inbound' => $summary->unknownInbound, 'invalid' => $summary->invalid, 'most_for_one_owner' => $summary->mostForOneOwner, 'not_on_chosen_inbounds' => $summary->notOnChosenInbounds, 'stopped' => $summary->stopped]);
 
         return $summary;
     }
@@ -118,12 +135,14 @@ final class PanelClientImporter
      *
      * @param array<string, mixed>   $item  a row of clients/list/paged (normalised)
      * @param array<string, ?int>    $usage used bytes by lower-cased email
+     * @param array<int, true>|null  $chosen the --inbound ids (panel numbers), null: every client
+     * @param array<string, array<string, mixed>> $listed clients/list rows by lower-cased email
      *
      * @return array{uuid: string, email: string, subId: ?string, telegramId: string, inbounds: list<VpnInbound>, remoteInboundId: int, client: array<string, mixed>, usedBytes: ?int, links: ?list<string>}|null
      *
      * @throws PanelApiException
      */
-    private function readClient(VpnPanel $panel, array $item, PanelClientIdentities $known, array $usage, PanelClientImportSummary $summary): ?array
+    private function readClient(VpnPanel $panel, array $item, PanelClientIdentities $known, array $usage, PanelClientImportSummary $summary, ?array $chosen = null, array $listed = []): ?array
     {
         $panelId = (int) $panel->getId();
         $email = trim((string) ($item['email'] ?? ''));
@@ -134,6 +153,14 @@ final class PanelClientImporter
         }
         if ($known->has(self::uuidOf($item), $email, self::subIdOf($item), $panelId)) {
             ++$summary->alreadyKnown;
+
+            return null;
+        }
+        // --inbound: decided from the paged row, else from the clients/list row (already read); only when neither
+        // names the client's inbounds is its full row read for it. Nothing more is read for a client filtered out.
+        $listedInbounds = $item['inboundIds'] ?? $listed[strtolower($email)]['inboundIds'] ?? null;
+        if (null !== $chosen && is_array($listedInbounds) && !self::onChosen($listedInbounds, $chosen)) {
+            ++$summary->notOnChosenInbounds;
 
             return null;
         }
@@ -149,6 +176,12 @@ final class PanelClientImporter
         $subId = self::subIdOf($client);
         if ($known->has($uuid, $email, $subId, $panelId)) {
             ++$summary->alreadyKnown;
+
+            return null;
+        }
+        // The full row is what the service is made from: it decides when it disagrees with the list.
+        if (null !== $chosen && !self::onChosen(is_array($client['inboundIds'] ?? null) ? $client['inboundIds'] : [], $chosen)) {
+            ++$summary->notOnChosenInbounds;
 
             return null;
         }
@@ -322,6 +355,21 @@ final class PanelClientImporter
             false === ($client['enable'] ?? true) => VpnServiceStatus::SUSPENDED,
             default => VpnServiceStatus::ACTIVE,
         };
+    }
+
+    /**
+     * @param array<mixed>     $inboundIds
+     * @param array<int, true> $chosen
+     */
+    private static function onChosen(array $inboundIds, array $chosen): bool
+    {
+        foreach ($inboundIds as $id) {
+            if (is_int($id) && isset($chosen[$id])) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
