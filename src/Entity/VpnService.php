@@ -71,6 +71,13 @@ class VpnService
     #[ORM\Column(type: 'text', nullable: true)]
     private ?string $configText = null;
 
+    /**
+     * When app:panel:import-clients created this service from a client already on the panel (docs/design/
+     * panel-client-import.md). NULL for every sold service. An imported service has no order, so no plan to renew from.
+     */
+    #[ORM\Column(nullable: true)]
+    private ?\DateTimeImmutable $importedAt = null;
+
     #[ORM\Column(length: 50)]
     private string $status = VpnServiceStatus::ACTIVE;
 
@@ -323,6 +330,23 @@ class VpnService
         $this->inboundChangedAt = $inboundChangedAt;
 
         return $this;
+    }
+
+    public function getImportedAt(): ?\DateTimeImmutable
+    {
+        return $this->importedAt;
+    }
+
+    public function setImportedAt(?\DateTimeImmutable $importedAt): self
+    {
+        $this->importedAt = $importedAt;
+
+        return $this;
+    }
+
+    public function isImported(): bool
+    {
+        return null !== $this->importedAt;
     }
 
     public function getConfigText(): ?string

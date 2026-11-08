@@ -190,6 +190,8 @@ checkout.message.trial_refused: "دریافت اکانت تست ممکن نیس�
 checkout.message.service_not_found: "سرویس پیدا نشد."
 checkout.message.renewal_unavailable: "تمدید خودکار برای این سرویس ممکن نیست. لطفاً با پشتیبانی تماس بگیرید."
 checkout.message.add_traffic_unavailable: "خرید حجم اضافه برای این سرویس ممکن نیست."
+checkout.message.renewal_new_plan: "این سرویس پلن ندارد. برای تمدید، یک پلن جدید بخرید."
+checkout.message.add_traffic_new_plan: "این سرویس پلن ندارد. برای حجم بیشتر، یک پلن جدید بخرید."
 checkout.message.receipt_not_manual: "این پرداخت رسید ندارد."
 checkout.message.receipt_already_submitted: "رسید این پرداخت قبلاً ارسال شده است."
 checkout.message.receipt_not_pending: "دیگر امکان ارسال رسید برای این پرداخت نیست."

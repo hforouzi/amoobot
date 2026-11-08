@@ -104,6 +104,7 @@ final class MiniAppCheckout
     public function quoteRenewal(User $user, int $serviceId, ?string $discountCode): CheckoutQuote
     {
         $service = $this->service($user, $serviceId);
+        self::requireOrder($service, 'renewal_new_plan');
         $quote = $this->serviceOrderCheckout->renewalQuote($service) ?? throw new CheckoutFailure('renewal_unavailable', 409);
         $price = new PriceCalculationResult($quote->baseAmount, $quote->globalDiscountPercent, $quote->globalDiscountAmount, $quote->amount, $quote->amount);
 
@@ -114,6 +115,7 @@ final class MiniAppCheckout
     {
         $this->requireOpen($this->salesSettings->renewalsEnabled());
         $service = $this->service($user, $serviceId);
+        self::requireOrder($service, 'renewal_new_plan');
         $quote = $this->serviceOrderCheckout->renewalQuote($service) ?? throw new CheckoutFailure('renewal_unavailable', 409);
         $this->requireUsableCode($this->quoteRenewal($user, $serviceId, $discountCode));
 
@@ -128,6 +130,7 @@ final class MiniAppCheckout
     public function quoteAddTraffic(User $user, int $serviceId, mixed $trafficGb, ?string $discountCode): CheckoutQuote
     {
         $service = $this->service($user, $serviceId);
+        self::requireOrder($service, 'add_traffic_new_plan');
         $plan = $this->serviceOrderCheckout->addTrafficPlan($service) ?? throw new CheckoutFailure('add_traffic_unavailable', 409);
         $trafficGb = self::intOrNull($trafficGb);
         if (null === $trafficGb || !$this->serviceOrderCheckout->isValidAddTrafficAmount($trafficGb)) {
@@ -142,6 +145,7 @@ final class MiniAppCheckout
     {
         $this->requireOpen($this->salesSettings->addTrafficEnabled() && $this->trafficAddonSettings->canPurchase());
         $service = $this->service($user, $serviceId);
+        self::requireOrder($service, 'add_traffic_new_plan');
         $this->requireUsableCode($this->quoteAddTraffic($user, $serviceId, $trafficGb, $discountCode));
         $trafficGb = (int) self::intOrNull($trafficGb);
         $plan = $this->serviceOrderCheckout->addTrafficPlan($service) ?? throw new CheckoutFailure('add_traffic_unavailable', 409);
@@ -344,6 +348,14 @@ final class MiniAppCheckout
     private function service(User $user, int $serviceId): VpnService
     {
         return $this->customerServices->ownedBy($user, $serviceId) ?? throw new CheckoutFailure('service_not_found', 404);
+    }
+
+    /** A service without an order (imported from the panel) has no plan to price this from: buy a new plan instead. */
+    private static function requireOrder(VpnService $service, string $error): void
+    {
+        if (null === $service->getOrder()) {
+            throw new CheckoutFailure($error, 409);
+        }
     }
 
     private static function intOrNull(mixed $value): ?int

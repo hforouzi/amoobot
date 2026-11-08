@@ -22,6 +22,13 @@
                 {% if canAddTraffic %}<a class="btn secondary small" href="{{ path('miniapp_service_add_traffic', {id: service.id}) }}" data-nav data-add-traffic>➕ {{ 'add_traffic.title'|trans }}</a>{% endif %}
             </div>
         </section>
+    {% elseif service.order is null %}
+        {# Imported from the panel (no plan): renewing means buying a new plan. #}
+        <section class="card" data-new-plan>
+            <h2>{{ 'service.buy_more'|trans }}</h2>
+            <p class="muted">{{ 'checkout.message.renewal_new_plan'|trans }}</p>
+            <a class="btn small" href="{{ path('miniapp_shop') }}" data-nav data-shop-link>🛒 {{ 'home.open_shop'|trans }}</a>
+        </section>
     {% endif %}
     <section class="card">
         <h2>{{ 'service.subscription'|trans }}</h2>
