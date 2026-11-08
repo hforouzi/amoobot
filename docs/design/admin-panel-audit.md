@@ -475,14 +475,14 @@ multi-store a store switcher sits above it, and "Stores" is added under Operatio
 زیرساخت / Infrastructure                                              [per module]
     پنل‌های VPN                  Panels, inbounds                      [vpn]
     انتقال سرویس‌ها به اینباند    Move runs                             [vpn]
-    حساب‌های ابری                Cloud accounts                        [hetzner]
-    مدیریت سو استفاده            Abuse                                 [hetzner]
+    اتصال‌های ارائه‌دهنده         Provider connections                  [server]
+    مدیریت سو استفاده            Abuse                                 [server]
 
 سیستم / Operations
     کارهای زمان‌بندی‌شده          Jobs (health and runs)
     برند و دامنه                 Branding
     اتصال ربات                   Bot connection (webhook status)
-    ماژول‌ها                     Modules (read only)
+    ماژول‌ها و درایورها           Modules and drivers (enable/disable, product-modules.md 4.2)
     افزونه‌ها                    Plugins
     مدیران                       Admins and roles
     گزارش‌ها                     Logs
@@ -499,7 +499,7 @@ For a store manager. Sections are shown by permission and module, as today (`Das
 | **Today** | Orders, confirmed payments, revenue, top-ups, new customers | Same |
 | **Services** | Active, expiring, expired, suspended, low traffic | Active, expiring, in grace, powered off, deletions due |
 | **Money** | Wallet outstanding, credit used | Same, plus cost estimate of running servers, cost of servers in grace |
-| **Infrastructure** | Panel health, last check | Cloud account status, API limit remaining, resource limit used |
+| **Infrastructure** | Panel health, last check | Provider connection health, API limit remaining, resource limit used (any server driver) |
 | **System** | Job health, last backup, deploy version | Same |
 | **Setup checklist** (new install) | Connect a panel, create a plan, add a payment method, set the bot texts, test a purchase | Connect a cloud account, create a plan, add a payment method, set the bot texts, test a purchase |
 
@@ -531,7 +531,7 @@ Inbound moves already have 2, 3 and most of 4. Bulk prices have 2. The wallet ha
 | **PM18** | Roles: sales manager, permission split, masking | Medium |
 | **PM19** | Jalali dates and local fonts | Low |
 
-PM12 shouldn't wait for any decision. PM14 onward should wait for the module decision (`product-modules.md` PM3) only where
+PM12 shouldn't wait for any decision. PM14 onward should wait for module gating (`product-modules.md` PM3b) only where
 they rely on module gating.
 
 ## 8. Open questions
