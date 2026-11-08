@@ -367,8 +367,9 @@ payment expires without a well-formed answer until 24 hours have passed.
 Customer-facing messages are generic. The admin detail goes to `adminNote` and contains no key. `PaymentStarter` already stores
 the failure message there.
 
-**Known gap.** A 401 or 403 at create raises no alert unless open payments exist for the timer to fail on. Admins see it
-on the payment and from customer reports. A later health check could close this. It is left out of this design.
+**Account errors at create (closed in PR 3).** A 401 or 403 at create now alerts the admins in Telegram, at most once an
+hour per gateway: the plugin reports `rawResponse.error` `unauthorized` or `store_disabled`, and the core's
+`PaymentGatewayCredentialAlert` (called by `PaymentStarter`, any plugin may use the two codes) sends a fixed text with no key.
 
 ### 10. Concurrency
 

@@ -180,6 +180,7 @@ checkout.message.idempotency_conflict: "This request was already used for someth
 checkout.message.rate_limited: "Too many requests. Please try again in a few minutes."
 checkout.message.order_not_found: "Order not found."
 checkout.message.order_not_payable: "This order can no longer be paid."
+checkout.message.idempotency_in_progress: "This payment is already being prepared. Wait a few seconds and open the order again."
 checkout.message.method_invalid: "This payment method is not available for this order."
 checkout.message.payment_start_failed: "The gateway could not create the payment. Please try another method."
 checkout.message.payment_not_found: "Payment not found."

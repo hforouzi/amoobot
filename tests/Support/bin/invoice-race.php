@@ -8,7 +8,9 @@ declare(strict_types=1);
  * Usage: php invoice-race.php start <orderId> <storePaymentMethodId> <startAt>
  *        php invoice-race.php expire <paymentId> 0 <startAt>
  *        php invoice-race.php settle <paymentId> <amountToman> <startAt>
- * Prints what happened: "start:ready", "start:refused", or the settlement outcome after "expire:" or "settle:".
+ *        php invoice-race.php approve <paymentId> 0 <startAt>
+ * Prints what happened: "start:ready", "start:refused", or the settlement outcome after "expire:" or "settle:". An admin
+ * approval prints "approve:<outcome> <milliseconds from its start to its end>".
  */
 
 use App\Entity\Order;
@@ -36,7 +38,13 @@ if ('start' === $action) {
 }
 
 $payment = $entityManager->find(Payment::class, $id) ?? throw new LogicException('no payment');
-waitForStartAt($startAt);
+$started = waitForStartAt($startAt);
+if ('approve' === $action) {
+    $outcome = $settlement->approveByAdmin($payment, null, null, 'race_admin')->outcome->value;
+    printf('approve:%s %d', $outcome, (int) round((microtime(true) - $started) * 1000));
+
+    return;
+}
 if ('expire' === $action) {
     echo 'expire:'.$settlement->expireUnpaid($payment, 'race_timer')->outcome->value;
 

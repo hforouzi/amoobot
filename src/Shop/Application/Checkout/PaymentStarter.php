@@ -9,6 +9,7 @@ use App\Entity\Order;
 use App\Entity\Payment;
 use App\Entity\PaymentGateway;
 use App\Entity\StorePaymentMethod;
+use App\Payment\Application\PaymentGatewayCredentialAlert;
 use App\Payment\Domain\PaymentGatewayInterface;
 use App\Payment\Domain\PaymentGatewayType;
 use App\Payment\Domain\PaymentStatus;
@@ -16,6 +17,7 @@ use App\Payment\Infrastructure\NowPaymentsGateway;
 use App\Payment\Infrastructure\PaymentGatewayRegistry;
 use App\Payment\Plugin\PaymentGatewayConstraintsInterface;
 use App\Shared\Infrastructure\SettingValueProvider;
+use App\Shop\Domain\OrderStatus;
 use App\Shop\Domain\OrderType;
 use Doctrine\DBAL\LockMode;
 use Doctrine\ORM\EntityManagerInterface;
@@ -56,6 +58,7 @@ final class PaymentStarter
         private readonly PaymentGatewayRegistry $paymentGatewayRegistry,
         private readonly SettingValueProvider $settingValueProvider,
         private readonly PlanSaleRule $saleRule,
+        private readonly PaymentGatewayCredentialAlert $credentialAlert,
         private readonly string $paymentCardNumber = '',
         private readonly string $paymentCardHolder = '',
         private readonly ?string $paymentDescription = null,
@@ -171,6 +174,10 @@ final class PaymentStarter
             $this->endReservation($payment, $reservation, (int) $lifetime);
         }
         $this->entityManager->flush();
+        if (!$requestResult->success) {
+            // An invalid key or a disabled store fails every customer: the admins hear of it (at most hourly per gateway).
+            $this->credentialAlert->afterFailedCreate($payment, $requestResult->rawResponse);
+        }
 
         return new PaymentStart(self::kindOf($gateway), $payment, $requestResult->success, $requestResult->message, $amount);
     }
@@ -211,8 +218,10 @@ final class PaymentStarter
      * gateway payment reused or a new one, flushed. While a wallet payment of the order holds its debit (pending, in
      * review, or provisioning_failed) nothing is started or reused: that payment is never taken over (its method would
      * change and its debit could no longer be given back) and no second payment is started beside it, which would make
-     * the customer pay twice. Then the refusal is answered (KIND_WALLET_PAYMENT_PENDING / _HELD). The same while another
-     * start is creating the invoice of the open row: a failed start of that row, for the customer to try again. KIND_ONLINE
+     * the customer pay twice. Then the refusal is answered (KIND_WALLET_PAYMENT_PENDING / _HELD). Otherwise an order that
+     * no longer awaits payment gets none (KIND_ORDER_NOT_PAYABLE): the callers checked it before, but a settlement may
+     * have paid it since, and a new invoice for a paid order could only be paid twice. Also refused while another start
+     * is creating the invoice of the open row: a failed start of that row, for the customer to try again. KIND_ONLINE
      * whatever the chosen method is, so that no caller shows a chosen manual card's details for a refused start.
      *
      * @return array{Payment, bool, int, ?\DateTimeImmutable}|PaymentStart [payment, created, amount, reservation written], or the refusal
@@ -233,6 +242,13 @@ final class PaymentStarter
                 $connection->commit();
 
                 return new PaymentStart(PaymentStatus::PENDING === $held->getStatus() ? PaymentStart::KIND_WALLET_PAYMENT_PENDING : PaymentStart::KIND_WALLET_PAYMENT_HELD, null, false, null, 0);
+            }
+            if (OrderStatus::WAITING_PAYMENT !== $order->getStatus()) {
+                // The callers' own rule, read again under the lock: a payment settled since they read the order. After the
+                // wallet check, whose answer (do not pay again) is the more precise one for an order its wallet payment holds.
+                $connection->commit();
+
+                return new PaymentStart(PaymentStart::KIND_ORDER_NOT_PAYABLE, null, false, null, 0);
             }
 
             $amount = $this->payableAmount($order);

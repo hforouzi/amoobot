@@ -6,7 +6,7 @@ namespace App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http;
 
 /**
  * Removes credentials from any text that may reach a log, an exception, the admin UI or the console:
- * the exact secret values given, Authorization/Bearer headers, and token/password-shaped key=value pairs.
+ * the exact secret values given, Authorization/Bearer and API key headers, and token/password-shaped key=value pairs.
  */
 final class SecretRedactor
 {
@@ -106,6 +106,9 @@ final class SecretRedactor
         }
         $text = preg_replace('/(Authorization\s*[:=]\s*)("?)[^\s",}]+(\s+[^\s",}]+)?/i', '$1$2'.self::MASK, $text) ?? $text;
         $text = preg_replace('/Bearer\s+[A-Za-z0-9\-._~+\/]+=*/i', 'Bearer '.self::MASK, $text) ?? $text;
+        // An API key header or field (X-API-KEY: …, "api_key":"…", api_key=…, 'apikey' => '…'): a backstop for the
+        // exact-value mask a gateway does itself (Tetraminator).
+        $text = preg_replace('/(\b(?:X-)?API[_-]?KEY[\'"]?\s*(?:=>|[:=])\s*)([\'"]?)[^\s\'",}&]+/i', '$1$2'.self::MASK, $text) ?? $text;
         $text = preg_replace('/([?&](?:api[_-]?token|access[_-]?token|token|password|passwd|session)=)[^&#\s]*/i', '$1'.self::MASK, $text) ?? $text;
         $text = preg_replace('/("?(?:password|passwd|token|api[_-]?token|cookie|secret|authorization)"?\s*[:=]\s*)"[^"]*"/i', '$1"'.self::MASK.'"', $text) ?? $text;
         $text = preg_replace('/\s+/', ' ', $text) ?? $text;

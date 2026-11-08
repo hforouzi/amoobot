@@ -22,6 +22,8 @@ App\Payment\Plugin\PaymentGatewayPluginInterface
 - `PaymentVerificationResult`: نتیجه verify، اطلاعات مرجع provider و `amount` + `currency` تأییدشده (برای تأیید خودکار الزامی).
 - `PaymentWebhookResult`: نتیجه Webhook وقتی پلاگین Webhook پشتیبانی کند.
 
+**خطای حساب هنگام ساخت پرداخت.** اگر درگاه به‌خاطر حساب خود فروشگاه فاکتور نسازد، یک `PaymentRequestResult` ناموفق با `rawResponse['error']` برابر `unauthorized` (کلید نامعتبر) یا `store_disabled` (فروشگاه نزد درگاه غیرفعال است) برگردانید. `PaymentStarter` حداکثر ساعتی یک بار برای هر درگاه در تلگرام به مدیران خبر می‌دهد (`PaymentGatewayCredentialAlert`). متن این هشدار ثابت است و چیزی از پاسخ درگاه، مثلاً کلید، در آن نمی‌آید.
+
 ## configSchema
 
 هر فیلد می‌تواند `key` یا `name`، `type`، `required`، `default`، `label` و `choices` داشته باشد.
