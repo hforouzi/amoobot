@@ -16,11 +16,13 @@ use App\Payment\Domain\PaymentStatus;
 use App\Payment\Infrastructure\NowPaymentsGateway;
 use App\Payment\Infrastructure\PaymentGatewayRegistry;
 use App\Payment\Plugin\PaymentGatewayConstraintsInterface;
+use App\Payment\Plugin\PaymentGatewayInvoiceCancellationInterface;
 use App\Shared\Infrastructure\SettingValueProvider;
 use App\Shop\Domain\OrderStatus;
 use App\Shop\Domain\OrderType;
 use Doctrine\DBAL\LockMode;
 use Doctrine\ORM\EntityManagerInterface;
+use Psr\Log\LoggerInterface;
 
 /**
  * Paying an order: the store payment methods it may use (StorePaymentMethodResolver: active, configured, currency,
@@ -32,7 +34,9 @@ use Doctrine\ORM\EntityManagerInterface;
  *
  * A gateway that declares an invoice lifetime (PaymentGatewayConstraintsInterface) keeps one invoice per row, and only
  * such a row has an expiresAt: see invoiceState(). createPayment() runs outside the lock, so its claim writes a short
- * reservation into expiresAt; the invoice replaces it. Every other gateway keeps reusing the open row.
+ * reservation into expiresAt; the invoice replaces it. Every other gateway keeps reusing the open row. A row closed that
+ * way has its provider invoice cancelled afterwards when its gateway can (PaymentGatewayInvoiceCancellationInterface):
+ * best effort, see cancelSuperseded().
  */
 final class PaymentStarter
 {
@@ -62,6 +66,7 @@ final class PaymentStarter
         private readonly string $paymentCardNumber = '',
         private readonly string $paymentCardHolder = '',
         private readonly ?string $paymentDescription = null,
+        private readonly ?LoggerInterface $logger = null,
     ) {
     }
 
@@ -136,7 +141,7 @@ final class PaymentStarter
         if ($claimed instanceof PaymentStart) {
             return $claimed;
         }
-        [$payment, $paymentWasCreated, $amount, $reservation] = $claimed;
+        [$payment, $paymentWasCreated, $amount, $reservation, $superseded] = $claimed;
         if ($driver instanceof \Throwable) {
             throw $driver;
         }
@@ -177,6 +182,9 @@ final class PaymentStarter
         if (!$requestResult->success) {
             // An invalid key or a disabled store fails every customer: the admins hear of it (at most hourly per gateway).
             $this->credentialAlert->afterFailedCreate($payment, $requestResult->rawResponse);
+        }
+        if (null !== $superseded) {
+            $this->cancelSuperseded($superseded);
         }
 
         return new PaymentStart(self::kindOf($gateway), $payment, $requestResult->success, $requestResult->message, $amount);
@@ -224,7 +232,7 @@ final class PaymentStarter
      * is creating the invoice of the open row: a failed start of that row, for the customer to try again. KIND_ONLINE
      * whatever the chosen method is, so that no caller shows a chosen manual card's details for a refused start.
      *
-     * @return array{Payment, bool, int, ?\DateTimeImmutable}|PaymentStart [payment, created, amount, reservation written], or the refusal
+     * @return array{Payment, bool, int, ?\DateTimeImmutable, ?Payment}|PaymentStart [payment, created, amount, reservation written, row superseded], or the refusal
      */
     private function claimPayment(Order $order, StorePaymentMethod $storePaymentMethod, ?int $lifetime): array|PaymentStart
     {
@@ -234,6 +242,7 @@ final class PaymentStarter
         $connection->beginTransaction();
         $payment = null;
         $paymentWasCreated = false;
+        $superseded = null;
 
         try {
             $this->entityManager->refresh($order, LockMode::PESSIMISTIC_WRITE);
@@ -261,7 +270,7 @@ final class PaymentStarter
                 return new PaymentStart(PaymentStart::KIND_ONLINE, $payment, false, self::INVOICE_IN_PROGRESS_MESSAGE, $amount);
             }
             if (self::INVOICE_REPLACE === $state && $payment instanceof Payment) {
-                $this->supersede($payment);
+                $superseded = $this->supersede($payment) ? $payment : null;
                 $payment = null;
             }
 
@@ -309,7 +318,7 @@ final class PaymentStarter
             throw $e;
         }
 
-        return [$payment, $paymentWasCreated, $amount, $reservation];
+        return [$payment, $paymentWasCreated, $amount, $reservation, $superseded];
     }
 
     private function driver(PaymentGateway $gateway): PaymentGatewayInterface|\Throwable
@@ -358,16 +367,53 @@ final class PaymentStarter
         return $live ? self::INVOICE_LIVE : self::INVOICE_REPLACE;
     }
 
-    /** Closed unpaid, not failed; the order stays open and a later "paid" goes to review (PaymentSettlementService). */
-    private function supersede(Payment $payment): void
+    /**
+     * Closed unpaid, not failed; the order stays open and a later "paid" goes to review (PaymentSettlementService).
+     * Whether it was closed now (a pending row).
+     */
+    private function supersede(Payment $payment): bool
     {
         if (PaymentStatus::PENDING !== $payment->getStatus()) {
-            return;
+            return false;
         }
         $payment
             ->setStatus(PaymentStatus::REJECTED)
             ->setAdminNote(Payment::NOTE_GATEWAY_INVOICE_SUPERSEDED)
             ->setConfirmationSource(Payment::SOURCE_GATEWAY_INVOICE_SUPERSEDED);
+
+        return true;
+    }
+
+    /**
+     * Asks the superseded row's own gateway (not necessarily the chosen one) to cancel its invoice, after the new invoice
+     * was created and outside the lock. Best effort: the row stays as supersede() left it whatever happens, and an
+     * exception is logged by its class only (its message may quote the config).
+     */
+    private function cancelSuperseded(Payment $superseded): void
+    {
+        $gateway = $superseded->getGateway();
+        if (null === $gateway || null === $superseded->getGatewayTransactionId()) {
+            return;
+        }
+        $context = ['payment_id' => $superseded->getId(), 'gateway_id' => $gateway->getId(), 'plugin_code' => $gateway->getPluginCode()];
+
+        try {
+            $driver = $this->paymentGatewayRegistry->resolve($gateway);
+            if (!$driver instanceof PaymentGatewayInvoiceCancellationInterface) {
+                return;
+            }
+            $outcome = $driver->cancelInvoice($superseded, []);
+        } catch (\Throwable $e) {
+            $this->logger?->warning('Superseded invoice not cancelled: the gateway failed.', $context + ['error' => $e::class]);
+
+            return;
+        }
+        $outcome = substr((string) preg_replace('/[^A-Za-z0-9_.-]/', '', $outcome), 0, 40);
+        if ('cancelled' === $outcome) {
+            $this->logger?->info('Superseded invoice cancelled at the gateway.', $context);
+        } elseif ('skipped' !== $outcome) {
+            $this->logger?->warning('Superseded invoice not cancelled at the gateway.', $context + ['outcome' => $outcome]);
+        }
     }
 
     /**

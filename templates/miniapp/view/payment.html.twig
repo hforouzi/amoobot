@@ -51,6 +51,7 @@
         {% elseif telegramLink or payment.paymentUrl %}
             <section class="card">
                 <p class="muted">{{ ('payment.gateway_hint_' ~ kind)|trans }}</p>
+                {% if gatewayAmount %}<p>{{ 'payment.gateway_amount'|trans }} <b class="amount">{{ 'money.toman'|trans({'%amount%': gatewayAmount|number_format}) }}</b></p>{% endif %}
                 <a class="btn" href="{{ telegramLink ?: payment.paymentUrl }}" {{ telegramLink ? 'data-telegram-link' : 'data-open-link' }}>{{ ('payment.open_' ~ kind)|trans }}</a>
                 <p class="muted small-print">{{ 'payment.return_hint'|trans }}</p>
             </section>

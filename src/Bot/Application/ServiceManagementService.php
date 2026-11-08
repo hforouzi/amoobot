@@ -18,6 +18,7 @@ use App\Entity\TelegramAccount;
 use App\Entity\User;
 use App\Entity\VpnService;
 use App\Payment\Domain\PaymentStatus;
+use App\Payment\Domain\GatewayPayableAmount;
 use App\Payment\Domain\PaymentGatewayType;
 use App\Payment\Infrastructure\NowPaymentsGateway;
 use App\Payment\Infrastructure\PaymentGatewayRegistry;
@@ -1152,7 +1153,7 @@ class ServiceManagementService
             $this->acknowledgeCallback($callbackId);
             $this->telegramApiClient->sendMessage(
                 $chatId,
-                sprintf("برای پرداخت آنلاین روی دکمه زیر بزنید.\nکد پیگیری: %s", (string) ($order->getTrackingCode() ?? '-')),
+                sprintf("برای پرداخت آنلاین روی دکمه زیر بزنید.\nکد پیگیری: %s", (string) ($order->getTrackingCode() ?? '-')).GatewayPayableAmount::botLine($payment),
                 $this->keyboardFactory->paymentOnlineActionMenu((int) ($payment->getId() ?? 0), (int) ($order->getId() ?? 0), (string) $payment->getPaymentUrl())
             );
 

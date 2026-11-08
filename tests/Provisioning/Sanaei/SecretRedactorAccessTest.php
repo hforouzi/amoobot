@@ -57,6 +57,25 @@ final class SecretRedactorAccessTest extends TestCase
         self::assertSame($expected, SecretRedactor::redact($text));
     }
 
+    /**
+     * @return iterable<string, array{string, string}>
+     */
+    public static function webhookSecretTexts(): iterable
+    {
+        yield 'signature header' => ['X-HooshPay-Signature: 0f3a9c', 'X-HooshPay-Signature: [redacted]'];
+        yield 'signature header, json' => ['{"X-HooshPay-Signature":"0f3a9c"}', '{"X-HooshPay-Signature":"[redacted]"}'];
+        yield 'secret field, json' => ['{"api_secret":"FAKE-secret-0123"}', '{"api_secret":"[redacted]"}'];
+        yield 'secret field, form' => ['api_secret=FAKE-secret-0123&x=1', 'api_secret=[redacted]&x=1'];
+        yield 'secret field, php array' => ["'api_secret' => 'FAKE-secret-0123'", "'api_secret' => '[redacted]'"];
+        yield 'field name alone stays' => ['api_secret is missing', 'api_secret is missing'];
+    }
+
+    #[DataProvider('webhookSecretTexts')]
+    public function testRedactMasksWebhookSignaturesAndGatewaySecrets(string $text, string $expected): void
+    {
+        self::assertSame($expected, SecretRedactor::redact($text));
+    }
+
     public function testRedactAccessAlsoFoldsAndLimits(): void
     {
         self::assertSame('a [redacted] b', SecretRedactor::redactAccess("a\n11111111-2222-3333-4444-555555555555\nb"));

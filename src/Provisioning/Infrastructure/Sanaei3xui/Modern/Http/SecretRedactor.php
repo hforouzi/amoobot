@@ -6,7 +6,8 @@ namespace App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http;
 
 /**
  * Removes credentials from any text that may reach a log, an exception, the admin UI or the console:
- * the exact secret values given, Authorization/Bearer and API key headers, token/password-shaped key=value pairs and the
+ * the exact secret values given, Authorization/Bearer and API key headers, webhook signature headers and gateway Secret
+ * fields, token/password-shaped key=value pairs and the
  * token part of a gateway notify URL (/payment/notify/...).
  */
 final class SecretRedactor
@@ -118,6 +119,9 @@ final class SecretRedactor
         // An API key header or field (X-API-KEY: …, "api_key":"…", api_key=…, 'apikey' => '…'): a backstop for the
         // exact-value mask a gateway does itself (Tetraminator).
         $text = preg_replace('/(\b(?:X-)?API[_-]?KEY[\'"]?\s*(?:=>|[:=])\s*)([\'"]?)[^\s\'",}&]+/i', '$1$2'.self::MASK, $text) ?? $text;
+        // A webhook signature header and a gateway Secret field (HooshPay: X-HooshPay-Signature, api_secret), also in a
+        // PHP array dump or a URL-encoded body: a backstop for the exact-value mask a gateway does itself.
+        $text = preg_replace('/(\b(?:X-HooshPay-Signature|api[_-]?secret)[\'"]?\s*(?:=>|[:=])\s*)([\'"]?)[^\s\'",}&]+/i', '$1$2'.self::MASK, $text) ?? $text;
         $text = preg_replace(self::NOTIFY_PATH, '$1'.self::MASK, $text) ?? $text;
         $text = preg_replace('/([?&](?:api[_-]?token|access[_-]?token|token|password|passwd|session)=)[^&#\s]*/i', '$1'.self::MASK, $text) ?? $text;
         $text = preg_replace('/("?(?:password|passwd|token|api[_-]?token|cookie|secret|authorization)"?\s*[:=]\s*)"[^"]*"/i', '$1"'.self::MASK.'"', $text) ?? $text;

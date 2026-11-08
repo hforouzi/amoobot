@@ -11,6 +11,7 @@ use App\MiniApp\Checkout\MiniAppCheckout;
 use App\MiniApp\Checkout\PaymentProgress;
 use App\MiniApp\Checkout\PaymentTelegramLink;
 use App\MiniApp\Security\MiniAppUser;
+use App\Payment\Domain\GatewayPayableAmount;
 use App\Payment\Domain\PaymentDisplayState;
 use App\Payment\Domain\PaymentStatus;
 use App\Provisioning\Domain\VpnServiceStatus;
@@ -93,6 +94,8 @@ final class MiniAppOrderController extends AbstractController
             'final' => PaymentDisplayState::isFinal($state),
             'kind' => null !== $gateway ? PaymentStarter::kindOf($gateway) : ($payment->isWalletPayment() ? 'wallet' : 'manual_card'),
             'card' => ReceiptSubmission::isManual($payment) ? $this->paymentStarter->manualCard($gateway) : null,
+            // What the gateway asks the customer to pay, when it says (HooshPay's payable_amount); display only.
+            'gatewayAmount' => GatewayPayableAmount::of($payment),
             'canUploadReceipt' => ReceiptSubmission::isManual($payment) && PaymentStatus::PENDING === $payment->getStatus(),
             'service' => $this->progress->service($payment),
             'canCancel' => PaymentDisplayState::PENDING === $state && $this->orderLifecycle->canCancel($order, $payment),

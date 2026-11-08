@@ -27,6 +27,7 @@
             <!-- First-party plugin sources keep their own unit tests (mocked HTTP, no database). -->
             <directory>docs/plugins/winapay-gateway/tests</directory>
             <directory>docs/plugins/tetraminator-gateway/tests</directory>
+            <directory>docs/plugins/hooshpay-gateway/tests</directory>
         </testsuite>
     </testsuites>
 

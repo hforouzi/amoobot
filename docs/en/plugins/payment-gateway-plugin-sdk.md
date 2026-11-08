@@ -73,6 +73,12 @@ the order lock, and `createPayment()` then runs outside any lock:
   `gatewayTransactionId` is a reservation, so `createPayment()` must treat only a row with both as a live invoice.
 - **Expiry.** Set `expiresAt` in `createPayment()`. If the plugin leaves it, the core sets now plus the lifetime. An answer
   without a `transactionId`, or an exception, clears the reservation, and the row is reused by the next start.
+- **Cancelling the replaced invoice.** A plugin may also implement
+  `App\Payment\Plugin\PaymentGatewayInvoiceCancellationInterface::cancelInvoice(Payment $payment, array $config): string`.
+  After a start closed a row as `gateway_invoice_superseded` and the new invoice was created, `PaymentStarter` asks the
+  closed row's own gateway (not necessarily the one chosen now) to cancel its invoice, outside any lock. Best effort:
+  return `cancelled`, `skipped` (nothing to cancel) or a short error code without secrets. A failure or an exception is
+  logged (the code, or the exception's class) and changes nothing; the row stays closed. HooshPay implements it.
 - **Late money.** A closed invoice keeps its references, so a later paid verification reaches `settle()` and waits in admin
   review. The same goes for `PaymentSettlementService::expireUnpaid()`, which a plugin's reconciler calls when the provider
   says an invoice ran out unpaid. It changes only a pending payment and leaves the order open.

@@ -1,0 +1,128 @@
+{
+  "manifestVersion": 1,
+  "type": "payment_gateway",
+  "code": "hooshpay",
+  "name": {
+    "fa": "هوش‌پی",
+    "en": "HooshPay"
+  },
+  "version": "1.0.0",
+  "description": {
+    "fa": "درگاه کارت‌به‌کارت هوش‌پی برای آموبات.",
+    "en": "HooshPay card-to-card gateway for Amoobot."
+  },
+  "mainClass": "Amoobot\\Plugin\\HooshPay\\HooshPayGatewayPlugin",
+  "category": "payment",
+  "permissions": [
+    "payment.create",
+    "payment.verify",
+    "payment.webhook",
+    "http.outbound"
+  ],
+  "supportsWebhook": true,
+  "supportsOnlinePayment": true,
+  "supportsManualConfirmation": false,
+  "configSchema": [
+    {
+      "key": "enabled",
+      "type": "boolean",
+      "required": false,
+      "default": false,
+      "label": {
+        "fa": "فعال (فقط فاکتورهای جدید)",
+        "en": "Enabled (new invoices only)"
+      }
+    },
+    {
+      "key": "api_key",
+      "type": "password",
+      "required": true,
+      "label": {
+        "fa": "کلید API (X-API-KEY)",
+        "en": "API key (X-API-KEY)"
+      }
+    },
+    {
+      "key": "api_secret",
+      "type": "password",
+      "required": true,
+      "label": {
+        "fa": "Secret امضای وب‌هوک",
+        "en": "Webhook signing Secret"
+      }
+    },
+    {
+      "key": "base_url",
+      "type": "url",
+      "required": false,
+      "default": "https://hooshpay.xyz",
+      "label": {
+        "fa": "آدرس پایه API هوش‌پی (فقط https)",
+        "en": "HooshPay API base URL (https only)"
+      }
+    },
+    {
+      "key": "callback_base_url",
+      "type": "url",
+      "required": true,
+      "label": {
+        "fa": "آدرس پایه عمومی آموبات (فقط https)",
+        "en": "Public base URL of Amoobot (https only)"
+      }
+    },
+    {
+      "key": "fee_mode",
+      "type": "choice",
+      "required": false,
+      "default": "seller",
+      "label": {
+        "fa": "پرداخت‌کننده کارمزد",
+        "en": "Who pays the fee"
+      },
+      "choices": {
+        "Seller (fee comes out of the shop's share)": "seller",
+        "Buyer (fee is added to what the customer pays)": "buyer",
+        "Split (half each)": "split"
+      }
+    },
+    {
+      "key": "min_amount",
+      "type": "integer",
+      "required": false,
+      "default": 1000,
+      "label": {
+        "fa": "حداقل مبلغ (تومان، دست‌کم ۱۰۰۰)",
+        "en": "Minimum amount (Toman, at least 1000)"
+      }
+    },
+    {
+      "key": "max_amount",
+      "type": "integer",
+      "required": false,
+      "label": {
+        "fa": "حداکثر مبلغ (تومان، خالی = بدون سقف)",
+        "en": "Maximum amount (Toman, empty = no limit)"
+      }
+    },
+    {
+      "key": "description_template",
+      "type": "text",
+      "required": false,
+      "default": "Order {order}",
+      "label": {
+        "fa": "قالب توضیح فاکتور ({order}، {payment}، {amount})",
+        "en": "Invoice description template ({order}, {payment}, {amount})"
+      }
+    },
+    {
+      "key": "invoice_lifetime_seconds",
+      "type": "integer",
+      "required": false,
+      "default": 1800,
+      "label": {
+        "fa": "مهلت پیش‌فرض فاکتور (ثانیه؛ فقط اگر هوش‌پی expires_at نفرستد)",
+        "en": "Fallback invoice lifetime (seconds; only when HooshPay sends no expires_at)"
+      }
+    }
+  ]
+}

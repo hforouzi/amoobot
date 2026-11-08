@@ -16,7 +16,7 @@ use App\Payment\Domain\Webhook\RequestPayload;
 use App\Entity\PaymentGateway;
 use Symfony\Component\HttpFoundation\Request;
 
-final class PluginPaymentGatewayDriverAdapter implements PaymentGatewayInterface, NotificationAwareGatewayInterface, PaymentGatewayConstraintsInterface
+final class PluginPaymentGatewayDriverAdapter implements PaymentGatewayInterface, NotificationAwareGatewayInterface, PaymentGatewayConstraintsInterface, PaymentGatewayInvoiceCancellationInterface
 {
     /** Config key the core sets for every plugin call: true only outside production (test env or debug). */
     public const CONFIG_TESTING_SHORTCUTS = '_amoobot_testing_shortcuts_allowed';
@@ -78,6 +78,16 @@ final class PluginPaymentGatewayDriverAdapter implements PaymentGatewayInterface
     public function invoiceLifetimeSeconds(): ?int
     {
         return $this->inner instanceof PaymentGatewayConstraintsInterface ? $this->inner->invoiceLifetimeSeconds() : null;
+    }
+
+    /**
+     * "skipped" for a plugin without PaymentGatewayInvoiceCancellationInterface.
+     *
+     * @param array<string, mixed> $config ignored: the payment's own gateway config is used, as for createPayment()
+     */
+    public function cancelInvoice(Payment $payment, array $config = []): string
+    {
+        return $this->inner instanceof PaymentGatewayInvoiceCancellationInterface ? $this->inner->cancelInvoice($payment, $this->gatewayConfig($payment)) : 'skipped';
     }
 
     /**
