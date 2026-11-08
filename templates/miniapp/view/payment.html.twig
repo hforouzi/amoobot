@@ -2,10 +2,11 @@
 {% trans_default_domain 'miniapp' %}
 {# One payment. Until a final state the page polls /app/api/payments/{id}/status (read only) and reloads when the
    state changes. Card to card: the details, the exact amount and the receipt upload. Online/crypto: the gateway's
-   page opens with Telegram's openLink; the gateway's own return page or webhook settles it, never this page. #}
+   page opens with Telegram's openLink, or a plugin's stored t.me link (telegramLink, PaymentTelegramLink) with
+   openTelegramLink; the gateway's own return page or webhook settles it, never this page. #}
 {% block section %}services{% endblock %}
 {% block title %}{{ 'payment.title'|trans }}{% endblock %}
-{% block attributes %} data-back{% if not final %} data-poll-url="{{ path('miniapp_payment_status', {id: payment.id}) }}" data-poll-state="{{ state }}"{% endif %}{% if state == 'pending' and kind != 'manual_card' and payment.paymentUrl %} data-main-button-text="{{ ('payment.open_' ~ kind)|trans }}" data-main-button-href="{{ payment.paymentUrl }}" data-main-button-external{% endif %}{% endblock %}
+{% block attributes %} data-back{% if not final %} data-poll-url="{{ path('miniapp_payment_status', {id: payment.id}) }}" data-poll-state="{{ state }}"{% endif %}{% if state == 'pending' and kind != 'manual_card' and telegramLink %} data-main-button-text="{{ ('payment.open_' ~ kind)|trans }}" data-main-button-href="{{ telegramLink }}" data-main-button-telegram{% elseif state == 'pending' and kind != 'manual_card' and payment.paymentUrl %} data-main-button-text="{{ ('payment.open_' ~ kind)|trans }}" data-main-button-href="{{ payment.paymentUrl }}" data-main-button-external{% endif %}{% endblock %}
 {% block content %}
     <section class="card state-card state-{{ state }}" data-payment-state="{{ state }}">
         <p class="state-icon" aria-hidden="true">{{ {pending: '⏳', review: '🕵️', paid: '✅', provision_failed: '🛠', failed: '❌', cancelled: '🚫', expired: '⌛'}[state] }}</p>
@@ -47,10 +48,10 @@
                     <button type="submit" class="btn">{{ 'payment.receipt_send'|trans }}</button>
                 </form>
             {% endif %}
-        {% elseif payment.paymentUrl %}
+        {% elseif telegramLink or payment.paymentUrl %}
             <section class="card">
                 <p class="muted">{{ ('payment.gateway_hint_' ~ kind)|trans }}</p>
-                <a class="btn" href="{{ payment.paymentUrl }}" data-open-link>{{ ('payment.open_' ~ kind)|trans }}</a>
+                <a class="btn" href="{{ telegramLink ?: payment.paymentUrl }}" {{ telegramLink ? 'data-telegram-link' : 'data-open-link' }}>{{ ('payment.open_' ~ kind)|trans }}</a>
                 <p class="muted small-print">{{ 'payment.return_hint'|trans }}</p>
             </section>
         {% elseif kind == 'crypto' and payment.cryptoAddress %}

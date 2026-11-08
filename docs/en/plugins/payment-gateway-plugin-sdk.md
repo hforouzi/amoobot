@@ -27,6 +27,12 @@ Do not define a duplicate interface inside the plugin.
 disabled at the provider). `PaymentStarter` then alerts the admins in Telegram, at most once an hour per gateway
 (`PaymentGatewayCredentialAlert`). The alert text is fixed, so nothing the provider sent, such as a quoted key, reaches it.
 
+**A Telegram link for the Mini App.** A successful `rawResponse` is stored as the payment's request payload. When it has
+`mini_app_link` set to a `https://t.me/...` link, the Mini App payment page opens that link with Telegram's
+`openTelegramLink`, so the customer stays inside Telegram; the bot keeps `paymentUrl`. The page checks the link again
+(`App\MiniApp\Checkout\PaymentTelegramLink`): host exactly `t.me`, no user info, port or fragment, a plain path, at most
+512 characters. Anything else is ignored and the page opens `paymentUrl` with `openLink`, as for any other gateway.
+
 ## Optional: Constraints
 
 A plugin may also implement `App\Payment\Plugin\PaymentGatewayConstraintsInterface`, when the provider has limits the

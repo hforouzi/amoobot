@@ -1,6 +1,6 @@
 # Tetraminator Payment Gateway Plugin: Design
 
-Status: PRs 1 to 5 of section 13 are implemented; PR 6 (Mini App link) is open. Plugin code: `tetraminator`.
+Status: PRs 1 to 6 of section 13 are implemented. Plugin code: `tetraminator`.
 
 Installable Toman payment gateway plugin for Amoobot, following the strict verification contract in
 `docs/en/plugins/payment-gateway-plugin-sdk.md` and the layout of `docs/plugins/winapay-gateway/`. The plugin creates
@@ -303,6 +303,11 @@ apply and can narrow the range.
   `verifyPayment()`, and `settle()` handles the result, with no change.
 - **Mini App.** The payment page reads `mini_app_link` from `requestPayload` for this gateway. A `t.me` link should open with
   `openTelegramLink`, and `app.js` always uses `openLink` for an external main button, so it needs a small change.
+  **As implemented (PR 6).** Generic, not tied to this plugin: `PaymentTelegramLink` reads `mini_app_link` from a plugin
+  gateway's stored payload and checks it again (https, host exactly `t.me`, no user info, port or fragment, a plain path,
+  at most 512 characters). With a valid link the page's main button (`data-main-button-telegram`) and its open button
+  (`a[data-telegram-link]`) use `openTelegramLink`; otherwise both open `url` with `openLink` as before. The button text
+  stays the generic one. A second tap on a live invoice reuses the row and its stored link.
 - **Result.** The API has no return URL, so the customer is never sent back to `/payment/return/{token}`. The result arrives
   as our bot's normal confirmation or under-review message from `PaymentCustomerNotifier`. An open Mini App page polls its
   read-only status endpoint and reloads when the state changes. The page should say that the invoice is valid for 60 minutes.
