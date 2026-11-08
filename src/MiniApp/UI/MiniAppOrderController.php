@@ -9,6 +9,7 @@ use App\Entity\VpnService;
 use App\MiniApp\Checkout\CheckoutFailure;
 use App\MiniApp\Checkout\MiniAppCheckout;
 use App\MiniApp\Checkout\PaymentProgress;
+use App\MiniApp\Checkout\PaymentTelegramLink;
 use App\MiniApp\Security\MiniAppUser;
 use App\Payment\Domain\GatewayPayableAmount;
 use App\Payment\Domain\PaymentDisplayState;
@@ -98,6 +99,8 @@ final class MiniAppOrderController extends AbstractController
             'canUploadReceipt' => ReceiptSubmission::isManual($payment) && PaymentStatus::PENDING === $payment->getStatus(),
             'service' => $this->progress->service($payment),
             'canCancel' => PaymentDisplayState::PENDING === $state && $this->orderLifecycle->canCancel($order, $payment),
+            // Opened with openTelegramLink instead of the payment URL (decision 6 of the Tetraminator design).
+            'telegramLink' => PaymentDisplayState::PENDING === $state ? PaymentTelegramLink::of($payment) : null,
         ]);
     }
 

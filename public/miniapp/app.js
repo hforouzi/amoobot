@@ -41,7 +41,9 @@
  *
  * Deep links: opened with startapp=<payload>, the app signs in again (even with a stored session) and opens the section
  * the /app/auth answer names in "start" (a claim link's screen), with Home behind it.
- *   .view-root[data-main-button-text][data-main-button-href|data-main-button-form]  Telegram's MainButton
+ *   .view-root[data-main-button-text][data-main-button-href|data-main-button-form]  Telegram's MainButton; with
+ *                          data-main-button-external the href opens with openLink, with data-main-button-telegram (a
+ *                          t.me link) with openTelegramLink, else it is a section of the app
  */
 (function () {
     'use strict';
@@ -170,6 +172,8 @@
             var form = formId ? document.getElementById(formId) : null;
             if (form) {
                 submitForm(form);
+            } else if (root.getAttribute('data-main-button-telegram') !== null) {
+                openTelegramLink(href);
             } else if (root.getAttribute('data-main-button-external') !== null) {
                 openLink(href);
             } else {

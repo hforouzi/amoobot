@@ -235,11 +235,13 @@ final class HooshPayCheckoutTest extends IntegrationTestCase
         self::assertSame('payment_start_failed', $answer['error'] ?? null);
         self::assertSame(HooshPayGatewayPlugin::CUSTOMER_UNAVAILABLE, $answer['message'] ?? null);
 
-        $this->hooshPayAnswers([self::hooshCreated('inv_M', 150_000, 150_019)]);
+        $this->hooshPayAnswers([self::hooshCreated('inv_M', 150_000, 150_019, ['mini_app_link' => 'https://t.me/SomeBot/app?startapp=x'])]);
         $answer = $this->appPostJson('/app/api/orders/'.$order->getId().'/pay', $session, ['methodId' => $method->getId()], self::newKey());
         self::assertArrayHasKey('redirect', $answer, (string) json_encode($answer, JSON_UNESCAPED_UNICODE));
         $page = $this->appGet((string) $answer['redirect'], $session);
         self::assertStringContainsString('150,019', $page);
         self::assertStringContainsString('https://hooshpay.xyz/pay/inv_M', $page);
+        self::assertStringContainsString('data-open-link', $page, 'opened with openLink, not openTelegramLink');
+        self::assertStringNotContainsString('data-telegram-link', $page);
     }
 }

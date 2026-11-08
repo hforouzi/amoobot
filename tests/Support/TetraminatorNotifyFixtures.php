@@ -89,9 +89,12 @@ trait TetraminatorNotifyFixtures
         $this->em->flush();
     }
 
-    private function tetraminatorGateway(): PaymentGateway
+    /**
+     * @param array<string, mixed> $config added to the base config (which has none of the link settings: their defaults)
+     */
+    private function tetraminatorGateway(array $config = []): PaymentGateway
     {
-        $gateway = $this->createGateway('plugin', ['enabled' => true, 'api_key' => self::TETRA_KEY, 'callback_base_url' => 'https://shop.example', 'test_script' => $this->tetraScript], 'IRT')
+        $gateway = $this->createGateway('plugin', $config + ['enabled' => true, 'api_key' => self::TETRA_KEY, 'callback_base_url' => 'https://shop.example', 'test_script' => $this->tetraScript], 'IRT')
             ->setPluginCode('tetraminator');
         $this->em->flush();
 

@@ -288,7 +288,7 @@ final class HooshPayGatewayPluginTest extends TestCase
     public function testCreateSendsTomanAndOurReferencesAndStoresNoCard(): void
     {
         $payment = $this->payment(250_000);
-        $this->respondCreated();
+        $this->respondCreated(['mini_app_link' => 'https://t.me/SomeBot/app?startapp=x']);
 
         $result = $this->plugin()->createPayment($payment, $payment->getOrder(), $this->config(['fee_mode' => 'buyer']));
 
@@ -314,6 +314,7 @@ final class HooshPayGatewayPluginTest extends TestCase
         self::assertSame(self::ORDER_ID, $result->rawResponse['order_id'] ?? null);
         self::assertArrayNotHasKey('card', (array) $result->rawResponse);
         self::assertArrayNotHasKey('payment_url', (array) $result->rawResponse);
+        self::assertArrayNotHasKey('mini_app_link', (array) $result->rawResponse, 'the Mini App opens payment_url (PaymentTelegramLink finds nothing)');
         $this->assertNothingSensitive($result, $payment->getRequestPayload(), $payment->getVerifyPayload());
     }
 

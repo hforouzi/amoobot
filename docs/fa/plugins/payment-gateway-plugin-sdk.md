@@ -24,6 +24,8 @@ App\Payment\Plugin\PaymentGatewayPluginInterface
 
 **خطای حساب هنگام ساخت پرداخت.** اگر درگاه به‌خاطر حساب خود فروشگاه فاکتور نسازد، یک `PaymentRequestResult` ناموفق با `rawResponse['error']` برابر `unauthorized` (کلید نامعتبر) یا `store_disabled` (فروشگاه نزد درگاه غیرفعال است) برگردانید. `PaymentStarter` حداکثر ساعتی یک بار برای هر درگاه در تلگرام به مدیران خبر می‌دهد (`PaymentGatewayCredentialAlert`). متن این هشدار ثابت است و چیزی از پاسخ درگاه، مثلاً کلید، در آن نمی‌آید.
 
+**لینک تلگرام برای مینی‌اپ.** `rawResponse` موفق به‌عنوان request payload پرداخت ذخیره می‌شود. اگر در آن `mini_app_link` یک لینک `https://t.me/...` باشد، صفحه پرداخت مینی‌اپ آن را با `openTelegramLink` تلگرام باز می‌کند تا مشتری در تلگرام بماند؛ ربات همچنان `paymentUrl` را نشان می‌دهد. صفحه لینک را دوباره بررسی می‌کند (`App\MiniApp\Checkout\PaymentTelegramLink`): میزبان دقیقاً `t.me`، بدون user info، پورت یا fragment، مسیر ساده و حداکثر ۵۱۲ نویسه. در غیر این صورت نادیده گرفته می‌شود و صفحه مثل هر درگاه دیگری `paymentUrl` را با `openLink` باز می‌کند.
+
 ## configSchema
 
 هر فیلد می‌تواند `key` یا `name`، `type`، `required`، `default`، `label` و `choices` داشته باشد.

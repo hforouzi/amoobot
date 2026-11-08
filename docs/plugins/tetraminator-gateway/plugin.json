@@ -6,7 +6,7 @@
     "fa": "تترامیناتور",
     "en": "Tetraminator"
   },
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": {
     "fa": "درگاه پرداخت تومانی تترامیناتور برای آموبات.",
     "en": "Tetraminator Toman payment gateway for Amoobot."
@@ -58,6 +58,26 @@
       "label": {
         "fa": "ارسال شناسه تلگرام مشتری به تترامیناتور",
         "en": "Send the customer's Telegram id to Tetraminator"
+      }
+    },
+    {
+      "key": "prefer_website_link",
+      "type": "boolean",
+      "required": false,
+      "default": true,
+      "label": {
+        "fa": "باز کردن صفحهٔ وب درگاه (gateway_link) در اولویت (فقط فاکتورهای جدید)",
+        "en": "Prefer the provider's website page (gateway_link) (new invoices only)"
+      }
+    },
+    {
+      "key": "use_mini_app_link",
+      "type": "boolean",
+      "required": false,
+      "default": false,
+      "label": {
+        "fa": "باز کردن مینی‌اپ تلگرامی تترامیناتور در مینی‌اپ آموبات (فقط فاکتورهای جدید)",
+        "en": "Open Tetraminator's Telegram mini app from the Amoobot Mini App (new invoices only)"
       }
     }
   ]
