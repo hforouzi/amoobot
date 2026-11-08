@@ -12,8 +12,9 @@ use Symfony\Contracts\HttpClient\HttpClientInterface;
  * HTTP layer for the Tetraminator REST API (docs/plugins/tetraminator-gateway/design.md, decision 9).
  *
  * TLS verification stays on, redirects are not followed, the body is capped and anything that is not a JSON object
- * (HTML error pages, empty bodies) becomes a TetraminatorException. Nothing is retried: the API has no idempotency key,
- * so a second create could leave a second invoice. The HTTP status is returned with the body: the plugin decides.
+ * (HTML error pages, empty bodies) becomes a TetraminatorException, except for 401 and 403, which are returned by their
+ * status alone. Nothing is retried: the API has no idempotency key, so a second create could leave a second invoice. The
+ * HTTP status is returned with the body: the plugin decides.
  */
 final class TetraminatorApi
 {
@@ -28,6 +29,8 @@ final class TetraminatorApi
     public const IDLE_TIMEOUT = 5.0;
     public const MAX_DURATION = 15.0;
     public const MAX_RESPONSE_BYTES = 65536;
+    /** 401 (invalid key) and 403 (store disabled): returned with an empty body, never parsed. */
+    public const STATUS_ONLY = [401, 403];
 
     public function __construct(private readonly ?HttpClientInterface $httpClient = null)
     {
@@ -70,9 +73,9 @@ final class TetraminatorApi
             'verify_peer' => true,
             'verify_host' => true,
             'headers' => ['Accept' => 'application/json', 'X-API-KEY' => $apiKey],
-            // Aborts the download as soon as the body grows past the cap.
-            'on_progress' => static function (int $downloaded): void {
-                if ($downloaded > self::MAX_RESPONSE_BYTES) {
+            // Aborts the download as soon as the body grows past the cap; a 401 / 403 body is never read, so never too large.
+            'on_progress' => static function (int $downloaded, int $size, array $info): void {
+                if ($downloaded > self::MAX_RESPONSE_BYTES && !in_array($info['http_code'] ?? 0, self::STATUS_ONLY, true)) {
                     throw new TetraminatorException('Tetraminator response is too large.');
                 }
             },
@@ -84,6 +87,12 @@ final class TetraminatorApi
         try {
             $response = $client->request($method, self::BASE_URL.$path, $options);
             $httpStatus = $response->getStatusCode();
+            if (in_array($httpStatus, self::STATUS_ONLY, true)) {
+                // Decided by the status alone, whatever the body is (empty, HTML, JSON): it is not read.
+                $response->cancel();
+
+                return ['status' => $httpStatus, 'body' => []];
+            }
             $body = $response->getContent(false);
         } catch (ExceptionInterface $exception) {
             if ($exception->getPrevious() instanceof TetraminatorException) {

@@ -44,6 +44,13 @@ final class TetraminatorGatewayPlugin implements PaymentGatewayPluginInterface, 
     /** The verify payload key holding the evidence of a paid claim that failed a rule. */
     public const REVIEW_EVIDENCE_KEY = 'tetraminator_review';
 
+    /**
+     * What a failed createPayment() says: the bot and the Mini App show it to the customer, and PaymentStarter keeps it as
+     * the admin note. Generic on purpose; the admin's detail is in the payment's request payload (rawResponse).
+     */
+    public const CUSTOMER_UNAVAILABLE = 'درگاه پرداخت در حال حاضر در دسترس نیست. لطفاً روش دیگری را انتخاب کنید.';
+    public const CUSTOMER_AMOUNT_OUT_OF_RANGE = 'پرداخت با این درگاه فقط برای مبلغ ۵۰٬۰۰۰ تا ۱۰٬۰۰۰٬۰۰۰ تومان ممکن است. لطفاً روش دیگری را انتخاب کنید.';
+
     private const TOKEN_BYTES = 32;
     private const PAID = 'paid';
     private const REDACTED = '[redacted]';
@@ -92,10 +99,10 @@ final class TetraminatorGatewayPlugin implements PaymentGatewayPluginInterface, 
     {
         $amount = $this->payableAmount($payment);
         if (!$this->acceptsAmount($amount)) {
-            return new PaymentRequestResult(success: false, message: sprintf('Tetraminator accepts %s to %s Toman.', number_format(self::MIN_AMOUNT_TOMAN), number_format(self::MAX_AMOUNT_TOMAN)));
+            return $this->createFailed(['error' => 'amount_out_of_range', 'amount' => $amount], self::CUSTOMER_AMOUNT_OUT_OF_RANGE);
         }
         if (!$this->isUsable($config)) {
-            return new PaymentRequestResult(success: false, message: 'Tetraminator is switched off or not configured (enabled, api_key, https callback_base_url).');
+            return $this->createFailed(['error' => 'not_usable', 'detail' => 'switched off or not configured (enabled, api_key, https callback_base_url)']);
         }
         $apiKey = $this->apiKey($config);
         $callbackBaseUrl = (string) $this->callbackBaseUrl($config);
@@ -107,7 +114,7 @@ final class TetraminatorGatewayPlugin implements PaymentGatewayPluginInterface, 
 
         $paymentId = $payment->getId();
         if (null === $paymentId) {
-            return new PaymentRequestResult(success: false, message: 'Tetraminator needs a saved payment.');
+            return $this->createFailed(['error' => 'payment_not_saved']);
         }
         $token = rtrim(strtr(base64_encode(random_bytes(self::TOKEN_BYTES)), '+/', '-_'), '=');
         $callbackUrl = $callbackBaseUrl.self::NOTIFY_PATH.$paymentId.'/'.$token;
@@ -122,40 +129,26 @@ final class TetraminatorGatewayPlugin implements PaymentGatewayPluginInterface, 
         try {
             $response = $this->api->post(TetraminatorApi::CREATE_PATH, $apiKey, $params);
         } catch (TetraminatorException $exception) {
-            $message = $this->mask($exception->getMessage(), $secrets);
-
-            return new PaymentRequestResult(success: false, message: $message, rawResponse: ['error' => $message]);
+            return $this->createFailed(['error' => 'transport', 'detail' => $this->mask($exception->getMessage(), $secrets)]);
         }
 
         $httpStatus = $response['status'];
         $body = $response['body'];
         $failure = $this->credentialFailure($httpStatus);
         if (null !== $failure) {
-            return new PaymentRequestResult(success: false, message: $failure['message'], rawResponse: ['error' => $failure['error'], 'http_status' => $httpStatus]);
+            return $this->createFailed(['error' => $failure['error'], 'http_status' => $httpStatus, 'detail' => $failure['message']]);
         }
         if (!in_array($httpStatus, [200, 201], true)) {
-            return new PaymentRequestResult(
-                success: false,
-                message: sprintf('Tetraminator refused the invoice (HTTP %d).', $httpStatus),
-                rawResponse: ['error' => 'http_'.$httpStatus, 'http_status' => $httpStatus, 'message' => $this->text($body['message'] ?? null, $secrets)],
-            );
+            return $this->createFailed(['error' => 'http_'.$httpStatus, 'http_status' => $httpStatus, 'message' => $this->text($body['message'] ?? null, $secrets)]);
         }
         if (true !== ($body['status'] ?? null)) {
-            return new PaymentRequestResult(
-                success: false,
-                message: 'Tetraminator did not create the invoice (status is not true).',
-                rawResponse: ['error' => 'status_not_true', 'http_status' => $httpStatus, 'message' => $this->text($body['message'] ?? null, $secrets)],
-            );
+            return $this->createFailed(['error' => 'status_not_true', 'http_status' => $httpStatus, 'message' => $this->text($body['message'] ?? null, $secrets)]);
         }
 
         $payId = $this->payId($body['pay_id'] ?? null);
         $paymentUrl = $this->firstLink($body, ['url', 'payment_link', 'gateway_link']);
         if (null === $payId || null === $paymentUrl) {
-            return new PaymentRequestResult(
-                success: false,
-                message: null === $payId ? 'Tetraminator response has no valid pay_id.' : 'Tetraminator response has no valid https payment link.',
-                rawResponse: ['error' => null === $payId ? 'invalid_pay_id' : 'invalid_link', 'http_status' => $httpStatus],
-            );
+            return $this->createFailed(['error' => null === $payId ? 'invalid_pay_id' : 'invalid_link', 'http_status' => $httpStatus]);
         }
 
         // Frozen at invoice time: AmountMatcher::expectationFor() and verifyPayment() compare with it.
@@ -343,6 +336,17 @@ final class TetraminatorGatewayPlugin implements PaymentGatewayPluginInterface, 
         }
 
         return new PaymentRequestResult(success: true, paymentUrl: $paymentUrl, transactionId: $payId, message: 'Tetraminator invoice is still open.');
+    }
+
+    /**
+     * A failed create: the customer's generic text as the message, the admin's detail only in rawResponse (stored as the
+     * payment's request payload; rawResponse.error is what PaymentGatewayCredentialAlert reads).
+     *
+     * @param array<string, mixed> $rawResponse
+     */
+    private function createFailed(array $rawResponse, string $message = self::CUSTOMER_UNAVAILABLE): PaymentRequestResult
+    {
+        return new PaymentRequestResult(success: false, message: $message, rawResponse: $rawResponse);
     }
 
     /**

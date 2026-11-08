@@ -305,7 +305,8 @@ final class TetraminatorGatewayPluginTest extends TestCase
         self::assertSame($accepted, $result->success);
         self::assertCount($accepted ? 1 : 0, $this->requests, 'no call on refusal');
         if (!$accepted) {
-            self::assertStringContainsString('50,000 to 10,000,000 Toman', (string) $result->message);
+            self::assertSame(TetraminatorGatewayPlugin::CUSTOMER_AMOUNT_OUT_OF_RANGE, $result->message);
+            self::assertSame(['error' => 'amount_out_of_range', 'amount' => $amount], $result->rawResponse);
             self::assertNull($payment->getExpectedAmount());
         }
     }
@@ -488,7 +489,7 @@ final class TetraminatorGatewayPluginTest extends TestCase
     }
 
     #[DataProvider('createHttpErrors')]
-    public function testCreateHttpErrors(int $status, string $error, string $message): void
+    public function testCreateHttpErrors(int $status, string $error): void
     {
         $this->respond(['status' => false, 'message' => 'bad key '.self::API_KEY], $status);
         $payment = $this->payment();
@@ -497,24 +498,25 @@ final class TetraminatorGatewayPluginTest extends TestCase
 
         self::assertFalse($result->success);
         self::assertSame($error, $result->rawResponse['error'] ?? null);
-        self::assertStringContainsString($message, (string) $result->message);
+        self::assertSame($status, $result->rawResponse['http_status'] ?? null);
+        self::assertSame(TetraminatorGatewayPlugin::CUSTOMER_UNAVAILABLE, $result->message);
         self::assertNull($result->transactionId);
         self::assertCount(1, $this->requests, 'no retry');
         $this->assertNoSecret($result);
     }
 
     /**
-     * @return iterable<string, array{int, string, string}>
+     * @return iterable<string, array{int, string}>
      */
     public static function createHttpErrors(): iterable
     {
-        yield '400' => [400, 'http_400', 'HTTP 400'];
-        yield '401' => [401, 'unauthorized', 'rejected the API key'];
-        yield '403' => [403, 'store_disabled', 'store is disabled'];
-        yield '404' => [404, 'http_404', 'HTTP 404'];
-        yield '429' => [429, 'http_429', 'HTTP 429'];
-        yield '500' => [500, 'http_500', 'HTTP 500'];
-        yield '503' => [503, 'http_503', 'HTTP 503'];
+        yield '400' => [400, 'http_400'];
+        yield '401' => [401, 'unauthorized'];
+        yield '403' => [403, 'store_disabled'];
+        yield '404' => [404, 'http_404'];
+        yield '429' => [429, 'http_429'];
+        yield '500' => [500, 'http_500'];
+        yield '503' => [503, 'http_503'];
     }
 
     public function testCreateMasksTheKeyAndTokenInAProviderMessage(): void
@@ -527,7 +529,8 @@ final class TetraminatorGatewayPluginTest extends TestCase
         $empty = $plugin->createPayment($payment, $payment->getOrder(), $this->config());
         $refused = $plugin->createPayment($payment, $payment->getOrder(), $this->config());
 
-        self::assertStringContainsString('empty response (HTTP 201)', (string) $empty->message);
+        self::assertSame(TetraminatorGatewayPlugin::CUSTOMER_UNAVAILABLE, $empty->message);
+        self::assertSame(['error' => 'transport', 'detail' => 'Tetraminator returned an empty response (HTTP 201).'], $empty->rawResponse);
         self::assertSame('key=[redacted]', $refused->rawResponse['message'] ?? null);
         $this->assertNoSecret($empty, $refused);
     }
@@ -541,9 +544,105 @@ final class TetraminatorGatewayPluginTest extends TestCase
         $result = $this->plugin()->createPayment($payment, $payment->getOrder(), $this->config());
 
         self::assertFalse($result->success);
-        self::assertStringContainsString($message, (string) $result->message);
+        self::assertSame(TetraminatorGatewayPlugin::CUSTOMER_UNAVAILABLE, $result->message);
+        self::assertSame('transport', $result->rawResponse['error'] ?? null);
+        self::assertStringContainsString($message, (string) ($result->rawResponse['detail'] ?? ''), 'the detail is for the admin');
         self::assertCount(1, $this->requests);
         $this->assertNoSecret($result);
+    }
+
+    // ---- 401 / 403 by status alone ---------------------------------------------------------------
+
+    /**
+     * @return iterable<string, array{int, string, MockResponse}>
+     */
+    public static function credentialAnswers(): iterable
+    {
+        foreach ([401 => 'unauthorized', 403 => 'store_disabled'] as $status => $error) {
+            yield $status.' empty body' => [$status, $error, new MockResponse('', ['http_code' => $status])];
+            yield $status.' HTML body' => [$status, $error, new MockResponse('<html><body>Forbidden</body></html>', ['http_code' => $status, 'response_headers' => ['content-type' => 'text/html']])];
+            yield $status.' JSON body' => [$status, $error, new MockResponse('{"status":false,"message":"no"}', ['http_code' => $status, 'response_headers' => ['content-type' => 'application/json']])];
+            yield $status.' JSON list body' => [$status, $error, new MockResponse('["x"]', ['http_code' => $status])];
+            yield $status.' oversized body' => [$status, $error, new MockResponse(str_repeat('a', TetraminatorApi::MAX_RESPONSE_BYTES + 10), ['http_code' => $status])];
+        }
+    }
+
+    #[DataProvider('credentialAnswers')]
+    public function testCreateRecognises401And403WhateverTheBody(int $status, string $error, MockResponse $response): void
+    {
+        $this->responses[] = $response;
+        $payment = $this->payment();
+
+        $result = $this->plugin()->createPayment($payment, $payment->getOrder(), $this->config());
+
+        self::assertFalse($result->success);
+        self::assertSame(['error' => $error, 'http_status' => $status], array_intersect_key((array) $result->rawResponse, ['error' => 1, 'http_status' => 1]));
+        self::assertSame(TetraminatorGatewayPlugin::CUSTOMER_UNAVAILABLE, $result->message);
+        self::assertNull($result->transactionId);
+    }
+
+    #[DataProvider('credentialAnswers')]
+    public function testInquiryRecognises401And403WhateverTheBody(int $status, string $error, MockResponse $response): void
+    {
+        $this->responses[] = $response;
+
+        $result = $this->plugin()->verifyPayment($this->issued(), [], $this->config());
+
+        self::assertFalse($result->success);
+        self::assertFalse($result->paid);
+        self::assertFalse($result->failed);
+        self::assertSame(['error' => $error, 'http_status' => $status], $result->rawResponse);
+    }
+
+    // ---- what a failed create shows the customer --------------------------------------------------
+
+    /**
+     * Every way createPayment() can fail, each as [config overrides, amount, responses to queue].
+     *
+     * @return iterable<string, array{array<string, mixed>, int, list<MockResponse|\Throwable>}>
+     */
+    public static function createFailures(): iterable
+    {
+        $json = static fn (array $body, int $status = 201): MockResponse => new MockResponse((string) json_encode($body), ['http_code' => $status]);
+        yield 'below the range' => [[], 49_999, []];
+        yield 'above the range' => [[], 10_000_001, []];
+        yield 'switched off' => [['enabled' => false], 50_000, []];
+        yield 'no key' => [['api_key' => ''], 50_000, []];
+        yield 'http callback' => [['callback_base_url' => 'http://shop.example'], 50_000, []];
+        yield 'timeout' => [[], 50_000, [new MockResponse([''])]];
+        yield 'TLS' => [[], 50_000, [new TransportException('SSL problem')]];
+        yield 'HTML' => [[], 50_000, [new MockResponse('<html>x</html>', ['http_code' => 502])]];
+        yield 'empty' => [[], 50_000, [new MockResponse('')]];
+        yield 'oversized' => [[], 50_000, [new MockResponse(str_repeat('a', TetraminatorApi::MAX_RESPONSE_BYTES + 10))]];
+        yield '400' => [[], 50_000, [$json(['status' => false, 'message' => 'amount too low'], 400)]];
+        yield '401' => [[], 50_000, [new MockResponse('', ['http_code' => 401])]];
+        yield '403' => [[], 50_000, [new MockResponse('', ['http_code' => 403])]];
+        yield '429' => [[], 50_000, [$json(['status' => false], 429)]];
+        yield '500' => [[], 50_000, [$json(['status' => false], 500)]];
+        yield 'status false' => [[], 50_000, [$json(['status' => false, 'pay_id' => 'P1', 'url' => self::LINK])]];
+        yield 'no pay_id' => [[], 50_000, [$json(['status' => true, 'url' => self::LINK])]];
+        yield 'no link' => [[], 50_000, [$json(['status' => true, 'pay_id' => 'P1'])]];
+    }
+
+    /**
+     * @param array<string, mixed>        $overrides
+     * @param list<MockResponse|\Throwable> $responses
+     */
+    #[DataProvider('createFailures')]
+    public function testEveryCreateFailureShowsTheCustomerAGenericPersianText(array $overrides, int $amount, array $responses): void
+    {
+        $this->responses = $responses;
+        $payment = $this->payment($amount);
+
+        $result = $this->plugin()->createPayment($payment, $payment->getOrder(), $this->config($overrides));
+
+        self::assertFalse($result->success);
+        $message = (string) $result->message;
+        self::assertMatchesRegularExpression('/\p{Arabic}/u', $message, 'Persian');
+        self::assertDoesNotMatchRegularExpression('/[A-Za-z0-9]/', $message, 'no config name, code or English word');
+        self::assertDoesNotMatchRegularExpression('/api|key|http|enabled|callback/i', $message);
+        self::assertIsString($result->rawResponse['error'] ?? null, 'the admin detail is in the payload');
+        self::assertSame([], $this->responses, 'every queued answer was used');
     }
 
     // ---- verifyPayment ------------------------------------------------------------------------

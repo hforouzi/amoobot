@@ -37,8 +37,8 @@ paid. Amoobot does everything else: locking, amount check, provisioning and noti
 | Says paid (`payment_status` is "paid" in any case) but any rule above fails | paid, **no amount**. Evidence in the payment's verify payload under `tetraminator_review`: reason code(s), reported amount, expected amount, `pay_id_match` yes/no | NEEDS_REVIEW, nothing provisioned |
 | `status === true` with any other `payment_status` | `success: true, paid: false`, the value in the message | Stays pending |
 | HTTP 200 with `status === false`, or HTTP 404 with a JSON body | `success: true, paid: false` | Stays pending |
-| 401 | `success: false`, `rawResponse.error` = `unauthorized` | Stays pending |
-| 403 | `success: false`, `rawResponse.error` = `store_disabled` | Stays pending |
+| 401, whatever the body | `success: false`, `rawResponse.error` = `unauthorized` | Stays pending |
+| 403, whatever the body | `success: false`, `rawResponse.error` = `store_disabled` | Stays pending |
 | 400, 429, 5xx, other statuses, timeout, TLS error, HTML, empty, oversized, redirect | `success: false` | Stays pending, retried by the next check |
 
 `failed` is never reported. An invoice stays payable after Amoobot gave up on it, and a rejected payment would ignore
@@ -53,17 +53,33 @@ is in the verify payload. Reason codes: `status_not_true`, `payment_status_not_e
 
 ## Create failures
 
-| Answer | Message (also the payment's admin note) | `rawResponse.error` |
-|---|---|---|
-| 401 | Tetraminator rejected the API key (HTTP 401). | `unauthorized` |
-| 403 | Tetraminator says the store is disabled (HTTP 403). | `store_disabled` |
-| 400, 404, 429, 5xx | Tetraminator refused the invoice (HTTP n). | `http_n` |
-| `status` not strictly `true` | Tetraminator did not create the invoice. | `status_not_true` |
-| No valid `pay_id` or link | ...has no valid pay_id / https payment link. | `invalid_pay_id`, `invalid_link` |
-| Timeout, TLS, non-JSON | Fixed text, no URL | the same text |
+The bot and the Mini App show a failed create's message to the customer, and `PaymentStarter` keeps it as the payment's
+admin note. So the message is always a short generic Persian text, with no config name, HTTP code or provider wording:
 
-On `unauthorized` or `store_disabled` the core alerts the admins in Telegram, at most once an hour per gateway
-(`PaymentGatewayCredentialAlert`). The alert has a fixed text and never the key.
+- amount out of range: «پرداخت با این درگاه فقط برای مبلغ ۵۰٬۰۰۰ تا ۱۰٬۰۰۰٬۰۰۰ تومان ممکن است. لطفاً روش دیگری را انتخاب کنید.»
+- anything else: «درگاه پرداخت در حال حاضر در دسترس نیست. لطفاً روش دیگری را انتخاب کنید.»
+
+The admin's detail is in `rawResponse`, stored as the payment's request payload:
+
+| Case | `rawResponse` |
+|---|---|
+| Amount out of range | `error` `amount_out_of_range`, `amount` |
+| Switched off or not configured | `error` `not_usable`, `detail` |
+| Payment not saved yet | `error` `payment_not_saved` |
+| 401, whatever the body | `error` `unauthorized`, `http_status`, `detail` |
+| 403, whatever the body | `error` `store_disabled`, `http_status`, `detail` |
+| 400, 404, 429, 5xx | `error` `http_n`, `http_status`, masked provider `message` |
+| `status` not strictly `true` | `error` `status_not_true`, `http_status`, masked provider `message` |
+| No valid `pay_id` or link | `error` `invalid_pay_id` or `invalid_link`, `http_status` |
+| Timeout, TLS, HTML, empty, oversized, non-JSON | `error` `transport`, `detail` (fixed text, no URL) |
+
+401 and 403 are recognised by the status code alone, on create and on inquiry: the body is not read, so an empty, HTML or
+oversized body still gives `unauthorized` or `store_disabled`. On those two codes at create, the core alerts the admins in
+Telegram, at most once an hour per gateway (`PaymentGatewayCredentialAlert`). The alert has a fixed text and never the key.
+
+`verifyPayment()` messages are for admins and logs (English, with the detail). No customer path shows them for this gateway:
+the bot's check button answers with its own fixed texts, and the core return page `/payment/return/{token}`, which would show
+one, is never linked for Tetraminator (it has no return URL).
 
 ## Config fields
 
@@ -111,7 +127,7 @@ assumptions. Each one is safe: a wrong guess leaves a payment pending or sends i
    only when it is a short plain word.
 5. **Unpaid or unknown invoice** (question 2): HTTP 200 with `status: false`, and HTTP 404 with a JSON body, mean not
    paid. A 404 without JSON is an error.
-6. **401 and 403** (question 2): the key is invalid and the store is disabled, at create and at inquiry.
+6. **401 and 403** (question 2): the key is invalid and the store is disabled, at create and at inquiry, whatever the body.
 7. **Everything else** (questions 2, 10): 400, 429, 5xx, timeout, TLS, HTML, empty, oversized and redirect answers
    decide nothing.
 8. **`failed` is never true** (question 9): an invoice may be payable after 60 minutes.
