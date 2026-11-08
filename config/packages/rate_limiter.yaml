@@ -76,3 +76,9 @@ framework:
             policy: sliding_window
             limit: 3
             interval: '1 day'
+        # Admin alert when a gateway refuses to create a payment because of its account (invalid key, store disabled):
+        # once an hour per gateway (PaymentGatewayCredentialAlert).
+        payment_gateway_credential_alert:
+            policy: fixed_window
+            limit: 1
+            interval: '1 hour'

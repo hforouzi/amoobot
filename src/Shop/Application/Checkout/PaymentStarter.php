@@ -9,6 +9,7 @@ use App\Entity\Order;
 use App\Entity\Payment;
 use App\Entity\PaymentGateway;
 use App\Entity\StorePaymentMethod;
+use App\Payment\Application\PaymentGatewayCredentialAlert;
 use App\Payment\Domain\PaymentGatewayInterface;
 use App\Payment\Domain\PaymentGatewayType;
 use App\Payment\Domain\PaymentStatus;
@@ -57,6 +58,7 @@ final class PaymentStarter
         private readonly PaymentGatewayRegistry $paymentGatewayRegistry,
         private readonly SettingValueProvider $settingValueProvider,
         private readonly PlanSaleRule $saleRule,
+        private readonly PaymentGatewayCredentialAlert $credentialAlert,
         private readonly string $paymentCardNumber = '',
         private readonly string $paymentCardHolder = '',
         private readonly ?string $paymentDescription = null,
@@ -172,6 +174,10 @@ final class PaymentStarter
             $this->endReservation($payment, $reservation, (int) $lifetime);
         }
         $this->entityManager->flush();
+        if (!$requestResult->success) {
+            // An invalid key or a disabled store fails every customer: the admins hear of it (at most hourly per gateway).
+            $this->credentialAlert->afterFailedCreate($payment, $requestResult->rawResponse);
+        }
 
         return new PaymentStart(self::kindOf($gateway), $payment, $requestResult->success, $requestResult->message, $amount);
     }

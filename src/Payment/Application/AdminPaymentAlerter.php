@@ -25,6 +25,7 @@ class AdminPaymentAlerter
     public const WALLET_CREDIT_FAILED_TITLE = '🚨 پرداخت شارژ کیف پول تایید شد اما واریز به کیف پول انجام نشد';
     public const STUCK_REMINDER_TITLE = '⏰ یادآوری: این پرداخت هنوز منتظر تصمیم مدیر است';
     public const DELIVERY_FAILED_TITLE = '📭 پیام تحویل سرویس به مشتری نرسید';
+    public const GATEWAY_ACCOUNT_REFUSED_TITLE = '🔑 درگاه پرداخت به‌خاطر کلید API یا غیرفعال بودن فروشگاه، پرداخت را نساخت';
     public const SETTLEMENT_INTERRUPTED_TITLE = '🚨 ثبت پرداخت با خطای پایگاه داده قطع شد؛ وضعیت پرداخت را بررسی کنید';
 
     public function __construct(
@@ -72,6 +73,16 @@ class AdminPaymentAlerter
             'The service was created, but its delivery message was not accepted by Telegram after %d attempt(s) (the customer may have blocked the bot). It is not sent again: give the customer the service\'s links yourself.',
             $attempts
         ));
+    }
+
+    /**
+     * A gateway refused to create this payment because of its own account (PaymentGatewayCredentialAlert, which limits
+     * it to once an hour per gateway). $detail is a fixed text, never the provider's.
+     */
+    public function gatewayAccountRefused(Payment $payment, string $detail): void
+    {
+        $gateway = $payment->getGateway();
+        $this->send($payment, self::GATEWAY_ACCOUNT_REFUSED_TITLE, sprintf('%s (gateway #%d %s)', $detail, $gateway?->getId() ?? 0, $gateway?->getTitle() ?? '-'));
     }
 
     public function overpaid(Payment $payment): void
