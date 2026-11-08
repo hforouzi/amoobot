@@ -259,6 +259,6 @@ final class PanelImportClientsInboundFilterTest extends IntegrationTestCase
      */
     private function imported(): array
     {
-        return array_values(array_map('strval', $this->em->getConnection()->fetchFirstColumn('SELECT client_email FROM vpn_service ORDER BY client_email')));
+        return array_map('strval', $this->em->getConnection()->fetchFirstColumn('SELECT client_email FROM vpn_service ORDER BY client_email'));
     }
 }
