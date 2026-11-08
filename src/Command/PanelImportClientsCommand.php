@@ -9,6 +9,7 @@ use App\Provisioning\Application\PanelClientImporter;
 use App\Provisioning\Application\PanelClientImportSummary;
 use Doctrine\ORM\EntityManagerInterface;
 use Psr\Log\LoggerInterface;
+use Symfony\Component\Console\Formatter\OutputFormatter;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -37,12 +38,16 @@ final class PanelImportClientsCommand extends Command
             ->addOption('panel', null, InputOption::VALUE_REQUIRED, 'VpnPanel id')
             ->addOption('dry-run', null, InputOption::VALUE_NONE, 'Read the panel and count, write nothing')
             ->addOption('limit', null, InputOption::VALUE_REQUIRED, 'Stop after this many services were imported')
+            ->addOption('inbound', null, InputOption::VALUE_REQUIRED | InputOption::VALUE_IS_ARRAY, 'Only clients on this inbound (its id on the panel; repeatable). A client also on other inbounds is imported with all of them')
             ->addOption('batch-size', null, InputOption::VALUE_REQUIRED, 'Clients read and written per batch (1-200)', (string) PanelClientImporter::DEFAULT_BATCH_SIZE)
             ->setHelp(<<<'HELP'
                 Creates a service for every client of the panel whose tgId names a Telegram user, owned by that user's
                 account (created when there is none). Nothing is changed on the panel and no order, payment or
                 notification is created. Imported services have no plan: renewal and extra traffic ask the customer to
                 buy a new plan. A second run imports nothing new. Run app:panel:sync-inbounds first.
+
+                With <info>--inbound=ID</info> (repeatable; the inbound's id on the panel) only clients on at least one of
+                those inbounds are imported, each with all its inbounds.
                 HELP);
     }
 
@@ -56,6 +61,19 @@ final class PanelImportClientsCommand extends Command
 
             return Command::INVALID;
         }
+        $inbounds = null;
+        if ([] !== $input->getOption('inbound')) {
+            $inbounds = [];
+            foreach ((array) $input->getOption('inbound') as $value) {
+                $value = trim((string) $value);
+                if (1 !== preg_match('/^\d{1,9}$/', $value) || (int) $value <= 0) {
+                    $io->error(sprintf('--inbound takes the inbound\'s id on the panel, a positive number: "%s" is not one. Nothing was read or imported.', OutputFormatter::escape(mb_substr($value, 0, 20))));
+
+                    return Command::INVALID;
+                }
+                $inbounds[] = (int) $value;
+            }
+        }
         $panel = $this->entityManager->getRepository(VpnPanel::class)->find($panelId);
         if (!$panel instanceof VpnPanel) {
             $io->error('Panel not found.');
@@ -65,7 +83,7 @@ final class PanelImportClientsCommand extends Command
         $dryRun = (bool) $input->getOption('dry-run');
 
         try {
-            $summary = $this->importer->import($panel, $dryRun, $limit, (int) $input->getOption('batch-size'));
+            $summary = $this->importer->import($panel, $dryRun, $limit, (int) $input->getOption('batch-size'), $inbounds);
         } catch (\Throwable $e) {
             $this->logger->error('panel_client_import_failed', ['panel_id' => $panelId, 'error' => $e::class]);
             $io->error(sprintf('The import stopped with an unexpected error (%s). The batch it was writing was rolled back; batches before it are kept. Run the command again to continue.', (new \ReflectionClass($e))->getShortName()));
@@ -79,8 +97,17 @@ final class PanelImportClientsCommand extends Command
             return Command::FAILURE;
         }
 
+        if (PanelClientImportSummary::STOPPED_UNKNOWN_CHOSEN_INBOUND === $summary->stopped) {
+            $io->error(sprintf('Inbound %s is not known for this panel: run app:panel:sync-inbounds %d first. Nothing was read or imported.', implode(', ', $summary->unknownChosenInbounds), $panelId));
+
+            return Command::FAILURE;
+        }
+
         $io->title($dryRun ? 'Panel client import: dry run (nothing written)' : 'Panel client import');
-        $io->listing([
+        if (null !== $inbounds) {
+            $io->text(sprintf('Only clients of inbound %s.', implode(', ', array_values(array_unique($inbounds)))));
+        }
+        $lines = [
             sprintf('Clients read: %d', $summary->read),
             sprintf('%s: %d', $dryRun ? 'Would import' : 'Imported', $summary->imported),
             sprintf('New users %s: %d', $dryRun ? 'to create' : 'created', $summary->newUsers),
@@ -90,7 +117,11 @@ final class PanelImportClientsCommand extends Command
             sprintf('Unknown inbound: %d', $summary->unknownInbound),
             sprintf('Invalid: %d', $summary->invalid),
             sprintf('Most services for one owner: %d', $summary->mostForOneOwner),
-        ]);
+        ];
+        if (null !== $summary->notOnChosenInbounds) {
+            $lines[] = sprintf('Not on the chosen inbounds: %d', $summary->notOnChosenInbounds);
+        }
+        $io->listing($lines);
 
         $code = Command::SUCCESS;
         if ($summary->mostForOneOwner > PanelClientImportSummary::MANY_FOR_ONE_OWNER) {

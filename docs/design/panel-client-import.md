@@ -54,6 +54,24 @@ php bin/console app:panel:import-clients --panel=<panelId> [--limit=N] [--batch-
   the next `send-notifications` run does not message every imported customer at once. Thresholds reached later notify as
   usual.
 
+### Only some inbounds: --inbound=ID
+
+`--inbound=ID` (repeatable) limits the run to clients on at least one of those inbounds. ID is the inbound's number on
+the 3x-ui panel (`VpnInbound.remoteInboundId`), not the bot's VpnInbound id.
+
+- Checked before any panel request: every ID must be a positive number (else exit 2, `Command::INVALID`) and an inbound
+  of this panel the bot knows (else the unknown numbers are printed with "run app:panel:sync-inbounds", exit 1).
+  Nothing is read or written then.
+- A client on a chosen inbound is imported with all its real inbounds (as without the option), so the service matches
+  the panel; its primary is still the first inbound the panel lists, chosen or not.
+- Other clients are counted as "Not on the chosen inbounds: N" (a line printed only with the option). Already-known
+  clients stay "already known" whatever their inbounds (decided first, without a request).
+- Which inbounds a client is on comes from its `clients/list/paged` row, else its `clients/list` row (read anyway for
+  the traffic); only when neither names them is its full row read to decide. A filtered-out client never gets a links
+  request. The full row decides when it disagrees with the lists.
+- Panel requests of a filtered run: 1 (`clients/list`) + the pages + per new client on a chosen inbound one full row
+  and one links request; when the list rows do not name inbounds, also one full row per new client filtered out.
+
 The marker is one nullable column, `vpn_service.imported_at` (migration `Version20261108090000`), so a deploy of this
 change needs the full deploy (migrations), not `--app-only`.
 
