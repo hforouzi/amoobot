@@ -9,6 +9,7 @@ use App\Entity\Order;
 use App\Entity\Payment;
 use App\Payment\Domain\Dto\PaymentRequestResult;
 use App\Payment\Domain\Dto\PaymentVerificationResult;
+use App\Payment\Plugin\PaymentGatewayConstraintsInterface;
 use App\Payment\Plugin\PaymentGatewayPluginInterface;
 use App\Payment\Plugin\PaymentWebhookResult;
 use Symfony\Component\HttpClient\Exception\TransportException;
@@ -23,13 +24,14 @@ foreach (['TetraminatorException', 'TetraminatorApi', 'TetraminatorGatewayPlugin
 
 /**
  * Test only: the real TetraminatorGatewayPlugin behind a mocked HTTP layer, installed like a real plugin (the same idea
- * as ScriptedWinapayPlugin). The answers come from the JSON file named by the gateway's config key "test_script":
- * {"responses": [...], "calls": [...]}. Each inquiry takes the next response under a file lock, so processes share one
- * script and every inquiry, in any process, is counted in "calls". A response is {"status": 200, "body": {...}}, or
- * {"transport": "message"} for a network error; an empty script answers with a network error. With "sleep_ms" the
- * answer comes that much later, so a race test can hold both inquiries in flight together.
+ * as ScriptedWinapayPlugin), with its constraints. The answers come from the JSON file named by the gateway's config
+ * key "test_script": {"responses": [...], "calls": [...]}. Each request (an invoice create or an inquiry) takes the next
+ * response under a file lock, so processes share one script and every request, in any process, is counted in "calls".
+ * A response is {"status": 200, "body": {...}}, or {"transport": "message"} for a network error; an empty script
+ * answers with a network error. With "sleep_ms" the answer comes that much later, so a race test can hold both
+ * inquiries in flight together.
  */
-final class ScriptedTetraminatorPlugin implements PaymentGatewayPluginInterface
+final class ScriptedTetraminatorPlugin implements PaymentGatewayPluginInterface, PaymentGatewayConstraintsInterface
 {
     public function getType(): string
     {
@@ -38,10 +40,44 @@ final class ScriptedTetraminatorPlugin implements PaymentGatewayPluginInterface
 
     public function createPayment(Payment $payment, Order $order, array $config): PaymentRequestResult
     {
-        throw new \LogicException('Not scripted.');
+        return $this->plugin($config)->createPayment($payment, $order, $config);
     }
 
     public function verifyPayment(Payment $payment, array $payload, array $config): PaymentVerificationResult
+    {
+        return $this->plugin($config)->verifyPayment($payment, $payload, $config);
+    }
+
+    public function isUsable(array $config): bool
+    {
+        return (new TetraminatorGatewayPlugin())->isUsable($config);
+    }
+
+    public function acceptsAmount(int $toman): bool
+    {
+        return (new TetraminatorGatewayPlugin())->acceptsAmount($toman);
+    }
+
+    /** The real lifetime: the checkout reuses a live invoice's row only for a gateway that has one. */
+    public function invoiceLifetimeSeconds(): int
+    {
+        return (new TetraminatorGatewayPlugin())->invoiceLifetimeSeconds();
+    }
+
+    public function supportsWebhook(): bool
+    {
+        return false;
+    }
+
+    public function handleWebhook(array $payload, Request $request, array $config): ?PaymentWebhookResult
+    {
+        return null;
+    }
+
+    /**
+     * @param array<string, mixed> $config
+     */
+    private function plugin(array $config): TetraminatorGatewayPlugin
     {
         $script = (string) ($config['test_script'] ?? throw new \LogicException('The gateway has no test_script.'));
         $client = new MockHttpClient(static function (string $method, string $url, array $options) use ($script): ResponseInterface {
@@ -56,17 +92,7 @@ final class ScriptedTetraminatorPlugin implements PaymentGatewayPluginInterface
             return new MockResponse((string) json_encode($response['body'] ?? []), ['http_code' => (int) ($response['status'] ?? 200), 'response_headers' => ['content-type' => 'application/json']]);
         });
 
-        return (new TetraminatorGatewayPlugin($client))->verifyPayment($payment, $payload, $config);
-    }
-
-    public function supportsWebhook(): bool
-    {
-        return false;
-    }
-
-    public function handleWebhook(array $payload, Request $request, array $config): ?PaymentWebhookResult
-    {
-        return null;
+        return new TetraminatorGatewayPlugin($client);
     }
 
     /**
