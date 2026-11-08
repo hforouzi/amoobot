@@ -173,7 +173,7 @@ No migration. Every value fits an existing column.
 | Expiry | `expiresAt` | Plugin | No other code reads or writes `Payment::expiresAt` today |
 | Created | Derived: `expiresAt` minus 60 minutes | n/a | `createdAt` is the row's age, which can be older than the invoice |
 | Bot link | `paymentUrl` | `PaymentStarter` | |
-| Mini App link | `requestPayload.mini_app_link` | Plugin result | `requestPayload` holds an allowlist: `status`, `message`, `pay_id`, `mini_app_link`. Anything echoed back, such as a callback URL, is dropped |
+| Mini App link | `requestPayload.mini_app_link` | Plugin result | `requestPayload` holds an allowlist: `status`, `message`, `pay_id`, and `mini_app_link` only when `use_mini_app_link` is on (decision 6). Anything echoed back, such as a callback URL, is dropped |
 
 **One `Payment` row is one invoice, for life.** This is the rule that makes the columns safe. Core changes in
 `PaymentStarter::claimPayment()`, under the order lock it already holds:
@@ -308,6 +308,17 @@ apply and can narrow the range.
   at most 512 characters). With a valid link the page's main button (`data-main-button-telegram`) and its open button
   (`a[data-telegram-link]`) use `openTelegramLink`; otherwise both open `url` with `openLink` as before. The button text
   stays the generic one. A second tap on a live invoice reuses the row and its stored link.
+- **Admin's choice (plugin 1.1.0).** Two config fields override the table above, for new invoices only:
+  - `prefer_website_link` (default on): `paymentUrl` is `gateway_link`, the provider's website page, when present and valid,
+    else `url`, else `payment_link`. Off: the order above (`url`, `payment_link`, `gateway_link`).
+  - `use_mini_app_link` (default off): only when on is `mini_app_link` kept in the stored request payload, so
+    `PaymentTelegramLink` opens it in our Mini App. Off, it is not stored at all, and our Mini App opens `paymentUrl` with
+    `openLink`, as for every other gateway.
+
+  So by default a customer gets the website page in the bot and in our Mini App, never the provider's Telegram mini app.
+  Every link is validated as above. A config saved before 1.1.0 lacks both keys and gets the defaults. A live invoice
+  reused from the row keeps the link chosen at its creation (no API call), so a settings change applies to new invoices
+  only. No core change.
 - **Result.** The API has no return URL, so the customer is never sent back to `/payment/return/{token}`. The result arrives
   as our bot's normal confirmation or under-review message from `PaymentCustomerNotifier`. An open Mini App page polls its
   read-only status endpoint and reloads when the state changes. The page should say that the invoice is valid for 60 minutes.
@@ -522,7 +533,8 @@ Use the real gateway on production, with a test plan, and with the switch on onl
 - [ ] Webhook arrived. Record request method, user agent, query parameters and source IP, by turning on that location's
       access log for this test only. Turn it off again before the log check above.
 - [ ] Order confirmed and provisioned once. Bot message received once. Reload and press the check button: nothing changes.
-- [ ] 50,000 Toman from the Mini App, using `mini_app_link`. The page updates by itself.
+- [ ] 50,000 Toman from the Mini App. With the defaults it opens the website page (`gateway_link`); with
+      `use_mini_app_link` on, `mini_app_link`. The page updates by itself.
 - [ ] Wallet top-up of 50,000 Toman: wallet credited once.
 - [ ] Lost webhook: block the notify location for one payment. The timer settles it within minutes.
 - [ ] Unpaid invoice, left alone: record the real inquiry answer. Marked expired after about 70 minutes, and the order can be

@@ -146,7 +146,7 @@ final class TetraminatorGatewayPlugin implements PaymentGatewayPluginInterface, 
         }
 
         $payId = $this->payId($body['pay_id'] ?? null);
-        $paymentUrl = $this->firstLink($body, ['url', 'payment_link', 'gateway_link']);
+        $paymentUrl = $this->firstLink($body, $this->linkOrder($config));
         if (null === $payId || null === $paymentUrl) {
             return $this->createFailed(['error' => null === $payId ? 'invalid_pay_id' : 'invalid_link', 'http_status' => $httpStatus]);
         }
@@ -158,7 +158,9 @@ final class TetraminatorGatewayPlugin implements PaymentGatewayPluginInterface, 
 
         // An allowlist: anything else the provider echoes back (a callback URL, a chat id) is dropped.
         $stored = ['status' => true, 'message' => $this->text($body['message'] ?? null, $secrets), 'pay_id' => $payId];
-        $miniAppLink = $this->link($body['mini_app_link'] ?? null);
+        // Stored only when the admin chose it: the core's PaymentTelegramLink then opens it in our Mini App. Otherwise the
+        // Mini App opens paymentUrl with openLink, as for every other gateway.
+        $miniAppLink = true === ($config['use_mini_app_link'] ?? false) ? $this->link($body['mini_app_link'] ?? null) : null;
         if (null !== $miniAppLink) {
             $stored['mini_app_link'] = $miniAppLink;
         }
@@ -408,6 +410,21 @@ final class TetraminatorGatewayPlugin implements PaymentGatewayPluginInterface, 
         }
 
         return 1 === preg_match('/^[1-9]\d{0,17}$/', $telegramId) ? (int) $telegramId : $telegramId;
+    }
+
+    /**
+     * Which create-answer link becomes paymentUrl, in order of preference. prefer_website_link (default on; only an
+     * explicit false turns it off) puts the provider's website page, gateway_link, first.
+     *
+     * @param array<string, mixed> $config
+     *
+     * @return list<string>
+     */
+    private function linkOrder(array $config): array
+    {
+        return false === ($config['prefer_website_link'] ?? true)
+            ? ['url', 'payment_link', 'gateway_link']
+            : ['gateway_link', 'url', 'payment_link'];
     }
 
     /** Toman, the unit Tetraminator uses. */

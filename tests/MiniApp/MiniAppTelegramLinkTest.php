@@ -25,6 +25,8 @@ use Symfony\Contracts\Translation\TranslatorInterface;
  * A Tetraminator payment in the Mini App opens the t.me link the plugin stored (mini_app_link) with openTelegramLink
  * (tetraminator-gateway design, decision 6), checked again on the server; anything else falls back to the payment URL
  * and openLink as for every gateway. The bot keeps the payment URL. Other gateways' pages are unchanged.
+ * The plugin stores mini_app_link only when the admin turns use_mini_app_link on, so this gateway has it on; with the
+ * defaults the page opens the provider's website page (testWithTheDefaultsThePageOpensTheWebsiteLink).
  */
 final class MiniAppTelegramLinkTest extends IntegrationTestCase
 {
@@ -35,6 +37,7 @@ final class MiniAppTelegramLinkTest extends IntegrationTestCase
 
     private const LINK = 'https://t.me/TetraminatorBot/pay?startapp=TPAY0000000000000001';
     private const PAY_URL = 'https://pay.tetraminator.test/invoice/TPAY0000000000000001';
+    private const WEBSITE_URL = 'https://gw.tetraminator.test/pay/TPAY0000000000000001';
 
     private StorePaymentMethod $tetraMethod;
 
@@ -43,7 +46,7 @@ final class MiniAppTelegramLinkTest extends IntegrationTestCase
         parent::setUp();
         $this->setUpShop();
         $this->installTetraminator();
-        $this->tetraMethod = (new StorePaymentMethod())->setGateway($this->tetraminatorGateway())->setTitle('پرداخت آنلاین')->setIsActive(true)->setSortOrder(50);
+        $this->tetraMethod = (new StorePaymentMethod())->setGateway($this->tetraminatorGateway(['use_mini_app_link' => true]))->setTitle('پرداخت آنلاین')->setIsActive(true)->setSortOrder(50);
         $this->em->persist($this->tetraMethod);
         $this->em->flush();
         $this->startMiniAppClient();
@@ -76,6 +79,29 @@ final class MiniAppTelegramLinkTest extends IntegrationTestCase
         self::assertCount(0, $page->filter('a[data-open-link]'));
         self::assertStringNotContainsString(self::PAY_URL, $html, 'the bot\'s link is not handed out in the Mini App');
         self::assertStringNotContainsStringIgnoringCase('tetraminator', $page->filter('.view-root')->text(), 'no provider name in the text');
+    }
+
+    public function testWithTheDefaultsThePageOpensTheWebsiteLink(): void
+    {
+        // A config saved before the link settings existed: prefer_website_link on, use_mini_app_link off.
+        $gateway = $this->tetraMethod->getGateway();
+        $config = $gateway->getConfig() ?? [];
+        unset($config['use_mini_app_link'], $config['prefer_website_link']);
+        $gateway->setConfig($config);
+        $this->em->flush();
+        $session = $this->authenticate(self::CUSTOMER);
+        $this->tetraminatorAnswers([['status' => 201, 'body' => self::created()['body'] + ['gateway_link' => self::WEBSITE_URL]]]);
+
+        $payment = $this->payTetraminator($session, $this->checkout($session));
+
+        self::assertSame(self::WEBSITE_URL, $payment->getPaymentUrl(), 'the website page');
+        self::assertArrayNotHasKey('mini_app_link', $payment->getRequestPayload() ?? [], 'not stored');
+        $html = $this->appGet('/app/view/payments/'.$payment->getId(), $session);
+        self::assertSame($this->onlineMarkup($payment, self::WEBSITE_URL), $this->markup($html), 'openLink, as for every other gateway');
+        $root = (new Crawler($html))->filter('.view-root');
+        self::assertNotNull($root->attr('data-main-button-external'));
+        self::assertNull($root->attr('data-main-button-telegram'));
+        self::assertStringNotContainsString('t.me/TetraminatorBot', $html);
     }
 
     public function testASecondTapOnTheLiveInvoiceGetsTheSameLinkAndNoNewInvoice(): void

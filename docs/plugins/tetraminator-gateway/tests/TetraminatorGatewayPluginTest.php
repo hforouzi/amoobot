@@ -40,6 +40,8 @@ final class TetraminatorGatewayPluginTest extends TestCase
     private const PAYMENT_ID = 4242;
     private const TELEGRAM_ID = '512345678';
     private const LINK = 'https://pay.tetraminator.example/invoice/PAY_7f3a-0001';
+    private const GATEWAY_LINK = 'https://gw.tetraminator.example/g/PAY_7f3a-0001';
+    private const MINI_APP_LINK = 'https://t.me/TetraminatorBot/app?startapp=PAY_7f3a-0001';
 
     /** @var list<array{method: string, url: string, options: array<string, mixed>}> */
     private array $requests = [];
@@ -233,8 +235,7 @@ final class TetraminatorGatewayPluginTest extends TestCase
             'status' => true,
             'message' => 'Invoice created',
             'pay_id' => self::PAY_ID,
-            'mini_app_link' => 'https://t.me/TetraminatorBot/app?startapp='.self::PAY_ID,
-        ], $result->rawResponse, 'allowlist only');
+        ], $result->rawResponse, 'allowlist only; mini_app_link only when use_mini_app_link is on');
         $this->assertNoSecret($result);
     }
 
@@ -430,10 +431,127 @@ final class TetraminatorGatewayPluginTest extends TestCase
         $this->respondCreated(['mini_app_link' => 'http://t.me/x', 'callback_url' => 'https://shop.example/echo', 'chat_id' => 1]);
         $payment = $this->payment();
 
-        $result = $this->plugin()->createPayment($payment, $payment->getOrder(), $this->config());
+        $result = $this->plugin()->createPayment($payment, $payment->getOrder(), $this->config(['use_mini_app_link' => true]));
 
         self::assertTrue($result->success);
         self::assertSame(['status', 'message', 'pay_id'], array_keys((array) $result->rawResponse));
+    }
+
+    /**
+     * Every combination of the two link settings (missing = an existing config from before them) with an answer that has
+     * or lacks gateway_link and mini_app_link.
+     *
+     * @return iterable<string, array{array<string, mixed>, bool, bool, string, bool}>
+     */
+    public static function linkSettings(): iterable
+    {
+        $settings = ['missing' => null, 'on' => true, 'off' => false];
+        foreach ($settings as $preferName => $prefer) {
+            foreach ($settings as $miniName => $mini) {
+                foreach ([true, false] as $hasGateway) {
+                    foreach ([true, false] as $hasMini) {
+                        $config = array_filter(['prefer_website_link' => $prefer, 'use_mini_app_link' => $mini], static fn (?bool $v): bool => null !== $v);
+                        $expectedUrl = $hasGateway && false !== $prefer ? self::GATEWAY_LINK : self::LINK;
+                        $name = sprintf('prefer %s, mini app %s, %s gateway_link, %s mini_app_link', $preferName, $miniName, $hasGateway ? 'with' : 'no', $hasMini ? 'with' : 'no');
+                        yield $name => [$config, $hasGateway, $hasMini, $expectedUrl, $hasMini && true === $mini];
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * @param array<string, mixed> $settings
+     */
+    #[DataProvider('linkSettings')]
+    public function testTheAdminChoosesTheLink(array $settings, bool $hasGateway, bool $hasMini, string $expectedUrl, bool $storesMini): void
+    {
+        $this->respondCreated([
+            'gateway_link' => $hasGateway ? self::GATEWAY_LINK : null,
+            'mini_app_link' => $hasMini ? self::MINI_APP_LINK : null,
+        ]);
+        $payment = $this->payment();
+        $config = $this->config($settings);
+        self::assertArrayNotHasKey('prefer_website_link', $this->config(), 'the base config predates the settings');
+
+        $result = $this->plugin()->createPayment($payment, $payment->getOrder(), $config);
+
+        self::assertTrue($result->success);
+        self::assertSame($expectedUrl, $result->paymentUrl);
+        $raw = (array) $result->rawResponse;
+        if ($storesMini) {
+            self::assertSame(self::MINI_APP_LINK, $raw['mini_app_link'] ?? null);
+        } else {
+            self::assertArrayNotHasKey('mini_app_link', $raw, 'not stored at all');
+        }
+    }
+
+    public function testPreferWebsiteLinkOffKeepsTheOldOrder(): void
+    {
+        $this->respondCreated(['url' => null, 'gateway_link' => self::GATEWAY_LINK]);
+        $payment = $this->payment();
+
+        $result = $this->plugin()->createPayment($payment, $payment->getOrder(), $this->config(['prefer_website_link' => false]));
+
+        self::assertSame('https://pay.tetraminator.example/p/'.self::PAY_ID, $result->paymentUrl, 'payment_link before gateway_link');
+    }
+
+    /**
+     * @return iterable<string, array{array<mixed>, ?string}>
+     */
+    public static function invalidGatewayLinks(): iterable
+    {
+        $paymentLink = 'https://pay.tetraminator.example/p/'.self::PAY_ID;
+        foreach ([
+            'http' => 'http://gw.tetraminator.example/g/1',
+            'port' => 'https://gw.tetraminator.example:8443/g/1',
+            'user info' => 'https://u:p@gw.tetraminator.example/g/1',
+            'javascript' => 'javascript:alert(1)',
+            'newline' => "https://gw.tetraminator.example/g/1\nX: y",
+            'not a string' => ['x'],
+            'empty' => '',
+        ] as $name => $link) {
+            yield $name.': url' => [['gateway_link' => $link], self::LINK];
+            yield $name.': payment_link' => [['gateway_link' => $link, 'url' => null], $paymentLink];
+            yield $name.': nothing left' => [['gateway_link' => $link, 'url' => null, 'payment_link' => null], null];
+        }
+    }
+
+    /**
+     * @param array<mixed> $overrides
+     */
+    #[DataProvider('invalidGatewayLinks')]
+    public function testAnInvalidGatewayLinkFallsBack(array $overrides, ?string $expected): void
+    {
+        $this->respondCreated($overrides);
+        $payment = $this->payment();
+
+        $result = $this->plugin()->createPayment($payment, $payment->getOrder(), $this->config(['prefer_website_link' => true]));
+
+        self::assertSame(null !== $expected, $result->success);
+        self::assertSame($expected, $result->paymentUrl);
+    }
+
+    public function testATruthyNonBooleanDoesNotStoreTheMiniAppLink(): void
+    {
+        $this->respondCreated();
+        $payment = $this->payment();
+
+        $result = $this->plugin()->createPayment($payment, $payment->getOrder(), $this->config(['use_mini_app_link' => 'yes']));
+
+        self::assertArrayNotHasKey('mini_app_link', (array) $result->rawResponse);
+    }
+
+    public function testALiveInvoiceKeepsTheLinkChosenAtCreationAfterASettingsChange(): void
+    {
+        // Created with prefer_website_link off (url); the admin then turns it on: the open invoice is not re-asked.
+        $payment = $this->issued();
+
+        $result = $this->plugin()->createPayment($payment, $payment->getOrder(), $this->config(['prefer_website_link' => true, 'use_mini_app_link' => true]));
+
+        self::assertSame(self::LINK, $result->paymentUrl);
+        self::assertNull($result->rawResponse, 'the stored payload stays as it was');
+        self::assertSame([], $this->requests);
     }
 
     #[DataProvider('payIds')]
@@ -945,12 +1063,14 @@ final class TetraminatorGatewayPluginTest extends TestCase
         self::assertTrue($manifest['supportsOnlinePayment']);
         self::assertSame(['payment.create', 'payment.verify', 'http.outbound'], $manifest['permissions']);
         $fields = array_column($manifest['configSchema'], null, 'key');
-        self::assertSame(['enabled', 'api_key', 'callback_base_url', 'send_chat_id'], array_keys($fields));
+        self::assertSame(['enabled', 'api_key', 'callback_base_url', 'send_chat_id', 'prefer_website_link', 'use_mini_app_link'], array_keys($fields));
         self::assertSame(['boolean', false, false], [$fields['enabled']['type'], $fields['enabled']['required'], $fields['enabled']['default']]);
         self::assertSame(['password', true], [$fields['api_key']['type'], $fields['api_key']['required']]);
         self::assertArrayNotHasKey('default', $fields['api_key'], 'no fake secret default');
         self::assertSame(['url', true], [$fields['callback_base_url']['type'], $fields['callback_base_url']['required']]);
         self::assertSame(['boolean', false, false], [$fields['send_chat_id']['type'], $fields['send_chat_id']['required'], $fields['send_chat_id']['default']]);
+        self::assertSame(['boolean', false, true], [$fields['prefer_website_link']['type'], $fields['prefer_website_link']['required'], $fields['prefer_website_link']['default']]);
+        self::assertSame(['boolean', false, false], [$fields['use_mini_app_link']['type'], $fields['use_mini_app_link']['required'], $fields['use_mini_app_link']['default']]);
         self::assertArrayNotHasKey('underpayment_tolerance_percent', $fields);
     }
 
