@@ -169,14 +169,22 @@ it. Keep `enabled` off until PR 5 is deployed (see the note at the top).
 
 ### Upgrading an installed plugin (1.0.0 to 1.1.0)
 
-**Not supported by the core yet.** `app:plugin:install` refuses a plugin whose code is already installed ("Plugin
-already installed."), `PluginManager::uninstall()` throws ("Plugin uninstall is not available in this phase."), and
-`app:plugin:disable` / `app:plugin:enable` only switch the status of the files already installed under
-`var/plugins/tetraminator`. So there are no upgrade commands to run. The admin form reads the config fields from the
-manifest stored at install time, so the two new fields only appear after a real upgrade path exists in the core.
+Upgrade in place with `app:plugin:upgrade`. The full procedure is in
+[Upgrading a plugin](../../en/plugins/payment-gateway-plugin-sdk.md#upgrading-a-plugin) (Persian:
+[ارتقای پلاگین](../../fa/plugins/payment-gateway-plugin-sdk.md)). On the server:
 
-Until then, an installed 1.0.0 keeps today's behaviour (`url` first, `mini_app_link` stored). The gateway's config lives
-in the payment gateway row, not in the plugin, so it is not touched by any of this.
+```bash
+cd /var/www/amoobot
+sudo -u www-data sh docs/plugins/tetraminator-gateway/build.sh /tmp/tetraminator.zip
+sudo -u www-data php bin/console app:plugin:upgrade /tmp/tetraminator.zip --dry-run --env=prod
+sudo -u www-data php bin/console app:plugin:upgrade /tmp/tetraminator.zip --env=prod
+sudo systemctl reload php8.4-fpm
+sudo -u www-data php bin/console app:plugin:doctor tetraminator --env=prod
+```
+
+1.0.0 to 1.1.0 adds no permission and no required field. The dry run lists the two new config fields,
+`prefer_website_link` and `use_mini_app_link`. The plugin keeps its status, and the gateway config is not touched, so
+the gateway runs on the defaults until you change them in Admin > Payment Gateways.
 
 Unit tests (mocked HTTP, no network): `php bin/phpunit docs/plugins/tetraminator-gateway/tests`.
 
@@ -200,5 +208,5 @@ The real-payment checklist is in `design.md` section 15.
 - خطای 401 (کلید نامعتبر) یا 403 (فروشگاه غیرفعال) هنگام ساخت فاکتور، حداکثر ساعتی یک بار برای هر درگاه به مدیران اطلاع داده می‌شود.
 - ارسال `chat_id` به‌طور پیش‌فرض خاموش است.
 - به‌طور پیش‌فرض مشتری صفحهٔ وب درگاه (`gateway_link`) را باز می‌کند، در ربات و در مینی‌اپ آموبات (`prefer_website_link` روشن، `use_mini_app_link` خاموش). تغییر این تنظیمات فقط روی فاکتورهای جدید اثر دارد.
-- ارتقای افزونهٔ نصب‌شده (از 1.0.0 به 1.1.0) هنوز در هستهٔ آموبات پشتیبانی نمی‌شود؛ بخش «Upgrading an installed plugin» را ببینید.
+- ارتقای افزونهٔ نصب‌شده (مثلاً از 1.0.0 به 1.1.0) با `app:plugin:upgrade` انجام می‌شود؛ دستورها در بخش «Upgrading an installed plugin» و در [ارتقای پلاگین](../../fa/plugins/payment-gateway-plugin-sdk.md) آمده‌اند. پس از ارتقا PHP-FPM را reload کنید.
 - فرض‌های بخش «Pending provider answers» تا پاسخ تترامیناتور برقرارند.

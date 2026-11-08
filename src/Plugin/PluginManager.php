@@ -28,6 +28,7 @@ final class PluginManager
         private readonly LoggerInterface $logger,
         private readonly PaymentPluginDoctor $doctor,
         private readonly PluginConfigSchemaValidator $schemaValidator,
+        private readonly PluginFilesLock $filesLock,
         private readonly string $projectDir,
         private readonly int $maxUploadBytes = self::MAX_UPLOAD_BYTES,
     ) {
@@ -35,18 +36,40 @@ final class PluginManager
 
     public function installFromZip(UploadedFile|string $zipPath): PluginInstallResult
     {
-        $sourcePath = $zipPath instanceof UploadedFile ? $zipPath->getPathname() : $zipPath;
-        $tmpDir = null;
-        $cleanupDir = null;
+        // Never at the same time as another install or an upgrade (PluginUpgrader): both move directories in var/plugins.
+        $lock = null;
+        try {
+            $lock = $this->filesLock->acquire();
+        } catch (PluginInstallException $exception) {
+            $this->logger->warning('Plugin installation rejected: '.$exception->getMessage());
+
+            return PluginInstallResult::failure($exception->getMessage());
+        }
 
         try {
-            $this->validateZipSource($zipPath);
-            $tmpDir = $this->createTempDir();
-            $cleanupDir = $tmpDir;
-            $this->extractZipSafely($sourcePath, $tmpDir);
-            $tmpDir = $this->normalizeExtractedRoot($tmpDir);
+            return $this->installLocked($zipPath);
+        } finally {
+            $this->filesLock->release($lock);
+        }
+    }
 
-            $manifestPath = $tmpDir.\DIRECTORY_SEPARATOR.'plugin.json';
+    /**
+     * The ZIP checked, extracted safely into a fresh workspace under var/plugin_uploads/tmp, and its manifest and config
+     * schema validated: the checks install runs, shared with PluginUpgrader. The caller removes $package->workspace.
+     *
+     * @throws PluginInstallException
+     */
+    public function extractPackage(UploadedFile|string $zipPath): ExtractedPluginPackage
+    {
+        $sourcePath = $zipPath instanceof UploadedFile ? $zipPath->getPathname() : $zipPath;
+        $this->validateZipSource($zipPath);
+        $workspace = $this->createTempDir();
+
+        try {
+            $this->extractZipSafely($sourcePath, $workspace);
+            $root = $this->normalizeExtractedRoot($workspace);
+
+            $manifestPath = $root.\DIRECTORY_SEPARATOR.'plugin.json';
             if (!is_file($manifestPath)) {
                 throw new PluginInstallException('plugin.json was not found in the plugin ZIP root.');
             }
@@ -60,6 +83,38 @@ final class PluginManager
             if (!$schemaValidation->valid) {
                 throw new PluginInstallException($schemaValidation->message());
             }
+        } catch (\Throwable $exception) {
+            $this->removeDirectory($workspace);
+
+            throw $exception;
+        }
+
+        return new ExtractedPluginPackage($workspace, $root, $manifest);
+    }
+
+    public function discardPackage(?ExtractedPluginPackage $package): void
+    {
+        if (null !== $package) {
+            $this->removeDirectory($package->workspace);
+        }
+    }
+
+    /** var/plugins/<code>, where install puts a plugin. */
+    public function pluginDirectory(string $code): string
+    {
+        return $this->pluginDir($code);
+    }
+
+    private function installLocked(UploadedFile|string $zipPath): PluginInstallResult
+    {
+        $tmpDir = null;
+        $cleanupDir = null;
+
+        try {
+            $package = $this->extractPackage($zipPath);
+            $cleanupDir = $package->workspace;
+            $tmpDir = $package->root;
+            $manifest = $package->manifest;
 
             $code = (string) $manifest['code'];
             if (null !== $this->entityManager->getRepository(Plugin::class)->findOneBy(['code' => $code])) {
@@ -403,8 +458,14 @@ final class PluginManager
         }
     }
 
-    private function removeDirectory(string $dir): void
+    public function removeDirectory(string $dir): void
     {
+        // A link is removed itself, never followed.
+        if (is_link($dir)) {
+            unlink($dir);
+
+            return;
+        }
         if (!is_dir($dir)) {
             return;
         }
@@ -415,7 +476,9 @@ final class PluginManager
         );
 
         foreach ($iterator as $item) {
-            if ($item->isDir()) {
+            if ($item->isLink()) {
+                unlink($item->getPathname());
+            } elseif ($item->isDir()) {
                 rmdir($item->getPathname());
             } else {
                 unlink($item->getPathname());
@@ -440,7 +503,7 @@ final class PluginManager
      *
      * @return array<string, string>
      */
-    private function stringMap(array $values): array
+    public function stringMap(array $values): array
     {
         $result = [];
         foreach ($values as $key => $value) {
@@ -457,7 +520,7 @@ final class PluginManager
      *
      * @return list<string>|null
      */
-    private function permissionsFromManifest(array $manifest): ?array
+    public function permissionsFromManifest(array $manifest): ?array
     {
         $permissions = $manifest['permissions'] ?? null;
         if (!is_array($permissions)) {

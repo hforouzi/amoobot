@@ -41,6 +41,12 @@ final class AdminActor
         return new self($this->adminUserId, $this->label, $this->roles, $this->active, $source, $this->telegramUserId);
     }
 
+    /** Whoever ran a console command, named by the operating system user (no AdminUser row). */
+    public static function console(string $label): self
+    {
+        return new self(null, $label, [], true, self::SOURCE_CLI, null);
+    }
+
     public static function environmentBotAdmin(string $telegramUserId): self
     {
         return new self(null, 'TELEGRAM_ADMIN_CHAT_ID', [AdminUser::ROLE_SUPER_ADMIN], true, self::SOURCE_BOT, $telegramUserId);
