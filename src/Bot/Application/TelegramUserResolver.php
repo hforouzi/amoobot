@@ -25,14 +25,7 @@ class TelegramUserResolver
         $account = $this->entityManager->getRepository(TelegramAccount::class)->findOneBy(['telegramId' => $telegramId]);
 
         if (!$account instanceof TelegramAccount) {
-            $user = new User();
-            $user->setName(trim(((string) ($telegramUser['first_name'] ?? '')).' '.((string) ($telegramUser['last_name'] ?? ''))));
-            $this->entityManager->persist($user);
-
-            $account = (new TelegramAccount())
-                ->setUser($user)
-                ->setTelegramId($telegramId);
-            $this->entityManager->persist($account);
+            $account = $this->createAccount($telegramId, trim(((string) ($telegramUser['first_name'] ?? '')).' '.((string) ($telegramUser['last_name'] ?? ''))));
         }
 
         $account
@@ -44,6 +37,26 @@ class TelegramUserResolver
             ->setUpdatedAt(new \DateTimeImmutable());
 
         $this->entityManager->flush();
+
+        return $account;
+    }
+
+    /**
+     * A new User with its TelegramAccount, persisted, not flushed: what a first message from this Telegram id creates,
+     * and what app:panel:import-clients creates for a panel client's owner who has no account yet (lastActivityAt
+     * stays null until the person writes to the bot; their first message then finds this account).
+     */
+    public function createAccount(string $telegramId, string $name = ''): TelegramAccount
+    {
+        $user = new User();
+        $user->setName($name);
+        $this->entityManager->persist($user);
+
+        $account = (new TelegramAccount())
+            ->setUser($user)
+            ->setTelegramId($telegramId);
+        $user->setTelegramAccount($account);
+        $this->entityManager->persist($account);
 
         return $account;
     }

@@ -8,6 +8,8 @@
     {% if view %}{{ include('subscription/_status.html.twig', {view: view}) }}{% endif %}
     {% if not open %}
         <section class="card notice" data-sales-closed><p class="pre-line">{{ disabledMessage }}</p></section>
+    {% elseif service.order is null %}
+        <section class="card notice" data-new-plan><p>{{ 'checkout.message.add_traffic_new_plan'|trans }}</p><a class="btn small" href="{{ path('miniapp_shop') }}" data-nav data-shop-link>🛒 {{ 'home.open_shop'|trans }}</a></section>
     {% elseif not quote %}
         <section class="card notice"><p>{{ 'checkout.message.add_traffic_unavailable'|trans }}</p></section>
     {% else %}

@@ -162,13 +162,22 @@ final class InvoiceRowParallelTest extends IntegrationTestCase
         self::assertSame('race', $row['gateway_transaction_id'], 'the old invoice keeps its reference');
         self::assertContains(PaymentStatus::CONFIRMED === $row['status'] ? 'settle:confirmed' : 'settle:needs_review', $outputs);
         self::assertSame(PaymentStatus::CONFIRMED === $row['status'] ? 1 : 0, $this->countServicesForOrder($this->order));
-        self::assertSame(1, $this->providerCalls(), 'the new row got its one invoice');
         if ($startAt > $settleAt) {
             self::assertSame(PaymentStatus::CONFIRMED, $row['status'], 'the settlement held the locks');
         }
         if ($startAt < $settleAt) {
             self::assertSame(PaymentStatus::NEEDS_REVIEW, $row['status'], 'the switch went first');
         }
-        self::assertNotEmpty($this->em->getRepository(Payment::class)->findBy(['order' => $this->order->getId(), 'status' => PaymentStatus::PENDING]));
+        $pending = $this->em->getRepository(Payment::class)->findBy(['order' => $this->order->getId(), 'status' => PaymentStatus::PENDING]);
+        if (PaymentStatus::CONFIRMED === $row['status']) {
+            // The settlement paid the order first: the start finds it paid under the lock and creates no invoice.
+            self::assertContains('start:refused', $outputs);
+            self::assertSame(0, $this->providerCalls(), 'no invoice for a paid order');
+            self::assertSame([], $pending);
+        } else {
+            self::assertContains('start:ready', $outputs);
+            self::assertSame(1, $this->providerCalls(), 'the new row got its one invoice');
+            self::assertNotEmpty($pending);
+        }
     }
 }

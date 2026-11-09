@@ -8,6 +8,9 @@
     {% if view %}{{ include('subscription/_status.html.twig', {view: view}) }}{% endif %}
     {% if not open %}
         <section class="card notice" data-sales-closed><p class="pre-line">{{ disabledMessage }}</p></section>
+    {% elseif service.order is null %}
+        {# No order, so no plan to renew from (imported from the panel): docs/design/panel-client-import.md. #}
+        <section class="card notice" data-new-plan><p>{{ 'checkout.message.renewal_new_plan'|trans }}</p><a class="btn small" href="{{ path('miniapp_shop') }}" data-nav data-shop-link>🛒 {{ 'home.open_shop'|trans }}</a></section>
     {% elseif not renewal or not quote %}
         <section class="card notice"><p>{{ 'checkout.message.renewal_unavailable'|trans }}</p></section>
     {% else %}

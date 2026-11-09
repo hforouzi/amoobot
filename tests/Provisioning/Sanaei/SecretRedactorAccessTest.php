@@ -36,6 +36,27 @@ final class SecretRedactorAccessTest extends TestCase
         self::assertSame($expected, SecretRedactor::maskAccess($text));
     }
 
+    /**
+     * @return iterable<string, array{string, string}>
+     */
+    public static function apiKeyTexts(): iterable
+    {
+        yield 'header' => ['X-API-KEY: FAKE-key-0123', 'X-API-KEY: [redacted]'];
+        yield 'header, lower case' => ['x-api-key:FAKE-key-0123 sent', 'x-api-key:[redacted] sent'];
+        yield 'json header' => ['{"X-API-KEY":"FAKE-key-0123","Accept":"application/json"}', '{"X-API-KEY":"[redacted]","Accept":"application/json"}'];
+        yield 'json field' => ['{"api_key":"FAKE-key-0123"}', '{"api_key":"[redacted]"}'];
+        yield 'query' => ['/x?api_key=FAKE-key-0123&y=1', '/x?api_key=[redacted]&y=1'];
+        yield 'dash and no separator' => ['api-key=FAKE-key-0123 apikey: FAKE-key-0123', 'api-key=[redacted] apikey: [redacted]'];
+        yield 'php array' => ["'api_key' => 'FAKE-key-0123'", "'api_key' => '[redacted]'"];
+        yield 'field name alone stays' => ['api_key is not configured', 'api_key is not configured'];
+    }
+
+    #[DataProvider('apiKeyTexts')]
+    public function testRedactMasksApiKeyHeadersAndFields(string $text, string $expected): void
+    {
+        self::assertSame($expected, SecretRedactor::redact($text));
+    }
+
     public function testRedactAccessAlsoFoldsAndLimits(): void
     {
         self::assertSame('a [redacted] b', SecretRedactor::redactAccess("a\n11111111-2222-3333-4444-555555555555\nb"));
