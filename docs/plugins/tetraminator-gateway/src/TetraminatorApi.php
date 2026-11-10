@@ -13,7 +13,8 @@ use Symfony\Contracts\HttpClient\HttpClientInterface;
  *
  * TLS verification stays on, redirects are not followed, the body is capped and anything that is not a JSON object
  * (HTML error pages, empty bodies) becomes a TetraminatorException, except for 401 and 403, which are returned by their
- * status alone. Nothing is retried: the API has no idempotency key, so a second create could leave a second invoice. The
+ * status alone, and a GET's 404, which is returned with json false and the would-be exception text as detail (the plugin
+ * decides by the invoice's expiry: the provider may delete an expired invoice). Nothing is retried: the API has no idempotency key, so a second create could leave a second invoice. The
  * HTTP status is returned with the body: the plugin decides.
  */
 final class TetraminatorApi
@@ -39,7 +40,7 @@ final class TetraminatorApi
     /**
      * @param array<string, string|int> $json
      *
-     * @return array{status: int, body: array<mixed>}
+     * @return array{status: int, body: array<mixed>, json: bool, detail?: string}
      *
      * @throws TetraminatorException
      */
@@ -49,7 +50,7 @@ final class TetraminatorApi
     }
 
     /**
-     * @return array{status: int, body: array<mixed>}
+     * @return array{status: int, body: array<mixed>, json: bool, detail?: string}
      *
      * @throws TetraminatorException
      */
@@ -61,7 +62,7 @@ final class TetraminatorApi
     /**
      * @param array<string, string|int>|null $json
      *
-     * @return array{status: int, body: array<mixed>}
+     * @return array{status: int, body: array<mixed>, json: bool, detail?: string}
      */
     private function request(string $method, string $path, #[\SensitiveParameter] string $apiKey, ?array $json): array
     {
@@ -91,7 +92,7 @@ final class TetraminatorApi
                 // Decided by the status alone, whatever the body is (empty, HTML, JSON): it is not read.
                 $response->cancel();
 
-                return ['status' => $httpStatus, 'body' => []];
+                return ['status' => $httpStatus, 'body' => [], 'json' => false];
             }
             $body = $response->getContent(false);
         } catch (ExceptionInterface $exception) {
@@ -111,13 +112,17 @@ final class TetraminatorApi
         $body = trim($body);
         $decoded = '' === $body ? null : json_decode($body, true, 32);
         if (!is_array($decoded) || array_is_list($decoded)) {
-            throw new TetraminatorException(sprintf(
+            $detail = sprintf(
                 '' === $body ? 'Tetraminator returned an empty response (HTTP %d).'
                     : (str_starts_with($body, '<') ? 'Tetraminator returned an HTML page instead of JSON (HTTP %d).' : 'Tetraminator returned an invalid response (HTTP %d).'),
                 $httpStatus,
-            ));
+            );
+            if (404 === $httpStatus && 'GET' === $method) {
+                return ['status' => $httpStatus, 'body' => [], 'json' => false, 'detail' => $detail];
+            }
+            throw new TetraminatorException($detail);
         }
 
-        return ['status' => $httpStatus, 'body' => $decoded];
+        return ['status' => $httpStatus, 'body' => $decoded, 'json' => true];
     }
 }

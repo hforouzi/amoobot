@@ -6,7 +6,7 @@
     "fa": "تترامیناتور",
     "en": "Tetraminator"
   },
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": {
     "fa": "درگاه پرداخت تومانی تترامیناتور برای آموبات.",
     "en": "Tetraminator Toman payment gateway for Amoobot."
@@ -66,8 +66,8 @@
       "required": false,
       "default": true,
       "label": {
-        "fa": "باز کردن صفحهٔ وب درگاه (gateway_link) در اولویت (فقط فاکتورهای جدید)",
-        "en": "Prefer the provider's website page (gateway_link) (new invoices only)"
+        "fa": "فقط درگاه مستقیم شاپرک (gateway_link، بدون کارت‌به‌کارت)؛ خاموش: صفحهٔ وب انتخاب روش پرداخت (url) طبق تنظیمات فروشگاه (فقط فاکتورهای جدید)",
+        "en": "Direct Shaparak page only (gateway_link, no card-to-card); off: the provider's web chooser (url) per store settings (new invoices only)"
       }
     },
     {
