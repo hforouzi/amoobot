@@ -37,7 +37,7 @@ final class TetraminatorCredentialAlertTest extends IntegrationTestCase
      */
     public static function answers(): iterable
     {
-        foreach ([401 => 'rejected its API key', 403 => 'store is disabled'] as $status => $text) {
+        foreach ([401 => 'API key missing or rejected', 403 => 'API key invalid or store disabled'] as $status => $text) {
             yield $status.' empty' => [$status, new MockResponse('', ['http_code' => $status]), $text];
             yield $status.' HTML' => [$status, new MockResponse('<html><body>'.$status.'</body></html>', ['http_code' => $status, 'response_headers' => ['content-type' => 'text/html']]), $text];
             yield $status.' JSON' => [$status, new MockResponse('{"status":false,"message":"key '.self::API_KEY.'"}', ['http_code' => $status, 'response_headers' => ['content-type' => 'application/json']]), $text];
