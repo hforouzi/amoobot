@@ -11,6 +11,7 @@ use App\Payment\Domain\Dto\PaymentVerificationResult;
 use App\Payment\Plugin\PaymentGatewayConstraintsInterface;
 use App\Payment\Plugin\PaymentGatewayPluginInterface;
 use App\Payment\Plugin\PaymentWebhookResult;
+use App\Shared\Infrastructure\SafeErrorLog;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 
@@ -43,6 +44,9 @@ final class TetraminatorGatewayPlugin implements PaymentGatewayPluginInterface, 
 
     /** The verify payload key holding the evidence of a paid claim that failed a rule. */
     public const REVIEW_EVIDENCE_KEY = 'tetraminator_review';
+
+    /** Every payment_status the provider documents. Inquiry "status" is true only for paid. */
+    public const PAYMENT_STATUSES = ['pending', 'paid', 'expired', 'refused'];
 
     /**
      * What a failed createPayment() says: the bot and the Mini App show it to the customer, and PaymentStarter keeps it as
@@ -211,7 +215,7 @@ final class TetraminatorGatewayPlugin implements PaymentGatewayPluginInterface, 
         }
         $rawResponse = $this->sanitize($body, $secrets);
         if (404 === $httpStatus) {
-            return new PaymentVerificationResult(success: true, paid: false, transactionId: $payId, message: 'Tetraminator does not know this invoice as paid (HTTP 404).', rawResponse: $rawResponse);
+            return $this->notFound($payment, $payId, $response, $rawResponse);
         }
         if (200 !== $httpStatus) {
             return new PaymentVerificationResult(success: false, paid: false, transactionId: $payId, message: sprintf('Tetraminator inquiry failed (HTTP %d).', $httpStatus), rawResponse: $rawResponse);
@@ -220,6 +224,11 @@ final class TetraminatorGatewayPlugin implements PaymentGatewayPluginInterface, 
         $status = $body['status'] ?? null;
         $paymentStatus = $body['payment_status'] ?? null;
         $claimsPaid = is_string($paymentStatus) && 0 === strcasecmp(trim($paymentStatus), self::PAID);
+        if (null !== $paymentStatus && !$claimsPaid && !in_array($paymentStatus, self::PAYMENT_STATUSES, true)) {
+            // Not a documented value: logged for the admin, still not paid.
+            $value = is_string($paymentStatus) ? mb_substr($this->mask($paymentStatus, $secrets), 0, 32) : '['.get_debug_type($paymentStatus).']';
+            SafeErrorLog::write(sprintf('[Tetraminator] warning: unknown payment_status payment_id=%d value=%s', (int) $payment->getId(), json_encode($value, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE)));
+        }
 
         if ($claimsPaid) {
             return $this->paidClaim($payment, $payId, $body, $rawResponse);
@@ -254,6 +263,30 @@ final class TetraminatorGatewayPlugin implements PaymentGatewayPluginInterface, 
     public function handleWebhook(array $payload, Request $request, array $config): ?PaymentWebhookResult
     {
         return null;
+    }
+
+    /**
+     * HTTP 404 from the inquiry. With a JSON object body the provider says it has no invoice under this pay_id: not
+     * paid. Without one (empty, HTML) it may be a misrouted answer, so it decides nothing while the invoice is live; only
+     * after expiresAt, when the provider may have deleted the expired invoice, does it read as not paid.
+     *
+     * @param array{status: int, body: array<mixed>, json: bool, detail?: string} $response
+     * @param array<mixed>                                                         $rawResponse
+     */
+    private function notFound(Payment $payment, string $payId, array $response, array $rawResponse): PaymentVerificationResult
+    {
+        if ($response['json']) {
+            return new PaymentVerificationResult(success: true, paid: false, transactionId: $payId, message: 'Tetraminator does not know this invoice as paid (HTTP 404).', rawResponse: $rawResponse);
+        }
+
+        SafeErrorLog::write(sprintf('[Tetraminator] warning: inquiry HTTP 404 without a JSON body payment_id=%d', (int) $payment->getId()));
+        $expiresAt = $payment->getExpiresAt();
+        if (null !== $expiresAt && $expiresAt < new \DateTimeImmutable()) {
+            return new PaymentVerificationResult(success: true, paid: false, transactionId: $payId, message: 'Tetraminator does not know this expired invoice (HTTP 404 without JSON); not paid.', rawResponse: ['error' => 'not_found_after_expiry', 'http_status' => 404]);
+        }
+        $detail = $response['detail'] ?? 'Tetraminator returned an invalid response (HTTP 404).';
+
+        return new PaymentVerificationResult(success: false, paid: false, transactionId: $payId, message: $detail, rawResponse: ['error' => $detail]);
     }
 
     /**
@@ -357,8 +390,8 @@ final class TetraminatorGatewayPlugin implements PaymentGatewayPluginInterface, 
     private function credentialFailure(int $httpStatus): ?array
     {
         return match ($httpStatus) {
-            401 => ['error' => self::ERROR_UNAUTHORIZED, 'message' => 'Tetraminator rejected the API key (HTTP 401).'],
-            403 => ['error' => self::ERROR_STORE_DISABLED, 'message' => 'Tetraminator says the store is disabled (HTTP 403).'],
+            401 => ['error' => self::ERROR_UNAUTHORIZED, 'message' => 'Tetraminator: API key missing or rejected (HTTP 401).'],
+            403 => ['error' => self::ERROR_STORE_DISABLED, 'message' => 'Tetraminator: API key invalid or store disabled (HTTP 403).'],
             default => null,
         };
     }
@@ -414,7 +447,8 @@ final class TetraminatorGatewayPlugin implements PaymentGatewayPluginInterface, 
 
     /**
      * Which create-answer link becomes paymentUrl, in order of preference. prefer_website_link (default on; only an
-     * explicit false turns it off) puts the provider's website page, gateway_link, first.
+     * explicit false turns it off) puts gateway_link, the direct Shaparak page (no card-to-card), first. Off, url comes
+     * first: the provider's web page offering Shaparak and/or card-to-card as the store is set up.
      *
      * @param array<string, mixed> $config
      *
@@ -475,7 +509,7 @@ final class TetraminatorGatewayPlugin implements PaymentGatewayPluginInterface, 
         return null;
     }
 
-    /** An https URL with a host, no user info and no port; hosts are not pinned yet (open question 6). */
+    /** An https URL with a host, no user info and no port; hosts are not pinned. */
     private function link(mixed $value): ?string
     {
         if (!is_string($value) || '' === trim($value) || strlen($value) > 2048 || 1 === preg_match('/[\s\x00-\x1F\x7F]/', $value)) {

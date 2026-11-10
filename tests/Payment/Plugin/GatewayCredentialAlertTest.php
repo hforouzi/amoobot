@@ -89,7 +89,7 @@ final class GatewayCredentialAlertTest extends IntegrationTestCase
 
         $alerts = $this->alerts();
         self::assertCount(1, $alerts, 'once per hour for this gateway, however many customers fail');
-        self::assertStringContainsString('rejected its API key', $alerts[0]);
+        self::assertStringContainsString('API key missing or rejected', $alerts[0]);
         self::assertStringContainsString('gateway #'.$this->method->getGateway()->getId(), $alerts[0]);
         self::assertStringNotContainsString(self::API_KEY, implode("\n", $this->http->telegramTexts()), 'the provider text quoted the key: the alert does not');
         self::assertStringNotContainsString(self::API_KEY, self::getContainer()->get(RecordingLogger::class)->text());
@@ -108,7 +108,7 @@ final class GatewayCredentialAlertTest extends IntegrationTestCase
 
         $alerts = $this->alerts();
         self::assertCount(1, $alerts);
-        self::assertStringContainsString('store is disabled', $alerts[0]);
+        self::assertStringContainsString('API key invalid or store disabled', $alerts[0]);
         self::assertStringNotContainsString(self::API_KEY, $alerts[0]);
     }
 

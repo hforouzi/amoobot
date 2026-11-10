@@ -61,9 +61,9 @@ Base URL `https://api.tetraminator.com/v1`. Authentication header `X-API-KEY: <A
 
 | Call | Request | Success | Errors |
 |---|---|---|---|
-| `POST /invoice/create` | `price` (int, Toman, 50,000 to 10,000,000), `callback_url` (required), `chat_id` (optional) | 201: `status`, `message`, `pay_id`, `url`, `payment_link`, `mini_app_link`, `gateway_link` (only when enabled) | 400 bad data or amount too low, 401 invalid key, 403 store disabled |
-| `GET /payment/inquiry/{pay_id}` | none | 200: `{status: true, payment_status: "paid", pay_id, amount}` | Undocumented |
-| Webhook to `callback_url` | Plain GET, no body, no signature, sent after a successful payment | n/a | Retries and extra query parameters undocumented |
+| `POST /invoice/create` | `price` (int, Toman, 50,000 to 10,000,000 by default; a store may have its own cap), `callback_url` (required), `chat_id` (optional) | 201: `status`, `message`, `pay_id`, `url`, `payment_link`, `mini_app_link`, `gateway_link` (all four links always) | 400 missing `price`/`callback_url`, unsafe URL, non-numeric `chat_id` or amount outside the store's range; 401 `X-API-KEY` missing; 403 invalid key or store disabled |
+| `GET /payment/inquiry/{pay_id}` | none | 200: `{status, payment_status, pay_id, amount}`; `payment_status` is `pending`, `paid`, `expired` or `refused`, `status` is true only when paid; `amount` is integer Toman before the gateway fee | 403 invalid key, store disabled or another store's invoice; 404 no invoice with that `pay_id` |
+| Webhook to `callback_url` | Plain GET from the provider's server, no body, no signature, no added parameters, sent after a successful payment | n/a | Retried at least once if the first attempt fails |
 
 An invoice expires 60 minutes after creation.
 
@@ -149,7 +149,7 @@ failure:
 
 Every outcome returns identical bytes: HTTP 200, a constant short page ("Received. You can go back to the bot.", in
 Persian and English), `Cache-Control: no-store`, `Referrer-Policy: no-referrer`, `X-Robots-Tag: noindex, nofollow`. It works
-for a server and for a browser, in case the provider's GET turns out to be a browser redirect (open question 5). A
+for a server and for a browser, in case the provider's GET turned out to be a browser redirect (open question 5; the provider has since said it is sent by its server). A
 wrong token costs at most one primary key read. Response time still differs for a valid token, but only someone who
 already holds that token can observe it.
 
@@ -293,12 +293,18 @@ apply and can narrow the range.
 | Where | First choice | Fallback |
 |---|---|---|
 | Bot | `url` | `payment_link`, then `gateway_link` |
+
+What the links are (provider docs): `url` is a web page where the buyer chooses Shaparak or card-to-card when both are on;
+it equals `payment_link` when Shaparak is off and `gateway_link` when only card-to-card is off. `payment_link` is the
+invoice in the provider's bot (card-to-card), `mini_app_link` the invoice in its Telegram mini app (card-to-card),
+`gateway_link` the direct Shaparak page. All four are always returned.
+
 | Mini App | `mini_app_link` | `url` |
 
 - **Rationale.** `url` follows the store's gateway priority, set in the provider's panel, so the shop owner stays in control.
   `mini_app_link` keeps a Mini App customer inside Telegram.
-- **Validation.** `https`, no user info, no port. A response without a valid link is a failed create. Hosts are not pinned yet,
-  unlike Winapay, because the docs do not list them. Open question 6.
+- **Validation.** `https`, no user info, no port. A response without a valid link is a failed create. Hosts are not pinned,
+  unlike Winapay, because the docs do not list them (open question 6).
 - **Bot.** The existing `paymentOnlineActionMenu`, with its pay button and check button. The check button calls
   `verifyPayment()`, and `settle()` handles the result, with no change.
 - **Mini App.** The payment page reads `mini_app_link` from `requestPayload` for this gateway. A `t.me` link should open with
@@ -309,13 +315,14 @@ apply and can narrow the range.
   (`a[data-telegram-link]`) use `openTelegramLink`; otherwise both open `url` with `openLink` as before. The button text
   stays the generic one. A second tap on a live invoice reuses the row and its stored link.
 - **Admin's choice (plugin 1.1.0).** Two config fields override the table above, for new invoices only:
-  - `prefer_website_link` (default on): `paymentUrl` is `gateway_link`, the provider's website page, when present and valid,
-    else `url`, else `payment_link`. Off: the order above (`url`, `payment_link`, `gateway_link`).
+  - `prefer_website_link` (default on): `paymentUrl` is `gateway_link`, the direct Shaparak page (no card-to-card), when
+    present and valid, else `url`, else `payment_link`. Off: the order above (`url`, `payment_link`, `gateway_link`), so
+    the customer gets `url`, the provider's web chooser, as the store is set up.
   - `use_mini_app_link` (default off): only when on is `mini_app_link` kept in the stored request payload, so
     `PaymentTelegramLink` opens it in our Mini App. Off, it is not stored at all, and our Mini App opens `paymentUrl` with
     `openLink`, as for every other gateway.
 
-  So by default a customer gets the website page in the bot and in our Mini App, never the provider's Telegram mini app.
+  So by default a customer gets the direct Shaparak page in the bot and in our Mini App, never the provider's Telegram mini app.
   Every link is validated as above. A config saved before 1.1.0 lacks both keys and gets the defaults. A live invoice
   reused from the row keeps the link chosen at its creation (no API call), so a settings change applies to new invoices
   only. No core change.
@@ -441,26 +448,39 @@ for each payment, as `WinapayReconciler` does.
 
 ### 12. Open questions for the provider
 
-Send these before writing code. The answers change the code in the places marked.
+Asked before the code was written. The provider answered most of them in its new docs (plugin 1.1.1 follows them);
+**open** marks what is still unanswered.
 
-1. All `payment_status` values, and which are final? (Decision 1, `TetraminatorStatus`)
-2. What exactly does the inquiry return for unpaid, expired and unknown invoices: which HTTP status and which body? Today an
-   HTTP 200 with `status: false` and a 404 with JSON are assumed to mean not paid. (Decisions 1 and 4)
-3. Does the webhook retry? How often, and for how long? Which response counts as received, and what is its timeout? Does the
-   URL get extra query parameters? (Decision 2)
-4. Can `amount` differ from `price`, for example through fees? What is its unit and JSON type? (Decisions 1 and 5)
-5. Is the webhook sent by a server, or is the buyer's browser redirected there? Is there any return URL for the buyer?
-   (Decisions 2 and 6)
-6. Which hosts can appear in `url`, `payment_link`, `mini_app_link` and `gateway_link`, so that they can be pinned? (Decision 6)
-7. What is the type and maximum length of `pay_id`? (Decision 3)
-8. Which IP addresses send webhooks, for allowlisting? The token stays required either way.
-9. Can an invoice be paid after 60 minutes, for example a card-to-card payment confirmed late by an operator? Can an invoice be
-   cancelled through the API? (Decisions 3 and 4)
-10. Are there API rate limits? (Decision 4)
-11. Is there a sandbox or test key? Does creating an invoice cost anything?
-12. Is a refund or chargeback signalled in any way after `paid`?
+1. All `payment_status` values, and which are final? **Answered:** `pending`, `paid`, `expired`, `refused`. The inquiry
+   `status` is true only when paid, false otherwise. An undocumented value is logged as a warning and is not paid.
+   (Decision 1)
+2. What exactly does the inquiry return for unpaid, expired and unknown invoices? **Answered:** 200 with `status: false`
+   and the `payment_status`; 403 for an invalid key, a disabled store or another store's invoice; 404 when no invoice has
+   that `pay_id`. A 404 with JSON is not paid. A 404 without JSON is not paid only after the payment's `expiresAt` (the
+   provider may delete an expired invoice); before that it stays an error, so a misrouted 404 never expires a live
+   invoice. (Decisions 1 and 4)
+3. Does the webhook retry? Extra query parameters? **Answered:** retried at least once if the first attempt fails; a
+   plain GET with no added parameters. The timer stays the safety net. (Decision 2)
+4. Can `amount` differ from `price`? Unit and JSON type? **Answered:** integer Toman, the invoice's original amount before
+   the gateway fee, so the exact match with the price is correct. (Decisions 1 and 5)
+5. Is the webhook sent by a server, or is the buyer's browser redirected there? **Answered:** by the provider's server.
+   There is no return URL for the buyer. (Decisions 2 and 6)
+6. Which hosts can appear in the links? Not answered; hosts stay unpinned. The meaning of each link is answered (see
+   decision 6), and all four links are always returned.
+7. What is the type and maximum length of `pay_id`? Not answered; the pattern of decision 3 stays.
+8. Which IP addresses send webhooks, for allowlisting? **Open.** The token stays required either way.
+9. Can an invoice be paid after 60 minutes, for example a card-to-card payment confirmed late by an operator? **Open.**
+   `failed` is never reported, and a late paid answer goes to review. (Decisions 3 and 4)
+10. Are there API rate limits? Not answered. (Decision 4)
+11. Is there a sandbox or test key? Not answered.
+12. Is a refund or chargeback signalled after `paid`? Not answered.
 
-Until questions 1 and 2 are answered, the real-payment checklist below stays the only proof of those branches.
+Create errors (provider docs): 400 for a missing `price` or `callback_url`, an unsafe URL, a non-numeric `chat_id`, or an
+amount outside the store's range (default 50,000 to 10,000,000; a store may have its own cap); 401 when `X-API-KEY` is
+missing; 403 for an invalid key or a disabled store. The admin alert reads "API key missing or rejected" for 401 and
+"API key invalid or store disabled" for 403; the error codes `unauthorized` and `store_disabled` are unchanged.
+
+The real-payment checklist below stays the proof of the paid branch.
 
 ### 13. PR split
 
@@ -533,7 +553,7 @@ Use the real gateway on production, with a test plan, and with the switch on onl
 - [ ] Webhook arrived. Record request method, user agent, query parameters and source IP, by turning on that location's
       access log for this test only. Turn it off again before the log check above.
 - [ ] Order confirmed and provisioned once. Bot message received once. Reload and press the check button: nothing changes.
-- [ ] 50,000 Toman from the Mini App. With the defaults it opens the website page (`gateway_link`); with
+- [ ] 50,000 Toman from the Mini App. With the defaults it opens the direct Shaparak page (`gateway_link`); with
       `use_mini_app_link` on, `mini_app_link`. The page updates by itself.
 - [ ] Wallet top-up of 50,000 Toman: wallet credited once.
 - [ ] Lost webhook: block the notify location for one payment. The timer settles it within minutes.
@@ -585,4 +605,4 @@ Then add the module in Admin > Payment Gateways, fill in the config, and create 
 - تایمر `tetraminator` هر ۲ دقیقه پرداخت‌های باز را با فاصلهٔ افزایشی استعلام می‌کند و حدود ۷۰ دقیقه پس از ساخت فاکتور آن‌ها را منقضی می‌کند. پرداخت دیرهنگام از بین نمی‌رود و به بررسی دستی می‌رود.
 - هر ردیف `Payment` فقط یک فاکتور دارد و مهاجرت پایگاه‌داده لازم نیست.
 - ارسال `chat_id` و خود درگاه به‌طور پیش‌فرض خاموش است. مبلغ‌های خارج از ۵۰٬۰۰۰ تا ۱۰٬۰۰۰٬۰۰۰ تومان این روش را پنهان می‌کنند.
-- پیش از نوشتن کد باید پرسش‌های بخش ۱۲ از تترامیناتور پرسیده شود و اولین پرداخت واقعی با حداقل مبلغ ۵۰٬۰۰۰ تومان انجام شود.
+- تترامیناتور بیشتر پرسش‌های بخش ۱۲ را پاسخ داده است؛ هنوز باز: پرداخت‌های تأییدشده پس از ۶۰ دقیقه و IPهای ارسال وب‌هوک. اولین پرداخت واقعی با حداقل مبلغ ۵۰٬۰۰۰ تومان انجام شود.

@@ -24,8 +24,8 @@ final class PaymentGatewayCredentialAlert
     public const ERROR_STORE_DISABLED = 'store_disabled';
 
     private const DETAILS = [
-        self::ERROR_UNAUTHORIZED => 'The gateway rejected its API key (unauthorized). Customers cannot pay with this method until the key is fixed in Admin > Payment Gateways.',
-        self::ERROR_STORE_DISABLED => 'The gateway says the store is disabled at the provider. Customers cannot pay with this method until it is enabled in the provider\'s panel.',
+        self::ERROR_UNAUTHORIZED => 'API key missing or rejected (unauthorized). Customers cannot pay with this method until the key is fixed in Admin > Payment Gateways.',
+        self::ERROR_STORE_DISABLED => 'API key invalid or store disabled (store_disabled). Customers cannot pay with this method until the key is fixed in Admin > Payment Gateways or the store is enabled in the provider\'s panel.',
     ];
 
     public function __construct(

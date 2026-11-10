@@ -17,6 +17,7 @@ use App\Payment\Domain\Money\AmountMatcher;
 use App\Payment\Domain\Money\AmountMatchStatus;
 use App\Payment\Domain\Webhook\NotificationAwareGatewayInterface;
 use App\Payment\Plugin\PluginPaymentGatewayDriverAdapter;
+use App\Tests\Support\CapturesErrorLog;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\HttpClient\Exception\TransportException;
@@ -35,6 +36,8 @@ foreach (['TetraminatorException', 'TetraminatorApi', 'TetraminatorGatewayPlugin
  */
 final class TetraminatorGatewayPluginTest extends TestCase
 {
+    use CapturesErrorLog;
+
     private const API_KEY = 'FAKE-tetraminator-key-for-tests-0000';
     private const PAY_ID = 'PAY_7f3a-0001';
     private const PAYMENT_ID = 4242;
@@ -900,6 +903,173 @@ final class TetraminatorGatewayPluginTest extends TestCase
         yield 'long payment_status' => [['status' => true, 'payment_status' => str_repeat('x', 40).self::API_KEY], 200, '[unrecognised string]'];
         yield 'status false' => [['status' => false, 'message' => 'not paid'], 200, 'status false'];
         yield '404 JSON' => [['status' => false, 'message' => 'not found'], 404, 'HTTP 404'];
+    }
+
+    // ---- provider answers (1.1.1) -------------------------------------------------------------
+
+    /**
+     * An inquiry 404. With a JSON object it is the provider's "no such invoice": not paid. Without one it decides
+     * nothing while the invoice is live (a misrouted 404 must not expire it), and is not paid only after expiresAt.
+     */
+    #[DataProvider('inquiry404s')]
+    public function testAnInquiry404(MockResponse $response, string $expiresIn, bool $decided, bool $warns): void
+    {
+        $this->responses[] = $response;
+        $payment = $this->issued(expiresIn: $expiresIn);
+
+        $result = null;
+        $log = $this->captureErrorLog(function () use ($payment, &$result): void {
+            $result = $this->plugin()->verifyPayment($payment, [], $this->config());
+        });
+
+        self::assertInstanceOf(PaymentVerificationResult::class, $result);
+        self::assertSame($decided, $result->success, $decided ? 'not paid' : 'an error: nothing decided');
+        self::assertFalse($result->paid);
+        self::assertFalse($result->failed);
+        self::assertSame(self::PAY_ID, $result->transactionId);
+        self::assertNull($payment->getVerifyPayload());
+        self::assertCount(1, $this->requests, 'no retry');
+        if ($warns) {
+            self::assertStringContainsString('inquiry HTTP 404 without a JSON body payment_id='.self::PAYMENT_ID, $log);
+        } else {
+            self::assertSame('', $log);
+        }
+        self::assertStringNotContainsString(self::PAY_ID, $log, 'payment id only');
+        $this->assertNoSecret($result, $log);
+    }
+
+    /**
+     * @return iterable<string, array{MockResponse, string, bool, bool}>
+     */
+    public static function inquiry404s(): iterable
+    {
+        $answers = [
+            'JSON' => [static fn (): MockResponse => new MockResponse('{"status":false,"message":"invoice not found"}', ['http_code' => 404, 'response_headers' => ['content-type' => 'application/json']]), true],
+            'empty' => [static fn (): MockResponse => new MockResponse('', ['http_code' => 404]), false],
+            'HTML' => [static fn (): MockResponse => new MockResponse('<html><body>Not Found</body></html>', ['http_code' => 404, 'response_headers' => ['content-type' => 'text/html']]), false],
+            'JSON list' => [static fn (): MockResponse => new MockResponse('[]', ['http_code' => 404]), false],
+        ];
+        foreach ($answers as $name => [$answer, $isJson]) {
+            yield $name.' before expiresAt' => [$answer(), '+30 minutes', $isJson, !$isJson];
+            yield $name.' after expiresAt' => [$answer(), '-1 minute', true, !$isJson];
+        }
+    }
+
+    public function testA404WithoutJsonAfterExpiryIsMarked(): void
+    {
+        $this->responses[] = new MockResponse('', ['http_code' => 404]);
+
+        $result = null;
+        $this->captureErrorLog(function () use (&$result): void {
+            $result = $this->plugin()->verifyPayment($this->issued(expiresIn: '-5 minutes'), [], $this->config());
+        });
+
+        self::assertInstanceOf(PaymentVerificationResult::class, $result);
+        self::assertSame(['error' => 'not_found_after_expiry', 'http_status' => 404], $result->rawResponse);
+        self::assertStringContainsString('expired invoice', (string) $result->message);
+    }
+
+    public function testA404WithoutJsonAndNoExpiryDecidesNothing(): void
+    {
+        $this->responses[] = new MockResponse('', ['http_code' => 404]);
+        $payment = $this->issued()->setExpiresAt(null);
+
+        $result = null;
+        $this->captureErrorLog(function () use ($payment, &$result): void {
+            $result = $this->plugin()->verifyPayment($payment, [], $this->config());
+        });
+
+        self::assertInstanceOf(PaymentVerificationResult::class, $result);
+        self::assertFalse($result->success);
+        self::assertFalse($result->paid);
+    }
+
+    /**
+     * The four documented payment_status values, with the documented status (true only when paid): no warning.
+     */
+    #[DataProvider('documentedStatuses')]
+    public function testDocumentedPaymentStatuses(string $paymentStatus, bool $paid): void
+    {
+        $this->respond(['status' => 'paid' === $paymentStatus, 'payment_status' => $paymentStatus, 'pay_id' => self::PAY_ID, 'amount' => 50_000]);
+        $payment = $this->issued();
+
+        $result = null;
+        $log = $this->captureErrorLog(function () use ($payment, &$result): void {
+            $result = $this->plugin()->verifyPayment($payment, [], $this->config());
+        });
+
+        self::assertInstanceOf(PaymentVerificationResult::class, $result);
+        self::assertTrue($result->success);
+        self::assertSame($paid, $result->paid);
+        self::assertFalse($result->failed);
+        self::assertSame($paid ? '50000' : null, $result->amount);
+        self::assertNull($payment->getVerifyPayload());
+        self::assertSame('', $log, 'a documented value is not logged');
+    }
+
+    /**
+     * @return iterable<string, array{string, bool}>
+     */
+    public static function documentedStatuses(): iterable
+    {
+        yield 'pending' => ['pending', false];
+        yield 'paid' => ['paid', true];
+        yield 'expired' => ['expired', false];
+        yield 'refused' => ['refused', false];
+    }
+
+    /**
+     * An undocumented payment_status: a warning with the payment id and the value (masked, capped), still not paid.
+     */
+    #[DataProvider('unknownStatuses')]
+    public function testAnUnknownPaymentStatusIsLoggedAndNotPaid(bool $status, mixed $paymentStatus, string $logged): void
+    {
+        $this->respond(['status' => $status, 'payment_status' => $paymentStatus, 'pay_id' => self::PAY_ID, 'amount' => 50_000]);
+        $payment = $this->issued();
+
+        $result = null;
+        $log = $this->captureErrorLog(function () use ($payment, &$result): void {
+            $result = $this->plugin()->verifyPayment($payment, [], $this->config());
+        });
+
+        self::assertInstanceOf(PaymentVerificationResult::class, $result);
+        self::assertTrue($result->success);
+        self::assertFalse($result->paid);
+        self::assertFalse($result->failed);
+        self::assertNull($payment->getVerifyPayload());
+        self::assertStringContainsString('unknown payment_status payment_id='.self::PAYMENT_ID.' value='.$logged, $log);
+        self::assertSame(1, substr_count($log, 'unknown payment_status'));
+        $this->assertNoSecret($result, $log);
+    }
+
+    /**
+     * @return iterable<string, array{bool, mixed, string}>
+     */
+    public static function unknownStatuses(): iterable
+    {
+        yield 'settled, status false' => [false, 'settled', '"settled"'];
+        yield 'settled, status true' => [true, 'settled', '"settled"'];
+        yield 'Pending (case)' => [false, 'Pending', '"Pending"'];
+        yield 'array' => [false, ['x' => 1], '"[array]"'];
+        yield 'long, with the key' => [false, 'x'.self::API_KEY.str_repeat('y', 100), '"x[redacted]'.str_repeat('y', 21).'"'];
+    }
+
+    public function testStatusFalseWithPaymentStatusPaidGoesToReviewWithoutAWarning(): void
+    {
+        $this->respond(['status' => false, 'payment_status' => 'paid', 'pay_id' => self::PAY_ID, 'amount' => 50_000]);
+        $payment = $this->issued();
+
+        $result = null;
+        $log = $this->captureErrorLog(function () use ($payment, &$result): void {
+            $result = $this->plugin()->verifyPayment($payment, [], $this->config());
+        });
+
+        self::assertInstanceOf(PaymentVerificationResult::class, $result);
+        self::assertTrue($result->paid);
+        self::assertNull($result->amount);
+        self::assertSame(AmountMatchStatus::MISSING, $this->match($payment, $result));
+        self::assertSame('status_not_true', $payment->getVerifyPayload()[TetraminatorGatewayPlugin::REVIEW_EVIDENCE_KEY]['reason'] ?? null);
+        self::assertSame('', $log);
     }
 
     #[DataProvider('verifyHttpErrors')]

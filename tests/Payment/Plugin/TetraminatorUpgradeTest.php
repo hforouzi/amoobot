@@ -15,7 +15,7 @@ use Symfony\Component\DomCrawler\Crawler;
 use Symfony\Component\Process\Process;
 
 /**
- * Tetraminator 1.0.0 -> 1.1.0 through app:plugin:upgrade. 1.1.0 is docs/plugins/tetraminator-gateway/build.sh's ZIP; the
+ * Tetraminator 1.0.0 -> the shipped version (1.1.x) through app:plugin:upgrade, which is docs/plugins/tetraminator-gateway/build.sh's ZIP; the
  * 1.0.0 fixture is the same ZIP with the 1.0.0 manifest (version, no link settings) and a marker constant in the main
  * class, so the test can tell which class a fresh PHP process loads. Installed into var/plugins/tetraminator of this
  * checkout for the test only, and removed again.
@@ -108,7 +108,15 @@ final class TetraminatorUpgradeTest extends IntegrationTestCase
         return $zip;
     }
 
-    /** What a fresh PHP process finds in var/plugins/tetraminator: the 1.0.0 marker, or 1.1.0's linkOrder(). */
+    /** The version in the shipped manifest, docs/plugins/tetraminator-gateway/plugin.json. */
+    private function shippedVersion(): string
+    {
+        $manifest = json_decode((string) file_get_contents($this->projectDir.'/docs/plugins/tetraminator-gateway/plugin.json'), true, flags: JSON_THROW_ON_ERROR);
+
+        return (string) $manifest['version'];
+    }
+
+    /** What a fresh PHP process finds in var/plugins/tetraminator: the 1.0.0 marker, or 1.1.x's linkOrder() ("new"). */
     private function liveClass(): string
     {
         $script = <<<'PHP'
@@ -121,7 +129,7 @@ final class TetraminatorUpgradeTest extends IntegrationTestCase
                 }
             });
             $class = 'Amoobot\\Plugin\\Tetraminator\\TetraminatorGatewayPlugin';
-            echo defined($class.'::FIXTURE_V100') ? '1.0.0' : (method_exists($class, 'linkOrder') ? '1.1.0' : 'unknown');
+            echo defined($class.'::FIXTURE_V100') ? '1.0.0' : (method_exists($class, 'linkOrder') ? 'new' : 'unknown');
             PHP;
         $process = new Process([PHP_BINARY, '-r', $script, '--', $this->projectDir.'/vendor/autoload.php', $this->installDir.'/src']);
         $process->mustRun();
@@ -174,14 +182,14 @@ final class TetraminatorUpgradeTest extends IntegrationTestCase
 
         [$status, $output] = $this->console('app:plugin:upgrade', ['zipPath' => $zip]);
         self::assertSame(Command::SUCCESS, $status, $output);
-        self::assertStringContainsString('Plugintetraminatorupgradedfrom1.0.0to1.1.0(statusenabledkept).', $output);
+        self::assertStringContainsString('Plugintetraminatorupgradedfrom1.0.0to'.$this->shippedVersion().'(statusenabledkept).', $output);
         self::assertStringNotContainsString('FAKE-tetraminator-key', $output);
 
-        self::assertSame('1.1.0', $this->liveClass(), 'the new class is live');
+        self::assertSame('new', $this->liveClass(), 'the new class is live');
         $this->em->clear();
         $plugin = $this->em->getRepository(Plugin::class)->findOneBy(['code' => self::CODE]);
         self::assertInstanceOf(Plugin::class, $plugin);
-        self::assertSame(['1.1.0', Plugin::STATUS_ENABLED], [$plugin->getVersion(), $plugin->getStatus()]);
+        self::assertSame([$this->shippedVersion(), Plugin::STATUS_ENABLED], [$plugin->getVersion(), $plugin->getStatus()]);
         self::assertSame($configBefore, $this->em->getConnection()->fetchOne('SELECT config FROM payment_gateway WHERE id = ?', [$gatewayId]));
 
         $after = $this->formFields($client, $gatewayId);
