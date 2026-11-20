@@ -15,31 +15,34 @@ declare(strict_types=1);
  * shard than its parent (tests/Shop/InboundMove vs tests/Shop). Every *Test.php under the suite directories of
  * phpunit.dist.xml must belong to a shard, otherwise `check`/`matrix` fail: a new test directory cannot be skipped silently.
  *
- * Balanced by measured runtime (develop/v3 run 44799254634, phpunit 15:24 serial): approx. seconds in comments.
- * Rebalance with the junit-* artifacts each shard uploads.
+ * Balanced by measured runtime (junit of PR #137's first sharded run; serial suite was 15:24): approx. seconds in
+ * comments. Rebalance with the junit-* artifacts each shard uploads.
  */
 
 const SHARDS = [
-    // ~250s
+    // ~225s
     'shop-inbound-move' => [
-        'faketime' => true, // tests/Clock/MidnightCrossingTest runs under libfaketime.
-        'paths' => ['tests/Shop/InboundMove', 'tests/Bot', 'tests/Clock', 'tests/Subscription', 'tests/Shared', 'tests/Broadcast'],
+        'faketime' => false,
+        'paths' => [
+            'tests/Shop/InboundMove', 'tests/Shop/TrialBacking', 'tests/Bot', 'tests/Subscription', 'tests/Shared',
+            'tests/Broadcast', 'tests/Branding',
+        ],
     ],
-    // ~140s: the multi-process / lock tests (parallel settlement, wallet locks) run alone.
+    // ~135s: the multi-process / lock tests (parallel settlement, wallet locks) run alone.
     'payment-wallet' => [
         'faketime' => false,
         'paths' => ['tests/Payment', 'tests/Wallet'],
     ],
-    // ~255s
+    // ~200s
     'reseller-admin' => [
         'faketime' => false,
         'paths' => ['tests/Reseller', 'tests/Admin', 'tests/Provisioning', 'tests/Security'],
     ],
-    // ~280s
+    // ~245s
     'shop-miniapp' => [
-        'faketime' => false,
+        'faketime' => true, // tests/Clock/MidnightCrossingTest (~80s) runs under libfaketime.
         'paths' => [
-            'tests/Shop', 'tests/Command', 'tests/MiniApp', 'tests/Branding', 'tests/Module', 'tests/Contract',
+            'tests/Shop', 'tests/Clock', 'tests/Command', 'tests/MiniApp', 'tests/Module', 'tests/Contract',
             'tests/Database', 'tests/Support',
             'docs/plugins/winapay-gateway/tests', 'docs/plugins/tetraminator-gateway/tests', 'docs/plugins/hooshpay-gateway/tests',
         ],
