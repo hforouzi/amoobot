@@ -6,6 +6,7 @@ namespace App\Provisioning\Application;
 
 use App\Bot\Application\BotTextResolver;
 use App\Bot\Infrastructure\TelegramApiClient;
+use App\Bot\Infrastructure\TelegramApiRejected;
 use App\Entity\ServiceNotificationLog;
 use App\Entity\TelegramAccount;
 use App\Entity\VpnService;
@@ -54,6 +55,7 @@ final class ServiceNotificationService
         $sent = 0;
         $skipped = 0;
         $failed = 0;
+        $undeliverable = 0;
 
         foreach ($services as $service) {
             ++$checked;
@@ -98,7 +100,7 @@ final class ServiceNotificationService
                     ]
                 );
 
-                $this->applyResultCounters($result, $sent, $skipped, $failed);
+                $this->applyResultCounters($result, $sent, $skipped, $failed, $undeliverable);
             }
 
             if (!$matched) {
@@ -106,7 +108,7 @@ final class ServiceNotificationService
             }
         }
 
-        return new NotificationSummary($checked, $sent, $skipped, $failed);
+        return new NotificationSummary($checked, $sent, $skipped, $failed, $undeliverable);
     }
 
     public function sendTrafficWarningsWithOptions(bool $dryRun = false, int $limit = 100): NotificationSummary
@@ -118,6 +120,7 @@ final class ServiceNotificationService
         $sent = 0;
         $skipped = 0;
         $failed = 0;
+        $undeliverable = 0;
 
         foreach ($services as $service) {
             ++$checked;
@@ -168,7 +171,7 @@ final class ServiceNotificationService
                     ]
                 );
 
-                $this->applyResultCounters($result, $sent, $skipped, $failed);
+                $this->applyResultCounters($result, $sent, $skipped, $failed, $undeliverable);
             }
 
             if (!$matched) {
@@ -176,7 +179,7 @@ final class ServiceNotificationService
             }
         }
 
-        return new NotificationSummary($checked, $sent, $skipped, $failed);
+        return new NotificationSummary($checked, $sent, $skipped, $failed, $undeliverable);
     }
 
     public function sendExpiredNotificationsWithOptions(bool $dryRun = false, int $limit = 100): NotificationSummary
@@ -188,6 +191,7 @@ final class ServiceNotificationService
         $sent = 0;
         $skipped = 0;
         $failed = 0;
+        $undeliverable = 0;
 
         foreach ($services as $service) {
             ++$checked;
@@ -222,10 +226,10 @@ final class ServiceNotificationService
                 ]
             );
 
-            $this->applyResultCounters($result, $sent, $skipped, $failed);
+            $this->applyResultCounters($result, $sent, $skipped, $failed, $undeliverable);
         }
 
-        return new NotificationSummary($checked, $sent, $skipped, $failed);
+        return new NotificationSummary($checked, $sent, $skipped, $failed, $undeliverable);
     }
 
     /**
@@ -352,18 +356,28 @@ final class ServiceNotificationService
             return 'sent';
         }
 
+        $result = 'sent';
         try {
             $this->telegramApiClient->sendMessageStrict($account->getTelegramId(), $text, $replyMarkup);
         } catch (\Throwable $e) {
-            $this->log(sprintf(
-                'send_failed service_id=%d type="%s" key="%s" message="%s"',
-                (int) ($service->getId() ?? 0),
-                $type,
-                $keyName,
-                $this->sanitizeError($e->getMessage())
-            ));
+            if (!$e instanceof TelegramApiRejected || !$e->isRecipientUnreachable()) {
+                $this->log(sprintf(
+                    'send_failed service_id=%d type="%s" key="%s" message="%s"',
+                    (int) ($service->getId() ?? 0),
+                    $type,
+                    $keyName,
+                    $this->sanitizeError($e->getMessage())
+                ));
 
-            return 'failed';
+                return 'failed';
+            }
+
+            // The bot cannot reach this user (blocked, chat gone): sending again will not help, so the notice is recorded
+            // below as handled, with the reason, and never retried.
+            $reason = $this->undeliverableReason($e);
+            $payload['undeliverable'] = $reason;
+            $result = 'undeliverable';
+            $this->log(sprintf('undeliverable service_id=%d type=%s key=%s reason=%s', (int) ($service->getId() ?? 0), $type, $keyName, $reason));
         }
 
         try {
@@ -389,7 +403,24 @@ final class ServiceNotificationService
             return 'failed';
         }
 
-        return 'sent';
+        return $result;
+    }
+
+    /** A short reason for an unreachable recipient, for the log row and the log line (never the chat id). */
+    private function undeliverableReason(TelegramApiRejected $e): string
+    {
+        $description = strtolower($e->description);
+
+        return match (true) {
+            str_contains($description, 'blocked') => 'blocked',
+            str_contains($description, 'deactivated') => 'deactivated',
+            str_contains($description, "can't initiate") => 'cant_initiate',
+            str_contains($description, 'chat not found') => 'chat_not_found',
+            str_contains($description, 'user not found') => 'user_not_found',
+            str_contains($description, 'peer_id_invalid') => 'peer_id_invalid',
+            403 === $e->errorCode => 'forbidden',
+            default => 'unreachable',
+        };
     }
 
     /**
@@ -436,10 +467,15 @@ final class ServiceNotificationService
         };
     }
 
-    private function applyResultCounters(string $result, int &$sent, int &$skipped, int &$failed): void
+    private function applyResultCounters(string $result, int &$sent, int &$skipped, int &$failed, int &$undeliverable): void
     {
         if ('sent' === $result) {
             ++$sent;
+            return;
+        }
+
+        if ('undeliverable' === $result) {
+            ++$undeliverable;
             return;
         }
 

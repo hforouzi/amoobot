@@ -75,6 +75,7 @@ final class ServiceSendNotificationsCommand extends Command
             sprintf('sent: %d', $total->sent),
             sprintf('skipped: %d', $total->skipped),
             sprintf('failed: %d', $total->failed),
+            sprintf('undeliverable: %d', $total->undeliverable),
         ]);
 
         if ($dryRun) {
