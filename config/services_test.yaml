@@ -12,6 +12,19 @@ services:
         arguments: ['@.inner']
         public: true
 
+    # PM1a: nothing in production uses the module registries or VpnProductModule yet, so the compiler would remove
+    # them. These test-only aliases keep them for tests/Module, tests/Provisioning/VpnProductModuleTest and
+    # VpnCapabilityHonestyTest.
+    test.module.product_module_registry:
+        alias: App\Module\Application\ProductModuleRegistry
+        public: true
+    test.module.provider_driver_registry:
+        alias: App\Module\Application\ProviderDriverRegistry
+        public: true
+    test.module.vpn_product_module:
+        alias: App\Provisioning\Application\VpnProductModule
+        public: true
+
     # Counts SQL statements for query-budget tests (AdminDashboardTest).
     App\Tests\Support\QueryCounter:
         public: true

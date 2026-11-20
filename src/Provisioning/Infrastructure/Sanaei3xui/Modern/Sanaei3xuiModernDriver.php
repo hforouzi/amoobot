@@ -29,7 +29,6 @@ use App\Provisioning\Domain\InboundMoveDriverInterface;
 use App\Provisioning\Domain\PanelLinkSourceDriverInterface;
 use App\Provisioning\Domain\ServiceActivationDriverInterface;
 use App\Provisioning\Domain\TrafficLimitDriverInterface;
-use App\Provisioning\Domain\VpnPanelDriverInterface;
 use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http\PanelApiException;
 use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http\PanelFailure;
 use App\Shared\Domain\SecretRedactor;
@@ -40,6 +39,10 @@ use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 use Symfony\Component\Clock\NativeClock;
 use Symfony\Component\Uid\Uuid;
+use App\Provisioning\Domain\VpnDriverInterface;
+use App\Provisioning\Domain\VpnDriverIdentity;
+use App\Provisioning\Domain\VpnCapability;
+use App\Module\Domain\CapabilitySet;
 
 /**
  * 3x-ui driver on the modern clients API (bearer token). Selected for sanaei_3xui panels whose effective integration
@@ -57,8 +60,22 @@ use Symfony\Component\Uid\Uuid;
  *   thrown: the primary alone makes a working service. Without additional inbounds the requests are exactly the
  *   single-inbound ones.
  */
-final class Sanaei3xuiModernDriver implements VpnPanelDriverInterface, ExistingClientAwareDriverInterface, TrafficLimitDriverInterface, ServiceActivationDriverInterface, BatchUsageDriverInterface, ClientOwnerDriverInterface, CredentialRotationDriverInterface, PanelLinkSourceDriverInterface, InboundAttachDriverInterface, InboundDetachDriverInterface, InboundMoveDriverInterface
+final class Sanaei3xuiModernDriver implements VpnDriverInterface, ExistingClientAwareDriverInterface, TrafficLimitDriverInterface, ServiceActivationDriverInterface, BatchUsageDriverInterface, ClientOwnerDriverInterface, CredentialRotationDriverInterface, PanelLinkSourceDriverInterface, InboundAttachDriverInterface, InboundDetachDriverInterface, InboundMoveDriverInterface
 {
+    use VpnDriverIdentity;
+
+    /** 3x-ui with the modern clients API (VpnPanel::isModern()). The VpnPanel type stays 'sanaei_3xui' for both 3x-ui drivers. */
+    public function code(): string
+    {
+        return 'sanaei_3xui';
+    }
+
+    /** Derived from the optional interfaces implemented above (docs/design/product-modules.md 6.3). */
+    public function capabilities(): CapabilitySet
+    {
+        return VpnCapability::derive($this);
+    }
+
     public const BYTES_PER_GB = 1073741824;
     /**
      * The additional inbounds are never attached at the sale (M2d B1): the sale runs under the settlement's row locks, so
