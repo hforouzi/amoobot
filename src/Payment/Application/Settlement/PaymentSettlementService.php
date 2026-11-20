@@ -8,7 +8,7 @@ use App\Entity\DiscountCode;
 use App\Entity\Order;
 use App\Entity\Payment;
 use App\Entity\VpnService;
-use App\Module\Application\ProductModuleRegistry;
+use App\Module\Application\ProductModuleResolver;
 use App\Module\Domain\ProductModuleInterface;
 use App\Payment\Application\AdminPaymentAlerter;
 use App\Payment\Application\PaymentCustomerNotifier;
@@ -20,7 +20,6 @@ use App\Payment\Domain\PaymentStatus;
 use App\Provisioning\Application\InboundAttachAlerts;
 use App\Provisioning\Application\ServiceInboundAttacher;
 use App\Provisioning\Application\ServiceTrafficAddonService;
-use App\Provisioning\Application\VpnProductModule;
 use App\Shared\Domain\SecretRedactor;
 use App\Shared\Infrastructure\TransactionRollback;
 use App\Shop\Application\DiscountCodeService;
@@ -83,7 +82,7 @@ class PaymentSettlementService
         private readonly TransactionRollback $transactionRollback,
         private readonly AmountMatcher $amountMatcher,
         private readonly UnderpaymentTolerancePolicy $tolerancePolicy,
-        private readonly ProductModuleRegistry $productModules,
+        private readonly ProductModuleResolver $productModules,
         private readonly ServiceTrafficAddonService $serviceTrafficAddonService,
         private readonly DiscountCodeService $discountCodeService,
         private readonly PaymentCustomerNotifier $customerNotifier,
@@ -618,7 +617,7 @@ class PaymentSettlementService
      */
     private function productModule(Order $order): ProductModuleInterface
     {
-        return $this->productModules->get(VpnProductModule::TYPE);
+        return $this->productModules->forOrder($order);
     }
 
     /**

@@ -15,6 +15,7 @@ use App\Payment\Application\Settlement\SettlementOutcome;
 use App\Payment\Application\Settlement\VerifiedPayment;
 use App\Payment\Domain\Dto\PaymentVerificationResult;
 use App\Payment\Domain\PaymentStatus;
+use App\Provisioning\Application\AutoSuspendSummary;
 use App\Provisioning\Application\RenewalResult;
 use App\Provisioning\Application\ServiceAdminOutcome;
 use App\Provisioning\Application\VpnProductModule;
@@ -270,6 +271,13 @@ final class SettlementViaProductModuleTest extends IntegrationTestCase
             $this->record('terminate', [$service]);
 
             return $this->inner->terminate($service);
+        }
+
+        public function runLifecycleTask(string $task, int $limit, bool $dryRun): AutoSuspendSummary
+        {
+            $this->record('runLifecycleTask', [$task, $limit, $dryRun]);
+
+            return $this->inner->runLifecycleTask($task, $limit, $dryRun);
         }
 
         /** @param list<mixed> $args */

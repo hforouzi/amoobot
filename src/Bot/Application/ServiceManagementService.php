@@ -28,6 +28,7 @@ use App\Provisioning\Application\ServiceConfigDeliveryRefresher;
 use App\Provisioning\Application\TrafficAddonSettingsProvider;
 use App\Provisioning\Application\CustomerAccessGuard;
 use App\Provisioning\Application\CustomerServiceFinder;
+use App\Module\Application\ProductModuleResolver;
 use App\Reseller\Application\ServiceOwnership;
 use App\Provisioning\Application\FinalConfigLinkProvider;
 use App\Provisioning\Application\ServiceAdminOutcome;
@@ -88,6 +89,7 @@ class ServiceManagementService
         private readonly ServiceOwnership $serviceOwnership,
         private readonly ServiceInboundCounts $inboundCounts,
         private readonly LinksUpdatingNotice $linksUpdatingNotice,
+        private readonly ProductModuleResolver $productModules,
     ) {
     }
 
@@ -1228,7 +1230,7 @@ class ServiceManagementService
             return;
         }
 
-        if (!$this->presentAdminOutcome($this->serviceAdministration->suspend($service), 'suspend', $chatId, $callbackId)) {
+        if (!$this->presentAdminOutcome($this->productModules->forService($service)->suspend($service), 'suspend', $chatId, $callbackId)) {
             return;
         }
 
@@ -1244,7 +1246,7 @@ class ServiceManagementService
             return;
         }
 
-        if (!$this->presentAdminOutcome($this->serviceAdministration->activate($service), 'activate', $chatId, $callbackId)) {
+        if (!$this->presentAdminOutcome($this->productModules->forService($service)->resume($service), 'activate', $chatId, $callbackId)) {
             return;
         }
 

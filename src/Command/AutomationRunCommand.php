@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Command;
 
 use App\Broadcast\BroadcastSender;
+use App\Module\Application\ProductModuleResolver;
+use App\Module\Domain\ProductModuleInterface;
 use App\Payment\Application\MissingDeliveryResender;
 use App\Payment\Application\Reconcile\TetraminatorReconciler;
 use App\Payment\Application\Reconcile\TetraminatorRunSummary;
@@ -12,10 +14,10 @@ use App\Payment\Application\StuckPaymentReminder;
 use App\Provisioning\Application\AutomationSettingsProvider;
 use App\Provisioning\Application\InboundAttachScheduler;
 use App\Provisioning\Application\InboundMoveScheduler;
-use App\Provisioning\Application\ServiceAutoSuspendService;
 use App\Provisioning\Application\ServiceExpiryChecker;
 use App\Provisioning\Application\ServiceNotificationService;
 use App\Provisioning\Application\ServiceUsageSyncService;
+use App\Provisioning\Application\VpnProductModule;
 use App\Reseller\Application\ClaimMaintenance;
 use App\Shared\Infrastructure\TransactionRollback;
 use App\Shop\Application\IncompleteOrderExpiryService;
@@ -35,7 +37,7 @@ final class AutomationRunCommand extends Command
         private readonly AutomationSettingsProvider $automationSettingsProvider,
         private readonly ServiceUsageSyncService $serviceUsageSyncService,
         private readonly ServiceExpiryChecker $serviceExpiryChecker,
-        private readonly ServiceAutoSuspendService $serviceAutoSuspendService,
+        private readonly ProductModuleResolver $productModules,
         private readonly ServiceNotificationService $serviceNotificationService,
         private readonly IncompleteOrderExpiryService $incompleteOrderExpiryService,
         private readonly StuckPaymentReminder $stuckPaymentReminder,
@@ -153,8 +155,9 @@ final class AutomationRunCommand extends Command
         }
 
         if ($this->shouldRun($only, 'suspend')) {
+            // The 'vpn' module's job path (ServiceAutoSuspendService), until PM2a/PM5a run every enabled module's tasks.
             if ($this->automationSettingsProvider->autoSuspendExpiredEnabled()) {
-                $summary = $this->serviceAutoSuspendService->suspendExpiredServices($limit, $dryRun);
+                $summary = $this->productModules->forType(VpnProductModule::TYPE)->runLifecycleTask(ProductModuleInterface::LIFECYCLE_EXPIRY, $limit, $dryRun);
                 $checked += $summary->checked;
                 $suspended += $summary->suspended;
                 $failed += $summary->failed;
@@ -165,7 +168,7 @@ final class AutomationRunCommand extends Command
             }
 
             if ($this->automationSettingsProvider->autoSuspendTrafficExhaustedEnabled()) {
-                $summary = $this->serviceAutoSuspendService->suspendTrafficExhaustedServices($limit, $dryRun);
+                $summary = $this->productModules->forType(VpnProductModule::TYPE)->runLifecycleTask(ProductModuleInterface::LIFECYCLE_TRAFFIC, $limit, $dryRun);
                 $checked += $summary->checked;
                 $suspended += $summary->suspended;
                 $failed += $summary->failed;

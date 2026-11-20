@@ -14,6 +14,7 @@ use App\MiniApp\Admin\AdminText;
 use App\MiniApp\Security\MiniAppUser;
 use App\MiniApp\UI\MiniAppFragments;
 use App\MiniApp\UI\MiniAppLocale;
+use App\Module\Application\ProductModuleResolver;
 use App\Provisioning\Application\InboundMoveOverview;
 use App\Provisioning\Application\ServiceAdministration;
 use App\Provisioning\Application\ServiceAdminOutcome;
@@ -42,9 +43,10 @@ use Symfony\Contracts\Translation\TranslatorInterface;
  * its actions, each through the code the bot and the web panel use:
  *  - SERVICES_ASSIST: resend the config into the customer's chat (ServiceManagementService, as the customer's own
  *    "resend config"), sync usage from the panel (ServiceUsageSyncService);
- *  - SERVICES_MANAGE: suspend, activate, extend, add traffic, reset usage (ServiceAdministration, as in the bot);
+ *  - SERVICES_MANAGE: suspend, activate (the service's product module), extend, add traffic, reset usage
+ *    (ServiceAdministration), as in the bot;
  *  - PANELS_MANAGE: regenerate config (ServiceConfigRegenerator, as on the web, which gates it the same way);
- *  - SERVICES_DELETE: delete, after typing the service's name.
+ *  - SERVICES_DELETE: delete (the product module's terminate()), after typing the service's name.
  * Amounts accept Persian digits and are range-checked here and again by ServiceAdministration. Every action is audited
  * (source miniapp) with its outcome.
  */
@@ -74,6 +76,7 @@ final class MiniAppAdminServiceController extends AbstractController
         private readonly PlanInboundDrift $inboundDrift,
         private readonly InboundMoveOverview $moveOverview,
         private readonly InboundMoveSettings $moveSettings,
+        private readonly ProductModuleResolver $productModules,
     ) {
     }
 
@@ -155,13 +158,13 @@ final class MiniAppAdminServiceController extends AbstractController
     #[Route('/app/api/admin/services/{id}/suspend', name: 'miniapp_admin_service_suspend', requirements: ['id' => '\d+'], defaults: ['_miniapp_section' => 'admin.services'], methods: ['POST'])]
     public function suspend(Request $request, #[CurrentUser] MiniAppUser $user, int $id): JsonResponse
     {
-        return $this->change($request, $user, $id, 'suspend', [], fn (VpnService $s): ServiceAdminOutcome => $this->administration->suspend($s));
+        return $this->change($request, $user, $id, 'suspend', [], fn (VpnService $s): ServiceAdminOutcome => $this->productModules->forService($s)->suspend($s));
     }
 
     #[Route('/app/api/admin/services/{id}/activate', name: 'miniapp_admin_service_activate', requirements: ['id' => '\d+'], defaults: ['_miniapp_section' => 'admin.services'], methods: ['POST'])]
     public function activate(Request $request, #[CurrentUser] MiniAppUser $user, int $id): JsonResponse
     {
-        return $this->change($request, $user, $id, 'activate', [], fn (VpnService $s): ServiceAdminOutcome => $this->administration->activate($s));
+        return $this->change($request, $user, $id, 'activate', [], fn (VpnService $s): ServiceAdminOutcome => $this->productModules->forService($s)->resume($s));
     }
 
     #[Route('/app/api/admin/services/{id}/reset-usage', name: 'miniapp_admin_service_reset_usage', requirements: ['id' => '\d+'], defaults: ['_miniapp_section' => 'admin.services'], methods: ['POST'])]
@@ -224,7 +227,7 @@ final class MiniAppAdminServiceController extends AbstractController
             return $this->invalid($request, 'service.delete_name_mismatch');
         }
 
-        return $this->change($request, $user, $id, 'delete', [], fn (VpnService $s): ServiceAdminOutcome => $this->administration->delete($s));
+        return $this->change($request, $user, $id, 'delete', [], fn (VpnService $s): ServiceAdminOutcome => $this->productModules->forService($s)->terminate($s));
     }
 
     /**

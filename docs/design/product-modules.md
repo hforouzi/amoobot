@@ -1643,6 +1643,48 @@ type from a later PR, PM1a took the smallest honest choice or left the method ou
   - none for add-traffic or a top-up;
   - an unknown type is a recorded failure that the admin retry then fulfils.
 
+**PM1c (lifecycle through the module).** Behaviour-neutral, no switch, no migration, no new setting or text.
+- **Resolver.** `App\Module\Application\ProductModuleResolver`: `forService(VpnService)`, `forOrder(Order)` and
+  `forType(string)`. The first two answer `'vpn'` in one place (`typeOfService()`/`typeOfOrder()`, commented) until
+  PM2a reads `product_type`. An unknown type is the registry's `ModuleRegistryException`, never caught by the
+  resolver. Settlement's `productModule()` now asks `forOrder($order)` (its constructor takes the resolver instead of
+  the registry). Only `src/Module/` names the registries again: `ModuleRegistryUsageGuardTest` allows `src/Module/`
+  and nothing else. `forType()` is for work that belongs to no single order or service (the jobs below).
+- **Admin lifecycle.** These callers now call `resolver->forService($s)->suspend|resume|terminate($s)`, which for
+  `'vpn'` is the same `ServiceAdministration::suspend|activate|delete($s)` call as before, with the same outcome,
+  answers, audit rows and log lines:
+  - bot: `ServiceManagementService::suspendService()` and `activateService()`;
+  - Mini App admin: `MiniAppAdminServiceController` suspend, activate, delete;
+  - web: `ServiceDeleteController` ("delete on panel").
+- **Still on `ServiceAdministration`** (no contract method yet): `extend`, `addTraffic` and `resetUsage` in the bot
+  and the Mini App, and the bot's delete (`ServiceManagementService::deleteService()`), which was outside this PR's
+  list. They move when the contract gets the matching method (customer and admin actions, PM1d/PM3a).
+- **Jobs: one method, `runLifecycleTask(string $task, int $limit, bool $dryRun): AutoSuspendSummary`**, with the
+  tasks `ProductModuleInterface::LIFECYCLE_EXPIRY` (`'expiry'`) and `LIFECYCLE_TRAFFIC` (`'traffic'`). An unknown task
+  throws `\InvalidArgumentException`. `VpnProductModule` delegates to
+  `ServiceAutoSuspendService::suspendExpiredServices()` and `suspendTrafficExhaustedServices()` unchanged: the batch
+  query, the per-service driver calls and the log lines stay there. `AutomationRunCommand`'s `suspend` job calls it
+  for the `'vpn'` module (`forType('vpn')`); the job's switches, totals, log lines, output, exit code and lock (the
+  timer's) are unchanged. Why this and not 2.2's `scheduledTasks()`: that returns `ScheduledTask` objects for a core
+  job runner that does not exist yet (PM5a), and would move the switches, the logging and the summing out of the
+  command, which this PR must keep byte-identical. One method with a task name is the smallest contract that lets the
+  core ask "do your due lifecycle work"; it becomes one of the module's scheduled tasks when PM5a adds the runner.
+  The `expiry` job (`ServiceExpiryChecker`, which only marks rows expired) is unchanged and does not use the module.
+- **Two suspend paths, kept apart (2.4).** The admin `suspend()` calls the panel only for `sanaei_3xui`; the job path
+  always resolves a driver. Not unified.
+- **Not added:** `LifecycleResult` and `LifecycleReason`. `suspend/resume/terminate` keep returning
+  `ServiceAdminOutcome` and the job task returns `AutoSuspendSummary`, so every caller's answer is unchanged.
+- **Tests.** No existing assertion changed. Changed test files: `ModuleRegistryUsageGuardTest` (allow list back to
+  `src/Module/`, and its comment); the two test doubles of `ProductModuleInterface`
+  (`ModuleRegistriesTest`'s stub and `SettlementViaProductModuleTest`'s spy) gained `runLifecycleTask()`, because the
+  interface did. New: `ProductModuleResolverTest` (vpn for every order and service, unknown type is
+  `ModuleRegistryException`); `AdminServiceLifecycleViaModuleTest` (bot), `MiniAppAdminLifecycleViaModuleTest`,
+  `ServiceDeleteViaModuleTest` (web), each with `SpyProductModule` around the real module: one module call per action,
+  with the service, the same outcome, and none for the actions still on `ServiceAdministration`;
+  `AutomationSuspendViaModuleTest`: seven scenarios of the `suspend` and `expiry` jobs (dry run, limit, batch-limit
+  setting, a panel without driver, switches off) compared with a baseline recorded on `develop/v3` (`9b9a165`): exit
+  code, console output, `automation_*` log lines and service statuses, plus the module calls each job makes.
+
 ## 10. What this design did not check
 
 - No production data: row counts, table sizes, real RAM headroom on the box, and PHP-FPM worker counts are unknown.

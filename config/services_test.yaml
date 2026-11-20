@@ -12,9 +12,10 @@ services:
         arguments: ['@.inner']
         public: true
 
-    # PM1a: nothing in production uses the module registries or VpnProductModule yet, so the compiler would remove
-    # them. These test-only aliases keep them for tests/Module, tests/Provisioning/VpnProductModuleTest and
-    # VpnCapabilityHonestyTest.
+    # The compiler would inline or remove the module registries and VpnProductModule (in production only
+    # ProductModuleResolver uses them). These test-only aliases keep them as services for tests/Module,
+    # tests/Provisioning/VpnProductModuleTest, VpnCapabilityHonestyTest and the spies that replace the registry
+    # (SettlementViaProductModuleTest, SpyProductModule).
     test.module.product_module_registry:
         alias: App\Module\Application\ProductModuleRegistry
         public: true
