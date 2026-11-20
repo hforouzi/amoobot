@@ -403,7 +403,8 @@ class TelegramApiClient
 
         if (true !== ($data['ok'] ?? false)) {
             $description = (string) ($data['description'] ?? 'unknown error');
-            throw new TelegramApiRejected(sprintf('Telegram API returned ok=false on method "%s": %s', $method, $description));
+            $errorCode = $data['error_code'] ?? null;
+            throw new TelegramApiRejected(sprintf('Telegram API returned ok=false on method "%s": %s', $method, $description), is_int($errorCode) ? $errorCode : null, $description);
         }
 
         return $data;

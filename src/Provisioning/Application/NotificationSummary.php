@@ -11,6 +11,8 @@ final class NotificationSummary
         public readonly int $sent,
         public readonly int $skipped,
         public readonly int $failed,
+        // Not sent because the bot cannot reach the recipient (blocked, chat not found...): recorded, never retried, not a failure.
+        public readonly int $undeliverable = 0,
     ) {
     }
 
@@ -21,6 +23,7 @@ final class NotificationSummary
             sent: $this->sent + $other->sent,
             skipped: $this->skipped + $other->skipped,
             failed: $this->failed + $other->failed,
+            undeliverable: $this->undeliverable + $other->undeliverable,
         );
     }
 }

@@ -83,6 +83,7 @@ final class AutomationRunCommand extends Command
         $failed = 0;
         $skipped = 0;
         $broadcasts = 0;
+        $undeliverable = 0;
 
         if ($this->shouldRun($only, 'orders')) {
             // Each task of the orders job on its own (M2e E1 review R3): a failure is logged and counted, never skips the
@@ -184,6 +185,7 @@ final class AutomationRunCommand extends Command
                 $notified += $summary->sent;
                 $failed += $summary->failed;
                 $skipped += $summary->skipped;
+                $undeliverable += $summary->undeliverable;
                 $this->logger->info('automation_task_completed', ['task' => 'send_notifications', 'summary' => (array) $summary]);
             } else {
                 $this->logger->info('automation_task_skipped_by_setting', ['task' => 'send_notifications']);
@@ -282,6 +284,7 @@ final class AutomationRunCommand extends Command
             sprintf('broadcasts: %d', $broadcasts),
             sprintf('failed: %d', $failed),
             sprintf('skipped: %d', $skipped),
+            sprintf('undeliverable: %d', $undeliverable),
         ]);
 
         if ($dryRun) {
