@@ -11,7 +11,8 @@ use Symfony\Component\DependencyInjection\Attribute\Autowire;
 use Symfony\Component\HttpFoundation\RequestStack;
 
 /**
- * The optional customer-facing domain (BRAND_PUBLIC_BASE_URL). It serves only the Mini App and the payment return page;
+ * The optional customer-facing domain (BRAND_PUBLIC_BASE_URL). It serves only the Mini App and the payment return page
+ * (and, with the switch in BrandSubscriptionPages, the subscription pages);
  * everything else stays on DEFAULT_URI, which is never replaced. Not set, or not valid: every method answers "no brand"
  * and the shop works on one domain, as before.
  */

@@ -7,6 +7,7 @@ namespace App\Admin\Application;
 use App\Branding\BrandingSettings;
 use App\Branding\BrandLogoRejected;
 use App\Branding\BrandLogoStorage;
+use App\Branding\BrandSubscriptionPages;
 use App\Branding\SupportLinkSettings;
 use App\Entity\Setting;
 use App\Provisioning\Application\AutomationSettingsProvider;
@@ -105,14 +106,16 @@ final class SettingsAdministration
         private readonly BrandingSettings $brandingSettings,
         private readonly BrandLogoStorage $logoStorage,
         private readonly SupportLinkSettings $supportLink,
+        private readonly BrandSubscriptionPages $brandSubscriptionPages,
     ) {
     }
 
     /**
      * The branding form's current values: '' for a name or support link that is not set, the default accent when none
-     * is set.
+     * is set. subscription_pages_on_brand is the stored switch, brand_domain_active whether BRAND_PUBLIC_BASE_URL is valid
+     * (without it the switch changes nothing).
      *
-     * @return array{brand_name: string, brand_accent_color: string, brand_logo: string|null, support_url: string}
+     * @return array{brand_name: string, brand_accent_color: string, brand_logo: string|null, support_url: string, subscription_pages_on_brand: bool, brand_domain_active: bool}
      */
     public function brandingValues(): array
     {
@@ -123,6 +126,8 @@ final class SettingsAdministration
             'brand_accent_color' => $branding->accentColor,
             'brand_logo' => $branding->logo,
             'support_url' => $this->supportLink->url() ?? '',
+            'subscription_pages_on_brand' => $this->brandSubscriptionPages->switchedOn(),
+            'brand_domain_active' => $this->brandSubscriptionPages->brandDomainActive(),
         ];
     }
 
@@ -178,6 +183,7 @@ final class SettingsAdministration
             $this->set(BrandingSettings::NAME, (string) ($form['brand_name'] ?? ''), 'text');
             $this->set(BrandingSettings::ACCENT, (string) ($form['brand_accent_color'] ?? ''), 'text');
             $this->set(SupportLinkSettings::URL, SupportLinkSettings::canonical((string) ($form['support_url'] ?? '')) ?? '', 'text');
+            $this->set(BrandSubscriptionPages::ENABLED, self::checked($form, 'subscription_pages_on_brand'), 'boolean');
             if (null !== $stored) {
                 $this->set(BrandingSettings::LOGO, $stored->storedName, 'text');
             }
@@ -189,6 +195,7 @@ final class SettingsAdministration
         } finally {
             $this->brandingSettings->reset();
             $this->supportLink->reset();
+            $this->brandSubscriptionPages->reset();
         }
         if (null !== $stored && $previous !== $stored->storedName) {
             $this->logoStorage->delete($previous);

@@ -105,7 +105,8 @@ final class SettingsAdminController extends AbstractController
             return;
         }
         $logo = $request->files->get('brand_logo');
-        $before = $this->settings->brandingValues()['brand_logo'];
+        $beforeValues = $this->settings->brandingValues();
+        $before = $beforeValues['brand_logo'];
         $problem = $this->settings->saveBranding($request->request->all(), $logo instanceof UploadedFile ? $logo : null);
         if (null !== $problem) {
             $this->flash('danger', $problem['message'], $problem['parameters'] ?? []);
@@ -119,7 +120,10 @@ final class SettingsAdminController extends AbstractController
             'brand_accent_color' => $values['brand_accent_color'],
             'support_url' => $values['support_url'],
             'logo' => $values['brand_logo'] === $before ? 'unchanged' : 'replaced',
-        ]);
+        ] + ($values['subscription_pages_on_brand'] === $beforeValues['subscription_pages_on_brand'] ? [] : [
+            // Named only when it changed: who moved the customer subscription pages to or from the brand domain.
+            'subscription_pages_on_brand' => $values['subscription_pages_on_brand'] ? 'on' : 'off',
+        ]));
         $this->flash('success', 'flash.settings.branding_saved');
     }
 

@@ -227,7 +227,7 @@ class VpnServiceCrudController extends AbstractCrudController
             IntegerField::new('ipLimit')->hideOnIndex()->setDisabled(),
             TextareaField::new('subscriptionUrl')->hideOnIndex()->setDisabled(),
             // The customer's public page (/s/{token}); "New subscription page link" replaces it.
-            AdminFormat::field('subscriptionPage', fn (mixed $v, ?VpnService $s): string => null === $s ? '' : $f->copyable($this->pageUrl->forService($s), 64), 'field.subscription_page')->onlyOnDetail(),
+            AdminFormat::field('subscriptionPage', fn (mixed $v, ?VpnService $s): string => null === $s ? '' : $f->copyable($this->pageUrl->forAdmin($s), 64), 'field.subscription_page')->onlyOnDetail(),
             TextareaField::new('configText')
                 ->formatValue(function (mixed $value, ?VpnService $service): string {
                     if (!$service instanceof VpnService) {

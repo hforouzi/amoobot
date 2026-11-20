@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Subscription\Application;
 
 use App\Entity\ClientApp;
+use App\Subscription\Domain\BridgeAutoOpen;
 use App\Subscription\Domain\ClientPlatform;
 use App\Subscription\Domain\ImportLinkTemplate;
 use Doctrine\ORM\EntityManagerInterface;
@@ -62,6 +63,7 @@ final class ClientAppCatalog
                 installUrl: null !== $download ? $this->downloads->path($download) : $app->getStoreUrl(),
                 matchesPlatform: $matches,
                 id: $app->getId(),
+                androidPackage: BridgeAutoOpen::androidPackage($app->getStoreUrl()),
             );
         }
 

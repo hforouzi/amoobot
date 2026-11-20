@@ -1305,7 +1305,9 @@ branding_settings:
     identity: Brand
     logo: Logo
     support: Support chat
+    brand_domain: Brand domain
   fields:
+    subscription_pages_on_brand: Customer subscription pages on the brand domain
     name: Brand name
     accent_color: Accent colour
     logo: Upload a logo
@@ -1318,6 +1320,8 @@ branding_settings:
     accent_color: "The colour of the main button and the top bar, as #rrggbb (for example #166534, the default). Leave empty for the default. The button text turns dark on a light colour so it stays readable."
     logo: "PNG, JPEG or WebP, at most %max% KB, %min% to %side% pixels per side. A square PNG of about 256×256 with a transparent background works best. The image is re-saved without its metadata; choosing a new file replaces the old one."
     support_url: "The Telegram chat customers reach with the “Message support” button, in the Mini App guide (Contact support) and under the bot's support message. Only https://t.me/<username> or https://telegram.me/<username>; leave empty for no button. The support message text itself is edited in the bot texts (bot.support)."
+    subscription_pages_on_brand: "On: new links to the subscription page (/s/…) and to the “Add to app” page are given out on the brand domain (BRAND_PUBLIC_BASE_URL): bot messages and buttons, notifications and the Mini App. Admin screens, payment callbacks, webhooks and app downloads stay on the main domain, and links already sent keep working there. The brand domain's web server must serve /s/ first (docs/en/nginx-brand-domain.conf.example). Off: everything as before."
+    subscription_pages_no_brand_domain: "No valid brand domain is configured (BRAND_PUBLIC_BASE_URL), so this switch has no effect: the pages stay on the main domain."
 
 branding:
   logo:

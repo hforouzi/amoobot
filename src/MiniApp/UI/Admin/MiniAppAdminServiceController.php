@@ -335,7 +335,7 @@ final class MiniAppAdminServiceController extends AbstractController
             'limit' => $limit,
             'percent' => null === $limit || $limit <= 0 ? null : min(100, (int) round($used * 100 / $limit)),
             'lastSync' => $service->getLastUsageSyncedAt(),
-            'pageUrl' => VpnServiceStatus::DELETED === $service->getStatus() ? null : $this->pageUrl->forService($service),
+            'pageUrl' => VpnServiceStatus::DELETED === $service->getStatus() ? null : $this->pageUrl->forAdmin($service),
             'customer' => AdminCustomerView::summary($service->getUser()),
         ];
     }

@@ -7,6 +7,14 @@
 # This allowlist repeats the application's (BrandHostGuard) on purpose. Keep both: while BRAND_PUBLIC_BASE_URL is unset
 # or invalid the application serves this host like any other, so during a rollback this file is the only thing that
 # keeps EasyAdmin and the webhook off the brand domain.
+#
+# /s/ (the subscription page /s/{token} and the app import bridge /s/{token}/open/{appId}) is served here for the
+# setting "customer subscription pages on the brand domain" (web settings, Branding tab). With that setting off the
+# application still answers 404 for /s/ on this host, so this location may be added before the switch is turned on.
+
+# The /s/ path is a bearer secret: its access log lines carry neither the path nor the query (nor the Referer).
+# log_format belongs to the http block; a file in sites-enabled is included there, so it can stay at the top of this file.
+log_format amoobot_brand_nopath '$remote_addr - [$time_local] "$request_method /s/(token) $server_protocol" $status $body_bytes_sent "$http_user_agent"';
 
 server {
     listen 80;
@@ -29,6 +37,11 @@ server {
     }
 
     location ^~ /payment/return/ {
+        return 301 https://$host$request_uri;
+    }
+
+    location ^~ /s/ {
+        access_log /var/log/nginx/amoobot_brand_access.log amoobot_brand_nopath;
         return 301 https://$host$request_uri;
     }
 
@@ -83,6 +96,17 @@ server {
     location ^~ /payment/return/ {
         access_log off;
         include /etc/nginx/snippets/amoobot-maintenance.conf;
+        fastcgi_pass unix:/run/php/php8.4-fpm.sock;
+        include fastcgi_params;
+        fastcgi_param SCRIPT_FILENAME $realpath_root/index.php;
+        fastcgi_param SCRIPT_NAME /index.php;
+        fastcgi_param DOCUMENT_ROOT $realpath_root;
+    }
+
+    # The subscription page and the app import bridge. The token is a bearer secret: logged without the path (format
+    # above). fastcgi directly, as /payment/return/: an internal redirect would be logged by the /index.php location.
+    location ^~ /s/ {
+        access_log /var/log/nginx/amoobot_brand_access.log amoobot_brand_nopath;
         fastcgi_pass unix:/run/php/php8.4-fpm.sock;
         include fastcgi_params;
         fastcgi_param SCRIPT_FILENAME $realpath_root/index.php;
