@@ -6,7 +6,7 @@ namespace App\Provisioning\Application;
 
 use App\Entity\VpnPanel;
 use App\Entity\VpnService;
-use App\Provisioning\Domain\PublicUrlPolicy;
+use App\Shared\Domain\PublicUrlPolicy;
 use App\Provisioning\Infrastructure\Sanaei3xui\Sanaei3xuiConfigGenerator;
 use App\Provisioning\Infrastructure\Sanaei3xui\Sanaei3xuiRemoteIdParser;
 use App\Shared\Infrastructure\SafeErrorLog;

@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace App\Subscription\Application;
 
 use App\Entity\VpnService;
-use App\Provisioning\Domain\PublicUrlPolicy;
+use App\Shared\Domain\PublicUrlPolicy;
 use App\Shared\Application\SiteUrls;
 
 /**

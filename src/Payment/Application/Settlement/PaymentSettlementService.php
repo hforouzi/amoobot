@@ -20,7 +20,7 @@ use App\Provisioning\Application\ServiceInboundAttacher;
 use App\Provisioning\Application\ServiceRenewalService;
 use App\Provisioning\Application\ServiceTrafficAddonService;
 use App\Provisioning\Application\VpnProvisioningService;
-use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http\SecretRedactor;
+use App\Shared\Domain\SecretRedactor;
 use App\Shared\Infrastructure\TransactionRollback;
 use App\Shop\Application\DiscountCodeService;
 use App\Shop\Domain\OrderStatus;

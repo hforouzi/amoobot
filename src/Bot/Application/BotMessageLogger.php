@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace App\Bot\Application;
 
 use App\Entity\BotMessageLog;
-use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http\SecretRedactor;
+use App\Shared\Domain\SecretRedactor;
 use App\Reseller\Domain\ClaimToken;
 use Doctrine\ORM\EntityManagerInterface;
 

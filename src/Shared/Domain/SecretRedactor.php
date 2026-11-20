@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http;
+namespace App\Shared\Domain;
 
 /**
  * Removes credentials from any text that may reach a log, an exception, the admin UI or the console:

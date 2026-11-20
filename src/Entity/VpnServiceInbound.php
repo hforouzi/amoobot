@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Entity;
 
-use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http\SecretRedactor;
+use App\Shared\Domain\SecretRedactor;
 use Doctrine\ORM\Mapping as ORM;
 
 /**

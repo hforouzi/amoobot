@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Provisioning;
 
-use App\Provisioning\Domain\PublicUrlPolicy;
+use App\Shared\Domain\PublicUrlPolicy;
 use App\Provisioning\Domain\SubscriptionUrlRepair;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;

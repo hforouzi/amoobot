@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http;
 
+use App\Shared\Domain\SecretRedactor;
+
 /**
  * A failed panel call. The message is always passed through SecretRedactor before it is stored here, so it is safe
  * for logs, flash messages and console output; the previous exception is never kept (its message may hold the token).

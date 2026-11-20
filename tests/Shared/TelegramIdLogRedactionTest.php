@@ -14,7 +14,7 @@ use App\Payment\Domain\PaymentStatus;
 use App\Provisioning\Application\VpnProvisioningService;
 use App\Provisioning\Domain\Dto\CreateVpnServiceRequest;
 use App\Provisioning\Domain\SanaeiIntegrationMode;
-use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http\SecretRedactor;
+use App\Shared\Domain\SecretRedactor;
 use App\Provisioning\Infrastructure\Sanaei3xui\Modern\ModernClientsApi;
 use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Sanaei3xuiModernDriver;
 use App\Provisioning\Infrastructure\Sanaei3xui\Sanaei3xuiRemoteIdParser;

@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Shared\Infrastructure;
 
-use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http\SecretRedactor;
+use App\Shared\Domain\SecretRedactor;
 
 /**
  * The app's own error_log() lines (provisioning, links, the bot's debug lines) go through here, so none of them writes

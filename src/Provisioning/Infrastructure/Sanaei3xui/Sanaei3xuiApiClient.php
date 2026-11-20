@@ -7,7 +7,7 @@ namespace App\Provisioning\Infrastructure\Sanaei3xui;
 use App\Entity\VpnPanel;
 use App\Provisioning\Infrastructure\PanelCredentials;
 use App\Provisioning\Infrastructure\PanelHttpClientFactory;
-use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http\SecretRedactor;
+use App\Shared\Domain\SecretRedactor;
 use App\Shared\Infrastructure\SafeErrorLog;
 use Symfony\Contracts\HttpClient\Exception\TransportExceptionInterface;
 use Symfony\Contracts\HttpClient\HttpClientInterface;

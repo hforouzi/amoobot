@@ -12,6 +12,7 @@ use Psr\Log\NullLogger;
 use Symfony\Contracts\HttpClient\Exception\ExceptionInterface as HttpClientException;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 use Symfony\Contracts\HttpClient\ResponseInterface;
+use App\Shared\Domain\SecretRedactor;
 
 /**
  * Bearer-token calls to the 3x-ui REST API (paths relative to the panel's base URL, e.g. "panel/api/clients/list").

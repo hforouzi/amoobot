@@ -12,7 +12,7 @@ use App\Payment\Application\Settlement\VerifiedPayment;
 use App\Payment\Domain\Dto\PaymentVerificationResult;
 use App\Payment\Domain\PaymentStatus;
 use App\Payment\Infrastructure\PaymentGatewayRegistry;
-use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http\SecretRedactor;
+use App\Shared\Domain\SecretRedactor;
 use Doctrine\ORM\EntityManagerInterface;
 use Psr\Log\LoggerInterface;
 

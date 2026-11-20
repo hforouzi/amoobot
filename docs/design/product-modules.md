@@ -1547,6 +1547,76 @@ second, simpler product of the same kind).
 
 PM1b is the smallest diff with the largest blast radius, so it goes alone.
 
+### 9.1 PM1a notes (what was built, and where it differs from this design)
+
+PM1a is behaviour-neutral: nothing in production calls the new code. `ModuleRegistryUsageGuardTest` fails if any file
+outside `src/Module/` names a registry; PM1b adds settlement to its allow list on purpose. Where the design needs a
+type from a later PR, PM1a took the smallest honest choice or left the method out.
+
+- **Places.** `SecretRedactor` and `PublicUrlPolicy` moved to `App\Shared\Domain` (pure move). The generic contracts
+  live in `App\Module\Domain` (`ProductModuleInterface`, `ProviderDriverInterface`, `CapabilitySet`,
+  `CapabilityNotSupported`, `ModuleRegistryException`), the registries in `App\Module\Application`. The VPN parts
+  live in `App\Provisioning`: `Domain\VpnDriverInterface`, `Domain\VpnCapability`, `Domain\VpnDriverIdentity` (module
+  and version) and `Application\VpnProductModule`. Tags: `app.product_module`, `app.provider_driver`.
+- **`ProviderDriverInterface`** has `code()`, `module()`, `contractVersion()` and `capabilities()`. `capabilities()`
+  takes no connection: today a driver's set does not depend on the panel, because 3x-ui modern and legacy are two
+  drivers. `connectionSchema()`, `planSchema()` and `healthCheck()` wait for `Connection`, `ConfigSchema` and
+  `HealthReport` (PM5b).
+- **`VpnDriverInterface`** extends `ProviderDriverInterface` and the unchanged `VpnPanelDriverInterface`. The required
+  operations are today's methods (`createService`, `renewService`, `suspendService`, `deleteService`, `resetUsage`,
+  `getUsage`), with the `VpnPanel` as the connection. The renamed `createUser(..., Connection)` set and
+  `listInbounds()` are not added. Each driver's `implements` line names `VpnDriverInterface` instead of
+  `VpnPanelDriverInterface`, so the `app.vpn_driver` tag and `VpnPanelDriverRegistry` see the same drivers in the
+  same order.
+- **Capabilities are derived** (`VpnCapability::derive()`) from the optional interfaces a driver implements, so the
+  declared set is exactly its `instanceof` set. `traffic_reset` maps to the base interface (`resetUsage`). Six names
+  of the 6.3 table have no interface or method today and are declared by no driver: `subscription_url`,
+  `client_import`, `ip_limit`, `device_limit`, `on_hold` and `webhooks`. The table's "yes" for modern
+  (`subscription_url`, `client_import`, `ip_limit`) and legacy (`subscription_url`, `ip_limit`) waits for the PR that
+  adds the interface. Result: 3x-ui modern 12, legacy 3 (`adopt_existing`, `traffic_add`, `traffic_reset`, as 6.4
+  says), dummy 1 (`traffic_reset`).
+- **`CapabilityNotSupported`** is thrown by `CapabilitySet::require()` and `VpnCapability::require($driver, $name)`, which
+  is how the kit (and later the module) uses a capability. A driver class has no method for an undeclared capability,
+  as before.
+- **Driver codes.** Open question 13 is answered provisionally: two codes, `sanaei_3xui` (modern) and
+  `sanaei_3xui_legacy`, because the registry refuses a duplicate code. `vpn_panel.type` stays `sanaei_3xui` for both,
+  and `supports()` still chooses between them. `dummy` keeps its name.
+- **Registries.** `ProviderDriverRegistry::get(module, code)`, `has()`, `codes()`. There is no
+  `driverFor(Connection)` (PM5b). `ProductModuleRegistry::get(type)`, `has()`, `types()`. Both index lazily on first
+  use and refuse a duplicate then. Not enforced yet: the contract version check of 4.3 (PM2b), and 6.3's rule that a
+  new VPN driver needs `panel_sub_links` or `subscription_url` (`dummy` has neither; PM2b/PM3a).
+- **`ProductModuleInterface`** has `type()`, `contractVersion()`, `provision()`, `renew()`, `suspend()`, `resume()` and
+  `terminate()`. The service record is `VpnService` (2.2). `provision(Order, array $meta): VpnService` covers DELIVERED
+  only (no `ProvisionContext`, `ProvisionResult` or `PENDING`, PM5a). `renew()` returns today's `RenewalResult`.
+  `suspend()`, `resume()` and `terminate()` take no `LifecycleReason` and return today's `ServiceAdminOutcome`
+  (`LifecycleResult` comes with PM1c). These methods are left out until their PR: `planSchema()`, `saleBlocker()`,
+  `lifecyclePolicy()`, `status()`, `customerView()`, `adminView()`, `customerActions()`, `runCustomerAction()`,
+  `scheduledTasks()`.
+- **`VpnProductModule`** delegates without changes:
+  - `provision` → `VpnProvisioningService::provisionOrder($order, $meta, adoptExisting: true)`, as settlement calls
+    it (the trial path calls it without adoption and is not routed here).
+  - `renew` → `ServiceRenewalService::renew()`.
+  - `suspend`, `resume`, `terminate` → the admin path of `ServiceAdministration` (`suspend()`, `activate()`,
+    `delete()`) as it stands, including the panel call on suspend only for `sanaei_3xui`.
+  - The batch job path (`ServiceAutoSuspendService`) is PM1c.
+- **Contract kit** (`tests/Contract/VpnDriverContractTestCase`), run on 3x-ui modern with `Fake3xuiPanel` and on
+  `dummy`. It covers:
+  - identity
+  - capability honesty (against the hand-written 6.3 set and the `instanceof` set)
+  - undeclared capability → `CapabilityNotSupported`
+  - create returns a remote id and a link
+  - create again for the same order adopts (skipped without `adopt_existing`)
+  - renew sets limit and expiry exactly
+  - suspend then resume (or renew with 0 days)
+  - reset usage
+  - delete twice
+
+  `dummy` reads nothing back. Not in the kit yet: a typed `RemoteNotFound`, lost-response adoption, health-check
+  classification, the `panel_sub_links` snapshot rules and the no-secret-leak checks. The legacy driver gets only the
+  honesty test (`VpnCapabilityHonestyTest`), not the kit.
+- **Tests only:** `config/services_test.yaml` has public aliases for the two registries and `VpnProductModule`. In
+  production they are unused, so the compiler removes them.
+
 ## 10. What this design did not check
 
 - No production data: row counts, table sizes, real RAM headroom on the box, and PHP-FPM worker counts are unknown.

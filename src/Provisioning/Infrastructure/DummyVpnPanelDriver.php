@@ -9,10 +9,27 @@ use App\Provisioning\Domain\Dto\CreatedVpnService;
 use App\Provisioning\Domain\Dto\CreateVpnServiceRequest;
 use App\Provisioning\Domain\Dto\RenewVpnServiceRequest;
 use App\Provisioning\Domain\Dto\VpnUsage;
-use App\Provisioning\Domain\VpnPanelDriverInterface;
+use App\Provisioning\Domain\VpnDriverInterface;
+use App\Provisioning\Domain\VpnDriverIdentity;
+use App\Provisioning\Domain\VpnCapability;
+use App\Module\Domain\CapabilitySet;
 
-class DummyVpnPanelDriver implements VpnPanelDriverInterface
+class DummyVpnPanelDriver implements VpnDriverInterface
 {
+    use VpnDriverIdentity;
+
+    /** Development driver (no remote panel). */
+    public function code(): string
+    {
+        return 'dummy';
+    }
+
+    /** Derived from the optional interfaces implemented above (docs/design/product-modules.md 6.3). */
+    public function capabilities(): CapabilitySet
+    {
+        return VpnCapability::derive($this);
+    }
+
     public function supports(?VpnPanel $panel): bool
     {
         return null === $panel || 'dummy' === $panel->getType();

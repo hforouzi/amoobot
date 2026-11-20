@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace App\Provisioning\Application;
 
 use App\Entity\VpnPanel;
-use App\Provisioning\Domain\PublicUrlPolicy;
+use App\Shared\Domain\PublicUrlPolicy;
 use App\Provisioning\Infrastructure\Sanaei3xui\Modern\SubscriptionUrl;
 
 /**

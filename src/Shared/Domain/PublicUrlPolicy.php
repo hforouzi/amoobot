@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace App\Provisioning\Domain;
+namespace App\Shared\Domain;
 
 /**
  * Whether an address can be handed to a customer: a phone on the internet must be able to reach it. The panel is often

@@ -11,7 +11,7 @@ use App\Entity\TelegramAccount;
 use App\Entity\TrialClaim;
 use App\Entity\TrialPlan;
 use App\Provisioning\Application\VpnProvisioningService;
-use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http\SecretRedactor;
+use App\Shared\Domain\SecretRedactor;
 use App\Shop\Domain\OrderStatus;
 use App\Shop\Domain\OrderType;
 use Doctrine\ORM\EntityManagerInterface;
