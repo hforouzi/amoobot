@@ -7,16 +7,16 @@ namespace App\Tests\Module;
 use PHPUnit\Framework\TestCase;
 
 /**
- * PM1a is behaviour-neutral: nothing in production uses the module registries yet. Only the module code itself
- * (src/Module/) may name them, and the service wiring in config/. The first PR that routes the core through them
- * (PM1b, settlement) adds its file here on purpose.
+ * The module registries are used only where a PR moved a caller on purpose. Only the module code itself
+ * (src/Module/), the service wiring in config/, and these files may name them:
+ * - PM1b: settlement's fulfilment (PaymentSettlementService::fulfil(), new service and renewal).
  */
 final class ModuleRegistryUsageGuardTest extends TestCase
 {
     private const REGISTRIES = ['ProductModuleRegistry', 'ProviderDriverRegistry'];
 
-    /** Paths (from the project root) allowed to name a registry. */
-    private const ALLOWED = ['src/Module/'];
+    /** Paths (from the project root) allowed to name a registry: a directory ends with '/', anything else is one file. */
+    private const ALLOWED = ['src/Module/', 'src/Payment/Application/Settlement/PaymentSettlementService.php'];
 
     public function testNoProductionClassUsesTheRegistriesYet(): void
     {
@@ -32,7 +32,7 @@ final class ModuleRegistryUsageGuardTest extends TestCase
                 $relative = str_replace('\\', '/', substr($file->getPathname(), strlen($root) + 1));
                 ++$scanned;
                 foreach (self::ALLOWED as $allowed) {
-                    if (str_starts_with($relative, $allowed)) {
+                    if (str_ends_with($allowed, '/') ? str_starts_with($relative, $allowed) : $relative === $allowed) {
                         continue 2;
                     }
                 }
