@@ -1617,6 +1617,32 @@ type from a later PR, PM1a took the smallest honest choice or left the method ou
 - **Tests only:** `config/services_test.yaml` has public aliases for the two registries and `VpnProductModule`. In
   production they are unused, so the compiler removes them.
 
+**PM1b (settlement through the module).** Only `PaymentSettlementService::fulfil()` changed:
+- **New service:** `ProductModuleRegistry::get('vpn')->provision($order, $meta)`, with exactly the metadata array
+  passed before. `VpnProductModule::provision()` calls `provisionOrder($order, $meta, adoptExisting: true)`, which is
+  the same call, arguments and return value as before. The comment about adoption stays at the call.
+- **Renewal:** `->renew($target, $order)`, after the `PESSIMISTIC_WRITE` refresh of the target, which has not moved.
+- **Module type:** always `VpnProductModule::TYPE` (`'vpn'`), in one private method (`productModule()`), until PM2a
+  adds `plan.product_type`. An unknown type throws `ModuleRegistryException`. Nothing catches it, so it follows
+  today's provisioning-failure path (`recordProvisioningFailure()`): rolled back, payment and order
+  `PROVISIONING_FAILED`, retryable, no ledger row.
+- **Unchanged:**
+  - **Add-traffic** still calls `ServiceTrafficAddonService` directly, because the module has no add-on method yet.
+    It moves when one is added (PM2b: the module's customer actions).
+  - **Wallet top-up** still credits the wallet directly: it is not a product.
+  - Lock order, transaction boundaries (the module runs inside the settlement transaction, before the commit),
+    `retryProvisioning()` (it shares `fulfil()`, so it is routed too), and everything outside `fulfil()`.
+  - The other callers of these services: `TrialAccountService` (provisioning without adoption) and
+    `ServiceTestRenewCommand` (renewal). They move in later PRs.
+- **Constructor:** `VpnProvisioningService` and `ServiceRenewalService` left the settlement constructor because
+  nothing else there used them. `ProductModuleRegistry` replaced them, wired by the container.
+- **Tests:** no existing test changed, except that `ModuleRegistryUsageGuardTest` now allows this one file. Its rule
+  is now "a directory ends with `/`, anything else is an exact path". `SettlementViaProductModuleTest` pins the call
+  path with a spy around the real module, so it can't drift from the real call:
+  - exactly one module call, inside the transaction, before the payment is confirmed, with the arguments used before;
+  - none for add-traffic or a top-up;
+  - an unknown type is a recorded failure that the admin retry then fulfils.
+
 ## 10. What this design did not check
 
 - No production data: row counts, table sizes, real RAM headroom on the box, and PHP-FPM worker counts are unknown.
