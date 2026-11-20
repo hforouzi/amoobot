@@ -104,14 +104,21 @@ Missing, empty or non-boolean values count as off. To stop inquiries too, remove
 
 | `prefer_website_link` | `use_mini_app_link` | Bot and our Mini App open | Our Mini App opens with |
 |---|---|---|---|
-| on (default) | off (default) | `gateway_link` (direct Shaparak), else `url`, else `payment_link` | `openLink` (the Shaparak page, inside Telegram's browser) |
-| off | off | `url` (the provider's web chooser), else `payment_link`, else `gateway_link` | `openLink` |
-| any | on | as above in the bot | `openTelegramLink` with `mini_app_link` when the provider sent a valid `t.me` link, else `openLink` with the payment link |
+| on (default) | off (default) | `gateway_link` (direct Shaparak), else `url`, else `payment_link` | `openLink` (the Shaparak page, inside Telegram's browser); `openTelegramLink` when that link is a valid `t.me` link |
+| off | off | `url` (the provider's web chooser), else `payment_link`, else `gateway_link` | `openLink`; `openTelegramLink` when that link is a valid `t.me` link |
+| any | on | as above in the bot | `openTelegramLink` with `mini_app_link` when the provider sent a valid `t.me` link, else as in the rows above with the payment link |
 
 - What each link is (provider docs): `url` is a web page where the buyer chooses Shaparak or card-to-card when the store
   has both on; it equals `payment_link` when Shaparak is off, and `gateway_link` when only card-to-card is off.
   `payment_link` is the invoice in the provider's bot (card-to-card), `mini_app_link` the invoice in the provider's
   Telegram mini app (card-to-card), `gateway_link` the direct Shaparak page. All four are always returned.
+- **A `t.me` payment URL.** Tetraminator may return `gateway_link` as a link to its own Telegram mini app (for example
+  `https://t.me/tetraminator_bot/pay?startapp=bank-<id>`). `openLink` would open it in Telegram's in-app browser, where
+  the provider's mini app does not start, so with no stored `mini_app_link` our Mini App opens a payment URL that passes
+  the same strict `t.me` check (`https`, host exactly `t.me`, no user info, port, fragment or `//`, at most 512
+  characters; `PaymentTelegramLink`) with `openTelegramLink`. Any other payment URL keeps `openLink`, a stored
+  `mini_app_link` keeps priority, and both are read from the payment row, never from the client. The bot is unchanged:
+  its URL button already opens `t.me` links inside Telegram. Built-in gateways never get this, even with a `t.me` URL.
 - Every link is validated the same way (`https`, a host, no user info, no port). An invalid `gateway_link` is skipped and
   the next link is used. A create answer with no valid link at all is a failed create.
 - A config saved before plugin 1.1.0 has neither key and gets the defaults: `prefer_website_link` is on unless it is
