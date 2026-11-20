@@ -16,7 +16,7 @@ use App\Provisioning\Domain\ExistingClientAwareDriverInterface;
 use App\Provisioning\Domain\InboundAttachDriverInterface;
 use App\Provisioning\Domain\VpnPanelDriverInterface;
 use App\Provisioning\Domain\VpnServiceStatus;
-use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http\SecretRedactor;
+use App\Shared\Domain\SecretRedactor;
 use App\Provisioning\Infrastructure\VpnPanelDriverRegistry;
 use App\Shared\Infrastructure\SafeErrorLog;
 use App\Shop\Application\MultiInboundSettings;

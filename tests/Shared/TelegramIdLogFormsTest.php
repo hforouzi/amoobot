@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Shared;
 
-use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http\SecretRedactor;
+use App\Shared\Domain\SecretRedactor;
 use App\Shared\Infrastructure\RedactingLogger;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;

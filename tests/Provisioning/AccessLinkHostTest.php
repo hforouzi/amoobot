@@ -8,7 +8,7 @@ use App\Entity\VpnInbound;
 use App\Entity\VpnPanel;
 use App\Entity\VpnService;
 use App\Provisioning\Application\VpnAccessLinkGenerator;
-use App\Provisioning\Domain\PublicUrlPolicy;
+use App\Shared\Domain\PublicUrlPolicy;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 
 /**

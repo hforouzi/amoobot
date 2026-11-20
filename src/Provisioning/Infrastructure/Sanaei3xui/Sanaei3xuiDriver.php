@@ -17,7 +17,7 @@ use App\Provisioning\Domain\Dto\VpnUsage;
 use App\Provisioning\Domain\ExistingClientAwareDriverInterface;
 use App\Provisioning\Domain\TrafficLimitDriverInterface;
 use App\Provisioning\Domain\VpnPanelDriverInterface;
-use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http\SecretRedactor;
+use App\Shared\Domain\SecretRedactor;
 use App\Shared\Infrastructure\SafeErrorLog;
 use Symfony\Component\Uid\Uuid;
 

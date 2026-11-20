@@ -6,7 +6,7 @@ namespace App\Provisioning\Application;
 
 use App\Entity\VpnService;
 use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http\PanelEndpoint;
-use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http\SecretRedactor;
+use App\Shared\Domain\SecretRedactor;
 use App\Provisioning\Infrastructure\Sanaei3xui\Sanaei3xuiRemoteIdParser;
 
 /**

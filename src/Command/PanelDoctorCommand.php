@@ -14,7 +14,7 @@ use App\Provisioning\Application\ServiceInboundCounts;
 use App\Provisioning\Domain\Dto\CreateVpnServiceRequest;
 use App\Provisioning\Domain\Dto\RenewVpnServiceRequest;
 use App\Provisioning\Infrastructure\PanelCredentials;
-use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http\SecretRedactor;
+use App\Shared\Domain\SecretRedactor;
 use App\Provisioning\Infrastructure\Sanaei3xui\Modern\ModernClientsApi;
 use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Sanaei3xuiModernDriver;
 use Doctrine\ORM\EntityManagerInterface;

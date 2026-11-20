@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace App\Provisioning\Application;
 
 use App\Entity\VpnService;
-use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http\SecretRedactor;
+use App\Shared\Domain\SecretRedactor;
 
 /**
  * An error text of the inbound move (docs/design/plan-inbound-change.md 5.4, 6.3) as the console, the logs, the move

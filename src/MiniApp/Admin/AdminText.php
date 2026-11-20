@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\MiniApp\Admin;
 
-use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http\SecretRedactor;
+use App\Shared\Domain\SecretRedactor;
 
 /**
  * Text and numbers crossing the Mini App admin boundary. safe(): text from a gateway, a panel or the settlement

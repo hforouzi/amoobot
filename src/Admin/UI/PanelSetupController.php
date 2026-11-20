@@ -17,7 +17,7 @@ use App\Provisioning\Domain\SanaeiIntegrationMode;
 use App\Provisioning\Infrastructure\PanelCredentials;
 use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http\PanelApiException;
 use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http\PanelEndpoint;
-use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http\SecretRedactor;
+use App\Shared\Domain\SecretRedactor;
 use App\Provisioning\Infrastructure\Sanaei3xui\Modern\ModernClientsApi;
 use App\Security\AdminAuditLogger;
 use App\Shop\Application\Catalog\PlanInboundDrift;

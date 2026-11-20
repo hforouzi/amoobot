@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\MiniApp\Application;
 
-use App\Provisioning\Domain\PublicUrlPolicy;
+use App\Shared\Domain\PublicUrlPolicy;
 use App\Shared\Application\SiteUrls;
 use App\Shared\Infrastructure\SettingValueProvider;
 

@@ -6,7 +6,7 @@ namespace App\Provisioning\Application;
 
 use App\Bot\Infrastructure\TelegramApiClient;
 use App\Entity\VpnService;
-use App\Provisioning\Domain\PublicUrlPolicy;
+use App\Shared\Domain\PublicUrlPolicy;
 use App\Security\AdminAccessPolicy;
 use App\Security\AdminPermission;
 use Doctrine\ORM\EntityManagerInterface;

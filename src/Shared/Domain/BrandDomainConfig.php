@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Shared\Domain;
 
-use App\Provisioning\Domain\PublicUrlPolicy;
 
 /**
  * BRAND_PUBLIC_BASE_URL read against DEFAULT_URI: either both hosts are known and the brand is active, or nothing is.

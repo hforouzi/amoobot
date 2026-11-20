@@ -8,7 +8,7 @@ use App\Entity\VpnService;
 use App\Entity\VpnServiceInbound;
 use App\Provisioning\Application\PanelLinkSnapshot;
 use App\Provisioning\Application\ServiceErrorText;
-use App\Provisioning\Domain\PublicUrlPolicy;
+use App\Shared\Domain\PublicUrlPolicy;
 use App\Provisioning\Domain\ShareLinkTuple;
 use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http\PanelApiException;
 use App\Provisioning\Infrastructure\Sanaei3xui\Sanaei3xuiRemoteIdParser;
