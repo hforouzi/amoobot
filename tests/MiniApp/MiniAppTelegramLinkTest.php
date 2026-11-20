@@ -24,7 +24,9 @@ use Symfony\Contracts\Translation\TranslatorInterface;
 /**
  * A Tetraminator payment in the Mini App opens the t.me link the plugin stored (mini_app_link) with openTelegramLink
  * (tetraminator-gateway design, decision 6), checked again on the server; anything else falls back to the payment URL
- * and openLink as for every gateway. The bot keeps the payment URL. Other gateways' pages are unchanged.
+ * and openLink as for every gateway, unless that payment URL is itself a valid t.me link (Tetraminator's gateway_link
+ * can be one), which also opens with openTelegramLink. The bot keeps the payment URL. Other gateways' pages are
+ * unchanged.
  * The plugin stores mini_app_link only when the admin turns use_mini_app_link on, so this gateway has it on; with the
  * defaults the page opens the provider's website page (testWithTheDefaultsThePageOpensTheWebsiteLink).
  */
@@ -169,6 +171,103 @@ final class MiniAppTelegramLinkTest extends IntegrationTestCase
         self::assertSame($this->onlineMarkup($payment, self::PAY_URL), $this->markup($html), 'today\'s openLink behaviour');
         self::assertStringNotContainsString('data-telegram-link', $html);
         self::assertStringNotContainsString('data-main-button-telegram', $html);
+    }
+
+    private const TME_PAY_URL = 'https://t.me/tetraminator_bot/pay?startapp=bank-TPAY0000000000000001';
+
+    /** Tetraminator's default answer when its gateway_link is a t.me mini app link: prefer_website_link on, no mini_app_link stored. */
+    private function payWithGatewayLink(string $gatewayLink): Payment
+    {
+        $gateway = $this->tetraMethod->getGateway();
+        $config = $gateway->getConfig() ?? [];
+        unset($config['use_mini_app_link'], $config['prefer_website_link']);
+        $gateway->setConfig($config);
+        $this->em->flush();
+        $session = $this->authenticate(self::CUSTOMER);
+        $this->tetraminatorAnswers([['status' => 201, 'body' => self::created()['body'] + ['gateway_link' => $gatewayLink]]]);
+
+        return $this->payTetraminator($session, $this->checkout($session));
+    }
+
+    public function testATelegramPaymentUrlWithNoStoredLinkOpensWithOpenTelegramLink(): void
+    {
+        $payment = $this->payWithGatewayLink(self::TME_PAY_URL);
+        self::assertSame(self::TME_PAY_URL, $payment->getPaymentUrl());
+        self::assertArrayNotHasKey('mini_app_link', $payment->getRequestPayload() ?? []);
+
+        $html = $this->appGet('/app/view/payments/'.$payment->getId(), $this->authenticate(self::CUSTOMER));
+        $page = new Crawler($html);
+        $root = $page->filter('.view-root');
+
+        self::assertSame(self::TME_PAY_URL, $root->attr('data-main-button-href'));
+        self::assertNotNull($root->attr('data-main-button-telegram'), 'opened with openTelegramLink');
+        self::assertNull($root->attr('data-main-button-external'));
+        self::assertSame(self::TME_PAY_URL, $page->filter('a[data-telegram-link]')->attr('href'));
+        self::assertCount(0, $page->filter('a[data-open-link]'));
+    }
+
+    public function testAStoredMiniAppLinkStillWinsOverATelegramPaymentUrl(): void
+    {
+        $session = $this->authenticate(self::CUSTOMER);
+        $this->tetraminatorAnswers([self::created()]);
+        $payment = $this->payTetraminator($session, $this->checkout($session));
+        $payment->setPaymentUrl(self::TME_PAY_URL);
+        $this->em->flush();
+
+        $page = new Crawler($this->appGet('/app/view/payments/'.$payment->getId(), $session));
+
+        self::assertSame(self::LINK, $page->filter('.view-root')->attr('data-main-button-href'));
+        self::assertSame(self::LINK, $page->filter('a[data-telegram-link]')->attr('href'));
+    }
+
+    /**
+     * Payment URLs that are not a valid t.me link: the page opens them with openLink, as before.
+     *
+     * @return iterable<string, array{string}>
+     */
+    public static function nonTelegramPaymentUrls(): iterable
+    {
+        yield 'https, another host' => [self::WEBSITE_URL];
+        yield 'port' => ['https://t.me:443/tetraminator_bot/pay?startapp=bank-1'];
+        yield 'user info' => ['https://user@t.me/tetraminator_bot/pay?startapp=bank-1'];
+        yield 'user info hiding a host' => ['https://t.me@evil.test/tetraminator_bot/pay'];
+        yield 'fragment' => ['https://t.me/tetraminator_bot/pay?startapp=bank-1#x'];
+        yield 't.me as a subdomain' => ['https://t.me.evil.com/tetraminator_bot/pay?startapp=bank-1'];
+        yield 'a subdomain of t.me' => ['https://x.t.me/tetraminator_bot/pay'];
+        yield 'double slash' => ['https://t.me//evil.test/x'];
+        yield 'double slash in the path' => ['https://t.me/tetraminator_bot//pay'];
+    }
+
+    #[DataProvider('nonTelegramPaymentUrls')]
+    public function testAPaymentUrlThatIsNotAValidTelegramLinkOpensWithOpenLink(string $url): void
+    {
+        $session = $this->authenticate(self::CUSTOMER);
+        $this->tetraminatorAnswers([self::created()]);
+        $payment = $this->payTetraminator($session, $this->checkout($session));
+        // Set on the row directly: the plugin may refuse some of these, the page must not trust it either way.
+        $payload = $payment->getRequestPayload() ?? [];
+        unset($payload['mini_app_link']);
+        $payment->setRequestPayload($payload)->setPaymentUrl($url);
+        $this->em->flush();
+
+        $html = $this->appGet('/app/view/payments/'.$payment->getId(), $session);
+
+        self::assertSame($this->onlineMarkup($payment, htmlspecialchars($url, ENT_QUOTES)), $this->markup($html));
+        self::assertStringNotContainsString('data-telegram-link', $html);
+        self::assertStringNotContainsString('data-main-button-telegram', $html);
+    }
+
+    public function testABuiltInGatewayWithATelegramPaymentUrlKeepsOpenLink(): void
+    {
+        $session = $this->authenticate(self::CUSTOMER);
+        $payment = $this->payWith($session, $this->checkout($session), $this->methods['custom_api']);
+        $payment->setPaymentUrl(self::TME_PAY_URL);
+        $this->em->flush();
+
+        $html = $this->appGet('/app/view/payments/'.$payment->getId(), $session);
+
+        self::assertSame($this->onlineMarkup($payment, self::TME_PAY_URL), $this->markup($html), 'only a plugin gateway gets openTelegramLink');
+        self::assertStringNotContainsString('data-telegram-link', $html);
     }
 
     /**

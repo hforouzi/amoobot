@@ -13,6 +13,11 @@ use App\Entity\Payment;
  * host exactly t.me, no user info, port or fragment, a plain path. Anything else is null and the page opens the payment
  * URL as for every other gateway. Only a plugin gateway's payload is the provider's answer; a built-in gateway stores
  * its own request there, so it never has one.
+ *
+ * With no valid stored link, a plugin gateway's payment URL that is itself such a t.me link (Tetraminator's gateway_link
+ * can be one) is returned too, so it starts inside Telegram instead of the in-app browser. Both are read from the
+ * Payment row only and pass the same checks. A built-in gateway never gets one, even with a t.me payment URL: its pages
+ * stay exactly as they were (openLink).
  */
 final class PaymentTelegramLink
 {
@@ -28,7 +33,7 @@ final class PaymentTelegramLink
             return null;
         }
 
-        return self::valid($payment->getRequestPayload()[self::PAYLOAD_KEY] ?? null);
+        return self::valid($payment->getRequestPayload()[self::PAYLOAD_KEY] ?? null) ?? self::valid($payment->getPaymentUrl());
     }
 
     public static function valid(mixed $link): ?string
