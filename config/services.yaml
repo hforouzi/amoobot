@@ -45,6 +45,11 @@ services:
             tags: ['app.vpn_driver']
         App\Payment\Domain\PaymentGatewayInterface:
             tags: ['app.payment_gateway']
+        # Product modules and provider drivers (docs/design/product-modules.md, PM1a): tagged, used by nothing yet.
+        App\Module\Domain\ProductModuleInterface:
+            tags: ['app.product_module']
+        App\Module\Domain\ProviderDriverInterface:
+            tags: ['app.provider_driver']
 
     _defaults:
         autowire: true
@@ -96,6 +101,14 @@ services:
     App\Payment\Infrastructure\PaymentGatewayRegistry:
         arguments:
             $drivers: !tagged_iterator 'app.payment_gateway'
+
+    App\Module\Application\ProductModuleRegistry:
+        arguments:
+            $modules: !tagged_iterator 'app.product_module'
+
+    App\Module\Application\ProviderDriverRegistry:
+        arguments:
+            $drivers: !tagged_iterator 'app.provider_driver'
 
     # Admin labels a CRUD does not set: "entity.<name>.singular|plural" and "field.<property>" (admin domain).
     EasyCorp\Bundle\EasyAdminBundle\Contracts\Translation\EntityTranslationIdGeneratorInterface:
