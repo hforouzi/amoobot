@@ -8,6 +8,8 @@ use App\Entity\DiscountCode;
 use App\Entity\Order;
 use App\Entity\Payment;
 use App\Entity\VpnService;
+use App\Module\Application\ProductModuleRegistry;
+use App\Module\Domain\ProductModuleInterface;
 use App\Payment\Application\AdminPaymentAlerter;
 use App\Payment\Application\PaymentCustomerNotifier;
 use App\Payment\Application\PaymentDeliveryLog;
@@ -17,9 +19,8 @@ use App\Payment\Domain\Money\AmountMatchStatus;
 use App\Payment\Domain\PaymentStatus;
 use App\Provisioning\Application\InboundAttachAlerts;
 use App\Provisioning\Application\ServiceInboundAttacher;
-use App\Provisioning\Application\ServiceRenewalService;
 use App\Provisioning\Application\ServiceTrafficAddonService;
-use App\Provisioning\Application\VpnProvisioningService;
+use App\Provisioning\Application\VpnProductModule;
 use App\Shared\Domain\SecretRedactor;
 use App\Shared\Infrastructure\TransactionRollback;
 use App\Shop\Application\DiscountCodeService;
@@ -82,8 +83,7 @@ class PaymentSettlementService
         private readonly TransactionRollback $transactionRollback,
         private readonly AmountMatcher $amountMatcher,
         private readonly UnderpaymentTolerancePolicy $tolerancePolicy,
-        private readonly VpnProvisioningService $vpnProvisioningService,
-        private readonly ServiceRenewalService $serviceRenewalService,
+        private readonly ProductModuleRegistry $productModules,
         private readonly ServiceTrafficAddonService $serviceTrafficAddonService,
         private readonly DiscountCodeService $discountCodeService,
         private readonly PaymentCustomerNotifier $customerNotifier,
@@ -578,7 +578,7 @@ class PaymentSettlementService
             $this->entityManager->refresh($target, LockMode::PESSIMISTIC_WRITE);
 
             if (OrderType::RENEWAL === $order->getType()) {
-                $this->serviceRenewalService->renew($target, $order);
+                $this->productModule($order)->renew($target, $order);
 
                 return $target;
             }
@@ -596,7 +596,11 @@ class PaymentSettlementService
         $plan = $order->requirePlan();
         $inbound = $plan->getInbound();
 
-        return $this->vpnProvisioningService->provisionOrder($order, [
+        // Every attempt first looks for the order's client on the panel and adopts it: an earlier
+        // attempt may have created it and then died before the commit (crash, timeout, kill), and
+        // the next webhook/retry must not create a second one. Safe: the UUID is derived from the order.
+        // VpnProductModule::provision() calls provisionOrder() with this metadata and adoptExisting: true.
+        return $this->productModule($order)->provision($order, [
             'source' => $source,
             'orderId' => $order->getId() ?? 0,
             'paymentId' => $payment->getId() ?? 0,
@@ -604,12 +608,17 @@ class PaymentSettlementService
             'planInboundId' => $inbound?->getId() ?? 0,
             'panelId' => $inbound?->getPanel()?->getId() ?? 0,
             'driverType' => (string) ($inbound?->getPanel()?->getType() ?? 'dummy'),
-        ],
-            // Every attempt first looks for the order's client on the panel and adopts it: an earlier
-            // attempt may have created it and then died before the commit (crash, timeout, kill), and
-            // the next webhook/retry must not create a second one. Safe: the UUID is derived from the order.
-            adoptExisting: true,
-        );
+        ]);
+    }
+
+    /**
+     * The product module that fulfils this order. Always 'vpn' until PM2a adds plan.product_type
+     * (docs/design/product-modules.md 9). An unknown type throws ModuleRegistryException, which is not caught here:
+     * it ends as a provisioning failure (recordProvisioningFailure()), like any other fulfilment error.
+     */
+    private function productModule(Order $order): ProductModuleInterface
+    {
+        return $this->productModules->get(VpnProductModule::TYPE);
     }
 
     /**
