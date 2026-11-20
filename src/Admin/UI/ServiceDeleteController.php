@@ -7,7 +7,7 @@ namespace App\Admin\UI;
 use App\Entity\VpnService;
 use App\MiniApp\Admin\AdminText;
 use App\MiniApp\UI\Admin\MiniAppAdminServiceController;
-use App\Provisioning\Application\ServiceAdministration;
+use App\Module\Application\ProductModuleResolver;
 use App\Provisioning\Application\ServiceAdminOutcome;
 use App\Security\AdminAuditLogger;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
@@ -19,8 +19,8 @@ use Symfony\Component\Routing\Attribute\Route;
 /**
  * "Delete on panel" of a service (SERVICES_DELETE, AdminCrudPermissions): the only web delete, since EasyAdmin's would
  * remove the row and leave the client working on the panel. As in the bot and the Mini App it goes through
- * ServiceAdministration::delete() (the panel first, nothing changes here if that fails), after the service's name is
- * typed back, as the Mini App asks.
+ * the service's product module (terminate(); for 'vpn' that is ServiceAdministration::delete(): the panel first, nothing
+ * changes here if that fails), after the service's name is typed back, as the Mini App asks.
  */
 #[Route('/admin')]
 final class ServiceDeleteController extends AbstractController
@@ -31,7 +31,7 @@ final class ServiceDeleteController extends AbstractController
     public const CSRF_PREFIX = 'vpn_service_delete_';
 
     #[Route('/vpn-service/{id}/delete-on-panel', name: 'admin_vpn_service_delete_on_panel', requirements: ['id' => '\d+'], methods: ['GET', 'POST'])]
-    public function delete(VpnService $service, Request $request, ServiceAdministration $administration, AdminAuditLogger $auditLogger): Response
+    public function delete(VpnService $service, Request $request, ProductModuleResolver $productModules, AdminAuditLogger $auditLogger): Response
     {
         $name = MiniAppAdminServiceController::name($service);
         $csrf = self::CSRF_PREFIX.$service->getId();
@@ -58,7 +58,7 @@ final class ServiceDeleteController extends AbstractController
             return $this->confirmAgain($service);
         }
 
-        $outcome = $administration->delete($service);
+        $outcome = $productModules->forService($service)->terminate($service);
         $auditLogger->record('service.delete', 'VpnService', $service->getId(), ['outcome' => $outcome->value]);
         match ($outcome) {
             ServiceAdminOutcome::DONE => $this->flash('success', 'flash.service.deleted_on_panel', ['%name%' => $name]),

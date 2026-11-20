@@ -7,16 +7,15 @@ namespace App\Tests\Module;
 use PHPUnit\Framework\TestCase;
 
 /**
- * The module registries are used only where a PR moved a caller on purpose. Only the module code itself
- * (src/Module/), the service wiring in config/, and these files may name them:
- * - PM1b: settlement's fulfilment (PaymentSettlementService::fulfil(), new service and renewal).
+ * Only the module code itself (src/Module/) and the service wiring in config/ may name the module registries. Since
+ * PM1c every other caller asks ProductModuleResolver (src/Module/Application) for an order's or a service's module.
  */
 final class ModuleRegistryUsageGuardTest extends TestCase
 {
     private const REGISTRIES = ['ProductModuleRegistry', 'ProviderDriverRegistry'];
 
     /** Paths (from the project root) allowed to name a registry: a directory ends with '/', anything else is one file. */
-    private const ALLOWED = ['src/Module/', 'src/Payment/Application/Settlement/PaymentSettlementService.php'];
+    private const ALLOWED = ['src/Module/'];
 
     public function testNoProductionClassUsesTheRegistriesYet(): void
     {

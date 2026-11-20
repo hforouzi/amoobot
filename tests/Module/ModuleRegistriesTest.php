@@ -12,6 +12,7 @@ use App\Module\Domain\CapabilitySet;
 use App\Module\Domain\ModuleRegistryException;
 use App\Module\Domain\ProductModuleInterface;
 use App\Module\Domain\ProviderDriverInterface;
+use App\Provisioning\Application\AutoSuspendSummary;
 use App\Provisioning\Application\RenewalResult;
 use App\Provisioning\Application\ServiceAdminOutcome;
 use PHPUnit\Framework\TestCase;
@@ -142,6 +143,11 @@ final class ModuleRegistriesTest extends TestCase
             }
 
             public function terminate(VpnService $service): ServiceAdminOutcome
+            {
+                throw new \LogicException('not used');
+            }
+
+            public function runLifecycleTask(string $task, int $limit, bool $dryRun): AutoSuspendSummary
             {
                 throw new \LogicException('not used');
             }

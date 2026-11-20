@@ -10,14 +10,16 @@ use App\Module\Domain\ProductModuleInterface;
 
 /**
  * The built-in 'vpn' product module (docs/design/product-modules.md 2.4): every method delegates to the existing
- * service, unchanged. PM1a: nothing calls it yet; PM1b routes settlement through it, PM1c the lifecycle jobs.
+ * service, unchanged. PM1b routes settlement through it, PM1c the admin lifecycle actions and the suspension jobs.
  *
  * - provision: VpnProvisioningService::provisionOrder() with adoption on, as settlement does today, so a second call
  *   for the same order adopts the client it created (orderClientUuid(), findAdoptableClient()).
  * - renew: ServiceRenewalService::renew().
  * - suspend / resume / terminate: the admin path of ServiceAdministration (suspend(), activate(), delete()), as it
- *   stands, including its rule that suspend only calls the panel for sanaei_3xui. The expiry/traffic job path
- *   (ServiceAutoSuspendService) works on batches and is wrapped in PM1c.
+ *   stands, including its rule that suspend only calls the panel for sanaei_3xui.
+ * - runLifecycleTask: the job path, ServiceAutoSuspendService::suspendExpiredServices() ('expiry') and
+ *   suspendTrafficExhaustedServices() ('traffic'), as they stand: the batch query and the per-service driver calls
+ *   stay there, and that path always resolves a driver. The two suspend paths are not unified (design 2.4).
  */
 final class VpnProductModule implements ProductModuleInterface
 {
@@ -28,6 +30,7 @@ final class VpnProductModule implements ProductModuleInterface
         private readonly VpnProvisioningService $provisioning,
         private readonly ServiceRenewalService $renewal,
         private readonly ServiceAdministration $administration,
+        private readonly ServiceAutoSuspendService $autoSuspend,
     ) {
     }
 
@@ -64,5 +67,14 @@ final class VpnProductModule implements ProductModuleInterface
     public function terminate(VpnService $service): ServiceAdminOutcome
     {
         return $this->administration->delete($service);
+    }
+
+    public function runLifecycleTask(string $task, int $limit, bool $dryRun): AutoSuspendSummary
+    {
+        return match ($task) {
+            self::LIFECYCLE_EXPIRY => $this->autoSuspend->suspendExpiredServices($limit, $dryRun),
+            self::LIFECYCLE_TRAFFIC => $this->autoSuspend->suspendTrafficExhaustedServices($limit, $dryRun),
+            default => throw new \InvalidArgumentException(sprintf('The "%s" module has no lifecycle task "%s".', self::TYPE, $task)),
+        };
     }
 }
