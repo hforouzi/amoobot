@@ -1,12 +1,43 @@
 name: CI
 
 on:
-  push:
   pull_request:
+  push:
+    branches: [main, develop/v3]
+    tags: ['v*']
+
+# One run per PR / ref. A new commit on a PR cancels the PR's older run; runs on main, develop/v3 and tags always finish.
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  APP_ENV: test
+  DATABASE_URL: mysql://root@127.0.0.1:3306/amoobot?serverVersion=10.11.0-MariaDB&charset=utf8mb4
 
 jobs:
-  tests:
+  # Proves every *Test.php belongs to exactly one shard (fails on an unassigned directory/file) and builds the matrix.
+  plan:
     runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.shards.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          coverage: none
+      - run: php .github/ci/phpunit-shards.php check
+      - id: shards
+        run: echo "matrix=$(php .github/ci/phpunit-shards.php matrix)" >> "$GITHUB_OUTPUT"
+
+  phpunit:
+    name: phpunit (${{ matrix.shard }})
+    needs: plan
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     services:
       mariadb:
         image: mariadb:10.11
@@ -17,9 +48,6 @@ jobs:
         options: >-
           --health-cmd="healthcheck.sh --connect --innodb_initialized"
           --health-interval=5s --health-timeout=5s --health-retries=20
-    env:
-      APP_ENV: test
-      DATABASE_URL: mysql://root@127.0.0.1:3306/amoobot?serverVersion=10.11.0-MariaDB&charset=utf8mb4
     steps:
       - uses: actions/checkout@v7
       - uses: shivammathur/setup-php@v2
@@ -28,11 +56,60 @@ jobs:
           extensions: intl, pdo_mysql, sodium, gd
           coverage: none
       # libfaketime: tests/Clock/MidnightCrossingTest runs the settlement/expiry tests across midnight boundaries.
-      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends faketime
+      - if: matrix.faketime
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends faketime
+      - id: composer-cache
+        run: echo "dir=$(composer config cache-files-dir)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: composer-${{ runner.os }}-${{ hashFiles('composer.lock') }}
+          restore-keys: composer-${{ runner.os }}-
       - run: composer install --no-interaction --no-progress --prefer-dist
       - run: php bin/console doctrine:database:create --if-not-exists
       - run: php bin/console doctrine:migrations:migrate --no-interaction
-      - run: php bin/phpunit
+      - id: config
+        run: echo "file=$(php .github/ci/phpunit-shards.php config "$SHARD")" >> "$GITHUB_OUTPUT"
+        env:
+          SHARD: ${{ matrix.shard }}
+      - run: php bin/phpunit -c "$CONFIG" --log-junit "var/junit-$SHARD.xml"
+        env:
+          CONFIG: ${{ steps.config.outputs.file }}
+          SHARD: ${{ matrix.shard }}
+      # Per-test timings, to rebalance the shards (.github/ci/phpunit-shards.php).
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-${{ matrix.shard }}
+          path: var/junit-${{ matrix.shard }}.xml
+          retention-days: 14
+          if-no-files-found: ignore
+
+  static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: intl, pdo_mysql, sodium, gd
+          coverage: none
+      - id: composer-cache
+        run: echo "dir=$(composer config cache-files-dir)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: composer-${{ runner.os }}-${{ hashFiles('composer.lock') }}
+          restore-keys: composer-${{ runner.os }}-
+      - run: composer install --no-interaction --no-progress --prefer-dist
+      # Same proof by test name: the shards' --list-tests together equal the full suite's, each test in one shard.
+      - name: Shards cover the full suite
+        run: php .github/ci/phpunit-shards.php verify
+      - uses: actions/cache@v4
+        with:
+          path: var/cache/phpstan
+          key: phpstan-${{ hashFiles('composer.lock', 'phpstan.dist.neon', 'phpstan-baseline.neon') }}-${{ github.sha }}
+          restore-keys: phpstan-${{ hashFiles('composer.lock', 'phpstan.dist.neon', 'phpstan-baseline.neon') }}-
       - name: PHPStan
         run: |
           APP_ENV=dev php bin/console cache:warmup
@@ -40,3 +117,17 @@ jobs:
       - run: php bin/console lint:container
       # --parse-tags: config/services.yaml uses !tagged_iterator.
       - run: php bin/console lint:yaml config --parse-tags
+      - run: php bin/console lint:twig templates
+
+  # The single check for branch protection: green only when the plan, every shard and the static job succeeded.
+  ci-ok:
+    name: ci-ok
+    if: always()
+    needs: [plan, phpunit, static]
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          echo "$RESULTS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          echo "$RESULTS" | jq -e 'all(.[]; .result == "success")' > /dev/null
