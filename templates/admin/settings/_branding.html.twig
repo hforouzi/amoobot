@@ -35,6 +35,18 @@
         </div>
 
         <div class="admin-section">
+            <h2>{{ 'branding_settings.sections.brand_domain'|trans }}</h2>
+            <div class="admin-checkbox-row">
+                <input type="checkbox" id="subscription_pages_on_brand" name="subscription_pages_on_brand" {% if values.subscription_pages_on_brand %}checked{% endif %}>
+                <label for="subscription_pages_on_brand">{{ 'branding_settings.fields.subscription_pages_on_brand'|trans }}</label>
+            </div>
+            <div class="form-text">{{ 'branding_settings.help.subscription_pages_on_brand'|trans }}</div>
+            {% if not values.brand_domain_active %}
+                <div class="form-text" data-no-brand-domain>{{ 'branding_settings.help.subscription_pages_no_brand_domain'|trans }}</div>
+            {% endif %}
+        </div>
+
+        <div class="admin-section">
             <h2>{{ 'branding_settings.sections.logo'|trans }}</h2>
             {% if values.brand_logo %}
                 <p class="form-label">{{ 'branding_settings.fields.current_logo'|trans }}</p>

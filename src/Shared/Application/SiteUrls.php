@@ -22,13 +22,13 @@ final class SiteUrls
     ) {
     }
 
-    /** The Mini App and the payment return page: the brand base. */
+    /** The Mini App, the return page, the subscription pages when switched on (SubscriptionPageUrl): brand base. */
     public function customer(string $route, array $parameters = []): string
     {
         return $this->on($this->brand->base(), $route, $parameters);
     }
 
-    /** Everything else (subscription pages, downloads, callbacks, webhooks): DEFAULT_URI, whatever host is asking. */
+    /** Everything else (subscription pages by default, downloads, callbacks, webhooks): DEFAULT_URI, whatever host is asking. */
     public function operational(string $route, array $parameters = []): string
     {
         return $this->on($this->brand->operationalBase(), $route, $parameters);
