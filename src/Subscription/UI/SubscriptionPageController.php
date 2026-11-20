@@ -6,6 +6,7 @@ namespace App\Subscription\UI;
 
 use App\Entity\VpnService;
 use App\Subscription\Application\SubscriptionPageViewFactory;
+use App\Subscription\Domain\BridgeAutoOpen;
 use App\Subscription\Domain\ClientPlatform;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
@@ -14,6 +15,7 @@ use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\RateLimiter\RateLimiterFactory;
 use Symfony\Component\Routing\Attribute\Route;
+use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
 use Symfony\Component\Translation\LocaleSwitcher;
 
 /**
@@ -68,8 +70,9 @@ final class SubscriptionPageController extends AbstractController
 
     /**
      * The import bridge for one client app: a page the Mini App opens in the external browser (Telegram's WebView
-     * blocks custom schemes such as hiddify:// and v2rayng://), with one big button carrying the app's import link
-     * and the subscription link to copy as a fallback. Same key, limits and headers as the subscription page; only
+     * blocks custom schemes such as hiddify:// and v2rayng://). Once shown it tries the app's import link by itself,
+     * once (BridgeAutoOpen); one big button carrying the same link and the subscription link to copy stay as the
+     * fallback. Same key, limits and headers as the subscription page; only
      * a working subscription of an active app that has an import link has a bridge (404 otherwise).
      */
     #[Route('/s/{token}/open/{appId}', name: 'subscription_app_bridge', requirements: ['token' => self::TOKEN_PATTERN, 'appId' => '\d+'], methods: ['GET'])]
@@ -96,7 +99,14 @@ final class SubscriptionPageController extends AbstractController
             return $this->page('subscription/not_found.html.twig', [], Response::HTTP_NOT_FOUND);
         }
 
-        return $this->page('subscription/bridge.html.twig', ['view' => $view, 'clientApp' => $app, 'locale' => $locale]);
+        // One automatic try of the import link (BridgeAutoOpen); Android's fallback is this page on this host, without it.
+        $autoOpen = null;
+        if (BridgeAutoOpen::allowed($request->getMethod(), $request->headers->get('User-Agent'), $request->query->has(BridgeAutoOpen::OPT_OUT))) {
+            $fallback = $this->generateUrl('subscription_app_bridge', ['token' => $token, 'appId' => $appId, BridgeAutoOpen::OPT_OUT => 1] + ('en' === $locale ? ['lang' => 'en'] : []), UrlGeneratorInterface::ABSOLUTE_URL);
+            $autoOpen = BridgeAutoOpen::target($app->importUrl, $app->androidPackage, ClientPlatform::ANDROID === $platform, $fallback);
+        }
+
+        return $this->page('subscription/bridge.html.twig', ['view' => $view, 'clientApp' => $app, 'locale' => $locale, 'autoOpen' => $autoOpen]);
     }
 
     /**

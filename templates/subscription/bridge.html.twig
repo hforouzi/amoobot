@@ -1,13 +1,15 @@
 {% extends 'subscription/_layout.html.twig' %}
 {% trans_default_domain 'subscription' %}
-{# The import bridge for one client app, opened by the Mini App in the external browser, where custom schemes work:
-   one big button with the app's import link (tapped by the customer, never automatic) and, when nothing opens, the
-   subscription link to copy. #}
+{# The import bridge for one client app, opened by the Mini App in the external browser, where custom schemes work.
+   Once shown, the page tries the app's import link by itself, once (autoOpen, BridgeAutoOpen: the plain link, or on
+   Android an intent:// URL whose browser fallback is this page with ?noauto=1). The big button with the same link and,
+   when nothing opens, the subscription link to copy stay for when that does not happen. No automatic try for HEAD,
+   crawlers or ?noauto=1 (autoOpen is null). #}
 {% block title %}{{ 'bridge.title'|trans({'%app%': clientApp.name}) }}{% endblock %}
 {% block body %}
-    <section class="card bridge" data-app>
+    <section class="card bridge" data-app{% if autoOpen|default(null) %} data-auto-open="{{ autoOpen }}"{% endif %}>
         <h1>{% if clientApp.icon %}{{ clientApp.icon }} {% endif %}{{ clientApp.name }}</h1>
-        <p class="muted">{{ 'bridge.intro'|trans({'%app%': clientApp.name}) }}</p>
+        <p class="muted">{{ (autoOpen|default(null) ? 'bridge.intro_auto' : 'bridge.intro')|trans({'%app%': clientApp.name}) }}</p>
         <a class="btn bridge-open" href="{{ clientApp.importUrl }}" data-deeplink>➕ {{ 'bridge.open'|trans({'%app%': clientApp.name}) }}</a>
         {% if clientApp.installUrl %}
             <p class="muted" style="margin-top:12px">{{ 'bridge.not_installed'|trans({'%app%': clientApp.name}) }}</p>
@@ -23,4 +25,32 @@
 {% endblock %}
 {% block scripts %}
     {{ include('subscription/_script.html.twig') }}
+    {% if autoOpen|default(null) %}
+        {# Inline, as the page's other script: the CSP already allows it (SubscriptionPageController::page()). #}
+        <script data-auto-open-script>
+        (function () {
+            'use strict';
+            var card = document.querySelector('[data-auto-open]');
+            if (!card) { return; }
+            var target = card.getAttribute('data-auto-open');
+            // Once: the address gets noauto=1 first, so a reload or coming back here does not try again.
+            try {
+                var here = new URL(window.location.href);
+                here.searchParams.set('noauto', '1');
+                window.history.replaceState(null, '', here.pathname + here.search + here.hash);
+            } catch (e) { /* old browser: no reload guard, still a single try */ }
+            function open() {
+                setTimeout(function () {
+                    window.location.href = target;
+                    // Still here and visible: nothing opened, so show the copy fallback (the button stays too).
+                    setTimeout(function () {
+                        var fallback = card.querySelector('[data-fallback]');
+                        if (fallback && document.visibilityState === 'visible') { fallback.classList.add('show'); }
+                    }, 1600);
+                }, 300);
+            }
+            if (document.readyState === 'complete') { open(); } else { window.addEventListener('load', open, { once: true }); }
+        })();
+        </script>
+    {% endif %}
 {% endblock %}

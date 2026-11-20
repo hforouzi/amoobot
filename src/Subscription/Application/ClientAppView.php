@@ -22,6 +22,8 @@ final class ClientAppView
         public readonly bool $matchesPlatform,
         /** The ClientApp id (the import bridge /s/{token}/open/{id} is per app). */
         public readonly ?int $id = null,
+        /** From its Google Play store link (BridgeAutoOpen::androidPackage()): the import bridge opens it with an Android intent. */
+        public readonly ?string $androidPackage = null,
     ) {
     }
 }
