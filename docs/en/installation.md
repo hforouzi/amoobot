@@ -43,7 +43,7 @@ including the Mini App and return pages, so links already sent keep working.
 
 | Stays on `DEFAULT_URI` | Moves to `BRAND_PUBLIC_BASE_URL` |
 |---|---|
-| Telegram webhook, EasyAdmin, subscription pages `/s/`, downloads `/d/` | Mini App pages, API and files (`/app`, `/miniapp/`), including its admin section (`/app/admin`, `/app/api/admin`) |
+| Telegram webhook, EasyAdmin, subscription pages `/s/` (unless [switched over](#subscription-pages-on-the-brand-domain-optional-switch)), downloads `/d/` | Mini App pages, API and files (`/app`, `/miniapp/`), including its admin section (`/app/admin`, `/app/api/admin`) |
 | Payment gateway callbacks and webhooks, delivery messages | Payment return page (`/payment/return/`) and the logo it shows |
 
 On the brand host everything else answers 404, whatever the method or user. The application enforces this
@@ -67,6 +67,21 @@ service's subscription page, stay on the main domain.
 **EasyAdmin stays on the main domain only** and answers 404 on the brand host. Direct links such as
 `https://<main domain>/app/admin` opened in a browser do not sign in, because Telegram sign-in only works when Telegram
 opens the page.
+
+### Subscription pages on the brand domain (optional switch)
+
+Settings → Branding → *Customer subscription pages on the brand domain*, off by default. With it on and a valid
+`BRAND_PUBLIC_BASE_URL`, the subscription page `/s/{token}` and the app import bridge `/s/{token}/open/{appId}` are also
+served on the brand host, and every link built for customers (bot messages and buttons, notifications, the Mini App and
+its "Add to app" buttons, the reseller's copy link) uses the brand domain. Admin screens (EasyAdmin, the Mini App admin
+section), downloads `/d/`, callbacks and webhooks stay on `DEFAULT_URI`, and the main domain keeps serving `/s/`, so
+links already saved in apps or sent in Telegram keep working. Off, or without a valid brand domain: exactly as before
+(the brand host answers 404 for `/s/`).
+
+Before switching it on, add the `/s/` locations and the `amoobot_brand_nopath` log format from
+[`nginx-brand-domain.conf.example`](nginx-brand-domain.conf.example) to the brand site (deploy.sh does not write that
+file), then `sudo nginx -t && sudo systemctl reload nginx`. Check with a real token:
+`curl -s -o /dev/null -w '%{http_code}\n' https://stacktunnel.net/s/<token>` (404 while the switch is off, 200 once on).
 
 ### Set it up
 
@@ -160,7 +175,8 @@ domain), and make a small real payment. After paying, the address bar should pas
 
 ### Roll back
 
-1. Remove `BRAND_PUBLIC_BASE_URL` from the env file(s), then deploy, or run `composer dump-env prod`, `cache:clear` and
+1. If *Customer subscription pages on the brand domain* is on, switch it off first (Settings → Branding): new links go
+   back to the main domain at once. Remove `BRAND_PUBLIC_BASE_URL` from the env file(s), then deploy, or run `composer dump-env prod`, `cache:clear` and
    reload PHP-FPM as above. New links are built on the main domain at once, and `trusted_hosts` and the application's
    allowlist switch off.
 2. Run `php bin/console app:telegram:set-menu-button` and restore the BotFather URLs.
@@ -168,7 +184,7 @@ domain), and make a small real payment. After paying, the address bar should pas
    nginx allowlist keeps everything else off it. A Mini App page opened on it in this state shows subscription and
    download links on the brand host, which 404; removing the site once old links have expired ends that.
 
-Nothing is stored in the database, so a rollback needs no data change, and gateways need none either.
+Apart from that switch nothing is stored in the database, so a rollback needs no data change, and gateways need none either.
 
 ## Database
 
