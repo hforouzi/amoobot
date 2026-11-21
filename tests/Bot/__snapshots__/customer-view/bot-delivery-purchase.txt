@@ -1,0 +1,18 @@
+sendMessage chat=7301
+  text: ✅ سرویس شما آماده شد
+
+نام سرویس:
+<code>EMAIL_NEW</code>
+
+🔗 لینک اشتراک:
+<a href="https://sub.shop-edge.com:2096/sub/SUB_ID_NEW">باز کردن لینک اشتراک</a>
+
+برای کپی:
+<code>https://sub.shop-edge.com:2096/sub/SUB_ID_NEW</code>
+
+⚙️ کانفیگ‌ها:
+
+1. <a href="vless://UUID_NEW@de1.shop-edge.com:443?type=tcp&amp;security=none#test">کانفیگ ۱</a>
+<code>vless://UUID_NEW@de1.shop-edge.com:443?type=tcp&amp;security=none#test</code>
+  parse_mode: HTML
+  [inline_keyboard] 🌐 صفحه اشتراک -> https://brand.example.org/s/TOKEN_NEW

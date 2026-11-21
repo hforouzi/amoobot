@@ -41,6 +41,13 @@ final class BotTranscript
         'payment_submit_receipt' => ['PAYMENT'],
         'admin_confirm_payment' => ['PAYMENT'],
         'admin_reject_payment' => ['PAYMENT'],
+        // The customer's service view (TelegramKeyboardFactory::userServiceDetail) and a claimed service's link reset.
+        'service_subscription' => ['SERVICE'],
+        'service_subscription_qr' => ['SERVICE'],
+        'service_resend_config' => ['SERVICE'],
+        'service_sync_usage' => ['SERVICE'],
+        'cl_rst' => ['SERVICE'],
+        'cl_rst_ok' => ['SERVICE', null],
     ];
 
     /** Text right before an id in a message => the id's table. */
@@ -140,6 +147,9 @@ final class BotTranscript
         foreach ($parts as $i => $argument) {
             if (1 !== preg_match('/^\d+$/', $argument)) {
                 continue;
+            }
+            if (array_key_exists($i, self::CALLBACK_ARGUMENTS[$route] ?? []) && null === self::CALLBACK_ARGUMENTS[$route][$i]) {
+                continue; // not an id (a nonce that happens to be all digits)
             }
             $table = self::CALLBACK_ARGUMENTS[$route][$i] ?? throw new \LogicException(sprintf('Callback "%s": argument %d is a number but BotTranscript::CALLBACK_ARGUMENTS does not say which table it belongs to.', $data, $i + 1));
             $parts[$i] = self::label($table, (int) $argument, $data, $ids);

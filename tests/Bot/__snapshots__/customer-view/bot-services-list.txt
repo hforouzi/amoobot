@@ -1,0 +1,13 @@
+answerCallbackQuery chat=cb
+
+sendMessage chat=7301
+  text: سرویس‌های شما:
+  [inline_keyboard] 📦 سرویس #SERVICE_IMPORTED -> service_view:SERVICE_IMPORTED
+  [inline_keyboard] 📦 سرویس #SERVICE_MULTI_INBOUND -> service_view:SERVICE_MULTI_INBOUND
+  [inline_keyboard] 📦 سرویس #SERVICE_UNLIMITED -> service_view:SERVICE_UNLIMITED
+  [inline_keyboard] 📦 سرویس #SERVICE_TRAFFIC_EXHAUSTED -> service_view:SERVICE_TRAFFIC_EXHAUSTED
+  [inline_keyboard] 📦 سرویس #SERVICE_SUSPENDED -> service_view:SERVICE_SUSPENDED
+  [inline_keyboard] 📦 سرویس #SERVICE_EXPIRED -> service_view:SERVICE_EXPIRED
+  [inline_keyboard] 📦 سرویس #SERVICE_NEAR_EXPIRY -> service_view:SERVICE_NEAR_EXPIRY
+  [inline_keyboard] 📦 سرویس #SERVICE_ACTIVE -> service_view:SERVICE_ACTIVE
+  [inline_keyboard] 🔙 بازگشت -> main_menu

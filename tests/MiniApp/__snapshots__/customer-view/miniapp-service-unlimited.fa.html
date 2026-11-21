@@ -1,0 +1,52 @@
+<div class="view-root" data-view="services" data-title="Gold 30 days" data-back data-main-button-text="باز کردن صفحه اشتراک" data-main-button-href="http://localhost/s/TOKEN_UNLIMITED" data-main-button-external>
+        <section class="card" data-status="active">
+    <div class="head">
+        <h1>Gold 30 days</h1>
+        <span class="badge active">فعال</span>
+    </div>
+    <div class="stats">
+        <div class="stat">
+            <span class="muted">تاریخ انقضا</span>
+                            <b><time datetime="<date of now+20d+12h>"><jdate of now+20d+12h></time></b>
+                <span class="muted ltr-num"><date of now+20d+12h></span>
+                    </div>
+        <div class="stat" data-days-left="20">
+            <span class="muted">روزهای باقی‌مانده</span>
+            <b>20 روز</b>
+        </div>
+        <div class="stat">
+            <span class="muted">مصرف شده</span>
+            <b class="ltr">3 GB</b>
+        </div>
+        <div class="stat">
+            <span class="muted">باقی‌مانده</span>
+            <b class="ltr">نامحدود</b>
+        </div>
+    </div>
+    </section>
+
+                <section class="card">
+            <h2>تمدید و افزایش حجم</h2>
+            <div class="row">
+                <a class="btn small" href="/app/view/services/SERVICE_UNLIMITED/renew" data-nav data-renew>🔄 تمدید سرویس</a>                            </div>
+        </section>
+        <section class="card">
+        <h2>صفحه اشتراک</h2>
+        <p class="muted">لینک اشتراک، QR و افزودن با یک لمس به برنامه‌ها در صفحه اشتراک است.</p>
+        <a class="btn" href="/app/view/services/SERVICE_UNLIMITED/subscription" data-nav data-subscription-view>🔗 لینک اشتراک، QR و افزودن به برنامه‌ها</a>
+        <a class="btn secondary small" style="margin-top:10px" href="http://localhost/s/TOKEN_UNLIMITED" data-open-link>🌐 باز کردن صفحه اشتراک</a>
+        <button type="button" class="btn secondary small" style="margin-top:10px" data-copy="http://localhost/s/TOKEN_UNLIMITED">📋 کپی لینک صفحه</button>
+    </section>
+    <section class="card">
+        <h2>ارسال در چت ربات</h2>
+                    <p class="muted">ربات همان پیام‌های همیشگی را در چت برایتان می‌فرستد.</p>
+            <div class="row">
+                <button type="button" class="btn secondary small" data-action="/app/api/services/SERVICE_UNLIMITED/send-link">🔗 لینک اشتراک</button>
+                <button type="button" class="btn secondary small" data-action="/app/api/services/SERVICE_UNLIMITED/send-qr">🔳 QR کد</button>
+                <button type="button" class="btn secondary small" data-action="/app/api/services/SERVICE_UNLIMITED/resend-config">📄 کانفیگ‌ها</button>
+            </div>
+            </section>
+    <section class="card">
+        <button type="button" class="btn secondary small" data-action="/app/api/services/SERVICE_UNLIMITED/refresh" data-reload>🔄 بروزرسانی مصرف</button>
+    </section>
+</div>

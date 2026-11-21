@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="robots" content="noindex, nofollow">
+    <meta name="referrer" content="no-referrer">
+    <meta name="color-scheme" content="light dark">
+    <meta name="format-detection" content="telephone=no">
+    <title>My subscription</title>
+    <style>
+        :root {
+            --bg: #f4f6fb; --card: #ffffff; --fg: #111827; --muted: #6b7280; --border: #e5e7eb;
+            --accent: #2563eb; --accent-fg: #ffffff; --ok: #15803d; --warn: #b45309; --bad: #b91c1c;
+            --track: #e5e7eb; --code: #f3f4f6; --radius: 14px;
+        }
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg: #0b1020; --card: #151b2e; --fg: #e5e7eb; --muted: #9ca3af; --border: #263049;
+                --accent: #3b82f6; --accent-fg: #ffffff; --ok: #22c55e; --warn: #f59e0b; --bad: #f87171;
+                --track: #263049; --code: #0f1528;
+            }
+        }
+        /* Vazirmatn, self-hosted with the Mini App (public/miniapp/fonts, OFL); CSP font-src 'self'. */
+        @font-face {
+            font-family: Vazirmatn; font-style: normal; font-weight: 100 900; font-display: swap;
+            src: url("/miniapp/fonts/Vazirmatn-wght.woff2?v=33.003") format("woff2-variations"), url("/miniapp/fonts/Vazirmatn-wght.woff2?v=33.003") format("woff2");
+            unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0600-06FF, U+0750-077F,
+                           U+08A0-08FF, U+200C-200F, U+2010-2027, U+2030-205E, U+20AC, U+2122, U+2212, U+FB50-FDFF, U+FE70-FEFF, U+FEFF, U+FFFD;
+        }
+        * { box-sizing: border-box; }
+        html { -webkit-text-size-adjust: 100%; }
+        body {
+            margin: 0; background: var(--bg); color: var(--fg); line-height: 1.7;
+            font-family: Vazirmatn, system-ui, -apple-system, "Segoe UI", Roboto, Tahoma, Arial, sans-serif;
+            padding: max(16px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom));
+        }
+        main { width: 100%; max-width: 560px; margin: 0 auto; display: grid; gap: 14px; }
+        .card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; min-width: 0; }
+        h1 { font-size: 1.25rem; margin: 0; }
+        h2 { font-size: 1.05rem; margin: 0 0 10px; }
+        p { margin: 0 0 8px; }
+        .muted { color: var(--muted); font-size: .9rem; }
+        .ltr { direction: ltr; unicode-bidi: isolate; }
+        .badge { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: .85rem; font-weight: 600; color: #fff; }
+        .badge.active { background: var(--ok); } .badge.expired, .badge.limited { background: var(--bad); } .badge.suspended { background: var(--warn); }
+        .head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+        .stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
+        .stat { background: var(--code); border-radius: 10px; padding: 10px; min-width: 0; }
+        .stat b { display: block; font-size: 1.05rem; overflow-wrap: anywhere; }
+        .bar { height: 10px; background: var(--track); border-radius: 999px; overflow: hidden; margin-top: 12px; }
+        .bar span { display: block; height: 100%; background: var(--ok); border-radius: inherit; }
+        .bar.high span { background: var(--warn); } .bar.full span { background: var(--bad); }
+        .btn {
+            display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; min-height: 46px;
+            padding: 10px 14px; border: 0; border-radius: 12px; background: var(--accent); color: var(--accent-fg);
+            font: inherit; font-weight: 600; text-decoration: none; cursor: pointer; text-align: center;
+        }
+        .btn.secondary { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+        .btn.small { min-height: 40px; font-size: .92rem; }
+        .row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
+        .qr { display: block; width: min(280px, 100%); height: auto; margin: 14px auto 4px; background: #fff; border-radius: 10px; }
+        .url { margin-top: 10px; width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--code); color: var(--fg); font: .85rem ui-monospace, Menlo, Consolas, monospace; direction: ltr; text-align: left; }
+        details { margin-top: 12px; } summary { cursor: pointer; color: var(--accent); font-weight: 600; }
+        ol.configs { padding-inline-start: 18px; margin: 10px 0 0; }
+        ol.configs li { margin-bottom: 10px; }
+        code { display: block; background: var(--code); border-radius: 8px; padding: 8px; font: .8rem/1.6 ui-monospace, Menlo, Consolas, monospace; direction: ltr; text-align: left; overflow-wrap: anywhere; white-space: pre-wrap; }
+        .apps { display: grid; gap: 10px; }
+        .app { border: 1px solid var(--border); border-radius: 12px; padding: 12px; }
+        .app-name { font-weight: 700; }
+        .platforms { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 10px; }
+        .platforms a { padding: 4px 10px; border-radius: 999px; border: 1px solid var(--border); color: var(--fg); text-decoration: none; font-size: .85rem; }
+        .platforms a.current { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+        .hint { display: none; margin-top: 10px; padding: 10px; border-radius: 10px; background: var(--code); font-size: .9rem; }
+        .hint.show { display: block; }
+        .notice { border-inline-start: 4px solid var(--warn); }
+        .downloads { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+        .downloads li { border: 1px solid var(--border); border-radius: 12px; padding: 12px; }
+        .sha { font: .72rem ui-monospace, Menlo, Consolas, monospace; overflow-wrap: anywhere; direction: ltr; text-align: left; color: var(--muted); }
+        .toast { position: fixed; inset-inline: 16px; bottom: max(16px, env(safe-area-inset-bottom)); margin: 0 auto; max-width: 420px; padding: 10px 14px; border-radius: 10px; background: var(--fg); color: var(--bg); text-align: center; opacity: 0; transition: opacity .2s; pointer-events: none; }
+        .toast.show { opacity: .95; }
+        footer { text-align: center; }
+        footer a { color: var(--muted); }
+        @media (max-width: 360px) { .row, .stats { grid-template-columns: minmax(0, 1fr); } }
+    </style>
+</head>
+<body data-platform="android">
+<main>
+        <section class="card" data-status="active">
+    <div class="head">
+        <h1>Gold 30 days</h1>
+        <span class="badge active">Active</span>
+    </div>
+    <div class="stats">
+        <div class="stat">
+            <span class="muted">Expires</span>
+                            <b><time datetime="<date of now+20d+12h>"><date of now+20d+12h></time></b>
+                <span class="muted ltr-num"><date of now+20d+12h></span>
+                    </div>
+        <div class="stat" data-days-left="20">
+            <span class="muted">Days left</span>
+            <b>20 days</b>
+        </div>
+        <div class="stat">
+            <span class="muted">Used</span>
+            <b class="ltr">12.5 GB</b>
+        </div>
+        <div class="stat">
+            <span class="muted">Remaining</span>
+            <b class="ltr">37.5 GB</b>
+        </div>
+    </div>
+            <div class="bar" data-used-percent="25"
+             role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="25" aria-label="Used">
+            <span style="width: 25%"></span>
+        </div>
+        <p class="muted" style="margin-top:6px">12.5 GB of 50 GB (25%)</p>
+    </section>
+
+            <section class="card">
+    <h2>Subscription link</h2>
+            <button type="button" class="btn" data-copy="https://sub.shop-edge.com:2096/sub/submultiinbound">📋 Copy subscription link</button>
+        <input class="url" type="text" readonly value="https://sub.shop-edge.com:2096/sub/submultiinbound" aria-label="Subscription link" data-select-all>
+                    <img class="qr" src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHhtbG5zOnhsaW5rPSJodHRwOi8vd3d3LnczLm9yZy8xOTk5L3hsaW5rIiB2ZXJzaW9uPSIxLjEiIHdpZHRoPSIzOTJweCIgaGVpZ2h0PSIzOTJweCIgdmlld0JveD0iMCAwIDM5MiAzOTIiPjxyZWN0IHg9IjAiIHk9IjAiIHdpZHRoPSIzOTIiIGhlaWdodD0iMzkyIiBmaWxsPSIjZmZmZmZmIiBmaWxsLW9wYWNpdHk9IjEiLz48cGF0aCBmaWxsPSIjMDAwMDAwIiBmaWxsLW9wYWNpdHk9IjEiIGQ9Ik0zMiwzMkw4OCwzMkw4OCw0MEwzMiw0MFpNOTYsMzJMMTIwLDMyTDEyMCw0MEw5Niw0MFpNMTUyLDMyTDE2OCwzMkwxNjgsNDBMMTUyLDQwWk0xNzYsMzJMMTg0LDMyTDE4NCw0MEwxNzYsNDBaTTIwMCwzMkwyMDgsMzJMMjA4LDQwTDIwMCw0MFpNMjI0LDMyTDIzMiwzMkwyMzIsNDBMMjI0LDQwWk0yNDgsMzJMMjcyLDMyTDI3Miw0MEwyNDgsNDBaTTI4OCwzMkwyOTYsMzJMMjk2LDQwTDI4OCw0MFpNMzA0LDMyTDM2MCwzMkwzNjAsNDBMMzA0LDQwWk0zMiw0MEw0MCw0MEw0MCw0OEwzMiw0OFpNODAsNDBMODgsNDBMODgsNDhMODAsNDhaTTk2LDQwTDExMiw0MEwxMTIsNDhMOTYsNDhaTTEyMCw0MEwxNDQsNDBMMTQ0LDQ4TDEyMCw0OFpNMTUyLDQwTDE2MCw0MEwxNjAsNDhMMTUyLDQ4Wk0xODQsNDBMMjA4LDQwTDIwOCw0OEwxODQsNDhaTTIxNiw0MEwyMzIsNDBMMjMyLDQ4TDIxNiw0OFpNMjQ4LDQwTDI3Miw0MEwyNzIsNDhMMjQ4LDQ4Wk0yODgsNDBMMjk2LDQwTDI5Niw0OEwyODgsNDhaTTMwNCw0MEwzMTIsNDBMMzEyLDQ4TDMwNCw0OFpNMzUyLDQwTDM2MCw0MEwzNjAsNDhMMzUyLDQ4Wk0zMiw0OEw0MCw0OEw0MCw1NkwzMiw1NlpNNDgsNDhMNzIsNDhMNzIsNTZMNDgsNTZaTTgwLDQ4TDg4LDQ4TDg4LDU2TDgwLDU2Wk05Niw0OEwxMjgsNDhMMTI4LDU2TDk2LDU2Wk0xNDQsNDhMMTY4LDQ4TDE2OCw1NkwxNDQsNTZaTTE4NCw0OEwyMDgsNDhMMjA4LDU2TDE4NCw1NlpNMjI0LDQ4TDIzMiw0OEwyMzIsNTZMMjI0LDU2Wk0yNDAsNDhMMjQ4LDQ4TDI0OCw1NkwyNDAsNTZaTTI1Niw0OEwyOTYsNDhMMjk2LDU2TDI1Niw1NlpNMzA0LDQ4TDMxMiw0OEwzMTIsNTZMMzA0LDU2Wk0zMjAsNDhMMzQ0LDQ4TDM0NCw1NkwzMjAsNTZaTTM1Miw0OEwzNjAsNDhMMzYwLDU2TDM1Miw1NlpNMzIsNTZMNDAsNTZMNDAsNjRMMzIsNjRaTTQ4LDU2TDcyLDU2TDcyLDY0TDQ4LDY0Wk04MCw1Nkw4OCw1Nkw4OCw2NEw4MCw2NFpNMTEyLDU2TDEyMCw1NkwxMjAsNjRMMTEyLDY0Wk0xMzYsNTZMMTUyLDU2TDE1Miw2NEwxMzYsNjRaTTE2MCw1NkwxNjgsNTZMMTY4LDY0TDE2MCw2NFpNMTc2LDU2TDIwOCw1NkwyMDgsNjRMMTc2LDY0Wk0yMjQsNTZMMjMyLDU2TDIzMiw2NEwyMjQsNjRaTTI0OCw1NkwyNTYsNTZMMjU2LDY0TDI0OCw2NFpNMzA0LDU2TDMxMiw1NkwzMTIsNjRMMzA0LDY0Wk0zMjAsNTZMMzQ0LDU2TDM0NCw2NEwzMjAsNjRaTTM1Miw1NkwzNjAsNTZMMzYwLDY0TDM1Miw2NFpNMzIsNjRMNDAsNjRMNDAsNzJMMzIsNzJaTTQ4LDY0TDcyLDY0TDcyLDcyTDQ4LDcyWk04MCw2NEw4OCw2NEw4OCw3Mkw4MCw3MlpNMTEyLDY0TDEyOCw2NEwxMjgsNzJMMTEyLDcyWk0xMzYsNjRMMTYwLDY0TDE2MCw3MkwxMzYsNzJaTTE4NCw2NEwyMDAsNjRMMjAwLDcyTDE4NCw3MlpNMjE2LDY0TDI0OCw2NEwyNDgsNzJMMjE2LDcyWk0yNzIsNjRMMjk2LDY0TDI5Niw3MkwyNzIsNzJaTTMwNCw2NEwzMTIsNjRMMzEyLDcyTDMwNCw3MlpNMzIwLDY0TDM0NCw2NEwzNDQsNzJMMzIwLDcyWk0zNTIsNjRMMzYwLDY0TDM2MCw3MkwzNTIsNzJaTTMyLDcyTDQwLDcyTDQwLDgwTDMyLDgwWk04MCw3Mkw4OCw3Mkw4OCw4MEw4MCw4MFpNOTYsNzJMMTA0LDcyTDEwNCw4MEw5Niw4MFpNMTEyLDcyTDEyMCw3MkwxMjAsODBMMTEyLDgwWk0xMzYsNzJMMTQ0LDcyTDE0NCw4MEwxMzYsODBaTTE1Miw3MkwxNjAsNzJMMTYwLDgwTDE1Miw4MFpNMTc2LDcyTDE4NCw3MkwxODQsODBMMTc2LDgwWk0yMDAsNzJMMjA4LDcyTDIwOCw4MEwyMDAsODBaTTIxNiw3MkwyMjQsNzJMMjI0LDgwTDIxNiw4MFpNMjMyLDcyTDI4OCw3MkwyODgsODBMMjMyLDgwWk0zMDQsNzJMMzEyLDcyTDMxMiw4MEwzMDQsODBaTTM1Miw3MkwzNjAsNzJMMzYwLDgwTDM1Miw4MFpNMzIsODBMODgsODBMODgsODhMMzIsODhaTTk2LDgwTDEwNCw4MEwxMDQsODhMOTYsODhaTTExMiw4MEwxMjAsODBMMTIwLDg4TDExMiw4OFpNMTI4LDgwTDEzNiw4MEwxMzYsODhMMTI4LDg4Wk0xNDQsODBMMTUyLDgwTDE1Miw4OEwxNDQsODhaTTE2MCw4MEwxNjgsODBMMTY4LDg4TDE2MCw4OFpNMTc2LDgwTDE4NCw4MEwxODQsODhMMTc2LDg4Wk0xOTIsODBMMjAwLDgwTDIwMCw4OEwxOTIsODhaTTIwOCw4MEwyMTYsODBMMjE2LDg4TDIwOCw4OFpNMjI0LDgwTDIzMiw4MEwyMzIsODhMMjI0LDg4Wk0yNDAsODBMMjQ4LDgwTDI0OCw4OEwyNDAsODhaTTI1Niw4MEwyNjQsODBMMjY0LDg4TDI1Niw4OFpNMjcyLDgwTDI4MCw4MEwyODAsODhMMjcyLDg4Wk0yODgsODBMMjk2LDgwTDI5Niw4OEwyODgsODhaTTMwNCw4MEwzNjAsODBMMzYwLDg4TDMwNCw4OFpNOTYsODhMMTIwLDg4TDEyMCw5Nkw5Niw5NlpNMTM2LDg4TDE2MCw4OEwxNjAsOTZMMTM2LDk2Wk0xNzYsODhMMTg0LDg4TDE4NCw5NkwxNzYsOTZaTTIwOCw4OEwyMzIsODhMMjMyLDk2TDIwOCw5NlpNMjY0LDg4TDI4OCw4OEwyODgsOTZMMjY0LDk2Wk00OCw5Nkw3Miw5Nkw3MiwxMDRMNDgsMTA0Wk04MCw5Nkw4OCw5Nkw4OCwxMDRMODAsMTA0Wk05Niw5NkwxMDQsOTZMMTA0LDEwNEw5NiwxMDRaTTE2MCw5NkwxNjgsOTZMMTY4LDEwNEwxNjAsMTA0Wk0yNDAsOTZMMjU2LDk2TDI1NiwxMDRMMjQwLDEwNFpNMjY0LDk2TDI3Miw5NkwyNzIsMTA0TDI2NCwxMDRaTTI4OCw5NkwzMjAsOTZMMzIwLDEwNEwyODgsMTA0Wk0zMzYsOTZMMzYwLDk2TDM2MCwxMDRMMzM2LDEwNFpNMzIsMTA0TDgwLDEwNEw4MCwxMTJMMzIsMTEyWk05NiwxMDRMMTA0LDEwNEwxMDQsMTEyTDk2LDExMlpNMTM2LDEwNEwyMTYsMTA0TDIxNiwxMTJMMTM2LDExMlpNMjI0LDEwNEwyMzIsMTA0TDIzMiwxMTJMMjI0LDExMlpNMjQwLDEwNEwyNDgsMTA0TDI0OCwxMTJMMjQwLDExMlpNMjU2LDEwNEwyNjQsMTA0TDI2NCwxMTJMMjU2LDExMlpNMjgwLDEwNEwyOTYsMTA0TDI5NiwxMTJMMjgwLDExMlpNMzEyLDEwNEwzMjgsMTA0TDMyOCwxMTJMMzEyLDExMlpNNDgsMTEyTDU2LDExMkw1NiwxMjBMNDgsMTIwWk03MiwxMTJMMTI4LDExMkwxMjgsMTIwTDcyLDEyMFpNMTQ0LDExMkwxNzYsMTEyTDE3NiwxMjBMMTQ0LDEyMFpNMTg0LDExMkwyMjQsMTEyTDIyNCwxMjBMMTg0LDEyMFpNMjY0LDExMkwyNzIsMTEyTDI3MiwxMjBMMjY0LDEyMFpNMjgwLDExMkwyODgsMTEyTDI4OCwxMjBMMjgwLDEyMFpNMzEyLDExMkwzMjAsMTEyTDMyMCwxMjBMMzEyLDEyMFpNMzI4LDExMkwzNjAsMTEyTDM2MCwxMjBMMzI4LDEyMFpNMzIsMTIwTDQwLDEyMEw0MCwxMjhMMzIsMTI4Wk02NCwxMjBMODAsMTIwTDgwLDEyOEw2NCwxMjhaTTEyOCwxMjBMMTM2LDEyMEwxMzYsMTI4TDEyOCwxMjhaTTE2MCwxMjBMMjE2LDEyMEwyMTYsMTI4TDE2MCwxMjhaTTIyNCwxMjBMMjMyLDEyMEwyMzIsMTI4TDIyNCwxMjhaTTI3MiwxMjBMMjg4LDEyMEwyODgsMTI4TDI3MiwxMjhaTTMwNCwxMjBMMzI4LDEyMEwzMjgsMTI4TDMwNCwxMjhaTTM0NCwxMjBMMzYwLDEyMEwzNjAsMTI4TDM0NCwxMjhaTTQwLDEyOEw2NCwxMjhMNjQsMTM2TDQwLDEzNlpNODAsMTI4TDk2LDEyOEw5NiwxMzZMODAsMTM2Wk0xMDQsMTI4TDEyMCwxMjhMMTIwLDEzNkwxMDQsMTM2Wk0xMjgsMTI4TDEzNiwxMjhMMTM2LDEzNkwxMjgsMTM2Wk0xNDQsMTI4TDE1MiwxMjhMMTUyLDEzNkwxNDQsMTM2Wk0xNjAsMTI4TDE2OCwxMjhMMTY4LDEzNkwxNjAsMTM2Wk0xODQsMTI4TDE5MiwxMjhMMTkyLDEzNkwxODQsMTM2Wk0yMzIsMTI4TDI0MCwxMjhMMjQwLDEzNkwyMzIsMTM2Wk0yNDgsMTI4TDI1NiwxMjhMMjU2LDEzNkwyNDgsMTM2Wk0yNjQsMTI4TDI4MCwxMjhMMjgwLDEzNkwyNjQsMTM2Wk0zMTIsMTI4TDMyOCwxMjhMMzI4LDEzNkwzMTIsMTM2Wk0zMzYsMTI4TDM0NCwxMjhMMzQ0LDEzNkwzMzYsMTM2Wk0zMiwxMzZMNDgsMTM2TDQ4LDE0NEwzMiwxNDRaTTY0LDEzNkw4MCwxMzZMODAsMTQ0TDY0LDE0NFpNODgsMTM2TDE1MiwxMzZMMTUyLDE0NEw4OCwxNDRaTTE2MCwxMzZMMTY4LDEzNkwxNjgsMTQ0TDE2MCwxNDRaTTE3NiwxMzZMMTg0LDEzNkwxODQsMTQ0TDE3NiwxNDRaTTIwMCwxMzZMMjA4LDEzNkwyMDgsMTQ0TDIwMCwxNDRaTTIxNiwxMzZMMjI0LDEzNkwyMjQsMTQ0TDIxNiwxNDRaTTI0MCwxMzZMMjY0LDEzNkwyNjQsMTQ0TDI0MCwxNDRaTTMxMiwxMzZMMzM2LDEzNkwzMzYsMTQ0TDMxMiwxNDRaTTMyLDE0NEw0OCwxNDRMNDgsMTUyTDMyLDE1MlpNNzIsMTQ0TDEyMCwxNDRMMTIwLDE1Mkw3MiwxNTJaTTE0NCwxNDRMMTUyLDE0NEwxNTIsMTUyTDE0NCwxNTJaTTE2MCwxNDRMMTY4LDE0NEwxNjgsMTUyTDE2MCwxNTJaTTE3NiwxNDRMMTg0LDE0NEwxODQsMTUyTDE3NiwxNTJaTTIwMCwxNDRMMjE2LDE0NEwyMTYsMTUyTDIwMCwxNTJaTTIzMiwxNDRMMjQwLDE0NEwyNDAsMTUyTDIzMiwxNTJaTTI2NCwxNDRMMjcyLDE0NEwyNzIsMTUyTDI2NCwxNTJaTTMzNiwxNDRMMzYwLDE0NEwzNjAsMTUyTDMzNiwxNTJaTTMyLDE1Mkw0MCwxNTJMNDAsMTYwTDMyLDE2MFpNNDgsMTUyTDU2LDE1Mkw1NiwxNjBMNDgsMTYwWk02NCwxNTJMNzIsMTUyTDcyLDE2MEw2NCwxNjBaTTg4LDE1MkwxMDQsMTUyTDEwNCwxNjBMODgsMTYwWk0xMTIsMTUyTDEyMCwxNTJMMTIwLDE2MEwxMTIsMTYwWk0xMjgsMTUyTDE2MCwxNTJMMTYwLDE2MEwxMjgsMTYwWk0xNjgsMTUyTDE3NiwxNTJMMTc2LDE2MEwxNjgsMTYwWk0xODQsMTUyTDE5MiwxNTJMMTkyLDE2MEwxODQsMTYwWk0yMTYsMTUyTDIzMiwxNTJMMjMyLDE2MEwyMTYsMTYwWk0yNTYsMTUyTDI2NCwxNTJMMjY0LDE2MEwyNTYsMTYwWk0yNzIsMTUyTDI4MCwxNTJMMjgwLDE2MEwyNzIsMTYwWk0zMDQsMTUyTDM0NCwxNTJMMzQ0LDE2MEwzMDQsMTYwWk0zNTIsMTUyTDM2MCwxNTJMMzYwLDE2MEwzNTIsMTYwWk0zMiwxNjBMNDgsMTYwTDQ4LDE2OEwzMiwxNjhaTTU2LDE2MEw2NCwxNjBMNjQsMTY4TDU2LDE2OFpNODAsMTYwTDg4LDE2MEw4OCwxNjhMODAsMTY4Wk05NiwxNjBMMTA0LDE2MEwxMDQsMTY4TDk2LDE2OFpNMTEyLDE2MEwxMzYsMTYwTDEzNiwxNjhMMTEyLDE2OFpNMTUyLDE2MEwxNjgsMTYwTDE2OCwxNjhMMTUyLDE2OFpNMTc2LDE2MEwxODQsMTYwTDE4NCwxNjhMMTc2LDE2OFpNMTkyLDE2MEwyMDAsMTYwTDIwMCwxNjhMMTkyLDE2OFpNMjE2LDE2MEwyNDgsMTYwTDI0OCwxNjhMMjE2LDE2OFpNMjY0LDE2MEwyODAsMTYwTDI4MCwxNjhMMjY0LDE2OFpNMjg4LDE2MEwzMDQsMTYwTDMwNCwxNjhMMjg4LDE2OFpNMzIwLDE2MEwzNTIsMTYwTDM1MiwxNjhMMzIwLDE2OFpNNDAsMTY4TDQ4LDE2OEw0OCwxNzZMNDAsMTc2Wk01NiwxNjhMNzIsMTY4TDcyLDE3Nkw1NiwxNzZaTTg4LDE2OEw5NiwxNjhMOTYsMTc2TDg4LDE3NlpNMTA0LDE2OEwxMTIsMTY4TDExMiwxNzZMMTA0LDE3NlpNMTI4LDE2OEwxNDQsMTY4TDE0NCwxNzZMMTI4LDE3NlpNMTY4LDE2OEwxOTIsMTY4TDE5MiwxNzZMMTY4LDE3NlpNMjAwLDE2OEwyMDgsMTY4TDIwOCwxNzZMMjAwLDE3NlpNMjE2LDE2OEwyNjQsMTY4TDI2NCwxNzZMMjE2LDE3NlpNMjcyLDE2OEwyODgsMTY4TDI4OCwxNzZMMjcyLDE3NlpNMjk2LDE2OEwzMDQsMTY4TDMwNCwxNzZMMjk2LDE3NlpNMzEyLDE2OEwzMjgsMTY4TDMyOCwxNzZMMzEyLDE3NlpNMzQ0LDE2OEwzNTIsMTY4TDM1MiwxNzZMMzQ0LDE3NlpNMzIsMTc2TDU2LDE3Nkw1NiwxODRMMzIsMTg0Wk02NCwxNzZMMTI4LDE3NkwxMjgsMTg0TDY0LDE4NFpNMTQ0LDE3NkwxNjAsMTc2TDE2MCwxODRMMTQ0LDE4NFpNMTY4LDE3NkwxODQsMTc2TDE4NCwxODRMMTY4LDE4NFpNMTkyLDE3NkwyMDgsMTc2TDIwOCwxODRMMTkyLDE4NFpNMjMyLDE3NkwyNDgsMTc2TDI0OCwxODRMMjMyLDE4NFpNMjcyLDE3NkwyODAsMTc2TDI4MCwxODRMMjcyLDE4NFpNMjg4LDE3NkwyOTYsMTc2TDI5NiwxODRMMjg4LDE4NFpNMzEyLDE3NkwzMjAsMTc2TDMyMCwxODRMMzEyLDE4NFpNMzI4LDE3NkwzNjAsMTc2TDM2MCwxODRMMzI4LDE4NFpNMzIsMTg0TDU2LDE4NEw1NiwxOTJMMzIsMTkyWk02NCwxODRMNzIsMTg0TDcyLDE5Mkw2NCwxOTJaTTg4LDE4NEw5NiwxODRMOTYsMTkyTDg4LDE5MlpNMTA0LDE4NEwxMTIsMTg0TDExMiwxOTJMMTA0LDE5MlpNMTIwLDE4NEwxMjgsMTg0TDEyOCwxOTJMMTIwLDE5MlpNMTg0LDE4NEwxOTIsMTg0TDE5MiwxOTJMMTg0LDE5MlpNMjE2LDE4NEwyNDAsMTg0TDI0MCwxOTJMMjE2LDE5MlpNMjU2LDE4NEwyNjQsMTg0TDI2NCwxOTJMMjU2LDE5MlpNMjgwLDE4NEwzMzYsMTg0TDMzNiwxOTJMMjgwLDE5MlpNMzQ0LDE4NEwzNjAsMTg0TDM2MCwxOTJMMzQ0LDE5MlpNMzIsMTkyTDU2LDE5Mkw1NiwyMDBMMzIsMjAwWk03MiwxOTJMODgsMTkyTDg4LDIwMEw3MiwyMDBaTTk2LDE5MkwxMTIsMTkyTDExMiwyMDBMOTYsMjAwWk0xMjgsMTkyTDEzNiwxOTJMMTM2LDIwMEwxMjgsMjAwWk0xNDQsMTkyTDE1MiwxOTJMMTUyLDIwMEwxNDQsMjAwWk0xNjAsMTkyTDE3NiwxOTJMMTc2LDIwMEwxNjAsMjAwWk0xODQsMTkyTDIwOCwxOTJMMjA4LDIwMEwxODQsMjAwWk0yNDAsMTkyTDI1NiwxOTJMMjU2LDIwMEwyNDAsMjAwWk0yNzIsMTkyTDI4MCwxOTJMMjgwLDIwMEwyNzIsMjAwWk0yODgsMTkyTDI5NiwxOTJMMjk2LDIwMEwyODgsMjAwWk0zMTIsMTkyTDMyMCwxOTJMMzIwLDIwMEwzMTIsMjAwWk0zMzYsMTkyTDM0NCwxOTJMMzQ0LDIwMEwzMzYsMjAwWk0zMiwyMDBMNTYsMjAwTDU2LDIwOEwzMiwyMDhaTTY0LDIwMEw4MCwyMDBMODAsMjA4TDY0LDIwOFpNOTYsMjAwTDEwNCwyMDBMMTA0LDIwOEw5NiwyMDhaTTExMiwyMDBMMTM2LDIwMEwxMzYsMjA4TDExMiwyMDhaTTE1MiwyMDBMMTYwLDIwMEwxNjAsMjA4TDE1MiwyMDhaTTE5MiwyMDBMMjA4LDIwMEwyMDgsMjA4TDE5MiwyMDhaTTIyNCwyMDBMMjMyLDIwMEwyMzIsMjA4TDIyNCwyMDhaTTI4OCwyMDBMMzA0LDIwMEwzMDQsMjA4TDI4OCwyMDhaTTMxMiwyMDBMMzIwLDIwMEwzMjAsMjA4TDMxMiwyMDhaTTMyOCwyMDBMMzM2LDIwMEwzMzYsMjA4TDMyOCwyMDhaTTM0NCwyMDBMMzUyLDIwMEwzNTIsMjA4TDM0NCwyMDhaTTMyLDIwOEw0MCwyMDhMNDAsMjE2TDMyLDIxNlpNNTYsMjA4TDg4LDIwOEw4OCwyMTZMNTYsMjE2Wk0xMDQsMjA4TDExMiwyMDhMMTEyLDIxNkwxMDQsMjE2Wk0xMjAsMjA4TDEyOCwyMDhMMTI4LDIxNkwxMjAsMjE2Wk0xNDQsMjA4TDE2MCwyMDhMMTYwLDIxNkwxNDQsMjE2Wk0xNjgsMjA4TDE4NCwyMDhMMTg0LDIxNkwxNjgsMjE2Wk0xOTIsMjA4TDIwMCwyMDhMMjAwLDIxNkwxOTIsMjE2Wk0yMTYsMjA4TDI0MCwyMDhMMjQwLDIxNkwyMTYsMjE2Wk0yNTYsMjA4TDI3MiwyMDhMMjcyLDIxNkwyNTYsMjE2Wk0zMzYsMjA4TDM0NCwyMDhMMzQ0LDIxNkwzMzYsMjE2Wk0zMiwyMTZMNjQsMjE2TDY0LDIyNEwzMiwyMjRaTTcyLDIxNkw4MCwyMTZMODAsMjI0TDcyLDIyNFpNOTYsMjE2TDE2OCwyMTZMMTY4LDIyNEw5NiwyMjRaTTE4NCwyMTZMMjA4LDIxNkwyMDgsMjI0TDE4NCwyMjRaTTIxNiwyMTZMMjI0LDIxNkwyMjQsMjI0TDIxNiwyMjRaTTI0MCwyMTZMMjQ4LDIxNkwyNDgsMjI0TDI0MCwyMjRaTTI4MCwyMTZMMzYwLDIxNkwzNjAsMjI0TDI4MCwyMjRaTTQwLDIyNEw0OCwyMjRMNDgsMjMyTDQwLDIzMlpNNTYsMjI0TDY0LDIyNEw2NCwyMzJMNTYsMjMyWk03MiwyMjRMODgsMjI0TDg4LDIzMkw3MiwyMzJaTTk2LDIyNEwxMDQsMjI0TDEwNCwyMzJMOTYsMjMyWk0xMjAsMjI0TDEyOCwyMjRMMTI4LDIzMkwxMjAsMjMyWk0xMzYsMjI0TDE0NCwyMjRMMTQ0LDIzMkwxMzYsMjMyWk0xNjAsMjI0TDE3NiwyMjRMMTc2LDIzMkwxNjAsMjMyWk0xODQsMjI0TDIwOCwyMjRMMjA4LDIzMkwxODQsMjMyWk0yMTYsMjI0TDIzMiwyMjRMMjMyLDIzMkwyMTYsMjMyWk0yNDAsMjI0TDI1NiwyMjRMMjU2LDIzMkwyNDAsMjMyWk0yNjQsMjI0TDI4MCwyMjRMMjgwLDIzMkwyNjQsMjMyWk0yOTYsMjI0TDMwNCwyMjRMMzA0LDIzMkwyOTYsMjMyWk0zMTIsMjI0TDMyMCwyMjRMMzIwLDIzMkwzMTIsMjMyWk0zMzYsMjI0TDM2MCwyMjRMMzYwLDIzMkwzMzYsMjMyWk0zMiwyMzJMNDAsMjMyTDQwLDI0MEwzMiwyNDBaTTk2LDIzMkwxMDQsMjMyTDEwNCwyNDBMOTYsMjQwWk0xMjAsMjMyTDEyOCwyMzJMMTI4LDI0MEwxMjAsMjQwWk0xMzYsMjMyTDE1MiwyMzJMMTUyLDI0MEwxMzYsMjQwWk0xOTIsMjMyTDIwMCwyMzJMMjAwLDI0MEwxOTIsMjQwWk0yMTYsMjMyTDIzMiwyMzJMMjMyLDI0MEwyMTYsMjQwWk0yODAsMjMyTDI4OCwyMzJMMjg4LDI0MEwyODAsMjQwWk0yOTYsMjMyTDMxMiwyMzJMMzEyLDI0MEwyOTYsMjQwWk0zMjAsMjMyTDMzNiwyMzJMMzM2LDI0MEwzMjAsMjQwWk00OCwyNDBMNTYsMjQwTDU2LDI0OEw0OCwyNDhaTTgwLDI0MEw4OCwyNDBMODgsMjQ4TDgwLDI0OFpNOTYsMjQwTDEwNCwyNDBMMTA0LDI0OEw5NiwyNDhaTTEzNiwyNDBMMTQ0LDI0MEwxNDQsMjQ4TDEzNiwyNDhaTTE1MiwyNDBMMTY4LDI0MEwxNjgsMjQ4TDE1MiwyNDhaTTE4NCwyNDBMMTkyLDI0MEwxOTIsMjQ4TDE4NCwyNDhaTTI0MCwyNDBMMjU2LDI0MEwyNTYsMjQ4TDI0MCwyNDhaTTI2NCwyNDBMMjcyLDI0MEwyNzIsMjQ4TDI2NCwyNDhaTTI4MCwyNDBMMjk2LDI0MEwyOTYsMjQ4TDI4MCwyNDhaTTMxMiwyNDBMMzIwLDI0MEwzMjAsMjQ4TDMxMiwyNDhaTTMzNiwyNDBMMzYwLDI0MEwzNjAsMjQ4TDMzNiwyNDhaTTMyLDI0OEw0MCwyNDhMNDAsMjU2TDMyLDI1NlpNNDgsMjQ4TDU2LDI0OEw1NiwyNTZMNDgsMjU2Wk03MiwyNDhMODAsMjQ4TDgwLDI1Nkw3MiwyNTZaTTk2LDI0OEwxMDQsMjQ4TDEwNCwyNTZMOTYsMjU2Wk0xMjAsMjQ4TDEyOCwyNDhMMTI4LDI1NkwxMjAsMjU2Wk0xMzYsMjQ4TDIwOCwyNDhMMjA4LDI1NkwxMzYsMjU2Wk0yMzIsMjQ4TDI0MCwyNDhMMjQwLDI1NkwyMzIsMjU2Wk0yNTYsMjQ4TDI4OCwyNDhMMjg4LDI1NkwyNTYsMjU2Wk0yOTYsMjQ4TDMyOCwyNDhMMzI4LDI1NkwyOTYsMjU2Wk0zMzYsMjQ4TDM2MCwyNDhMMzYwLDI1NkwzMzYsMjU2Wk00MCwyNTZMNTYsMjU2TDU2LDI2NEw0MCwyNjRaTTY0LDI1Nkw3MiwyNTZMNzIsMjY0TDY0LDI2NFpNODAsMjU2TDg4LDI1Nkw4OCwyNjRMODAsMjY0Wk0xMjAsMjU2TDEyOCwyNTZMMTI4LDI2NEwxMjAsMjY0Wk0xNjAsMjU2TDE3NiwyNTZMMTc2LDI2NEwxNjAsMjY0Wk0xOTIsMjU2TDIwOCwyNTZMMjA4LDI2NEwxOTIsMjY0Wk0yMjQsMjU2TDIzMiwyNTZMMjMyLDI2NEwyMjQsMjY0Wk0yNDgsMjU2TDI3MiwyNTZMMjcyLDI2NEwyNDgsMjY0Wk0zMDQsMjU2TDMyOCwyNTZMMzI4LDI2NEwzMDQsMjY0Wk0zMiwyNjRMODAsMjY0TDgwLDI3MkwzMiwyNzJaTTk2LDI2NEwxMDQsMjY0TDEwNCwyNzJMOTYsMjcyWk0xMzYsMjY0TDE0NCwyNjRMMTQ0LDI3MkwxMzYsMjcyWk0xNjAsMjY0TDE5MiwyNjRMMTkyLDI3MkwxNjAsMjcyWk0yMDAsMjY0TDIxNiwyNjRMMjE2LDI3MkwyMDAsMjcyWk0yNDAsMjY0TDI1NiwyNjRMMjU2LDI3MkwyNDAsMjcyWk0yODgsMjY0TDMyMCwyNjRMMzIwLDI3MkwyODgsMjcyWk0zMjgsMjY0TDMzNiwyNjRMMzM2LDI3MkwzMjgsMjcyWk0zNDQsMjY0TDM1MiwyNjRMMzUyLDI3MkwzNDQsMjcyWk0zMiwyNzJMNDAsMjcyTDQwLDI4MEwzMiwyODBaTTQ4LDI3Mkw3MiwyNzJMNzIsMjgwTDQ4LDI4MFpNODAsMjcyTDEwNCwyNzJMMTA0LDI4MEw4MCwyODBaTTEyMCwyNzJMMTI4LDI3MkwxMjgsMjgwTDEyMCwyODBaTTEzNiwyNzJMMTY4LDI3MkwxNjgsMjgwTDEzNiwyODBaTTE5MiwyNzJMMjMyLDI3MkwyMzIsMjgwTDE5MiwyODBaTTI0MCwyNzJMMjcyLDI3MkwyNzIsMjgwTDI0MCwyODBaTTMyOCwyNzJMMzUyLDI3MkwzNTIsMjgwTDMyOCwyODBaTTMyLDI4MEw0MCwyODBMNDAsMjg4TDMyLDI4OFpNODgsMjgwTDk2LDI4MEw5NiwyODhMODgsMjg4Wk0xMzYsMjgwTDE0NCwyODBMMTQ0LDI4OEwxMzYsMjg4Wk0xNTIsMjgwTDE2OCwyODBMMTY4LDI4OEwxNTIsMjg4Wk0xODQsMjgwTDE5MiwyODBMMTkyLDI4OEwxODQsMjg4Wk0yMDAsMjgwTDIwOCwyODBMMjA4LDI4OEwyMDAsMjg4Wk0yMTYsMjgwTDIyNCwyODBMMjI0LDI4OEwyMTYsMjg4Wk0yMzIsMjgwTDI0MCwyODBMMjQwLDI4OEwyMzIsMjg4Wk0yNDgsMjgwTDI1NiwyODBMMjU2LDI4OEwyNDgsMjg4Wk0yNjQsMjgwTDI5NiwyODBMMjk2LDI4OEwyNjQsMjg4Wk0zMDQsMjgwTDMxMiwyODBMMzEyLDI4OEwzMDQsMjg4Wk0zMjAsMjgwTDMyOCwyODBMMzI4LDI4OEwzMjAsMjg4Wk0zNTIsMjgwTDM2MCwyODBMMzYwLDI4OEwzNTIsMjg4Wk0zMiwyODhMNDAsMjg4TDQwLDI5NkwzMiwyOTZaTTgwLDI4OEwxMjAsMjg4TDEyMCwyOTZMODAsMjk2Wk0xMjgsMjg4TDEzNiwyODhMMTM2LDI5NkwxMjgsMjk2Wk0xNDQsMjg4TDE2MCwyODhMMTYwLDI5NkwxNDQsMjk2Wk0xNjgsMjg4TDIzMiwyODhMMjMyLDI5NkwxNjgsMjk2Wk0yNDgsMjg4TDI2NCwyODhMMjY0LDI5NkwyNDgsMjk2Wk0yODgsMjg4TDMyOCwyODhMMzI4LDI5NkwyODgsMjk2Wk0zNDQsMjg4TDM1MiwyODhMMzUyLDI5NkwzNDQsMjk2Wk05NiwyOTZMMTA0LDI5NkwxMDQsMzA0TDk2LDMwNFpNMTIwLDI5NkwxMjgsMjk2TDEyOCwzMDRMMTIwLDMwNFpNMTUyLDI5NkwxNjAsMjk2TDE2MCwzMDRMMTUyLDMwNFpNMTg0LDI5NkwxOTIsMjk2TDE5MiwzMDRMMTg0LDMwNFpNMjAwLDI5NkwyMDgsMjk2TDIwOCwzMDRMMjAwLDMwNFpNMjI0LDI5NkwyMzIsMjk2TDIzMiwzMDRMMjI0LDMwNFpNMjQ4LDI5NkwyNzIsMjk2TDI3MiwzMDRMMjQ4LDMwNFpNMjgwLDI5NkwyOTYsMjk2TDI5NiwzMDRMMjgwLDMwNFpNMzIwLDI5NkwzMjgsMjk2TDMyOCwzMDRMMzIwLDMwNFpNMzUyLDI5NkwzNjAsMjk2TDM2MCwzMDRMMzUyLDMwNFpNMzIsMzA0TDg4LDMwNEw4OCwzMTJMMzIsMzEyWk0xMDQsMzA0TDEyMCwzMDRMMTIwLDMxMkwxMDQsMzEyWk0xMjgsMzA0TDEzNiwzMDRMMTM2LDMxMkwxMjgsMzEyWk0xNDQsMzA0TDE2MCwzMDRMMTYwLDMxMkwxNDQsMzEyWk0xNjgsMzA0TDIwOCwzMDRMMjA4LDMxMkwxNjgsMzEyWk0yMjQsMzA0TDIzMiwzMDRMMjMyLDMxMkwyMjQsMzEyWk0yNDgsMzA0TDI3MiwzMDRMMjcyLDMxMkwyNDgsMzEyWk0yODAsMzA0TDI5NiwzMDRMMjk2LDMxMkwyODAsMzEyWk0zMDQsMzA0TDMxMiwzMDRMMzEyLDMxMkwzMDQsMzEyWk0zMjAsMzA0TDMyOCwzMDRMMzI4LDMxMkwzMjAsMzEyWk0zMzYsMzA0TDM1MiwzMDRMMzUyLDMxMkwzMzYsMzEyWk0zMiwzMTJMNDAsMzEyTDQwLDMyMEwzMiwzMjBaTTgwLDMxMkw4OCwzMTJMODgsMzIwTDgwLDMyMFpNMTEyLDMxMkwxMjAsMzEyTDEyMCwzMjBMMTEyLDMyMFpNMTYwLDMxMkwxNjgsMzEyTDE2OCwzMjBMMTYwLDMyMFpNMTc2LDMxMkwxODQsMzEyTDE4NCwzMjBMMTc2LDMyMFpNMTkyLDMxMkwyMDAsMzEyTDIwMCwzMjBMMTkyLDMyMFpNMjE2LDMxMkwyMzIsMzEyTDIzMiwzMjBMMjE2LDMyMFpNMjQwLDMxMkwyNDgsMzEyTDI0OCwzMjBMMjQwLDMyMFpNMjU2LDMxMkwyOTYsMzEyTDI5NiwzMjBMMjU2LDMyMFpNMzIwLDMxMkwzNDQsMzEyTDM0NCwzMjBMMzIwLDMyMFpNMzUyLDMxMkwzNjAsMzEyTDM2MCwzMjBMMzUyLDMyMFpNMzIsMzIwTDQwLDMyMEw0MCwzMjhMMzIsMzI4Wk00OCwzMjBMNzIsMzIwTDcyLDMyOEw0OCwzMjhaTTgwLDMyMEw4OCwzMjBMODgsMzI4TDgwLDMyOFpNOTYsMzIwTDEyMCwzMjBMMTIwLDMyOEw5NiwzMjhaTTEyOCwzMjBMMTQ0LDMyMEwxNDQsMzI4TDEyOCwzMjhaTTE1MiwzMjBMMTYwLDMyMEwxNjAsMzI4TDE1MiwzMjhaTTE3NiwzMjBMMTg0LDMyMEwxODQsMzI4TDE3NiwzMjhaTTE5MiwzMjBMMjAwLDMyMEwyMDAsMzI4TDE5MiwzMjhaTTIwOCwzMjBMMjE2LDMyMEwyMTYsMzI4TDIwOCwzMjhaTTIyNCwzMjBMMjMyLDMyMEwyMzIsMzI4TDIyNCwzMjhaTTI0OCwzMjBMMjY0LDMyMEwyNjQsMzI4TDI0OCwzMjhaTTI4MCwzMjBMMzQ0LDMyMEwzNDQsMzI4TDI4MCwzMjhaTTMyLDMyOEw0MCwzMjhMNDAsMzM2TDMyLDMzNlpNNDgsMzI4TDcyLDMyOEw3MiwzMzZMNDgsMzM2Wk04MCwzMjhMODgsMzI4TDg4LDMzNkw4MCwzMzZaTTk2LDMyOEwxMDQsMzI4TDEwNCwzMzZMOTYsMzM2Wk0xMTIsMzI4TDEyOCwzMjhMMTI4LDMzNkwxMTIsMzM2Wk0xMzYsMzI4TDE0NCwzMjhMMTQ0LDMzNkwxMzYsMzM2Wk0xNjAsMzI4TDE4NCwzMjhMMTg0LDMzNkwxNjAsMzM2Wk0yMDAsMzI4TDIxNiwzMjhMMjE2LDMzNkwyMDAsMzM2Wk0yNDAsMzI4TDI2NCwzMjhMMjY0LDMzNkwyNDAsMzM2Wk0yNzIsMzI4TDI4MCwzMjhMMjgwLDMzNkwyNzIsMzM2Wk0yODgsMzI4TDMwNCwzMjhMMzA0LDMzNkwyODgsMzM2Wk0zMjAsMzI4TDMzNiwzMjhMMzM2LDMzNkwzMjAsMzM2Wk0zMiwzMzZMNDAsMzM2TDQwLDM0NEwzMiwzNDRaTTQ4LDMzNkw3MiwzMzZMNzIsMzQ0TDQ4LDM0NFpNODAsMzM2TDg4LDMzNkw4OCwzNDRMODAsMzQ0Wk05NiwzMzZMMTA0LDMzNkwxMDQsMzQ0TDk2LDM0NFpNMTEyLDMzNkwxMjAsMzM2TDEyMCwzNDRMMTEyLDM0NFpNMTM2LDMzNkwxNDQsMzM2TDE0NCwzNDRMMTM2LDM0NFpNMTUyLDMzNkwxNjAsMzM2TDE2MCwzNDRMMTUyLDM0NFpNMTY4LDMzNkwxODQsMzM2TDE4NCwzNDRMMTY4LDM0NFpNMjY0LDMzNkwyNzIsMzM2TDI3MiwzNDRMMjY0LDM0NFpNMzA0LDMzNkwzMjgsMzM2TDMyOCwzNDRMMzA0LDM0NFpNMzM2LDMzNkwzNTIsMzM2TDM1MiwzNDRMMzM2LDM0NFpNMzIsMzQ0TDQwLDM0NEw0MCwzNTJMMzIsMzUyWk04MCwzNDRMODgsMzQ0TDg4LDM1Mkw4MCwzNTJaTTEyMCwzNDRMMTQ0LDM0NEwxNDQsMzUyTDEyMCwzNTJaTTE1MiwzNDRMMTYwLDM0NEwxNjAsMzUyTDE1MiwzNTJaTTE2OCwzNDRMMTc2LDM0NEwxNzYsMzUyTDE2OCwzNTJaTTIwMCwzNDRMMjA4LDM0NEwyMDgsMzUyTDIwMCwzNTJaTTIyNCwzNDRMMjMyLDM0NEwyMzIsMzUyTDIyNCwzNTJaTTI1NiwzNDRMMjY0LDM0NEwyNjQsMzUyTDI1NiwzNTJaTTI4MCwzNDRMMjk2LDM0NEwyOTYsMzUyTDI4MCwzNTJaTTMxMiwzNDRMMzIwLDM0NEwzMjAsMzUyTDMxMiwzNTJaTTM1MiwzNDRMMzYwLDM0NEwzNjAsMzUyTDM1MiwzNTJaTTMyLDM1Mkw4OCwzNTJMODgsMzYwTDMyLDM2MFpNMTI4LDM1MkwxNjAsMzUyTDE2MCwzNjBMMTI4LDM2MFpNMTY4LDM1MkwxNzYsMzUyTDE3NiwzNjBMMTY4LDM2MFpNMTg0LDM1MkwxOTIsMzUyTDE5MiwzNjBMMTg0LDM2MFpNMjAwLDM1MkwyMjQsMzUyTDIyNCwzNjBMMjAwLDM2MFpNMjMyLDM1MkwyNDAsMzUyTDI0MCwzNjBMMjMyLDM2MFpNMjQ4LDM1MkwyNjQsMzUyTDI2NCwzNjBMMjQ4LDM2MFpNMjgwLDM1MkwyODgsMzUyTDI4OCwzNjBMMjgwLDM2MFpNMjk2LDM1MkwzMjgsMzUyTDMyOCwzNjBMMjk2LDM2MFpNMzM2LDM1MkwzNDQsMzUyTDM0NCwzNjBMMzM2LDM2MFoiLz48L3N2Zz4K" alt="Subscription link QR code" width="280" height="280">
+            <p class="muted" style="text-align:center">Scan this code with your VPN app.</p>
+                        <details>
+            <summary>Advanced: individual configs</summary>
+            <p class="muted" style="margin-top:8px">Use these only if your app does not accept the subscription link.</p>
+            <ol class="configs">
+                                    <li>
+                        <code>vless://5e1c0a7e-0000-4000-8000-000000000007@de1.shop-edge.com:443?type=tcp&amp;security=reality&amp;sni=www.example.com#DE-multi_inbound</code>
+                        <button type="button" class="btn secondary small" data-copy="vless://5e1c0a7e-0000-4000-8000-000000000007@de1.shop-edge.com:443?type=tcp&amp;security=reality&amp;sni=www.example.com#DE-multi_inbound" style="margin-top:6px">Copy this config</button>
+                    </li>
+                            </ol>
+        </details>
+    </section>
+
+                    <section class="card">
+    <h2>Connect in one tap</h2>
+    <nav class="platforms" aria-label="Operating system">
+                                    <a href="?platform=android&amp;lang=en" class="current">Android</a>
+                                                <a href="?platform=ios&amp;lang=en" class="">iOS</a>
+                                                <a href="?platform=windows&amp;lang=en" class="">Windows</a>
+                                                <a href="?platform=macos&amp;lang=en" class="">macOS</a>
+                                                <a href="?platform=linux&amp;lang=en" class="">Linux</a>
+                        </nav>
+            <p class="muted">1. Install the app. 2. Tap “Add subscription”.</p>
+        <div class="apps">
+                                <article class="app" data-app>
+                <div class="head">
+                    <span><span class="app-name">v2rayNG</span></span>
+                    <span class="muted">Android</span>
+                </div>
+                <div class="row">
+                                                                        <a class="btn secondary small" href="https://play.google.com/store/apps/details?id=com.v2ray.ang" rel="noopener noreferrer" target="_blank">⬇️ Install app</a>
+                                                                                                                <a class="btn small" href="v2rayng://install-sub?url=https%3A%2F%2Fsub.shop-edge.com%3A2096%2Fsub%2Fsubmultiinbound#Gold%2030%20days" data-deeplink>➕ Add subscription</a>
+                                    </div>
+                                    <div class="hint" data-fallback>
+                        <p>The app did not open? Telegram&#039;s in-app browser may block it. Open this page in your browser, or copy the link and add it in the app.</p>
+                        <div class="row">
+                            <button type="button" class="btn secondary small" data-open-external>🌐 Open in browser</button>
+                            <button type="button" class="btn secondary small" data-copy="https://sub.shop-edge.com:2096/sub/submultiinbound">📋 Copy subscription link</button>
+                        </div>
+                        <p class="muted" data-external-hint hidden style="margin-top:8px">Use the ⋮ or ••• menu at the top and choose “Open in browser”.</p>
+                    </div>
+                            </article>
+                                <article class="app" data-app>
+                <div class="head">
+                    <span><span class="app-name">Hiddify</span></span>
+                    <span class="muted">Android · iOS</span>
+                </div>
+                <div class="row">
+                                                                                        <a class="btn small" href="hiddify://import/https://sub.shop-edge.com:2096/sub/submultiinbound#Gold%2030%20days" data-deeplink>➕ Add subscription</a>
+                                    </div>
+                                    <div class="hint" data-fallback>
+                        <p>The app did not open? Telegram&#039;s in-app browser may block it. Open this page in your browser, or copy the link and add it in the app.</p>
+                        <div class="row">
+                            <button type="button" class="btn secondary small" data-open-external>🌐 Open in browser</button>
+                            <button type="button" class="btn secondary small" data-copy="https://sub.shop-edge.com:2096/sub/submultiinbound">📋 Copy subscription link</button>
+                        </div>
+                        <p class="muted" data-external-hint hidden style="margin-top:8px">Use the ⋮ or ••• menu at the top and choose “Open in browser”.</p>
+                    </div>
+                            </article>
+            </div>
+            <div class="hint" id="in-app-hint">
+            <p>This page is open inside Telegram. If “Add subscription” does not work, open the page in your browser (Chrome or Safari).</p>
+            <button type="button" class="btn secondary small" data-open-external>🌐 Open in browser</button>
+            <p class="muted" data-external-hint hidden style="margin-top:8px">Use the ⋮ or ••• menu at the top and choose “Open in browser”.</p>
+        </div>
+    </section>
+
+                    <footer class="muted">
+                <a href="?lang=fa&amp;platform=android">فارسی</a>
+    </footer>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+</main>
+    <script>
+(function () {
+    'use strict';
+    var T = {
+        copied: "Copied \u2705",
+        copyFailed: "Could not copy; select the link in the box above and copy it."
+    };
+    var doc = document;
+
+    function toast(text) {
+        var el = doc.getElementById('toast');
+        if (!el) { return; }
+        el.textContent = text;
+        el.classList.add('show');
+        clearTimeout(el._t);
+        el._t = setTimeout(function () { el.classList.remove('show'); }, 2200);
+    }
+
+    function legacyCopy(text) {
+        var area = doc.createElement('textarea');
+        area.value = text;
+        area.setAttribute('readonly', '');
+        area.style.position = 'fixed';
+        area.style.opacity = '0';
+        doc.body.appendChild(area);
+        area.select();
+        area.setSelectionRange(0, text.length);
+        var ok = false;
+        try { ok = doc.execCommand('copy'); } catch (e) { ok = false; }
+        doc.body.removeChild(area);
+        return ok;
+    }
+
+    function copy(text) {
+        if (navigator.clipboard && window.isSecureContext) {
+            navigator.clipboard.writeText(text).then(function () { toast(T.copied); }, function () {
+                toast(legacyCopy(text) ? T.copied : T.copyFailed);
+            });
+            return;
+        }
+        toast(legacyCopy(text) ? T.copied : T.copyFailed);
+    }
+
+    function pageUrl() {
+        // Without the fragment: it may carry Mini App launch data.
+        return window.location.origin + window.location.pathname + window.location.search;
+    }
+
+    var tg = null;
+    function webApp() {
+        return tg || (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initData !== undefined ? window.Telegram.WebApp : null);
+    }
+
+    function openExternal(button) {
+        var app = webApp();
+        if (app && typeof app.openLink === 'function') {
+            app.openLink(pageUrl(), { try_instant_view: false });
+            return;
+        }
+        var box = button.closest('[data-fallback], #in-app-hint') || doc;
+        var hint = box.querySelector('[data-external-hint]');
+        if (hint) { hint.hidden = false; }
+    }
+
+    doc.addEventListener('click', function (event) {
+        var target = event.target.closest('[data-copy], [data-open-external], [data-deeplink]');
+        if (!target) { return; }
+        if (target.hasAttribute('data-copy')) {
+            event.preventDefault();
+            copy(target.getAttribute('data-copy'));
+        } else if (target.hasAttribute('data-open-external')) {
+            event.preventDefault();
+            openExternal(target);
+        } else if (target.hasAttribute('data-deeplink')) {
+            var card = target.closest('[data-app]');
+            setTimeout(function () {
+                if (doc.visibilityState === 'visible' && card) {
+                    var fallback = card.querySelector('[data-fallback]');
+                    if (fallback) { fallback.classList.add('show'); }
+                }
+            }, 1600);
+        }
+    });
+
+    doc.addEventListener('focusin', function (event) {
+        if (event.target.hasAttribute && event.target.hasAttribute('data-select-all')) { event.target.select(); }
+    });
+
+    // --- Telegram ---
+    var hash = window.location.hash || '';
+    var isMiniApp = /tgWebApp(Data|Version|Platform)=/.test(hash);
+    var inTelegram = isMiniApp || !!(window.TelegramWebviewProxy || window.TelegramWebview) || /Telegram/i.test(navigator.userAgent);
+
+    function applyTheme(theme) {
+        if (!theme) { return; }
+        var map = {
+            bg_color: ['--card'], secondary_bg_color: ['--bg', '--code'], section_bg_color: ['--card'],
+            text_color: ['--fg'], hint_color: ['--muted'], button_color: ['--accent'], button_text_color: ['--accent-fg']
+        };
+        Object.keys(map).forEach(function (key) {
+            var value = theme[key];
+            if (typeof value === 'string' && /^#[0-9a-f]{3,8}$/i.test(value)) {
+                map[key].forEach(function (name) { doc.documentElement.style.setProperty(name, value); });
+            }
+        });
+    }
+
+    if (isMiniApp) {
+        // The theme is in the launch parameters already: apply it before the script loads (or if it cannot).
+        try {
+            var params = new URLSearchParams(hash.slice(1));
+            var raw = params.get('tgWebAppThemeParams');
+            if (raw) { applyTheme(JSON.parse(raw)); }
+        } catch (e) { /* ignore */ }
+
+        var script = doc.createElement('script');
+        script.src = 'https://telegram.org/js/telegram-web-app.js';
+        script.async = true;
+        script.onload = function () {
+            if (!window.Telegram || !window.Telegram.WebApp) { return; }
+            tg = window.Telegram.WebApp;
+            applyTheme(tg.themeParams);
+            if (typeof tg.onEvent === 'function') { tg.onEvent('themeChanged', function () { applyTheme(tg.themeParams); }); }
+            if (typeof tg.ready === 'function') { tg.ready(); }
+            if (typeof tg.expand === 'function') { tg.expand(); }
+        };
+        doc.head.appendChild(script);
+    }
+
+    if (inTelegram) {
+        var hint = doc.getElementById('in-app-hint');
+        if (hint) { hint.classList.add('show'); }
+    }
+})();
+</script>
+
+</body>
+</html>

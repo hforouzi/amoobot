@@ -1,0 +1,36 @@
+answerCallbackQuery chat=cb
+
+sendMessage chat=7301
+  text: سرویس #SERVICE_IMPORTED
+وضعیت: 🟢 فعال
+سرور/کشور: de1.shop-edge.com / DE
+پروتکل/شبکه/امنیت: vless / tcp / reality
+تاریخ انقضا: <datetime now+20d+12h>
+حجم کل: 50.00 GB
+مصرف: 12.50 GB
+باقیمانده: 37.50 GB
+آخرین بروزرسانی مصرف: -
+محدودیت IP: پیشفرض/نامحدود
+لینک اشتراک: https://sub.shop-edge.com:2096/sub/subimported
+  [inline_keyboard] 🔗 لینک اشتراک -> service_subscription:SERVICE_IMPORTED | 📷 QR لینک اشتراک -> service_subscription_qr:SERVICE_IMPORTED
+  [inline_keyboard] 📨 ارسال مجدد کانفیگ -> service_resend_config:SERVICE_IMPORTED | 🔄 بروزرسانی مصرف -> service_sync_usage:SERVICE_IMPORTED
+  [inline_keyboard] 🔄 تمدید سرویس -> service_renew:SERVICE_IMPORTED | ➕ خرید حجم اضافه -> service_add_traffic_order:SERVICE_IMPORTED
+  [inline_keyboard] 🔙 بازگشت -> my_services
+
+sendMessage chat=7301
+  text: ✅ سرویس شما آماده شد
+
+نام سرویس:
+<code>cv_imported</code>
+
+🔗 لینک اشتراک:
+<a href="https://sub.shop-edge.com:2096/sub/subimported">باز کردن لینک اشتراک</a>
+
+برای کپی:
+<code>https://sub.shop-edge.com:2096/sub/subimported</code>
+
+⚙️ کانفیگ‌ها:
+
+1. <a href="vless://5e1c0a7e-0000-4000-8000-000000000008@de1.shop-edge.com:443?type=tcp&amp;security=reality&amp;sni=www.example.com#DE-imported">کانفیگ ۱</a>
+<code>vless://5e1c0a7e-0000-4000-8000-000000000008@de1.shop-edge.com:443?type=tcp&amp;security=reality&amp;sni=www.example.com#DE-imported</code>
+  parse_mode: HTML

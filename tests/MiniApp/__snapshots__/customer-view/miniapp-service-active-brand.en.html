@@ -1,0 +1,57 @@
+<div class="view-root" data-view="services" data-title="Gold 30 days" data-back data-main-button-text="Open subscription page" data-main-button-href="https://brand.example.org/s/TOKEN_ACTIVE" data-main-button-external>
+        <section class="card" data-status="active">
+    <div class="head">
+        <h1>Gold 30 days</h1>
+        <span class="badge active">Active</span>
+    </div>
+    <div class="stats">
+        <div class="stat">
+            <span class="muted">Expires</span>
+                            <b><time datetime="<date of now+20d+12h>"><date of now+20d+12h></time></b>
+                <span class="muted ltr-num"><date of now+20d+12h></span>
+                    </div>
+        <div class="stat" data-days-left="20">
+            <span class="muted">Days left</span>
+            <b>20 days</b>
+        </div>
+        <div class="stat">
+            <span class="muted">Used</span>
+            <b class="ltr">12.5 GB</b>
+        </div>
+        <div class="stat">
+            <span class="muted">Remaining</span>
+            <b class="ltr">37.5 GB</b>
+        </div>
+    </div>
+            <div class="bar" data-used-percent="25"
+             role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="25" aria-label="Used">
+            <span style="width: 25%"></span>
+        </div>
+        <p class="muted" style="margin-top:6px">12.5 GB of 50 GB (25%)</p>
+    </section>
+
+                <section class="card">
+            <h2>Renew or add traffic</h2>
+            <div class="row">
+                <a class="btn small" href="/app/view/services/SERVICE_ACTIVE/renew" data-nav data-renew>🔄 Renew service</a>                            </div>
+        </section>
+        <section class="card">
+        <h2>Subscription page</h2>
+        <p class="muted">The subscription link, QR code and one-tap import into apps are on the subscription page.</p>
+        <a class="btn" href="/app/view/services/SERVICE_ACTIVE/subscription" data-nav data-subscription-view>🔗 Subscription link, QR and apps</a>
+        <a class="btn secondary small" style="margin-top:10px" href="https://brand.example.org/s/TOKEN_ACTIVE" data-open-link>🌐 Open subscription page</a>
+        <button type="button" class="btn secondary small" style="margin-top:10px" data-copy="https://brand.example.org/s/TOKEN_ACTIVE">📋 Copy page link</button>
+    </section>
+    <section class="card">
+        <h2>Send to the bot chat</h2>
+                    <p class="muted">The bot sends you its usual messages in the chat.</p>
+            <div class="row">
+                <button type="button" class="btn secondary small" data-action="/app/api/services/SERVICE_ACTIVE/send-link">🔗 Subscription link</button>
+                <button type="button" class="btn secondary small" data-action="/app/api/services/SERVICE_ACTIVE/send-qr">🔳 QR code</button>
+                <button type="button" class="btn secondary small" data-action="/app/api/services/SERVICE_ACTIVE/resend-config">📄 Configs</button>
+            </div>
+            </section>
+    <section class="card">
+        <button type="button" class="btn secondary small" data-action="/app/api/services/SERVICE_ACTIVE/refresh" data-reload>🔄 Refresh usage</button>
+    </section>
+</div>

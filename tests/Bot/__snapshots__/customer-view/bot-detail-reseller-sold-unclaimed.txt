@@ -1,0 +1,36 @@
+answerCallbackQuery chat=cb
+
+sendMessage chat=8601
+  text: سرویس #SERVICE_SOLD
+وضعیت: 🟢 فعال
+سرور/کشور: - / -
+پروتکل/شبکه/امنیت: - / - / -
+تاریخ انقضا: <datetime now+20d+12h>
+حجم کل: 50.00 GB
+مصرف: 0.00 GB
+باقیمانده: 50.00 GB
+آخرین بروزرسانی مصرف: -
+محدودیت IP: پیشفرض/نامحدود
+لینک اشتراک: https://sub.shop-edge.com:2096/sub/SUB_ID_SOLD
+  [inline_keyboard] 🔗 لینک اشتراک -> service_subscription:SERVICE_SOLD | 📷 QR لینک اشتراک -> service_subscription_qr:SERVICE_SOLD
+  [inline_keyboard] 📨 ارسال مجدد کانفیگ -> service_resend_config:SERVICE_SOLD | 🔄 بروزرسانی مصرف -> service_sync_usage:SERVICE_SOLD
+  [inline_keyboard] 🔄 تمدید سرویس -> service_renew:SERVICE_SOLD | ➕ خرید حجم اضافه -> service_add_traffic_order:SERVICE_SOLD
+  [inline_keyboard] 🔙 بازگشت -> my_services
+
+sendMessage chat=8601
+  text: ✅ سرویس شما آماده شد
+
+نام سرویس:
+<code>USERNAME_SOLD</code>
+
+🔗 لینک اشتراک:
+<a href="https://sub.shop-edge.com:2096/sub/SUB_ID_SOLD">باز کردن لینک اشتراک</a>
+
+برای کپی:
+<code>https://sub.shop-edge.com:2096/sub/SUB_ID_SOLD</code>
+
+⚙️ کانفیگ‌ها:
+
+1. <a href="vless://UUID_SOLD@de1.shop-edge.com:443?type=tcp&amp;security=none#test">کانفیگ ۱</a>
+<code>vless://UUID_SOLD@de1.shop-edge.com:443?type=tcp&amp;security=none#test</code>
+  parse_mode: HTML

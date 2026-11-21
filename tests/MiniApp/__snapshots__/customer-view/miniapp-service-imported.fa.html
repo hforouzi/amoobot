@@ -1,0 +1,57 @@
+<div class="view-root" data-view="services" data-title="سرویس #SERVICE_IMPORTED" data-back data-main-button-text="باز کردن صفحه اشتراک" data-main-button-href="http://localhost/s/TOKEN_IMPORTED" data-main-button-external>
+        <section class="card" data-status="active">
+    <div class="head">
+        <h1>اشتراک من</h1>
+        <span class="badge active">فعال</span>
+    </div>
+    <div class="stats">
+        <div class="stat">
+            <span class="muted">تاریخ انقضا</span>
+                            <b><time datetime="<date of now+20d+12h>"><jdate of now+20d+12h></time></b>
+                <span class="muted ltr-num"><date of now+20d+12h></span>
+                    </div>
+        <div class="stat" data-days-left="20">
+            <span class="muted">روزهای باقی‌مانده</span>
+            <b>20 روز</b>
+        </div>
+        <div class="stat">
+            <span class="muted">مصرف شده</span>
+            <b class="ltr">12.5 GB</b>
+        </div>
+        <div class="stat">
+            <span class="muted">باقی‌مانده</span>
+            <b class="ltr">37.5 GB</b>
+        </div>
+    </div>
+            <div class="bar" data-used-percent="25"
+             role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="25" aria-label="مصرف شده">
+            <span style="width: 25%"></span>
+        </div>
+        <p class="muted" style="margin-top:6px">12.5 GB از 50 GB (25٪)</p>
+    </section>
+
+                        <section class="card" data-new-plan>
+            <h2>تمدید و افزایش حجم</h2>
+            <p class="muted">این سرویس پلن ندارد. برای تمدید، یک پلن جدید بخرید.</p>
+            <a class="btn small" href="/app/view/shop" data-nav data-shop-link>🛒 خرید سرویس</a>
+        </section>
+        <section class="card">
+        <h2>صفحه اشتراک</h2>
+        <p class="muted">لینک اشتراک، QR و افزودن با یک لمس به برنامه‌ها در صفحه اشتراک است.</p>
+        <a class="btn" href="/app/view/services/SERVICE_IMPORTED/subscription" data-nav data-subscription-view>🔗 لینک اشتراک، QR و افزودن به برنامه‌ها</a>
+        <a class="btn secondary small" style="margin-top:10px" href="http://localhost/s/TOKEN_IMPORTED" data-open-link>🌐 باز کردن صفحه اشتراک</a>
+        <button type="button" class="btn secondary small" style="margin-top:10px" data-copy="http://localhost/s/TOKEN_IMPORTED">📋 کپی لینک صفحه</button>
+    </section>
+    <section class="card">
+        <h2>ارسال در چت ربات</h2>
+                    <p class="muted">ربات همان پیام‌های همیشگی را در چت برایتان می‌فرستد.</p>
+            <div class="row">
+                <button type="button" class="btn secondary small" data-action="/app/api/services/SERVICE_IMPORTED/send-link">🔗 لینک اشتراک</button>
+                <button type="button" class="btn secondary small" data-action="/app/api/services/SERVICE_IMPORTED/send-qr">🔳 QR کد</button>
+                <button type="button" class="btn secondary small" data-action="/app/api/services/SERVICE_IMPORTED/resend-config">📄 کانفیگ‌ها</button>
+            </div>
+            </section>
+    <section class="card">
+        <button type="button" class="btn secondary small" data-action="/app/api/services/SERVICE_IMPORTED/refresh" data-reload>🔄 بروزرسانی مصرف</button>
+    </section>
+</div>

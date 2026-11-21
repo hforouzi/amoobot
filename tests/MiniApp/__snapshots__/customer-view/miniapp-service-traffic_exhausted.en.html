@@ -1,0 +1,55 @@
+<div class="view-root" data-view="services" data-title="Gold 30 days" data-back data-main-button-text="Open subscription page" data-main-button-href="http://localhost/s/TOKEN_TRAFFIC_EXHAUSTED" data-main-button-external>
+        <section class="card" data-status="limited">
+    <div class="head">
+        <h1>Gold 30 days</h1>
+        <span class="badge limited">Out of traffic</span>
+    </div>
+    <div class="stats">
+        <div class="stat">
+            <span class="muted">Expires</span>
+                            <b><time datetime="<date of now+20d+12h>"><date of now+20d+12h></time></b>
+                <span class="muted ltr-num"><date of now+20d+12h></span>
+                    </div>
+        <div class="stat" data-days-left="20">
+            <span class="muted">Days left</span>
+            <b>20 days</b>
+        </div>
+        <div class="stat">
+            <span class="muted">Used</span>
+            <b class="ltr">50 GB</b>
+        </div>
+        <div class="stat">
+            <span class="muted">Remaining</span>
+            <b class="ltr">0 B</b>
+        </div>
+    </div>
+            <div class="bar full" data-used-percent="100"
+             role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100" aria-label="Used">
+            <span style="width: 100%"></span>
+        </div>
+        <p class="muted" style="margin-top:6px">50 GB of 50 GB (100%)</p>
+    </section>
+
+                <section class="card">
+            <h2>Renew or add traffic</h2>
+            <div class="row">
+                <a class="btn small" href="/app/view/services/SERVICE_TRAFFIC_EXHAUSTED/renew" data-nav data-renew>🔄 Renew service</a>                            </div>
+        </section>
+        <section class="card">
+        <h2>Subscription page</h2>
+        <p class="muted">The subscription link, QR code and one-tap import into apps are on the subscription page.</p>
+        <a class="btn" href="/app/view/services/SERVICE_TRAFFIC_EXHAUSTED/subscription" data-nav data-subscription-view>🔗 Subscription link, QR and apps</a>
+        <a class="btn secondary small" style="margin-top:10px" href="http://localhost/s/TOKEN_TRAFFIC_EXHAUSTED" data-open-link>🌐 Open subscription page</a>
+        <button type="button" class="btn secondary small" style="margin-top:10px" data-copy="http://localhost/s/TOKEN_TRAFFIC_EXHAUSTED">📋 Copy page link</button>
+    </section>
+    <section class="card">
+        <h2>Send to the bot chat</h2>
+                    <p>This service is out of traffic.</p>
+            <p class="muted">To use it again, choose “Renew or add traffic” on the service page. Not there? Ask support.</p>
+                                            <p class="guide-link" data-guide-to="renew"><a href="/app/view/help?topic=renew" data-nav>📖 How renewing works</a></p>
+
+                        </section>
+    <section class="card">
+        <button type="button" class="btn secondary small" data-action="/app/api/services/SERVICE_TRAFFIC_EXHAUSTED/refresh" data-reload>🔄 Refresh usage</button>
+    </section>
+</div>

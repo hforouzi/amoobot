@@ -1,0 +1,28 @@
+sendMessage chat=7301
+  text: حجم سرویس شما رو به اتمام است.
+مصرف: 100٪
+  [inline_keyboard] 📦 مشاهده سرویس -> service_view:SERVICE_TRAFFIC_EXHAUSTED
+
+sendMessage chat=7301
+  text: حجم سرویس شما رو به اتمام است.
+مصرف: 100٪
+  [inline_keyboard] 📦 مشاهده سرویس -> service_view:SERVICE_TRAFFIC_EXHAUSTED
+
+sendMessage chat=7301
+  text: حجم سرویس شما به پایان رسیده است.
+  [inline_keyboard] 📦 مشاهده سرویس -> service_view:SERVICE_TRAFFIC_EXHAUSTED
+
+sendMessage chat=7301
+  text: حجم سرویس شما رو به اتمام است.
+مصرف: 96٪
+  [inline_keyboard] 📦 مشاهده سرویس -> service_view:SERVICE_NEAR_EXPIRY
+
+sendMessage chat=7301
+  text: حجم سرویس شما رو به اتمام است.
+مصرف: 96٪
+  [inline_keyboard] 📦 مشاهده سرویس -> service_view:SERVICE_NEAR_EXPIRY
+
+sendMessage chat=7301
+  text: حجم سرویس شما رو به اتمام است.
+مصرف: 82٪
+  [inline_keyboard] 📦 مشاهده سرویس -> service_view:SERVICE_ACTIVE

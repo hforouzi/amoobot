@@ -1,0 +1,4 @@
+sendMessage chat=7301
+  text: سرویس شما منقضی شده است.
+شناسه سرویس: SERVICE_EXPIRED
+  [inline_keyboard] 📦 مشاهده سرویس -> service_view:SERVICE_EXPIRED
