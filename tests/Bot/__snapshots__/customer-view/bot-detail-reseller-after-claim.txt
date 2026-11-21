@@ -1,0 +1,3 @@
+answerCallbackQuery chat=cb
+  text: دسترسی غیرمجاز.
+  show_alert: true

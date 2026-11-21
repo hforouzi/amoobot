@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="robots" content="noindex, nofollow">
+    <meta name="referrer" content="no-referrer">
+    <meta name="color-scheme" content="light dark">
+    <meta name="format-detection" content="telephone=no">
+    <title>اشتراک من</title>
+    <style>
+        :root {
+            --bg: #f4f6fb; --card: #ffffff; --fg: #111827; --muted: #6b7280; --border: #e5e7eb;
+            --accent: #2563eb; --accent-fg: #ffffff; --ok: #15803d; --warn: #b45309; --bad: #b91c1c;
+            --track: #e5e7eb; --code: #f3f4f6; --radius: 14px;
+        }
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg: #0b1020; --card: #151b2e; --fg: #e5e7eb; --muted: #9ca3af; --border: #263049;
+                --accent: #3b82f6; --accent-fg: #ffffff; --ok: #22c55e; --warn: #f59e0b; --bad: #f87171;
+                --track: #263049; --code: #0f1528;
+            }
+        }
+        /* Vazirmatn, self-hosted with the Mini App (public/miniapp/fonts, OFL); CSP font-src 'self'. */
+        @font-face {
+            font-family: Vazirmatn; font-style: normal; font-weight: 100 900; font-display: swap;
+            src: url("/miniapp/fonts/Vazirmatn-wght.woff2?v=33.003") format("woff2-variations"), url("/miniapp/fonts/Vazirmatn-wght.woff2?v=33.003") format("woff2");
+            unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0600-06FF, U+0750-077F,
+                           U+08A0-08FF, U+200C-200F, U+2010-2027, U+2030-205E, U+20AC, U+2122, U+2212, U+FB50-FDFF, U+FE70-FEFF, U+FEFF, U+FFFD;
+        }
+        * { box-sizing: border-box; }
+        html { -webkit-text-size-adjust: 100%; }
+        body {
+            margin: 0; background: var(--bg); color: var(--fg); line-height: 1.7;
+            font-family: Vazirmatn, system-ui, -apple-system, "Segoe UI", Roboto, Tahoma, Arial, sans-serif;
+            padding: max(16px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom));
+        }
+        main { width: 100%; max-width: 560px; margin: 0 auto; display: grid; gap: 14px; }
+        .card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; min-width: 0; }
+        h1 { font-size: 1.25rem; margin: 0; }
+        h2 { font-size: 1.05rem; margin: 0 0 10px; }
+        p { margin: 0 0 8px; }
+        .muted { color: var(--muted); font-size: .9rem; }
+        .ltr { direction: ltr; unicode-bidi: isolate; }
+        .badge { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: .85rem; font-weight: 600; color: #fff; }
+        .badge.active { background: var(--ok); } .badge.expired, .badge.limited { background: var(--bad); } .badge.suspended { background: var(--warn); }
+        .head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+        .stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
+        .stat { background: var(--code); border-radius: 10px; padding: 10px; min-width: 0; }
+        .stat b { display: block; font-size: 1.05rem; overflow-wrap: anywhere; }
+        .bar { height: 10px; background: var(--track); border-radius: 999px; overflow: hidden; margin-top: 12px; }
+        .bar span { display: block; height: 100%; background: var(--ok); border-radius: inherit; }
+        .bar.high span { background: var(--warn); } .bar.full span { background: var(--bad); }
+        .btn {
+            display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; min-height: 46px;
+            padding: 10px 14px; border: 0; border-radius: 12px; background: var(--accent); color: var(--accent-fg);
+            font: inherit; font-weight: 600; text-decoration: none; cursor: pointer; text-align: center;
+        }
+        .btn.secondary { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+        .btn.small { min-height: 40px; font-size: .92rem; }
+        .row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
+        .qr { display: block; width: min(280px, 100%); height: auto; margin: 14px auto 4px; background: #fff; border-radius: 10px; }
+        .url { margin-top: 10px; width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--code); color: var(--fg); font: .85rem ui-monospace, Menlo, Consolas, monospace; direction: ltr; text-align: left; }
+        details { margin-top: 12px; } summary { cursor: pointer; color: var(--accent); font-weight: 600; }
+        ol.configs { padding-inline-start: 18px; margin: 10px 0 0; }
+        ol.configs li { margin-bottom: 10px; }
+        code { display: block; background: var(--code); border-radius: 8px; padding: 8px; font: .8rem/1.6 ui-monospace, Menlo, Consolas, monospace; direction: ltr; text-align: left; overflow-wrap: anywhere; white-space: pre-wrap; }
+        .apps { display: grid; gap: 10px; }
+        .app { border: 1px solid var(--border); border-radius: 12px; padding: 12px; }
+        .app-name { font-weight: 700; }
+        .platforms { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 10px; }
+        .platforms a { padding: 4px 10px; border-radius: 999px; border: 1px solid var(--border); color: var(--fg); text-decoration: none; font-size: .85rem; }
+        .platforms a.current { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+        .hint { display: none; margin-top: 10px; padding: 10px; border-radius: 10px; background: var(--code); font-size: .9rem; }
+        .hint.show { display: block; }
+        .notice { border-inline-start: 4px solid var(--warn); }
+        .downloads { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+        .downloads li { border: 1px solid var(--border); border-radius: 12px; padding: 12px; }
+        .sha { font: .72rem ui-monospace, Menlo, Consolas, monospace; overflow-wrap: anywhere; direction: ltr; text-align: left; color: var(--muted); }
+        .toast { position: fixed; inset-inline: 16px; bottom: max(16px, env(safe-area-inset-bottom)); margin: 0 auto; max-width: 420px; padding: 10px 14px; border-radius: 10px; background: var(--fg); color: var(--bg); text-align: center; opacity: 0; transition: opacity .2s; pointer-events: none; }
+        .toast.show { opacity: .95; }
+        footer { text-align: center; }
+        footer a { color: var(--muted); }
+        @media (max-width: 360px) { .row, .stats { grid-template-columns: minmax(0, 1fr); } }
+    </style>
+</head>
+<body data-platform="android">
+<main>
+        <section class="card" data-status="active">
+    <div class="head">
+        <h1>Gold 30 days</h1>
+        <span class="badge active">فعال</span>
+    </div>
+    <div class="stats">
+        <div class="stat">
+            <span class="muted">تاریخ انقضا</span>
+                            <b><time datetime="<date of now+20d+12h>"><jdate of now+20d+12h></time></b>
+                <span class="muted ltr-num"><date of now+20d+12h></span>
+                    </div>
+        <div class="stat" data-days-left="20">
+            <span class="muted">روزهای باقی‌مانده</span>
+            <b>20 روز</b>
+        </div>
+        <div class="stat">
+            <span class="muted">مصرف شده</span>
+            <b class="ltr">12.5 GB</b>
+        </div>
+        <div class="stat">
+            <span class="muted">باقی‌مانده</span>
+            <b class="ltr">37.5 GB</b>
+        </div>
+    </div>
+            <div class="bar" data-used-percent="25"
+             role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="25" aria-label="مصرف شده">
+            <span style="width: 25%"></span>
+        </div>
+        <p class="muted" style="margin-top:6px">12.5 GB از 50 GB (25٪)</p>
+    </section>
+
+            <section class="card">
+    <h2>لینک اشتراک</h2>
+            <button type="button" class="btn" data-copy="https://sub.shop-edge.com:2096/sub/subactive">📋 کپی لینک اشتراک</button>
+        <input class="url" type="text" readonly value="https://sub.shop-edge.com:2096/sub/subactive" aria-label="لینک اشتراک" data-select-all>
+                    <img class="qr" src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHhtbG5zOnhsaW5rPSJodHRwOi8vd3d3LnczLm9yZy8xOTk5L3hsaW5rIiB2ZXJzaW9uPSIxLjEiIHdpZHRoPSIzOTJweCIgaGVpZ2h0PSIzOTJweCIgdmlld0JveD0iMCAwIDM5MiAzOTIiPjxyZWN0IHg9IjAiIHk9IjAiIHdpZHRoPSIzOTIiIGhlaWdodD0iMzkyIiBmaWxsPSIjZmZmZmZmIiBmaWxsLW9wYWNpdHk9IjEiLz48cGF0aCBmaWxsPSIjMDAwMDAwIiBmaWxsLW9wYWNpdHk9IjEiIGQ9Ik0zMiwzMkw4OCwzMkw4OCw0MEwzMiw0MFpNMTA0LDMyTDEyMCwzMkwxMjAsNDBMMTA0LDQwWk0xMzYsMzJMMTc2LDMyTDE3Niw0MEwxMzYsNDBaTTE5MiwzMkwyMDAsMzJMMjAwLDQwTDE5Miw0MFpNMjA4LDMyTDI0MCwzMkwyNDAsNDBMMjA4LDQwWk0yNDgsMzJMMjY0LDMyTDI2NCw0MEwyNDgsNDBaTTI4MCwzMkwyODgsMzJMMjg4LDQwTDI4MCw0MFpNMzA0LDMyTDM2MCwzMkwzNjAsNDBMMzA0LDQwWk0zMiw0MEw0MCw0MEw0MCw0OEwzMiw0OFpNODAsNDBMODgsNDBMODgsNDhMODAsNDhaTTEwNCw0MEwxMzYsNDBMMTM2LDQ4TDEwNCw0OFpNMTUyLDQwTDE3Niw0MEwxNzYsNDhMMTUyLDQ4Wk0xOTIsNDBMMjAwLDQwTDIwMCw0OEwxOTIsNDhaTTIyNCw0MEwyNTYsNDBMMjU2LDQ4TDIyNCw0OFpNMjY0LDQwTDI3Miw0MEwyNzIsNDhMMjY0LDQ4Wk0yODAsNDBMMjg4LDQwTDI4OCw0OEwyODAsNDhaTTMwNCw0MEwzMTIsNDBMMzEyLDQ4TDMwNCw0OFpNMzUyLDQwTDM2MCw0MEwzNjAsNDhMMzUyLDQ4Wk0zMiw0OEw0MCw0OEw0MCw1NkwzMiw1NlpNNDgsNDhMNzIsNDhMNzIsNTZMNDgsNTZaTTgwLDQ4TDg4LDQ4TDg4LDU2TDgwLDU2Wk05Niw0OEwxMDQsNDhMMTA0LDU2TDk2LDU2Wk0xMjAsNDhMMTI4LDQ4TDEyOCw1NkwxMjAsNTZaTTEzNiw0OEwxNDQsNDhMMTQ0LDU2TDEzNiw1NlpNMTYwLDQ4TDE2OCw0OEwxNjgsNTZMMTYwLDU2Wk0xOTIsNDhMMjAwLDQ4TDIwMCw1NkwxOTIsNTZaTTIwOCw0OEwyMTYsNDhMMjE2LDU2TDIwOCw1NlpNMjI0LDQ4TDI0OCw0OEwyNDgsNTZMMjI0LDU2Wk0yNjQsNDhMMjgwLDQ4TDI4MCw1NkwyNjQsNTZaTTI4OCw0OEwyOTYsNDhMMjk2LDU2TDI4OCw1NlpNMzA0LDQ4TDMxMiw0OEwzMTIsNTZMMzA0LDU2Wk0zMjAsNDhMMzQ0LDQ4TDM0NCw1NkwzMjAsNTZaTTM1Miw0OEwzNjAsNDhMMzYwLDU2TDM1Miw1NlpNMzIsNTZMNDAsNTZMNDAsNjRMMzIsNjRaTTQ4LDU2TDcyLDU2TDcyLDY0TDQ4LDY0Wk04MCw1Nkw4OCw1Nkw4OCw2NEw4MCw2NFpNOTYsNTZMMTEyLDU2TDExMiw2NEw5Niw2NFpNMTUyLDU2TDE2MCw1NkwxNjAsNjRMMTUyLDY0Wk0xODQsNTZMMTkyLDU2TDE5Miw2NEwxODQsNjRaTTIwOCw1NkwyMzIsNTZMMjMyLDY0TDIwOCw2NFpNMjQwLDU2TDI0OCw1NkwyNDgsNjRMMjQwLDY0Wk0yNTYsNTZMMjY0LDU2TDI2NCw2NEwyNTYsNjRaTTI4OCw1NkwyOTYsNTZMMjk2LDY0TDI4OCw2NFpNMzA0LDU2TDMxMiw1NkwzMTIsNjRMMzA0LDY0Wk0zMjAsNTZMMzQ0LDU2TDM0NCw2NEwzMjAsNjRaTTM1Miw1NkwzNjAsNTZMMzYwLDY0TDM1Miw2NFpNMzIsNjRMNDAsNjRMNDAsNzJMMzIsNzJaTTQ4LDY0TDcyLDY0TDcyLDcyTDQ4LDcyWk04MCw2NEw4OCw2NEw4OCw3Mkw4MCw3MlpNMTEyLDY0TDEyMCw2NEwxMjAsNzJMMTEyLDcyWk0xNDQsNjRMMTYwLDY0TDE2MCw3MkwxNDQsNzJaTTE2OCw2NEwxNzYsNjRMMTc2LDcyTDE2OCw3MlpNMTg0LDY0TDE5Miw2NEwxOTIsNzJMMTg0LDcyWk0yMDAsNjRMMjE2LDY0TDIxNiw3MkwyMDAsNzJaTTIyNCw2NEwyMzIsNjRMMjMyLDcyTDIyNCw3MlpNMjY0LDY0TDI4OCw2NEwyODgsNzJMMjY0LDcyWk0zMDQsNjRMMzEyLDY0TDMxMiw3MkwzMDQsNzJaTTMyMCw2NEwzNDQsNjRMMzQ0LDcyTDMyMCw3MlpNMzUyLDY0TDM2MCw2NEwzNjAsNzJMMzUyLDcyWk0zMiw3Mkw0MCw3Mkw0MCw4MEwzMiw4MFpNODAsNzJMODgsNzJMODgsODBMODAsODBaTTEwNCw3MkwxMTIsNzJMMTEyLDgwTDEwNCw4MFpNMTIwLDcyTDEyOCw3MkwxMjgsODBMMTIwLDgwWk0xNjAsNzJMMTc2LDcyTDE3Niw4MEwxNjAsODBaTTIwMCw3MkwyMTYsNzJMMjE2LDgwTDIwMCw4MFpNMjMyLDcyTDI0MCw3MkwyNDAsODBMMjMyLDgwWk0yNzIsNzJMMjg4LDcyTDI4OCw4MEwyNzIsODBaTTMwNCw3MkwzMTIsNzJMMzEyLDgwTDMwNCw4MFpNMzUyLDcyTDM2MCw3MkwzNjAsODBMMzUyLDgwWk0zMiw4MEw4OCw4MEw4OCw4OEwzMiw4OFpNOTYsODBMMTA0LDgwTDEwNCw4OEw5Niw4OFpNMTEyLDgwTDEyMCw4MEwxMjAsODhMMTEyLDg4Wk0xMjgsODBMMTM2LDgwTDEzNiw4OEwxMjgsODhaTTE0NCw4MEwxNTIsODBMMTUyLDg4TDE0NCw4OFpNMTYwLDgwTDE2OCw4MEwxNjgsODhMMTYwLDg4Wk0xNzYsODBMMTg0LDgwTDE4NCw4OEwxNzYsODhaTTE5Miw4MEwyMDAsODBMMjAwLDg4TDE5Miw4OFpNMjA4LDgwTDIxNiw4MEwyMTYsODhMMjA4LDg4Wk0yMjQsODBMMjMyLDgwTDIzMiw4OEwyMjQsODhaTTI0MCw4MEwyNDgsODBMMjQ4LDg4TDI0MCw4OFpNMjU2LDgwTDI2NCw4MEwyNjQsODhMMjU2LDg4Wk0yNzIsODBMMjgwLDgwTDI4MCw4OEwyNzIsODhaTTI4OCw4MEwyOTYsODBMMjk2LDg4TDI4OCw4OFpNMzA0LDgwTDM2MCw4MEwzNjAsODhMMzA0LDg4Wk0xMDQsODhMMTIwLDg4TDEyMCw5NkwxMDQsOTZaTTEzNiw4OEwxNDQsODhMMTQ0LDk2TDEzNiw5NlpNMTY4LDg4TDE3Niw4OEwxNzYsOTZMMTY4LDk2Wk0xODQsODhMMjAwLDg4TDIwMCw5NkwxODQsOTZaTTIwOCw4OEwyNDAsODhMMjQwLDk2TDIwOCw5NlpNMjQ4LDg4TDI1Niw4OEwyNTYsOTZMMjQ4LDk2Wk0yNjQsODhMMjgwLDg4TDI4MCw5NkwyNjQsOTZaTTI4OCw4OEwyOTYsODhMMjk2LDk2TDI4OCw5NlpNNTYsOTZMNzIsOTZMNzIsMTA0TDU2LDEwNFpNODAsOTZMOTYsOTZMOTYsMTA0TDgwLDEwNFpNMTI4LDk2TDE1Miw5NkwxNTIsMTA0TDEyOCwxMDRaTTE2MCw5NkwxNjgsOTZMMTY4LDEwNEwxNjAsMTA0Wk0xNzYsOTZMMjAwLDk2TDIwMCwxMDRMMTc2LDEwNFpNMjMyLDk2TDI3Miw5NkwyNzIsMTA0TDIzMiwxMDRaTTI4MCw5NkwyOTYsOTZMMjk2LDEwNEwyODAsMTA0Wk0zMjgsOTZMMzQ0LDk2TDM0NCwxMDRMMzI4LDEwNFpNNDAsMTA0TDU2LDEwNEw1NiwxMTJMNDAsMTEyWk02NCwxMDRMNzIsMTA0TDcyLDExMkw2NCwxMTJaTTEwNCwxMDRMMTEyLDEwNEwxMTIsMTEyTDEwNCwxMTJaTTEzNiwxMDRMMTQ0LDEwNEwxNDQsMTEyTDEzNiwxMTJaTTE2MCwxMDRMMTc2LDEwNEwxNzYsMTEyTDE2MCwxMTJaTTE5MiwxMDRMMjAwLDEwNEwyMDAsMTEyTDE5MiwxMTJaTTIwOCwxMDRMMjE2LDEwNEwyMTYsMTEyTDIwOCwxMTJaTTI0MCwxMDRMMjU2LDEwNEwyNTYsMTEyTDI0MCwxMTJaTTI4MCwxMDRMMjg4LDEwNEwyODgsMTEyTDI4MCwxMTJaTTI5NiwxMDRMMzI4LDEwNEwzMjgsMTEyTDI5NiwxMTJaTTMzNiwxMDRMMzYwLDEwNEwzNjAsMTEyTDMzNiwxMTJaTTMyLDExMkw0OCwxMTJMNDgsMTIwTDMyLDEyMFpNNTYsMTEyTDcyLDExMkw3MiwxMjBMNTYsMTIwWk04MCwxMTJMMTIwLDExMkwxMjAsMTIwTDgwLDEyMFpNMTI4LDExMkwxMzYsMTEyTDEzNiwxMjBMMTI4LDEyMFpNMTg0LDExMkwyMTYsMTEyTDIxNiwxMjBMMTg0LDEyMFpNMjI0LDExMkwyMzIsMTEyTDIzMiwxMjBMMjI0LDEyMFpNMjQwLDExMkwyNDgsMTEyTDI0OCwxMjBMMjQwLDEyMFpNMjgwLDExMkwyOTYsMTEyTDI5NiwxMjBMMjgwLDEyMFpNMzA0LDExMkwzMTIsMTEyTDMxMiwxMjBMMzA0LDEyMFpNMzIsMTIwTDQwLDEyMEw0MCwxMjhMMzIsMTI4Wk00OCwxMjBMNTYsMTIwTDU2LDEyOEw0OCwxMjhaTTcyLDEyMEw4MCwxMjBMODAsMTI4TDcyLDEyOFpNOTYsMTIwTDEyOCwxMjBMMTI4LDEyOEw5NiwxMjhaTTE3NiwxMjBMMTg0LDEyMEwxODQsMTI4TDE3NiwxMjhaTTIyNCwxMjBMMjMyLDEyMEwyMzIsMTI4TDIyNCwxMjhaTTI0OCwxMjBMMjg4LDEyMEwyODgsMTI4TDI0OCwxMjhaTTMyMCwxMjBMMzQ0LDEyMEwzNDQsMTI4TDMyMCwxMjhaTTQ4LDEyOEw3MiwxMjhMNzIsMTM2TDQ4LDEzNlpNODAsMTI4TDExMiwxMjhMMTEyLDEzNkw4MCwxMzZaTTEzNiwxMjhMMTQ0LDEyOEwxNDQsMTM2TDEzNiwxMzZaTTE2OCwxMjhMMTc2LDEyOEwxNzYsMTM2TDE2OCwxMzZaTTE5MiwxMjhMMjAwLDEyOEwyMDAsMTM2TDE5MiwxMzZaTTIwOCwxMjhMMjMyLDEyOEwyMzIsMTM2TDIwOCwxMzZaTTI0MCwxMjhMMjY0LDEyOEwyNjQsMTM2TDI0MCwxMzZaTTI3MiwxMjhMMjg4LDEyOEwyODgsMTM2TDI3MiwxMzZaTTMyMCwxMjhMMzQ0LDEyOEwzNDQsMTM2TDMyMCwxMzZaTTM1MiwxMjhMMzYwLDEyOEwzNjAsMTM2TDM1MiwxMzZaTTQ4LDEzNkw4MCwxMzZMODAsMTQ0TDQ4LDE0NFpNMTEyLDEzNkwxMjgsMTM2TDEyOCwxNDRMMTEyLDE0NFpNMTUyLDEzNkwxNjgsMTM2TDE2OCwxNDRMMTUyLDE0NFpNMTc2LDEzNkwxOTIsMTM2TDE5MiwxNDRMMTc2LDE0NFpNMjAwLDEzNkwyMDgsMTM2TDIwOCwxNDRMMjAwLDE0NFpNMjE2LDEzNkwyMjQsMTM2TDIyNCwxNDRMMjE2LDE0NFpNMjU2LDEzNkwyNjQsMTM2TDI2NCwxNDRMMjU2LDE0NFpNMjgwLDEzNkwyOTYsMTM2TDI5NiwxNDRMMjgwLDE0NFpNMzEyLDEzNkwzMjgsMTM2TDMyOCwxNDRMMzEyLDE0NFpNMzM2LDEzNkwzNTIsMTM2TDM1MiwxNDRMMzM2LDE0NFpNNDAsMTQ0TDQ4LDE0NEw0OCwxNTJMNDAsMTUyWk02NCwxNDRMNzIsMTQ0TDcyLDE1Mkw2NCwxNTJaTTgwLDE0NEw4OCwxNDRMODgsMTUyTDgwLDE1MlpNOTYsMTQ0TDEyOCwxNDRMMTI4LDE1Mkw5NiwxNTJaTTE0NCwxNDRMMTc2LDE0NEwxNzYsMTUyTDE0NCwxNTJaTTE4NCwxNDRMMTkyLDE0NEwxOTIsMTUyTDE4NCwxNTJaTTIwMCwxNDRMMjE2LDE0NEwyMTYsMTUyTDIwMCwxNTJaTTI0MCwxNDRMMjQ4LDE0NEwyNDgsMTUyTDI0MCwxNTJaTTI1NiwxNDRMMjcyLDE0NEwyNzIsMTUyTDI1NiwxNTJaTTI4MCwxNDRMMjk2LDE0NEwyOTYsMTUyTDI4MCwxNTJaTTMwNCwxNDRMMzEyLDE0NEwzMTIsMTUyTDMwNCwxNTJaTTMyOCwxNDRMMzUyLDE0NEwzNTIsMTUyTDMyOCwxNTJaTTU2LDE1Mkw4MCwxNTJMODAsMTYwTDU2LDE2MFpNODgsMTUyTDk2LDE1Mkw5NiwxNjBMODgsMTYwWk0xMDQsMTUyTDExMiwxNTJMMTEyLDE2MEwxMDQsMTYwWk0xMjgsMTUyTDE1MiwxNTJMMTUyLDE2MEwxMjgsMTYwWk0xOTIsMTUyTDIwMCwxNTJMMjAwLDE2MEwxOTIsMTYwWk0yMTYsMTUyTDI0MCwxNTJMMjQwLDE2MEwyMTYsMTYwWk0yNDgsMTUyTDI1NiwxNTJMMjU2LDE2MEwyNDgsMTYwWk0yNzIsMTUyTDI4MCwxNTJMMjgwLDE2MEwyNzIsMTYwWk0yODgsMTUyTDMwNCwxNTJMMzA0LDE2MEwyODgsMTYwWk0zMTIsMTUyTDMzNiwxNTJMMzM2LDE2MEwzMTIsMTYwWk0zNDQsMTUyTDM1MiwxNTJMMzUyLDE2MEwzNDQsMTYwWk00OCwxNjBMNTYsMTYwTDU2LDE2OEw0OCwxNjhaTTgwLDE2MEw4OCwxNjBMODgsMTY4TDgwLDE2OFpNOTYsMTYwTDEyMCwxNjBMMTIwLDE2OEw5NiwxNjhaTTE0NCwxNjBMMTUyLDE2MEwxNTIsMTY4TDE0NCwxNjhaTTE2MCwxNjBMMTY4LDE2MEwxNjgsMTY4TDE2MCwxNjhaTTE3NiwxNjBMMTkyLDE2MEwxOTIsMTY4TDE3NiwxNjhaTTIwMCwxNjBMMjA4LDE2MEwyMDgsMTY4TDIwMCwxNjhaTTIxNiwxNjBMMjI0LDE2MEwyMjQsMTY4TDIxNiwxNjhaTTI0MCwxNjBMMjQ4LDE2MEwyNDgsMTY4TDI0MCwxNjhaTTI3MiwxNjBMMjgwLDE2MEwyODAsMTY4TDI3MiwxNjhaTTI5NiwxNjBMMzA0LDE2MEwzMDQsMTY4TDI5NiwxNjhaTTMxMiwxNjBMMzM2LDE2MEwzMzYsMTY4TDMxMiwxNjhaTTM0NCwxNjBMMzUyLDE2MEwzNTIsMTY4TDM0NCwxNjhaTTQwLDE2OEw0OCwxNjhMNDgsMTc2TDQwLDE3NlpNNzIsMTY4TDgwLDE2OEw4MCwxNzZMNzIsMTc2Wk05NiwxNjhMMTA0LDE2OEwxMDQsMTc2TDk2LDE3NlpNMTIwLDE2OEwxMjgsMTY4TDEyOCwxNzZMMTIwLDE3NlpNMTM2LDE2OEwxNDQsMTY4TDE0NCwxNzZMMTM2LDE3NlpNMTUyLDE2OEwxNzYsMTY4TDE3NiwxNzZMMTUyLDE3NlpNMTg0LDE2OEwyMDAsMTY4TDIwMCwxNzZMMTg0LDE3NlpNMjA4LDE2OEwyMjQsMTY4TDIyNCwxNzZMMjA4LDE3NlpNMjMyLDE2OEwyNDgsMTY4TDI0OCwxNzZMMjMyLDE3NlpNMjY0LDE2OEwyODgsMTY4TDI4OCwxNzZMMjY0LDE3NlpNMzA0LDE2OEwzMTIsMTY4TDMxMiwxNzZMMzA0LDE3NlpNMzIwLDE2OEwzMjgsMTY4TDMyOCwxNzZMMzIwLDE3NlpNMzUyLDE2OEwzNjAsMTY4TDM2MCwxNzZMMzUyLDE3NlpNMzIsMTc2TDQwLDE3Nkw0MCwxODRMMzIsMTg0Wk00OCwxNzZMNTYsMTc2TDU2LDE4NEw0OCwxODRaTTgwLDE3Nkw5NiwxNzZMOTYsMTg0TDgwLDE4NFpNMTA0LDE3NkwxMjgsMTc2TDEyOCwxODRMMTA0LDE4NFpNMTM2LDE3NkwxNDQsMTc2TDE0NCwxODRMMTM2LDE4NFpNMTYwLDE3NkwxNjgsMTc2TDE2OCwxODRMMTYwLDE4NFpNMTg0LDE3NkwxOTIsMTc2TDE5MiwxODRMMTg0LDE4NFpNMjE2LDE3NkwyNTYsMTc2TDI1NiwxODRMMjE2LDE4NFpNMjY0LDE3NkwyODgsMTc2TDI4OCwxODRMMjY0LDE4NFpNMzA0LDE3NkwzMTIsMTc2TDMxMiwxODRMMzA0LDE4NFpNMzQ0LDE3NkwzNTIsMTc2TDM1MiwxODRMMzQ0LDE4NFpNMzIsMTg0TDQwLDE4NEw0MCwxOTJMMzIsMTkyWk01NiwxODRMNzIsMTg0TDcyLDE5Mkw1NiwxOTJaTTg4LDE4NEw5NiwxODRMOTYsMTkyTDg4LDE5MlpNMTA0LDE4NEwxMTIsMTg0TDExMiwxOTJMMTA0LDE5MlpNMTYwLDE4NEwxNjgsMTg0TDE2OCwxOTJMMTYwLDE5MlpNMTc2LDE4NEwxOTIsMTg0TDE5MiwxOTJMMTc2LDE5MlpNMjAwLDE4NEwyMDgsMTg0TDIwOCwxOTJMMjAwLDE5MlpNMjE2LDE4NEwyNDAsMTg0TDI0MCwxOTJMMjE2LDE5MlpNMjQ4LDE4NEwyNjQsMTg0TDI2NCwxOTJMMjQ4LDE5MlpNMzA0LDE4NEwzMjgsMTg0TDMyOCwxOTJMMzA0LDE5MlpNMzM2LDE4NEwzNDQsMTg0TDM0NCwxOTJMMzM2LDE5MlpNMzUyLDE4NEwzNjAsMTg0TDM2MCwxOTJMMzUyLDE5MlpNMzIsMTkyTDQwLDE5Mkw0MCwyMDBMMzIsMjAwWk02NCwxOTJMODgsMTkyTDg4LDIwMEw2NCwyMDBaTTExMiwxOTJMMTYwLDE5MkwxNjAsMjAwTDExMiwyMDBaTTE2OCwxOTJMMTg0LDE5MkwxODQsMjAwTDE2OCwyMDBaTTE5MiwxOTJMMjAwLDE5MkwyMDAsMjAwTDE5MiwyMDBaTTIwOCwxOTJMMjE2LDE5MkwyMTYsMjAwTDIwOCwyMDBaTTI0OCwxOTJMMjY0LDE5MkwyNjQsMjAwTDI0OCwyMDBaTTI3MiwxOTJMMjk2LDE5MkwyOTYsMjAwTDI3MiwyMDBaTTMwNCwxOTJMMzQ0LDE5MkwzNDQsMjAwTDMwNCwyMDBaTTM1MiwxOTJMMzYwLDE5MkwzNjAsMjAwTDM1MiwyMDBaTTQwLDIwMEw0OCwyMDBMNDgsMjA4TDQwLDIwOFpNNTYsMjAwTDgwLDIwMEw4MCwyMDhMNTYsMjA4Wk05NiwyMDBMMTEyLDIwMEwxMTIsMjA4TDk2LDIwOFpNMTIwLDIwMEwxNDQsMjAwTDE0NCwyMDhMMTIwLDIwOFpNMTYwLDIwMEwxNjgsMjAwTDE2OCwyMDhMMTYwLDIwOFpNMjA4LDIwMEwyMTYsMjAwTDIxNiwyMDhMMjA4LDIwOFpNMjI0LDIwMEwyNDAsMjAwTDI0MCwyMDhMMjI0LDIwOFpNMjQ4LDIwMEwyNjQsMjAwTDI2NCwyMDhMMjQ4LDIwOFpNMzA0LDIwMEwzMTIsMjAwTDMxMiwyMDhMMzA0LDIwOFpNMzIwLDIwMEwzMjgsMjAwTDMyOCwyMDhMMzIwLDIwOFpNMzM2LDIwMEwzNDQsMjAwTDM0NCwyMDhMMzM2LDIwOFpNMzUyLDIwMEwzNjAsMjAwTDM2MCwyMDhMMzUyLDIwOFpNNDAsMjA4TDg4LDIwOEw4OCwyMTZMNDAsMjE2Wk05NiwyMDhMMTA0LDIwOEwxMDQsMjE2TDk2LDIxNlpNMTM2LDIwOEwxNjAsMjA4TDE2MCwyMTZMMTM2LDIxNlpNMTY4LDIwOEwxNzYsMjA4TDE3NiwyMTZMMTY4LDIxNlpNMjAwLDIwOEwyMTYsMjA4TDIxNiwyMTZMMjAwLDIxNlpNMjI0LDIwOEwyMzIsMjA4TDIzMiwyMTZMMjI0LDIxNlpNMjU2LDIwOEwyNjQsMjA4TDI2NCwyMTZMMjU2LDIxNlpNMjg4LDIwOEwyOTYsMjA4TDI5NiwyMTZMMjg4LDIxNlpNMzIwLDIwOEwzMjgsMjA4TDMyOCwyMTZMMzIwLDIxNlpNMzM2LDIwOEwzNDQsMjA4TDM0NCwyMTZMMzM2LDIxNlpNMzIsMjE2TDU2LDIxNkw1NiwyMjRMMzIsMjI0Wk02NCwyMTZMNzIsMjE2TDcyLDIyNEw2NCwyMjRaTTg4LDIxNkw5NiwyMTZMOTYsMjI0TDg4LDIyNFpNMTEyLDIxNkwxMjAsMjE2TDEyMCwyMjRMMTEyLDIyNFpNMTI4LDIxNkwxNDQsMjE2TDE0NCwyMjRMMTI4LDIyNFpNMTc2LDIxNkwyMDAsMjE2TDIwMCwyMjRMMTc2LDIyNFpNMjA4LDIxNkwyMTYsMjE2TDIxNiwyMjRMMjA4LDIyNFpNMjMyLDIxNkwyNDAsMjE2TDI0MCwyMjRMMjMyLDIyNFpNMjQ4LDIxNkwyNzIsMjE2TDI3MiwyMjRMMjQ4LDIyNFpNMjgwLDIxNkwyOTYsMjE2TDI5NiwyMjRMMjgwLDIyNFpNMzEyLDIxNkwzMjgsMjE2TDMyOCwyMjRMMzEyLDIyNFpNMzIsMjI0TDQwLDIyNEw0MCwyMzJMMzIsMjMyWk01NiwyMjRMNzIsMjI0TDcyLDIzMkw1NiwyMzJaTTgwLDIyNEw5NiwyMjRMOTYsMjMyTDgwLDIzMlpNMTI4LDIyNEwxMzYsMjI0TDEzNiwyMzJMMTI4LDIzMlpNMTYwLDIyNEwxODQsMjI0TDE4NCwyMzJMMTYwLDIzMlpNMTkyLDIyNEwyMDgsMjI0TDIwOCwyMzJMMTkyLDIzMlpNMjI0LDIyNEwyNDAsMjI0TDI0MCwyMzJMMjI0LDIzMlpNMjQ4LDIyNEwyNjQsMjI0TDI2NCwyMzJMMjQ4LDIzMlpNMjcyLDIyNEwzMTIsMjI0TDMxMiwyMzJMMjcyLDIzMlpNMzI4LDIyNEwzNTIsMjI0TDM1MiwyMzJMMzI4LDIzMlpNNDgsMjMyTDY0LDIzMkw2NCwyNDBMNDgsMjQwWk0xMDQsMjMyTDExMiwyMzJMMTEyLDI0MEwxMDQsMjQwWk0xMjAsMjMyTDEzNiwyMzJMMTM2LDI0MEwxMjAsMjQwWk0xNzYsMjMyTDIwOCwyMzJMMjA4LDI0MEwxNzYsMjQwWk0yMzIsMjMyTDI1NiwyMzJMMjU2LDI0MEwyMzIsMjQwWk0yODgsMjMyTDI5NiwyMzJMMjk2LDI0MEwyODgsMjQwWk0zMDQsMjMyTDMxMiwyMzJMMzEyLDI0MEwzMDQsMjQwWk0zMjAsMjMyTDMyOCwyMzJMMzI4LDI0MEwzMjAsMjQwWk0zMzYsMjMyTDM0NCwyMzJMMzQ0LDI0MEwzMzYsMjQwWk0zNTIsMjMyTDM2MCwyMzJMMzYwLDI0MEwzNTIsMjQwWk0zMiwyNDBMNDAsMjQwTDQwLDI0OEwzMiwyNDhaTTQ4LDI0MEw3MiwyNDBMNzIsMjQ4TDQ4LDI0OFpNODAsMjQwTDg4LDI0MEw4OCwyNDhMODAsMjQ4Wk05NiwyNDBMMTA0LDI0MEwxMDQsMjQ4TDk2LDI0OFpNMTEyLDI0MEwxMjgsMjQwTDEyOCwyNDhMMTEyLDI0OFpNMTYwLDI0MEwxNjgsMjQwTDE2OCwyNDhMMTYwLDI0OFpNMTg0LDI0MEwyMDAsMjQwTDIwMCwyNDhMMTg0LDI0OFpNMjA4LDI0MEwyMTYsMjQwTDIxNiwyNDhMMjA4LDI0OFpNMjMyLDI0MEwyNzIsMjQwTDI3MiwyNDhMMjMyLDI0OFpNMjg4LDI0MEwzMjAsMjQwTDMyMCwyNDhMMjg4LDI0OFpNMzI4LDI0MEwzNDQsMjQwTDM0NCwyNDhMMzI4LDI0OFpNMzUyLDI0MEwzNjAsMjQwTDM2MCwyNDhMMzUyLDI0OFpNNDgsMjQ4TDU2LDI0OEw1NiwyNTZMNDgsMjU2Wk02NCwyNDhMNzIsMjQ4TDcyLDI1Nkw2NCwyNTZaTTk2LDI0OEwxMjgsMjQ4TDEyOCwyNTZMOTYsMjU2Wk0xMzYsMjQ4TDE0NCwyNDhMMTQ0LDI1NkwxMzYsMjU2Wk0xNTIsMjQ4TDE2MCwyNDhMMTYwLDI1NkwxNTIsMjU2Wk0xNjgsMjQ4TDE5MiwyNDhMMTkyLDI1NkwxNjgsMjU2Wk0yMDgsMjQ4TDI1NiwyNDhMMjU2LDI1NkwyMDgsMjU2Wk0yNjQsMjQ4TDMyOCwyNDhMMzI4LDI1NkwyNjQsMjU2Wk0zNDQsMjQ4TDM1MiwyNDhMMzUyLDI1NkwzNDQsMjU2Wk0zMiwyNTZMNDgsMjU2TDQ4LDI2NEwzMiwyNjRaTTY0LDI1Nkw3MiwyNTZMNzIsMjY0TDY0LDI2NFpNODAsMjU2TDEwNCwyNTZMMTA0LDI2NEw4MCwyNjRaTTE0NCwyNTZMMTUyLDI1NkwxNTIsMjY0TDE0NCwyNjRaTTE2MCwyNTZMMTY4LDI1NkwxNjgsMjY0TDE2MCwyNjRaTTE4NCwyNTZMMTkyLDI1NkwxOTIsMjY0TDE4NCwyNjRaTTIwMCwyNTZMMjA4LDI1NkwyMDgsMjY0TDIwMCwyNjRaTTIxNiwyNTZMMjI0LDI1NkwyMjQsMjY0TDIxNiwyNjRaTTI0MCwyNTZMMjY0LDI1NkwyNjQsMjY0TDI0MCwyNjRaTTI4OCwyNTZMMzA0LDI1NkwzMDQsMjY0TDI4OCwyNjRaTTMyMCwyNTZMMzI4LDI1NkwzMjgsMjY0TDMyMCwyNjRaTTMzNiwyNTZMMzQ0LDI1NkwzNDQsMjY0TDMzNiwyNjRaTTMyLDI2NEw0MCwyNjRMNDAsMjcyTDMyLDI3MlpNNDgsMjY0TDU2LDI2NEw1NiwyNzJMNDgsMjcyWk02NCwyNjRMODAsMjY0TDgwLDI3Mkw2NCwyNzJaTTk2LDI2NEwxMDQsMjY0TDEwNCwyNzJMOTYsMjcyWk0xMTIsMjY0TDEyOCwyNjRMMTI4LDI3MkwxMTIsMjcyWk0xMzYsMjY0TDE0NCwyNjRMMTQ0LDI3MkwxMzYsMjcyWk0xNjgsMjY0TDE4NCwyNjRMMTg0LDI3MkwxNjgsMjcyWk0xOTIsMjY0TDIwOCwyNjRMMjA4LDI3MkwxOTIsMjcyWk0yMTYsMjY0TDIyNCwyNjRMMjI0LDI3MkwyMTYsMjcyWk0yNDAsMjY0TDI0OCwyNjRMMjQ4LDI3MkwyNDAsMjcyWk0yNTYsMjY0TDI3MiwyNjRMMjcyLDI3MkwyNTYsMjcyWk0yODgsMjY0TDMxMiwyNjRMMzEyLDI3MkwyODgsMjcyWk0zMjgsMjY0TDMzNiwyNjRMMzM2LDI3MkwzMjgsMjcyWk0zNTIsMjY0TDM2MCwyNjRMMzYwLDI3MkwzNTIsMjcyWk0zMiwyNzJMNDgsMjcyTDQ4LDI4MEwzMiwyODBaTTU2LDI3Mkw2NCwyNzJMNjQsMjgwTDU2LDI4MFpNODAsMjcyTDg4LDI3Mkw4OCwyODBMODAsMjgwWk0xNTIsMjcyTDE2MCwyNzJMMTYwLDI4MEwxNTIsMjgwWk0xOTIsMjcyTDIwOCwyNzJMMjA4LDI4MEwxOTIsMjgwWk0yNDAsMjcyTDI1NiwyNzJMMjU2LDI4MEwyNDAsMjgwWk0yODgsMjcyTDI5NiwyNzJMMjk2LDI4MEwyODgsMjgwWk0zMDQsMjcyTDMyMCwyNzJMMzIwLDI4MEwzMDQsMjgwWk0zNDQsMjcyTDM2MCwyNzJMMzYwLDI4MEwzNDQsMjgwWk0zMiwyODBMNjQsMjgwTDY0LDI4OEwzMiwyODhaTTk2LDI4MEwxMDQsMjgwTDEwNCwyODhMOTYsMjg4Wk0xMTIsMjgwTDEyOCwyODBMMTI4LDI4OEwxMTIsMjg4Wk0xMzYsMjgwTDE0NCwyODBMMTQ0LDI4OEwxMzYsMjg4Wk0xNjgsMjgwTDE3NiwyODBMMTc2LDI4OEwxNjgsMjg4Wk0yMDAsMjgwTDIwOCwyODBMMjA4LDI4OEwyMDAsMjg4Wk0yMTYsMjgwTDIyNCwyODBMMjI0LDI4OEwyMTYsMjg4Wk0yNDAsMjgwTDI0OCwyODBMMjQ4LDI4OEwyNDAsMjg4Wk0yNzIsMjgwTDI4MCwyODBMMjgwLDI4OEwyNzIsMjg4Wk0yOTYsMjgwTDMxMiwyODBMMzEyLDI4OEwyOTYsMjg4Wk0zMjAsMjgwTDM2MCwyODBMMzYwLDI4OEwzMjAsMjg4Wk0zMiwyODhMNDgsMjg4TDQ4LDI5NkwzMiwyOTZaTTU2LDI4OEw2NCwyODhMNjQsMjk2TDU2LDI5NlpNNzIsMjg4TDg4LDI4OEw4OCwyOTZMNzIsMjk2Wk0xMjAsMjg4TDE0NCwyODhMMTQ0LDI5NkwxMjAsMjk2Wk0xNjgsMjg4TDE3NiwyODhMMTc2LDI5NkwxNjgsMjk2Wk0xODQsMjg4TDIwMCwyODhMMjAwLDI5NkwxODQsMjk2Wk0yMTYsMjg4TDIyNCwyODhMMjI0LDI5NkwyMTYsMjk2Wk0yNDgsMjg4TDI1NiwyODhMMjU2LDI5NkwyNDgsMjk2Wk0yNzIsMjg4TDI4MCwyODhMMjgwLDI5NkwyNzIsMjk2Wk0yODgsMjg4TDMzNiwyODhMMzM2LDI5NkwyODgsMjk2Wk0zNDQsMjg4TDM2MCwyODhMMzYwLDI5NkwzNDQsMjk2Wk05NiwyOTZMMTA0LDI5NkwxMDQsMzA0TDk2LDMwNFpNMTI4LDI5NkwxNTIsMjk2TDE1MiwzMDRMMTI4LDMwNFpNMTY4LDI5NkwxNzYsMjk2TDE3NiwzMDRMMTY4LDMwNFpNMjQ4LDI5NkwyNzIsMjk2TDI3MiwzMDRMMjQ4LDMwNFpNMjgwLDI5NkwyOTYsMjk2TDI5NiwzMDRMMjgwLDMwNFpNMzIwLDI5NkwzMjgsMjk2TDMyOCwzMDRMMzIwLDMwNFpNMzM2LDI5NkwzNTIsMjk2TDM1MiwzMDRMMzM2LDMwNFpNMzIsMzA0TDg4LDMwNEw4OCwzMTJMMzIsMzEyWk05NiwzMDRMMTIwLDMwNEwxMjAsMzEyTDk2LDMxMlpNMTI4LDMwNEwxNjAsMzA0TDE2MCwzMTJMMTI4LDMxMlpNMTc2LDMwNEwyMjQsMzA0TDIyNCwzMTJMMTc2LDMxMlpNMjQ4LDMwNEwyNTYsMzA0TDI1NiwzMTJMMjQ4LDMxMlpNMjgwLDMwNEwyOTYsMzA0TDI5NiwzMTJMMjgwLDMxMlpNMzA0LDMwNEwzMTIsMzA0TDMxMiwzMTJMMzA0LDMxMlpNMzIwLDMwNEwzMjgsMzA0TDMyOCwzMTJMMzIwLDMxMlpNMzQ0LDMwNEwzNTIsMzA0TDM1MiwzMTJMMzQ0LDMxMlpNMzIsMzEyTDQwLDMxMkw0MCwzMjBMMzIsMzIwWk04MCwzMTJMODgsMzEyTDg4LDMyMEw4MCwzMjBaTTEwNCwzMTJMMTEyLDMxMkwxMTIsMzIwTDEwNCwzMjBaTTE0NCwzMTJMMTUyLDMxMkwxNTIsMzIwTDE0NCwzMjBaTTE2OCwzMTJMMjAwLDMxMkwyMDAsMzIwTDE2OCwzMjBaTTI0MCwzMTJMMjU2LDMxMkwyNTYsMzIwTDI0MCwzMjBaTTI3MiwzMTJMMjk2LDMxMkwyOTYsMzIwTDI3MiwzMjBaTTMyMCwzMTJMMzUyLDMxMkwzNTIsMzIwTDMyMCwzMjBaTTMyLDMyMEw0MCwzMjBMNDAsMzI4TDMyLDMyOFpNNDgsMzIwTDcyLDMyMEw3MiwzMjhMNDgsMzI4Wk04MCwzMjBMODgsMzIwTDg4LDMyOEw4MCwzMjhaTTk2LDMyMEwxNDQsMzIwTDE0NCwzMjhMOTYsMzI4Wk0xNTIsMzIwTDE3NiwzMjBMMTc2LDMyOEwxNTIsMzI4Wk0xODQsMzIwTDE5MiwzMjBMMTkyLDMyOEwxODQsMzI4Wk0yMDAsMzIwTDIxNiwzMjBMMjE2LDMyOEwyMDAsMzI4Wk0yMjQsMzIwTDI0MCwzMjBMMjQwLDMyOEwyMjQsMzI4Wk0yNDgsMzIwTDI1NiwzMjBMMjU2LDMyOEwyNDgsMzI4Wk0yNjQsMzIwTDI3MiwzMjBMMjcyLDMyOEwyNjQsMzI4Wk0yODgsMzIwTDMyOCwzMjBMMzI4LDMyOEwyODgsMzI4Wk0zNTIsMzIwTDM2MCwzMjBMMzYwLDMyOEwzNTIsMzI4Wk0zMiwzMjhMNDAsMzI4TDQwLDMzNkwzMiwzMzZaTTQ4LDMyOEw3MiwzMjhMNzIsMzM2TDQ4LDMzNlpNODAsMzI4TDg4LDMyOEw4OCwzMzZMODAsMzM2Wk05NiwzMjhMMTA0LDMyOEwxMDQsMzM2TDk2LDMzNlpNMTEyLDMyOEwxMjgsMzI4TDEyOCwzMzZMMTEyLDMzNlpNMTQ0LDMyOEwyMDAsMzI4TDIwMCwzMzZMMTQ0LDMzNlpNMjA4LDMyOEwyMTYsMzI4TDIxNiwzMzZMMjA4LDMzNlpNMjMyLDMyOEwyNDAsMzI4TDI0MCwzMzZMMjMyLDMzNlpNMjU2LDMyOEwyNjQsMzI4TDI2NCwzMzZMMjU2LDMzNlpNMjcyLDMyOEwyODgsMzI4TDI4OCwzMzZMMjcyLDMzNlpNMzIwLDMyOEwzMjgsMzI4TDMyOCwzMzZMMzIwLDMzNlpNMzQ0LDMyOEwzNTIsMzI4TDM1MiwzMzZMMzQ0LDMzNlpNMzIsMzM2TDQwLDMzNkw0MCwzNDRMMzIsMzQ0Wk00OCwzMzZMNzIsMzM2TDcyLDM0NEw0OCwzNDRaTTgwLDMzNkw4OCwzMzZMODgsMzQ0TDgwLDM0NFpNMTA0LDMzNkwxMTIsMzM2TDExMiwzNDRMMTA0LDM0NFpNMTM2LDMzNkwxNDQsMzM2TDE0NCwzNDRMMTM2LDM0NFpNMTUyLDMzNkwxNjgsMzM2TDE2OCwzNDRMMTUyLDM0NFpNMTg0LDMzNkwxOTIsMzM2TDE5MiwzNDRMMTg0LDM0NFpNMjQwLDMzNkwyNDgsMzM2TDI0OCwzNDRMMjQwLDM0NFpNMjU2LDMzNkwyNzIsMzM2TDI3MiwzNDRMMjU2LDM0NFpNMjgwLDMzNkwyODgsMzM2TDI4OCwzNDRMMjgwLDM0NFpNMzEyLDMzNkwzNjAsMzM2TDM2MCwzNDRMMzEyLDM0NFpNMzIsMzQ0TDQwLDM0NEw0MCwzNTJMMzIsMzUyWk04MCwzNDRMODgsMzQ0TDg4LDM1Mkw4MCwzNTJaTTEwNCwzNDRMMTQ0LDM0NEwxNDQsMzUyTDEwNCwzNTJaTTE2MCwzNDRMMTY4LDM0NEwxNjgsMzUyTDE2MCwzNTJaTTE3NiwzNDRMMTg0LDM0NEwxODQsMzUyTDE3NiwzNTJaTTE5MiwzNDRMMjAwLDM0NEwyMDAsMzUyTDE5MiwzNTJaTTIyNCwzNDRMMjMyLDM0NEwyMzIsMzUyTDIyNCwzNTJaTTI0OCwzNDRMMjU2LDM0NEwyNTYsMzUyTDI0OCwzNTJaTTI4MCwzNDRMMjg4LDM0NEwyODgsMzUyTDI4MCwzNTJaTTI5NiwzNDRMMzIwLDM0NEwzMjAsMzUyTDI5NiwzNTJaTTMyOCwzNDRMMzM2LDM0NEwzMzYsMzUyTDMyOCwzNTJaTTM0NCwzNDRMMzUyLDM0NEwzNTIsMzUyTDM0NCwzNTJaTTMyLDM1Mkw4OCwzNTJMODgsMzYwTDMyLDM2MFpNMTEyLDM1MkwxNDQsMzUyTDE0NCwzNjBMMTEyLDM2MFpNMTUyLDM1MkwxNjAsMzUyTDE2MCwzNjBMMTUyLDM2MFpNMTc2LDM1MkwxOTIsMzUyTDE5MiwzNjBMMTc2LDM2MFpNMjAwLDM1MkwyMDgsMzUyTDIwOCwzNjBMMjAwLDM2MFpNMjMyLDM1MkwyNzIsMzUyTDI3MiwzNjBMMjMyLDM2MFpNMjgwLDM1MkwzMTIsMzUyTDMxMiwzNjBMMjgwLDM2MFpNMzIwLDM1MkwzMjgsMzUyTDMyOCwzNjBMMzIwLDM2MFpNMzM2LDM1MkwzNDQsMzUyTDM0NCwzNjBMMzM2LDM2MFoiLz48L3N2Zz4K" alt="QR لینک اشتراک" width="280" height="280">
+            <p class="muted" style="text-align:center">این کد را با برنامه VPN اسکن کنید.</p>
+                        <details>
+            <summary>پیشرفته: کانفیگ‌های جداگانه</summary>
+            <p class="muted" style="margin-top:8px">فقط اگر برنامه شما لینک اشتراک را نمی‌پذیرد از این‌ها استفاده کنید.</p>
+            <ol class="configs">
+                                    <li>
+                        <code>vless://5e1c0a7e-0000-4000-8000-000000000001@de1.shop-edge.com:443?type=tcp&amp;security=reality&amp;sni=www.example.com#DE-active</code>
+                        <button type="button" class="btn secondary small" data-copy="vless://5e1c0a7e-0000-4000-8000-000000000001@de1.shop-edge.com:443?type=tcp&amp;security=reality&amp;sni=www.example.com#DE-active" style="margin-top:6px">کپی این کانفیگ</button>
+                    </li>
+                            </ol>
+        </details>
+    </section>
+
+                    <section class="card">
+    <h2>اتصال با یک لمس</h2>
+    <nav class="platforms" aria-label="سیستم‌عامل">
+                                    <a href="?platform=android" class="current">اندروید</a>
+                                                <a href="?platform=ios" class="">iOS</a>
+                                                <a href="?platform=windows" class="">ویندوز</a>
+                                                <a href="?platform=macos" class="">مک</a>
+                                                <a href="?platform=linux" class="">لینوکس</a>
+                        </nav>
+            <p class="muted">۱. برنامه را نصب کنید. ۲. «افزودن اشتراک» را بزنید.</p>
+        <div class="apps">
+                                <article class="app" data-app>
+                <div class="head">
+                    <span><span class="app-name">v2rayNG</span></span>
+                    <span class="muted">اندروید</span>
+                </div>
+                <div class="row">
+                                                                        <a class="btn secondary small" href="https://play.google.com/store/apps/details?id=com.v2ray.ang" rel="noopener noreferrer" target="_blank">⬇️ نصب برنامه</a>
+                                                                                                                <a class="btn small" href="v2rayng://install-sub?url=https%3A%2F%2Fsub.shop-edge.com%3A2096%2Fsub%2Fsubactive#Gold%2030%20days" data-deeplink>➕ افزودن اشتراک</a>
+                                    </div>
+                                    <div class="hint" data-fallback>
+                        <p>برنامه باز نشد؟ مرورگر داخل تلگرام اجازه باز کردن برنامه را نمی‌دهد. این صفحه را در مرورگر باز کنید یا لینک را کپی کرده و در برنامه اضافه کنید.</p>
+                        <div class="row">
+                            <button type="button" class="btn secondary small" data-open-external>🌐 باز کردن در مرورگر</button>
+                            <button type="button" class="btn secondary small" data-copy="https://sub.shop-edge.com:2096/sub/subactive">📋 کپی لینک اشتراک</button>
+                        </div>
+                        <p class="muted" data-external-hint hidden style="margin-top:8px">از منوی ⋮ یا ••• بالای صفحه گزینه «باز کردن در مرورگر» (Open in browser) را بزنید.</p>
+                    </div>
+                            </article>
+                                <article class="app" data-app>
+                <div class="head">
+                    <span><span class="app-name">Hiddify</span></span>
+                    <span class="muted">اندروید · iOS</span>
+                </div>
+                <div class="row">
+                                                                                        <a class="btn small" href="hiddify://import/https://sub.shop-edge.com:2096/sub/subactive#Gold%2030%20days" data-deeplink>➕ افزودن اشتراک</a>
+                                    </div>
+                                    <div class="hint" data-fallback>
+                        <p>برنامه باز نشد؟ مرورگر داخل تلگرام اجازه باز کردن برنامه را نمی‌دهد. این صفحه را در مرورگر باز کنید یا لینک را کپی کرده و در برنامه اضافه کنید.</p>
+                        <div class="row">
+                            <button type="button" class="btn secondary small" data-open-external>🌐 باز کردن در مرورگر</button>
+                            <button type="button" class="btn secondary small" data-copy="https://sub.shop-edge.com:2096/sub/subactive">📋 کپی لینک اشتراک</button>
+                        </div>
+                        <p class="muted" data-external-hint hidden style="margin-top:8px">از منوی ⋮ یا ••• بالای صفحه گزینه «باز کردن در مرورگر» (Open in browser) را بزنید.</p>
+                    </div>
+                            </article>
+            </div>
+            <div class="hint" id="in-app-hint">
+            <p>این صفحه داخل تلگرام باز شده است. اگر دکمه «افزودن اشتراک» کار نکرد، صفحه را در مرورگر (Chrome یا Safari) باز کنید.</p>
+            <button type="button" class="btn secondary small" data-open-external>🌐 باز کردن در مرورگر</button>
+            <p class="muted" data-external-hint hidden style="margin-top:8px">از منوی ⋮ یا ••• بالای صفحه گزینه «باز کردن در مرورگر» (Open in browser) را بزنید.</p>
+        </div>
+    </section>
+
+                    <footer class="muted">
+                <a href="?lang=en&amp;platform=android">English</a>
+    </footer>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+</main>
+    <script>
+(function () {
+    'use strict';
+    var T = {
+        copied: "\u06a9\u067e\u06cc \u0634\u062f \u2705",
+        copyFailed: "\u06a9\u067e\u06cc \u0646\u0634\u062f\u061b \u0644\u06cc\u0646\u06a9 \u0631\u0627 \u0627\u0632 \u06a9\u0627\u062f\u0631 \u0628\u0627\u0644\u0627 \u0627\u0646\u062a\u062e\u0627\u0628 \u0648 \u06a9\u067e\u06cc \u06a9\u0646\u06cc\u062f."
+    };
+    var doc = document;
+
+    function toast(text) {
+        var el = doc.getElementById('toast');
+        if (!el) { return; }
+        el.textContent = text;
+        el.classList.add('show');
+        clearTimeout(el._t);
+        el._t = setTimeout(function () { el.classList.remove('show'); }, 2200);
+    }
+
+    function legacyCopy(text) {
+        var area = doc.createElement('textarea');
+        area.value = text;
+        area.setAttribute('readonly', '');
+        area.style.position = 'fixed';
+        area.style.opacity = '0';
+        doc.body.appendChild(area);
+        area.select();
+        area.setSelectionRange(0, text.length);
+        var ok = false;
+        try { ok = doc.execCommand('copy'); } catch (e) { ok = false; }
+        doc.body.removeChild(area);
+        return ok;
+    }
+
+    function copy(text) {
+        if (navigator.clipboard && window.isSecureContext) {
+            navigator.clipboard.writeText(text).then(function () { toast(T.copied); }, function () {
+                toast(legacyCopy(text) ? T.copied : T.copyFailed);
+            });
+            return;
+        }
+        toast(legacyCopy(text) ? T.copied : T.copyFailed);
+    }
+
+    function pageUrl() {
+        // Without the fragment: it may carry Mini App launch data.
+        return window.location.origin + window.location.pathname + window.location.search;
+    }
+
+    var tg = null;
+    function webApp() {
+        return tg || (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initData !== undefined ? window.Telegram.WebApp : null);
+    }
+
+    function openExternal(button) {
+        var app = webApp();
+        if (app && typeof app.openLink === 'function') {
+            app.openLink(pageUrl(), { try_instant_view: false });
+            return;
+        }
+        var box = button.closest('[data-fallback], #in-app-hint') || doc;
+        var hint = box.querySelector('[data-external-hint]');
+        if (hint) { hint.hidden = false; }
+    }
+
+    doc.addEventListener('click', function (event) {
+        var target = event.target.closest('[data-copy], [data-open-external], [data-deeplink]');
+        if (!target) { return; }
+        if (target.hasAttribute('data-copy')) {
+            event.preventDefault();
+            copy(target.getAttribute('data-copy'));
+        } else if (target.hasAttribute('data-open-external')) {
+            event.preventDefault();
+            openExternal(target);
+        } else if (target.hasAttribute('data-deeplink')) {
+            var card = target.closest('[data-app]');
+            setTimeout(function () {
+                if (doc.visibilityState === 'visible' && card) {
+                    var fallback = card.querySelector('[data-fallback]');
+                    if (fallback) { fallback.classList.add('show'); }
+                }
+            }, 1600);
+        }
+    });
+
+    doc.addEventListener('focusin', function (event) {
+        if (event.target.hasAttribute && event.target.hasAttribute('data-select-all')) { event.target.select(); }
+    });
+
+    // --- Telegram ---
+    var hash = window.location.hash || '';
+    var isMiniApp = /tgWebApp(Data|Version|Platform)=/.test(hash);
+    var inTelegram = isMiniApp || !!(window.TelegramWebviewProxy || window.TelegramWebview) || /Telegram/i.test(navigator.userAgent);
+
+    function applyTheme(theme) {
+        if (!theme) { return; }
+        var map = {
+            bg_color: ['--card'], secondary_bg_color: ['--bg', '--code'], section_bg_color: ['--card'],
+            text_color: ['--fg'], hint_color: ['--muted'], button_color: ['--accent'], button_text_color: ['--accent-fg']
+        };
+        Object.keys(map).forEach(function (key) {
+            var value = theme[key];
+            if (typeof value === 'string' && /^#[0-9a-f]{3,8}$/i.test(value)) {
+                map[key].forEach(function (name) { doc.documentElement.style.setProperty(name, value); });
+            }
+        });
+    }
+
+    if (isMiniApp) {
+        // The theme is in the launch parameters already: apply it before the script loads (or if it cannot).
+        try {
+            var params = new URLSearchParams(hash.slice(1));
+            var raw = params.get('tgWebAppThemeParams');
+            if (raw) { applyTheme(JSON.parse(raw)); }
+        } catch (e) { /* ignore */ }
+
+        var script = doc.createElement('script');
+        script.src = 'https://telegram.org/js/telegram-web-app.js';
+        script.async = true;
+        script.onload = function () {
+            if (!window.Telegram || !window.Telegram.WebApp) { return; }
+            tg = window.Telegram.WebApp;
+            applyTheme(tg.themeParams);
+            if (typeof tg.onEvent === 'function') { tg.onEvent('themeChanged', function () { applyTheme(tg.themeParams); }); }
+            if (typeof tg.ready === 'function') { tg.ready(); }
+            if (typeof tg.expand === 'function') { tg.expand(); }
+        };
+        doc.head.appendChild(script);
+    }
+
+    if (inTelegram) {
+        var hint = doc.getElementById('in-app-hint');
+        if (hint) { hint.classList.add('show'); }
+    }
+})();
+</script>
+
+</body>
+</html>

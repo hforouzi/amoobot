@@ -12,7 +12,7 @@ namespace App\Tests\Support;
  * different tables collide (on a fresh database the first plan, service and draft are all id 1), so a callback argument
  * or a text like "Order ID: 7" says which table the number belongs to, and only an id registered for that table is
  * renamed. Opaque strings (tracking codes, generated usernames, uuids) are replaced by value.
- * Record or update snapshots with UPDATE_BOT_SNAPSHOTS=1.
+ * Record or update snapshots with UPDATE_BOT_SNAPSHOTS=1; a missing snapshot fails the test (SnapshotFile).
  */
 final class BotTranscript
 {
@@ -41,6 +41,13 @@ final class BotTranscript
         'payment_submit_receipt' => ['PAYMENT'],
         'admin_confirm_payment' => ['PAYMENT'],
         'admin_reject_payment' => ['PAYMENT'],
+        // The customer's service view (TelegramKeyboardFactory::userServiceDetail) and a claimed service's link reset.
+        'service_subscription' => ['SERVICE'],
+        'service_subscription_qr' => ['SERVICE'],
+        'service_resend_config' => ['SERVICE'],
+        'service_sync_usage' => ['SERVICE'],
+        'cl_rst' => ['SERVICE'],
+        'cl_rst_ok' => ['SERVICE', null],
     ];
 
     /** Text right before an id in a message => the id's table. */
@@ -118,14 +125,7 @@ final class BotTranscript
      */
     public static function assertMatchesSnapshot(string $name, array $lines): void
     {
-        $file = dirname(__DIR__).'/Bot/__snapshots__/'.$name.'.txt';
-        $actual = implode("\n\n", $lines)."\n";
-        if ('1' === getenv('UPDATE_BOT_SNAPSHOTS') || !is_file($file)) {
-            @mkdir(dirname($file), 0777, true);
-            file_put_contents($file, $actual);
-        }
-        // Line endings depend on the checkout (core.autocrlf), not on the bot.
-        \PHPUnit\Framework\Assert::assertSame(str_replace("\r\n", "\n", (string) file_get_contents($file)), $actual, 'bot transcript differs from tests/Bot/__snapshots__/'.$name.'.txt');
+        SnapshotFile::assertMatches('Bot/__snapshots__/'.$name.'.txt', implode("\n\n", $lines)."\n");
     }
 
     /**
@@ -140,6 +140,9 @@ final class BotTranscript
         foreach ($parts as $i => $argument) {
             if (1 !== preg_match('/^\d+$/', $argument)) {
                 continue;
+            }
+            if (array_key_exists($i, self::CALLBACK_ARGUMENTS[$route] ?? []) && null === self::CALLBACK_ARGUMENTS[$route][$i]) {
+                continue; // not an id (a nonce that happens to be all digits)
             }
             $table = self::CALLBACK_ARGUMENTS[$route][$i] ?? throw new \LogicException(sprintf('Callback "%s": argument %d is a number but BotTranscript::CALLBACK_ARGUMENTS does not say which table it belongs to.', $data, $i + 1));
             $parts[$i] = self::label($table, (int) $argument, $data, $ids);

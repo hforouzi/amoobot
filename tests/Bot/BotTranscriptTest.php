@@ -55,6 +55,13 @@ final class BotTranscriptTest extends TestCase
         self::assertSame(["sendMessage chat=42\n  text: کد پیگیری: TRACKING, نام: FINAL_USERNAME"], $lines);
     }
 
+    public function testAnArgumentThatIsNotAnIdStaysEvenWhenItIsAllDigits(): void
+    {
+        $lines = BotTranscript::lines([self::message('x', [['cl_rst_ok:1:123456789012', 'cl_rst_ok:1:0a1b2c3d4e5f']])], [], self::IDS);
+
+        self::assertSame(["sendMessage chat=42\n  text: x\n  [inline_keyboard] b -> cl_rst_ok:SERVICE:123456789012 | b -> cl_rst_ok:SERVICE:0a1b2c3d4e5f"], $lines);
+    }
+
     public function testAnUnregisteredIdFailsInsteadOfLeakingTheAutoincrement(): void
     {
         $this->expectException(\LogicException::class);

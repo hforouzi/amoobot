@@ -1,0 +1,17 @@
+sendMessage chat=7301
+  text: ⏳ سرویس شما به‌زودی منقضی می‌شود.
+شناسه سرویس: SERVICE_ACTIVE
+تاریخ انقضا: <datetime now+0d+12h>
+  [inline_keyboard] 📦 مشاهده سرویس -> service_view:SERVICE_ACTIVE
+
+sendMessage chat=7301
+  text: ⏳ سرویس شما به‌زودی منقضی می‌شود.
+شناسه سرویس: SERVICE_ACTIVE
+تاریخ انقضا: <datetime now+0d+12h>
+  [inline_keyboard] 📦 مشاهده سرویس -> service_view:SERVICE_ACTIVE
+
+sendMessage chat=7301
+  text: ⏳ سرویس شما به‌زودی منقضی می‌شود.
+شناسه سرویس: SERVICE_NEAR_EXPIRY
+تاریخ انقضا: <datetime now+2d+12h>
+  [inline_keyboard] 📦 مشاهده سرویس -> service_view:SERVICE_NEAR_EXPIRY
