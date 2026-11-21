@@ -8,6 +8,7 @@ use App\Entity\VpnInbound;
 use App\Entity\VpnPanel;
 use App\Entity\VpnService;
 use App\Provisioning\Application\AutoSuspendSummary;
+use App\Tests\Support\ConsoleOutputAssertions;
 use App\Tests\Support\IntegrationTestCase;
 use App\Tests\Support\RecordingLogger;
 use App\Tests\Support\SpyProductModule;
@@ -24,6 +25,9 @@ use Symfony\Component\Console\Tester\CommandTester;
  */
 final class AutomationSuspendViaModuleTest extends IntegrationTestCase
 {
+    // A fixed COLUMNS (200) for every run, so no block wraps differently on another terminal.
+    use ConsoleOutputAssertions;
+
     private const SETTINGS = ['automation.auto_suspend_expired_enabled', 'automation.auto_suspend_traffic_exhausted_enabled', 'automation.batch_limit', 'automation.check_expiry_enabled'];
 
     /** Recorded on develop/v3 (9b9a165) with the same scenarios. */
@@ -67,7 +71,7 @@ final class AutomationSuspendViaModuleTest extends IntegrationTestCase
         ],
         'suspend, dry run' => [
             'exit' => 0,
-            'display' => "\nSummary\n-------\n\n * checked: 2\n * updated: 0\n * suspended: 2\n * notified: 0\n * broadcasts: 0\n * failed: 0\n * skipped: 0\n * undeliverable: 0\n\n ! [NOTE] Dry-run mode: no data was saved and no notifications were sent (counters show simulated actions).            \n\n",
+            'display' => "\nSummary\n-------\n\n * checked: 2\n * updated: 0\n * suspended: 2\n * notified: 0\n * broadcasts: 0\n * failed: 0\n * skipped: 0\n * undeliverable: 0\n\n ! [NOTE] Dry-run mode: no data was saved and no notifications were sent (counters show simulated actions).\n\n",
             'logs' => [
                 [
                     'level' => 'info',
@@ -278,22 +282,17 @@ final class AutomationSuspendViaModuleTest extends IntegrationTestCase
     ];
 
     private SpyProductModule $spy;
-    private string|false $columns;
 
     protected function setUp(): void
     {
         parent::setUp();
         $this->spy = SpyProductModule::install(self::getContainer());
-        // The same console width everywhere, so the output compares byte for byte (SymfonyStyle wraps notes).
-        $this->columns = getenv('COLUMNS');
-        putenv('COLUMNS=120');
         $this->clearSettings();
     }
 
     protected function tearDown(): void
     {
         $this->clearSettings();
-        putenv(false === $this->columns ? 'COLUMNS' : 'COLUMNS='.$this->columns);
         parent::tearDown();
     }
 
@@ -335,7 +334,7 @@ final class AutomationSuspendViaModuleTest extends IntegrationTestCase
 
         $observed = [
             'exit' => $exit,
-            'display' => $tester->getDisplay(true),
+            'display' => self::withoutTrailingSpaces($tester->getDisplay(true)),
             'logs' => $this->automationLogs($logger, $services),
             'statuses' => $this->statuses($services),
         ];
@@ -348,7 +347,19 @@ final class AutomationSuspendViaModuleTest extends IntegrationTestCase
 
         $name = (string) $this->dataName();
         self::assertArrayHasKey($name, self::BASELINE, 'baseline recorded for '.$name);
-        self::assertSame(self::BASELINE[$name], $observed);
+        $expected = self::BASELINE[$name];
+        $expected['display'] = self::withoutTrailingSpaces($expected['display']);
+        self::assertSame($expected, $observed);
+    }
+
+    /**
+     * SymfonyStyle pads a block ("[NOTE] Dry-run mode: ...") with spaces to its line length, which depends on the OS
+     * even at a fixed COLUMNS (Windows uses one column less). Only those trailing spaces are dropped; every word, line
+     * and blank line still compares exactly.
+     */
+    private static function withoutTrailingSpaces(string $display): string
+    {
+        return (string) preg_replace('/[ \t]+$/m', '', $display);
     }
 
     /**
