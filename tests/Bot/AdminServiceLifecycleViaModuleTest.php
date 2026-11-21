@@ -13,8 +13,9 @@ use App\Tests\Support\SpyProductModule;
 
 /**
  * PM1c: the bot's admin "suspend" and "activate" buttons go through the service's product module (suspend(),
- * resume()) exactly once, with the service, and answer as before. Delete, extend, add traffic and reset usage still
- * call ServiceAdministration directly, so they never reach the module.
+ * resume()) exactly once, with the service, and answer as before. Extend, add traffic and reset usage still call
+ * ServiceAdministration directly, so they never reach the module; delete goes through terminate() since PM1d
+ * (AdminServiceDeleteViaModuleTest).
  */
 final class AdminServiceLifecycleViaModuleTest extends IntegrationTestCase
 {
@@ -75,7 +76,7 @@ final class AdminServiceLifecycleViaModuleTest extends IntegrationTestCase
             $this->pressButton(self::ENV_ADMIN, sprintf($callback, $id));
         }
 
-        self::assertSame([], $this->spy->methods());
+        self::assertSame(['terminate'], $this->spy->methods());
         self::assertSame(VpnServiceStatus::DELETED, $this->row('vpn_service', $id)['status']);
     }
 

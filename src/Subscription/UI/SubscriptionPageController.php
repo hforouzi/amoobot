@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace App\Subscription\UI;
 
 use App\Entity\VpnService;
-use App\Subscription\Application\SubscriptionPageViewFactory;
+use App\Module\Application\ProductModuleResolver;
 use App\Subscription\Domain\BridgeAutoOpen;
 use App\Subscription\Domain\ClientPlatform;
 use Doctrine\ORM\EntityManagerInterface;
@@ -19,7 +19,8 @@ use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
 use Symfony\Component\Translation\LocaleSwitcher;
 
 /**
- * The customer's subscription page, opened from the bot (URL button), a browser or a Telegram web_app button.
+ * The customer's subscription page, opened from the bot (URL button), a browser or a Telegram web_app button. What it
+ * shows is the service's product module's customerView() (PM1d; for VPN SubscriptionPageViewFactory::build()).
  *
  * No login and no cookies: the random per-service token in the URL is the only key (rotatable by admins), every
  * request counts against a per-IP rate limit (wrong tokens included), and an unknown token and a deleted service get
@@ -31,7 +32,7 @@ final class SubscriptionPageController extends AbstractController
 
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
-        private readonly SubscriptionPageViewFactory $viewFactory,
+        private readonly ProductModuleResolver $productModules,
         #[Autowire(service: 'limiter.subscription_page')]
         private readonly RateLimiterFactory $limiter,
         private readonly LocaleSwitcher $localeSwitcher,
@@ -56,7 +57,7 @@ final class SubscriptionPageController extends AbstractController
 
         $service = $this->entityManager->getRepository(VpnService::class)->findOneBy(['publicToken' => $token]);
         $platform = ClientPlatform::tryFrom((string) $request->query->get('platform')) ?? ClientPlatform::fromUserAgent($request->headers->get('User-Agent'));
-        $view = $service instanceof VpnService ? $this->viewFactory->build($service, $platform) : null;
+        $view = $service instanceof VpnService ? $this->productModules->forService($service)->customerView($service)->page($platform) : null;
         if (null === $view) {
             return $this->page('subscription/not_found.html.twig', [], Response::HTTP_NOT_FOUND);
         }
@@ -88,7 +89,7 @@ final class SubscriptionPageController extends AbstractController
 
         $service = $this->entityManager->getRepository(VpnService::class)->findOneBy(['publicToken' => $token]);
         $platform = ClientPlatform::fromUserAgent($request->headers->get('User-Agent'));
-        $view = $service instanceof VpnService ? $this->viewFactory->build($service, $platform) : null;
+        $view = $service instanceof VpnService ? $this->productModules->forService($service)->customerView($service)->page($platform) : null;
         $app = null;
         foreach (null !== $view && $view->isUsable() ? $view->apps : [] as $candidate) {
             if ($appId === $candidate->id && null !== $candidate->importUrl) {

@@ -9,16 +9,12 @@ use App\Branding\SupportLinkSettings;
 use App\Entity\VpnService;
 use App\MiniApp\Guide\MiniAppGuide;
 use App\MiniApp\Security\MiniAppUser;
+use App\Module\Application\ProductModuleResolver;
+use App\Module\Domain\CustomerActions;
 use App\Provisioning\Application\CustomerServiceFinder;
-use App\Provisioning\Application\ServiceInboundCounts;
-use App\Provisioning\Application\TrafficAddonSettingsProvider;
-use App\Shop\Application\Checkout\ServiceOrderCheckout;
-use App\Shop\Application\SalesSettingsProvider;
 use App\Subscription\Application\AppDownloadCatalog;
 use App\Subscription\Application\ClientAppCatalog;
-use App\Subscription\Application\SubscriptionPageUrl;
 use App\Subscription\Application\SubscriptionPageView;
-use App\Subscription\Application\SubscriptionPageViewFactory;
 use App\Subscription\Domain\ClientPlatform;
 use App\Wallet\Application\WalletService;
 use App\Wallet\Application\WalletSettings;
@@ -32,8 +28,10 @@ use Symfony\Component\Security\Http\Attribute\IsGranted;
 
 /**
  * The customer sections of the Mini App. Services come from CustomerServiceFinder (the bot's "My services" rule and
- * the ownership check) and are shown through SubscriptionPageViewFactory::summary(): status, plan, expiry and traffic,
- * never a link or config. Those stay on the subscription page, which the app opens, or come into the chat from the bot.
+ * the ownership check) and are shown through their product module's customerView() (for VPN
+ * SubscriptionPageViewFactory::summary(): status, plan, expiry and traffic, never a link or config) and
+ * customerActions(). Links and configs stay on the subscription page, which the app opens, or come into the chat from
+ * the bot.
  */
 #[IsGranted(MiniAppUser::ROLE)]
 final class MiniAppCustomerController extends AbstractController
@@ -42,16 +40,11 @@ final class MiniAppCustomerController extends AbstractController
         private readonly MiniAppFragments $fragments,
         private readonly BotTextResolver $botTexts,
         private readonly CustomerServiceFinder $customerServices,
-        private readonly SubscriptionPageViewFactory $viewFactory,
-        private readonly SubscriptionPageUrl $pageUrl,
+        private readonly ProductModuleResolver $productModules,
         private readonly ClientAppCatalog $clientApps,
         private readonly AppDownloadCatalog $downloads,
-        private readonly ServiceOrderCheckout $serviceOrderCheckout,
-        private readonly SalesSettingsProvider $salesSettings,
-        private readonly TrafficAddonSettingsProvider $trafficAddonSettings,
         private readonly WalletSettings $walletSettings,
         private readonly WalletService $wallets,
-        private readonly ServiceInboundCounts $inboundCounts,
         private readonly MiniAppGuide $guide,
         private readonly SupportLinkSettings $supportLink,
         private readonly string $serviceNotifyTrafficThresholds = '80',
@@ -90,26 +83,33 @@ final class MiniAppCustomerController extends AbstractController
     public function service(Request $request, #[CurrentUser] MiniAppUser $user, int $id): Response
     {
         $service = $this->customerServices->ownedBy($user->customer(), $id);
-        $view = null !== $service ? $this->viewFactory->summary($service) : null;
-        if (null === $service || null === $view) {
+        if (null === $service) {
             throw new NotFoundHttpException();
         }
+        $module = $this->productModules->forService($service);
+        $customerView = $module->customerView($service);
+        $view = $customerView->summary();
+        if (null === $view) {
+            throw new NotFoundHttpException();
+        }
+        // The page link, renewal and extra traffic: the module's rules for this view (the pages check them again).
+        $actions = $module->customerActions($service, CustomerActions::CHANNEL_MINIAPP);
 
         return $this->fragments->render($request, 'miniapp/view/service.html.twig', [
             'service' => $service,
             'view' => $view,
-            'pageUrl' => $this->pageUrl->forService($service),
+            'pageUrl' => $actions->pageUrl,
             // A plan with several inbounds (switch on): "Servers: N", never which ones; null for every other service.
-            'servers' => $this->inboundCounts->servers($service),
-            // The same switches the bot's service view uses; the pages check them again.
-            'canRenew' => $this->salesSettings->renewalsEnabled() && null !== $this->serviceOrderCheckout->renewalQuote($service),
-            'canAddTraffic' => $this->salesSettings->addTrafficEnabled() && $this->trafficAddonSettings->canPurchase() && null !== $this->serviceOrderCheckout->addTrafficPlan($service),
+            'servers' => $customerView->servers(),
+            'canRenew' => $actions->has(CustomerActions::RENEW),
+            'canAddTraffic' => $actions->has(CustomerActions::ADD_TRAFFIC),
         ]);
     }
 
     /**
      * The subscription page inside the Mini App, for the signed-in owner only (not the public /s/{token} link): the
-     * same SubscriptionPageViewFactory::build() and partials, so it carries the customer's own subscription link,
+     * same view (the module's customerView(), for VPN SubscriptionPageViewFactory::build()) and partials, so it carries
+     * the customer's own subscription link,
      * QR code and configs. The only /app response that does; one-tap imports go through the https bridge.
      */
     #[Route('/app/view/services/{id}/subscription', name: 'miniapp_subscription', requirements: ['id' => '\d+'], defaults: ['_miniapp_section' => 'services'], methods: ['GET'])]
@@ -117,7 +117,7 @@ final class MiniAppCustomerController extends AbstractController
     {
         $service = $this->customerServices->ownedBy($user->customer(), $id);
         $platform = ClientPlatform::tryFrom((string) $request->query->get('platform')) ?? ClientPlatform::fromUserAgent($request->headers->get('User-Agent'));
-        $view = null !== $service ? $this->viewFactory->build($service, $platform) : null;
+        $view = null !== $service ? $this->productModules->forService($service)->customerView($service)->page($platform) : null;
         if (null === $service || null === $view) {
             throw new NotFoundHttpException();
         }
@@ -172,7 +172,7 @@ final class MiniAppCustomerController extends AbstractController
     {
         $cards = [];
         foreach ($this->customerServices->visibleTo($user->customer()) as $service) {
-            $view = $this->viewFactory->summary($service);
+            $view = $this->productModules->forService($service)->customerView($service)->summary();
             if (null !== $view) {
                 $cards[] = ['service' => $service, 'view' => $view];
             }

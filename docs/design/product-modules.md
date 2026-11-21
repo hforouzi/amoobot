@@ -1657,8 +1657,8 @@ type from a later PR, PM1a took the smallest honest choice or left the method ou
   - Mini App admin: `MiniAppAdminServiceController` suspend, activate, delete;
   - web: `ServiceDeleteController` ("delete on panel").
 - **Still on `ServiceAdministration`** (no contract method yet): `extend`, `addTraffic` and `resetUsage` in the bot
-  and the Mini App, and the bot's delete (`ServiceManagementService::deleteService()`), which was outside this PR's
-  list. They move when the contract gets the matching method (customer and admin actions, PM1d/PM3a).
+  and the Mini App. They move when the contract gets the matching method (admin actions, PM3a). The bot's delete
+  (`ServiceManagementService::deleteService()`), outside PM1c's list, moved to `terminate()` in PM1d.
 - **Jobs: one method, `runLifecycleTask(string $task, int $limit, bool $dryRun): AutoSuspendSummary`**, with the
   tasks `ProductModuleInterface::LIFECYCLE_EXPIRY` (`'expiry'`) and `LIFECYCLE_TRAFFIC` (`'traffic'`). An unknown task
   throws `\InvalidArgumentException`. `VpnProductModule` delegates to
@@ -1684,6 +1684,73 @@ type from a later PR, PM1a took the smallest honest choice or left the method ou
   `AutomationSuspendViaModuleTest`: seven scenarios of the `suspend` and `expiry` jobs (dry run, limit, batch-limit
   setting, a panel without driver, switches off) compared with a baseline recorded on `develop/v3` (`9b9a165`): exit
   code, console output, `automation_*` log lines and service statuses, plus the module calls each job makes.
+
+**PM1d (customer view and actions through the module).** Behaviour-neutral, no switch, no migration, no new setting,
+template or text. The golden files of PR #140 (`tests/{Bot,MiniApp,Subscription}/__snapshots__/customer-view/` and the
+bot checkout snapshots) are the proof: none of them changed.
+- **Contract.** Three methods, with today's types where no neutral one exists yet:
+  - `customerView(VpnService): VpnCustomerView`. `VpnCustomerView` (`App\Provisioning\Application`) stands in for 2.2's
+    `CustomerServiceView`: it is bound to one service and each method is one of today's calls, run only when the
+    caller asks, so every caller keeps the order of its panel calls and renders the same objects and texts:
+    `page()` and `summary()` (`SubscriptionPageViewFactory::build()`/`summary()`, the `SubscriptionPageView` the
+    templates and `_service_card` already render), `refreshBeforeDelivery()` (`ServiceConfigDeliveryRefresher`),
+    `configLinkSet()` (`FinalConfigLinkProvider`), `accessMessages()` (`VpnAccessMessageFormatter`),
+    `subscriptionUrl()` and `usableConfigLinks()` (`CustomerAccessGuard`), `servers()` (`ServiceInboundCounts`). No
+    `ViewContext`: the channel picks the method it needs. No new rendering layer.
+  - `customerActions(VpnService, string $channel): CustomerActions`, channels `bot` and `miniapp`.
+    `CustomerActions` (`App\Module\Domain`) is the action names offered now plus the service's own page link; it
+    stands in for 2.2's `list<CustomerAction>` until an action needs to name a paid order type. The two channels'
+    rules are kept apart, as 2.4 found them ("two lists to unify"), each in the order it had: bot (from
+    `ServiceManagementService::sendUserServiceDetail()`): renew and add traffic while their sales switch is on and the
+    service is not deleted, `SubscriptionPageUrl::forTelegram()` for a service that is not deleted,
+    `reset_links` when `ServiceOwnership::canResetLinks()` (D4); Mini App (from `MiniAppCustomerController::service()`):
+    `SubscriptionPageUrl::forService()`, renew while renewals are on and `renewalQuote()` is not null, add traffic
+    while it is on, `canPurchase()` and `addTrafficPlan()` is not null. Both always offer `send_link`, `send_qr`,
+    `resend_config`, `refresh`. The keyboard (`TelegramKeyboardFactory::userServiceDetail()`) and the template still
+    draw the buttons. An unknown channel is `\InvalidArgumentException`.
+  - `runCustomerAction(VpnService, string $action, CustomerActionInput): CustomerActionResult`. `CustomerActionInput`
+    is the Telegram account, the chat and the callback id (`''` from the Mini App): today every delivery goes into the
+    customer's chat with the bot. `CustomerActionResult` only says whether it failed. VPN: `send_link`, `send_qr`,
+    `resend_config` call `ServiceManagementService::sendSubscription()`, `sendSubscriptionQr()`, `resendConfig(...,
+    false)` with the same arguments (those keep their own owner check and answers); `refresh` is
+    `ServiceUsageSyncService::syncOne()` (failed = `isFailed()`; an exception passes, the caller catches it as before).
+    An unknown action is `\InvalidArgumentException`. The module gets `ServiceManagementService` as a service closure
+    (`#[AutowireServiceClosure]`): that class asks the resolver for the module's views, so building it with the module
+    would bind it to the registry of that moment (and the tests' spy could not be installed).
+- **Callers switched** (all through `ProductModuleResolver::forService()`):
+  - bot: `ServiceManagementService` customer paths — the service view (`sendUserServiceDetail()`, used by
+    `service_view:` and the customer's refresh: one `customerView()`, one `customerActions('bot')`), and the
+    deliveries `sendSubscription()`, `sendSubscriptionQr()`, `resendConfig()` (one `customerView()` each, after the
+    service is found and checked). The admin service view keeps its direct calls (`adminView()` is PM3a).
+  - bot action handlers: `SubscriptionLinkAction` (`service_subscription:`, `service_subscription_qr:`) and
+    `ResendConfigAction` (`service_config_links:`, and `service_resend_config:` for a customer) call
+    `runCustomerAction()` when the id names a service; an unknown id calls `ServiceManagementService` as before, which
+    answers "invalid service". An admin with `SERVICES_ASSIST` still resends directly (admin mode). The other handlers
+    (renewal, add-traffic order, list, refresh, the admin ones) are unchanged: they create orders or are admin actions.
+  - Mini App: `MiniAppCustomerController` (home and services cards, the `_service_card` source: `summary()`; the
+    service view: `summary()`, `servers()` and `customerActions('miniapp')`; the in-app subscription view: `page()`)
+    and `MiniAppServiceActionController` (all four actions through `runCustomerAction()`, after the ownership check).
+  - `SubscriptionPageController` page and bridge: `page()`.
+  - bot admin delete: `ServiceManagementService::deleteService()` → `terminate()`. Still direct now: only `extend`,
+    `addTraffic` and `resetUsage` (bot and Mini App).
+- **Order of side effects.** The same calls in the same order, with two reads regrouped: on the Mini App service view
+  the module computes the page link, renewal and traffic rules together, so `ServiceInboundCounts::servers()` (one
+  read) now runs after them instead of between; on the bot's service view the detail text is built before the
+  keyboard's rules, as PHP evaluated the arguments before. A bot handler now finds the service before the delivery
+  finds it again (Doctrine's identity map: one query, as before).
+- **Not switched (still direct):** `PaymentCustomerNotifier` (delivery after a payment, settlement path),
+  `MiniAppServiceOrderController` and `MiniAppResellerServiceController` (`summary()` on the renew/add-traffic pages
+  and the reseller's own pages), the claim pages, notifications and the admin views. Access rules are unchanged:
+  `CustomerServiceFinder`, the owner checks, `CustomerAccessGuard` and the reseller privacy rule D5 (the claim
+  snapshots are unchanged).
+- **Tests.** No snapshot file changed and `UPDATE_BOT_SNAPSHOTS` was never set. Changed test files: the three
+  `ProductModuleInterface` doubles gained the three methods (`ModuleRegistriesTest`'s stub throws, `SpyProductModule`
+  and `SettlementViaProductModuleTest`'s spy record and pass on); `AdminServiceLifecycleViaModuleTest` (PM1c) now
+  expects `['terminate']` instead of `[]` for the other admin actions, because the bot's delete moved (owner
+  approved; one expected value and the docblock). New: `CustomerViewViaModuleTest` (bot),
+  `AdminServiceDeleteViaModuleTest` (bot delete via `terminate()`), `MiniAppCustomerViewViaModuleTest`,
+  `SubscriptionPageViaModuleTest` (with an unknown module type → `ModuleRegistryException`) and
+  `VpnProductModuleCustomerTest` (unknown channel and action → `\InvalidArgumentException`).
 
 ## 10. What this design did not check
 

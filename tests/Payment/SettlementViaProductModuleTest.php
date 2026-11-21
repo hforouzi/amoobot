@@ -9,6 +9,9 @@ use App\Entity\Payment;
 use App\Entity\VpnService;
 use App\Module\Application\ProductModuleRegistry;
 use App\Module\Domain\ModuleRegistryException;
+use App\Module\Domain\CustomerActionInput;
+use App\Module\Domain\CustomerActionResult;
+use App\Module\Domain\CustomerActions;
 use App\Module\Domain\ProductModuleInterface;
 use App\Payment\Application\Settlement\PaymentSettlementService;
 use App\Payment\Application\Settlement\SettlementOutcome;
@@ -18,6 +21,7 @@ use App\Payment\Domain\PaymentStatus;
 use App\Provisioning\Application\AutoSuspendSummary;
 use App\Provisioning\Application\RenewalResult;
 use App\Provisioning\Application\ServiceAdminOutcome;
+use App\Provisioning\Application\VpnCustomerView;
 use App\Provisioning\Application\VpnProductModule;
 use App\Shop\Domain\OrderStatus;
 use App\Shop\Domain\OrderType;
@@ -278,6 +282,27 @@ final class SettlementViaProductModuleTest extends IntegrationTestCase
             $this->record('runLifecycleTask', [$task, $limit, $dryRun]);
 
             return $this->inner->runLifecycleTask($task, $limit, $dryRun);
+        }
+
+        public function customerView(VpnService $service): VpnCustomerView
+        {
+            $this->record('customerView', [$service]);
+
+            return $this->inner->customerView($service);
+        }
+
+        public function customerActions(VpnService $service, string $channel): CustomerActions
+        {
+            $this->record('customerActions', [$service, $channel]);
+
+            return $this->inner->customerActions($service, $channel);
+        }
+
+        public function runCustomerAction(VpnService $service, string $action, CustomerActionInput $input): CustomerActionResult
+        {
+            $this->record('runCustomerAction', [$service, $action, $input]);
+
+            return $this->inner->runCustomerAction($service, $action, $input);
         }
 
         /** @param list<mixed> $args */
