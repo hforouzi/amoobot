@@ -12,7 +12,7 @@ namespace App\Tests\Support;
  * different tables collide (on a fresh database the first plan, service and draft are all id 1), so a callback argument
  * or a text like "Order ID: 7" says which table the number belongs to, and only an id registered for that table is
  * renamed. Opaque strings (tracking codes, generated usernames, uuids) are replaced by value.
- * Record or update snapshots with UPDATE_BOT_SNAPSHOTS=1.
+ * Record or update snapshots with UPDATE_BOT_SNAPSHOTS=1; a missing snapshot fails the test (SnapshotFile).
  */
 final class BotTranscript
 {
@@ -125,14 +125,7 @@ final class BotTranscript
      */
     public static function assertMatchesSnapshot(string $name, array $lines): void
     {
-        $file = dirname(__DIR__).'/Bot/__snapshots__/'.$name.'.txt';
-        $actual = implode("\n\n", $lines)."\n";
-        if ('1' === getenv('UPDATE_BOT_SNAPSHOTS') || !is_file($file)) {
-            @mkdir(dirname($file), 0777, true);
-            file_put_contents($file, $actual);
-        }
-        // Line endings depend on the checkout (core.autocrlf), not on the bot.
-        \PHPUnit\Framework\Assert::assertSame(str_replace("\r\n", "\n", (string) file_get_contents($file)), $actual, 'bot transcript differs from tests/Bot/__snapshots__/'.$name.'.txt');
+        SnapshotFile::assertMatches('Bot/__snapshots__/'.$name.'.txt', implode("\n\n", $lines)."\n");
     }
 
     /**

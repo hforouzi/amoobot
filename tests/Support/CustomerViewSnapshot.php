@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Tests\Support;
 
 use App\Subscription\UI\SubscriptionFormat;
-use PHPUnit\Framework\Assert;
 
 /**
  * Golden files of what a customer sees about a VPN service (bot messages, notifications, Mini App fragments and JSON,
@@ -13,7 +12,7 @@ use PHPUnit\Framework\Assert;
  * product module, so that PR can prove its output byte-identical (docs/design/product-modules.md, section 9).
  *
  * Files live under tests/<area>/__snapshots__/customer-view/. Record or update them with UPDATE_BOT_SNAPSHOTS=1 (the
- * switch BotTranscript uses). Volatile values are replaced before comparing:
+ * switch BotTranscript uses); a missing file fails the test (SnapshotFile). Volatile values are replaced before comparing:
  * - dates: services are built at fixed offsets from $now. "Y-m-d H:i:s" becomes <datetime now+20d+12h> (rounded to
  *   the hour, so the seconds a test takes do not matter). A calendar day alone ("Y-m-d", and the Persian calendar
  *   form of SubscriptionFormat::date()) depends on the time of day the test runs, so it is named after the expiry it
@@ -76,13 +75,7 @@ final class CustomerViewSnapshot
 
     public static function assertMatches(string $area, string $name, string $actual): void
     {
-        $file = dirname(__DIR__).'/'.$area.'/__snapshots__/customer-view/'.$name;
-        if ('1' === getenv('UPDATE_BOT_SNAPSHOTS') || !is_file($file)) {
-            @mkdir(dirname($file), 0777, true);
-            file_put_contents($file, $actual);
-        }
-        // Line endings depend on the checkout (core.autocrlf), not on the code.
-        Assert::assertSame(str_replace("\r\n", "\n", (string) file_get_contents($file)), $actual, 'differs from tests/'.$area.'/__snapshots__/customer-view/'.$name);
+        SnapshotFile::assertMatches($area.'/__snapshots__/customer-view/'.$name, $actual);
     }
 
     /**
