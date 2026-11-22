@@ -1752,6 +1752,72 @@ bot checkout snapshots) are the proof: none of them changed.
   `SubscriptionPageViaModuleTest` (with an unknown module type → `ModuleRegistryException`) and
   `VpnProductModuleCustomerTest` (unknown channel and action → `\InvalidArgumentException`).
 
+**PM2a (product type on plans and services).** The first migration of the series. Additive, no switch: the defaults
+reproduce today, so every existing plan and service is `'vpn'` and nothing a customer or an admin does changes.
+- **Migration** `Version20261122090000`, as 3.2 says, table and entity names kept (3.1):
+  `ALTER TABLE plan ADD product_type VARCHAR(32) DEFAULT 'vpn' NOT NULL, ADD module_config JSON DEFAULT NULL`,
+  `ALTER TABLE vpn_service ADD product_type VARCHAR(32) DEFAULT 'vpn' NOT NULL`,
+  `CREATE INDEX idx_vpn_service_type_status ON vpn_service (product_type, status)`. The ADD COLUMNs run with
+  `ALGORITHM=INSTANT` and the index with `ALGORITHM=INPLACE, LOCK=NONE` (checked by hand on MariaDB 10.8.3; 10.11, which
+  CI migrates, does at least the same). On a test database with 10,000 services and 51 plans the three statements took
+  8.5 ms, 17 ms and 48.5 ms (`--query-time`), the whole console command 0.9 s. `down()` drops them again and is refused,
+  changing nothing, while a plan or service is not a plain VPN row (a type other than `'vpn'`, or `module_config` set).
+  `doctrine:schema:validate` reports no drift from these columns: its `--dump-sql` output is identical with and
+  without them (the drift it shows on a local MariaDB 10.8.3 is older and unrelated).
+- **Entities.** `Plan::$productType` and `VpnService::$productType` (both `'vpn'` in PHP too, `DEFAULT_PRODUCT_TYPE`),
+  `Plan::$moduleConfig` (nullable array, unused for now; a plan copy in the Mini App keeps both). A new service takes its
+  plan's type in one place: `VpnProvisioningService::provisionOrder()`, which settlement (through the module) and the
+  trial both use. A service made by `app:panel:import-clients` (no plan) keeps the default.
+- **Resolver.** `forService()` reads `vpn_service.product_type`. `forOrder()` reads the plan's `product_type`; for a
+  `renewal` or `add_traffic` order with a target service, the **target service's type wins** when the two differ (the
+  order changes that service; the plan may have changed since it was sold). An order without a plan (a wallet top-up,
+  never sent to a module) keeps PM1c's answer, `'vpn'`. An unknown type is still the registry's
+  `ModuleRegistryException`, uncaught: in settlement a provisioning failure as before (a renewal of a service whose
+  type has no module fails the same way, whatever the plan says).
+- **Jobs fail closed** (`App\Module\Application\UnknownProductTypeGuard`). A service whose type has no module is
+  skipped: no panel call, no status change, no message, no write. It is logged once per run and service as
+  `unknown_product_type service_id=<id> type=<type>` (warning, no context, no customer data), is not a failure, so the
+  exit code is the one the other rows give, and the batch goes on. `app:automation:run` resets the guard at its start
+  (one line per run even when several of its jobs meet the row). The guard gets the registry as a service closure
+  (`#[AutowireServiceClosure]`, as PM1d did for `ServiceManagementService`): the jobs it guards are built with the
+  `'vpn'` module, so a direct dependency would build the registry with them (and the tests' spy registry could not be
+  installed). Where each job checks:
+  - `suspend` (`expiry` and `traffic` tasks): `ServiceAutoSuspendService`, per row before the driver call; counted in
+    the task's `skipped`.
+  - `expiry`: `ServiceExpiryChecker::checkAll()`, per row (not even stamped as checked); `skipped`.
+  - `sync`: `ServiceUsageSyncService::syncActiveServices()`, before the batch usage read of the panel; `skipped`.
+  - `notifications`: `ServiceNotificationService::loadServices()`, the loader of its three tasks; not counted.
+  - `orders`: `MissingDeliveryResender` (resend of a missing delivery): left due, not abandoned. The other two tasks of
+    the job load orders and payments, not services.
+  - `attach-inbounds`: `InboundAttachScheduler::one()` after the service is loaded (`skipped`), and
+    `InboundAttachAlerts::send()`, which the job runs at its end: no alert claimed or sent for such a row.
+  - `inbound-moves`: `InboundMoveRunner::process()`, before a move is claimed: the move stays due, so its run stays
+    open; counted as skipped. The admin's undo (`--undo`) is not a job and is not guarded.
+  - `claims`: `ClaimMaintenance::expire()` (the link stays open; it is refused at claim time anyway once past its time)
+    and `retryPanelSync()` (not tried, no attempt used; `skipped`).
+  - `broadcasts` and `tetraminator` load no service.
+
+  An unknown row still takes its place in a batch with a `LIMIT` (suspend, expiry, sync, notifications, claims expiry),
+  so a large number of them would slow the others down; there are none today, and PM3b/PM5a, which run each module's
+  own tasks, filter by type in the query.
+- **Admin.** The plan and service detail pages show `product_type` read only, labelled with the existing `field.type`
+  ("Type" / «نوع»); it is not on the forms. Not a list column: `AdminUiPolishTest` pins the columns of both lists and
+  no existing test may change in this PR (a column is a one-line change to that test later). No change for customers,
+  no new text or translation, no snapshot changed.
+- **Tests.** No existing test file changed: rows built by hand need nothing, because the columns have a default. New:
+  `ProductTypeMigrationTest` (down and up in a console process; old rows read `'vpn'`; down refused for a non-VPN row),
+  `ProductTypeColumnsTest` (old rows, JSON config, provisioning copies the plan's type, a sale is `'vpn'`, resolver
+  throws for `'x'`, a plan `'x'` is a provisioning failure, a renewal is settled by the target service's module),
+  `ProductTypeResolutionTest` (resolver rules, target wins), `UnknownProductTypeGuardTest`, and for each job a type
+  `'x'` service next to a `'vpn'` one in the same batch: `UnknownProductTypeJobsTest` (suspend both tasks, expiry, sync,
+  notifications, orders, a whole run), `UnknownProductTypeAttachTest`, `UnknownProductTypeMoveTest`,
+  `UnknownProductTypeClaimsTest`, and `ProductTypeAdminTest` (detail pages, no form field). With the guard switched
+  off, all eleven job tests fail.
+- **Deploy.** A FULL deploy (it has a migration), backup first: `sudo amoobot-backup pre-pm2a`, then
+  `sudo amoobot-deploy --ref develop/v3` (without `--app-only`); `deploy.sh` also takes its own `pre-deploy` dump
+  because a migration is pending, and runs it. Going back means restoring that dump or a forward fix (3.6:
+  `check_schema_matches()` stops a deploy of an older commit).
+
 ## 10. What this design did not check
 
 - No production data: row counts, table sizes, real RAM headroom on the box, and PHP-FPM worker counts are unknown.

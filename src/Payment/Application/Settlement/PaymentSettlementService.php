@@ -611,8 +611,8 @@ class PaymentSettlementService
     }
 
     /**
-     * The product module that fulfils this order. Always 'vpn' until PM2a adds plan.product_type
-     * (docs/design/product-modules.md 9). An unknown type throws ModuleRegistryException, which is not caught here:
+     * The product module that fulfils this order: its plan's product_type, or for a renewal or add-traffic order its
+     * target service's (ProductModuleResolver::forOrder(), PM2a). An unknown type throws ModuleRegistryException, which is not caught here:
      * it ends as a provisioning failure (recordProvisioningFailure()), like any other fulfilment error.
      */
     private function productModule(Order $order): ProductModuleInterface

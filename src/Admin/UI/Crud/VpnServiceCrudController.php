@@ -207,6 +207,8 @@ class VpnServiceCrudController extends AbstractCrudController
             AdminFormat::field('plan', static fn (mixed $v, ?VpnService $s): string => null === ($plan = $s?->getOrder()?->getPlan()) ? AdminFormat::NONE : AdminFormat::e($plan->getTitle()))->onlyOnIndex(),
             AssociationField::new('order')->hideOnIndex()->setDisabled(),
             AssociationField::new('panel')->setDisabled(),
+            // The service's product module (PM2a): on the detail page only, never edited here (the list's columns are pinned).
+            TextField::new('productType', 'field.type')->onlyOnDetail(),
             AssociationField::new('inbound')->hideOnIndex()->setDisabled(),
             ...$this->inboundNoticeField($pageName),
             ...$this->inboundMoveField($pageName),

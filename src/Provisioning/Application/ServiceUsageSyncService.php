@@ -7,6 +7,7 @@ namespace App\Provisioning\Application;
 use App\Entity\Payment;
 use App\Entity\VpnPanel;
 use App\Entity\VpnService;
+use App\Module\Application\UnknownProductTypeGuard;
 use App\Provisioning\Domain\BatchUsageDriverInterface;
 use App\Provisioning\Domain\Dto\VpnUsage;
 use App\Provisioning\Domain\VpnServiceStatus;
@@ -24,6 +25,7 @@ final class ServiceUsageSyncService
         private readonly EntityManagerInterface $entityManager,
         private readonly VpnPanelDriverRegistry $driverRegistry,
         private readonly ServiceExpiryChecker $serviceExpiryChecker,
+        private readonly UnknownProductTypeGuard $unknownTypes,
     ) {
     }
 
@@ -132,13 +134,22 @@ final class ServiceUsageSyncService
             $queryBuilder->setMaxResults($limit);
         }
 
-        /** @var VpnService[] $services */
-        $services = $queryBuilder->getQuery()->getResult();
+        /** @var VpnService[] $loaded */
+        $loaded = $queryBuilder->getQuery()->getResult();
 
         $checked = 0;
         $updated = 0;
         $failed = 0;
         $skipped = 0;
+        // PM2a: a service of a type without a module is left alone (fail closed), before the batch read of its panel.
+        $services = [];
+        foreach ($loaded as $service) {
+            if ($this->unknownTypes->skips($service)) {
+                ++$skipped;
+                continue;
+            }
+            $services[] = $service;
+        }
         $prefetched = $this->prefetchBatchUsages($services);
 
         foreach ($services as $service) {

@@ -6,6 +6,7 @@ namespace App\Command;
 
 use App\Broadcast\BroadcastSender;
 use App\Module\Application\ProductModuleResolver;
+use App\Module\Application\UnknownProductTypeGuard;
 use App\Module\Domain\ProductModuleInterface;
 use App\Payment\Application\MissingDeliveryResender;
 use App\Payment\Application\Reconcile\TetraminatorReconciler;
@@ -50,6 +51,7 @@ final class AutomationRunCommand extends Command
         private readonly InboundMoveScheduler $inboundMoveScheduler,
         private readonly TetraminatorReconciler $tetraminatorReconciler,
         private readonly ClockInterface $clock,
+        private readonly UnknownProductTypeGuard $unknownTypes,
     ) {
         parent::__construct();
     }
@@ -74,6 +76,9 @@ final class AutomationRunCommand extends Command
 
             return Command::FAILURE;
         }
+
+        // One "unknown_product_type" line per service and run, whichever jobs of this run meet it (PM2a).
+        $this->unknownTypes->reset();
 
         $limitOption = $input->getOption('limit');
         $limit = null !== $limitOption ? max(1, (int) $limitOption) : $this->automationSettingsProvider->batchLimit();
@@ -155,7 +160,8 @@ final class AutomationRunCommand extends Command
         }
 
         if ($this->shouldRun($only, 'suspend')) {
-            // The 'vpn' module's job path (ServiceAutoSuspendService), until PM2a/PM5a run every enabled module's tasks.
+            // The 'vpn' module's job path (ServiceAutoSuspendService), until PM5a runs every enabled module's tasks. A
+            // service of a type without a module is skipped there (PM2a, UnknownProductTypeGuard).
             if ($this->automationSettingsProvider->autoSuspendExpiredEnabled()) {
                 $summary = $this->productModules->forType(VpnProductModule::TYPE)->runLifecycleTask(ProductModuleInterface::LIFECYCLE_EXPIRY, $limit, $dryRun);
                 $checked += $summary->checked;

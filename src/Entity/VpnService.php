@@ -10,8 +10,12 @@ use Doctrine\ORM\Mapping as ORM;
 #[ORM\Entity]
 #[ORM\UniqueConstraint(name: 'uniq_vpn_service_public_token', columns: ['public_token'])]
 #[ORM\Index(name: 'idx_vpn_service_sold_by', columns: ['sold_by_reseller_id', 'status'])]
+#[ORM\Index(name: 'idx_vpn_service_type_status', columns: ['product_type', 'status'])]
 class VpnService
 {
+    /** The product type of every service made before PM2a (VpnProductModule::TYPE, Plan::DEFAULT_PRODUCT_TYPE). */
+    public const DEFAULT_PRODUCT_TYPE = Plan::DEFAULT_PRODUCT_TYPE;
+
     #[ORM\Id]
     #[ORM\GeneratedValue]
     #[ORM\Column]
@@ -123,6 +127,13 @@ class VpnService
     #[ORM\JoinColumn(nullable: true, onDelete: 'RESTRICT')]
     private ?Reseller $soldByReseller = null;
 
+    /**
+     * The product module that owns this service (docs/design/product-modules.md 3.2, PM2a); ProductModuleResolver
+     * reads it. Set once, from the plan, when provisioning creates the service (VpnProvisioningService).
+     */
+    #[ORM\Column(length: 32, options: ['default' => self::DEFAULT_PRODUCT_TYPE])]
+    private string $productType = self::DEFAULT_PRODUCT_TYPE;
+
     public function __construct()
     {
         $this->createdAt = new \DateTimeImmutable();
@@ -148,6 +159,18 @@ class VpnService
     public function setSoldByReseller(?Reseller $soldByReseller): self
     {
         $this->soldByReseller = $soldByReseller;
+
+        return $this;
+    }
+
+    public function getProductType(): string
+    {
+        return $this->productType;
+    }
+
+    public function setProductType(string $productType): self
+    {
+        $this->productType = $productType;
 
         return $this;
     }

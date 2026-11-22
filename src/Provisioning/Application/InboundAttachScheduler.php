@@ -6,6 +6,7 @@ namespace App\Provisioning\Application;
 
 use App\Entity\VpnService;
 use App\Entity\VpnServiceInbound;
+use App\Module\Application\UnknownProductTypeGuard;
 use App\Provisioning\Domain\InboundAttachDriverInterface;
 use App\Provisioning\Domain\VpnServiceStatus;
 use App\Provisioning\Infrastructure\VpnPanelDriverRegistry;
@@ -71,6 +72,7 @@ final class InboundAttachScheduler
         private readonly PanelLinkSnapshot $panelLinkSnapshot,
         private readonly InboundAttachAlerts $alerts,
         private readonly LoggerInterface $logger,
+        private readonly UnknownProductTypeGuard $unknownTypes,
     ) {
     }
 
@@ -142,6 +144,12 @@ final class InboundAttachScheduler
             ++$run->skipped;
 
             return 'skipped (not active)';
+        }
+        // PM2a: a service of a type without a module is left alone (fail closed): no panel read, no write.
+        if ($this->unknownTypes->skips($service)) {
+            ++$run->skipped;
+
+            return 'skipped (unknown product type)';
         }
         $panelId = (int) $panel->getId();
         if (isset($run->stoppedPanels[$panelId])) {

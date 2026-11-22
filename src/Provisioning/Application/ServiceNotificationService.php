@@ -10,6 +10,7 @@ use App\Bot\Infrastructure\TelegramApiRejected;
 use App\Entity\ServiceNotificationLog;
 use App\Entity\TelegramAccount;
 use App\Entity\VpnService;
+use App\Module\Application\UnknownProductTypeGuard;
 use App\Provisioning\Domain\VpnServiceStatus;
 use App\Shared\Infrastructure\SafeErrorLog;
 use App\Shared\Infrastructure\SettingValueProvider;
@@ -25,6 +26,7 @@ final class ServiceNotificationService
         private readonly TelegramApiClient $telegramApiClient,
         private readonly BotTextResolver $botTextResolver,
         private readonly SettingValueProvider $settingValueProvider,
+        private readonly UnknownProductTypeGuard $unknownTypes,
         private readonly string $serviceNotifyExpiryDays = '3,1',
         private readonly string $serviceNotifyTrafficThresholds = '50,80,95,100',
     ) {
@@ -310,6 +312,9 @@ final class ServiceNotificationService
     }
 
     /**
+     * The services the three notification tasks look at. PM2a: a service of a type without a module is dropped here
+     * (fail closed: no message), logged once per run by UnknownProductTypeGuard, and not counted.
+     *
      * @return list<VpnService>
      */
     private function loadServices(int $limit): array
@@ -325,7 +330,7 @@ final class ServiceNotificationService
         /** @var list<VpnService> $services */
         $services = $query->getQuery()->getResult();
 
-        return $services;
+        return array_values(array_filter($services, fn (VpnService $service): bool => !$this->unknownTypes->skips($service)));
     }
 
     private function dispatchNotification(

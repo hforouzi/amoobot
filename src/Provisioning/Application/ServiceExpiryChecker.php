@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Provisioning\Application;
 
 use App\Entity\VpnService;
+use App\Module\Application\UnknownProductTypeGuard;
 use App\Provisioning\Domain\VpnServiceStatus;
 use App\Shared\Infrastructure\SafeErrorLog;
 use Doctrine\ORM\EntityManagerInterface;
@@ -13,6 +14,7 @@ final class ServiceExpiryChecker
 {
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
+        private readonly UnknownProductTypeGuard $unknownTypes,
     ) {
     }
 
@@ -71,6 +73,11 @@ final class ServiceExpiryChecker
         $skipped = 0;
 
         foreach ($services as $service) {
+            // PM2a: a service of a type without a module is left alone (fail closed).
+            if ($this->unknownTypes->skips($service)) {
+                ++$skipped;
+                continue;
+            }
             ++$checked;
             try {
                 $result = $this->checkOne($service, $dryRun, false);

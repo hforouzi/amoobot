@@ -9,6 +9,7 @@ use App\Entity\InboundMoveRun;
 use App\Entity\Order;
 use App\Entity\VpnService;
 use App\Entity\VpnServiceInbound;
+use App\Module\Application\UnknownProductTypeGuard;
 use App\Provisioning\Domain\VpnServiceStatus;
 use App\Security\AdminAccessPolicy;
 use App\Security\AdminPermission;
@@ -55,10 +56,13 @@ class InboundAttachAlerts
         private readonly AdminAccessPolicy $accessPolicy,
         private readonly TelegramApiClient $telegramApiClient,
         private readonly LoggerInterface $logger,
+        private readonly UnknownProductTypeGuard $unknownTypes,
     ) {
     }
 
     /**
+     * PM2a: a row of a service whose product type has no module is left alone (fail closed): not claimed, no alert.
+     *
      * @return int the alerts sent (one per service and kind)
      */
     public function send(int $limit = 500): int
@@ -68,7 +72,7 @@ class InboundAttachAlerts
         $connection = $this->entityManager->getConnection();
         $rows = $connection->fetchAllAssociative(
             sprintf(
-                "SELECT r.id, r.service_id, r.status, r.attempts, r.alert_state, r.last_error, i.id AS inbound_id, i.title AS inbound_title, s.user_id, s.client_email, p.title AS plan_title
+                "SELECT r.id, r.service_id, r.status, r.attempts, r.alert_state, r.last_error, i.id AS inbound_id, i.title AS inbound_title, s.user_id, s.client_email, s.product_type, p.title AS plan_title
                  FROM vpn_service_inbound r
                  JOIN vpn_service s ON s.id = r.service_id
                  JOIN vpn_inbound i ON i.id = r.inbound_id
@@ -94,6 +98,9 @@ class InboundAttachAlerts
 
         $groups = [];
         foreach ($rows as $row) {
+            if ($this->unknownTypes->skipsRow((int) $row['service_id'], (string) $row['product_type'])) {
+                continue;
+            }
             $kind = VpnServiceInbound::STATUS_ATTACHED === $row['status'] ? self::KIND_RECOVERED : ((int) $row['attempts'] >= $max ? self::KIND_EXHAUSTED : self::KIND_FAILED);
             if ($this->claim((int) $row['id'], $kind, $max)) {
                 $groups[(int) $row['service_id']][$kind][] = $row;

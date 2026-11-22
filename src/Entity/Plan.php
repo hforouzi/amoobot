@@ -20,6 +20,9 @@ use Symfony\Component\Validator\Context\ExecutionContextInterface;
 #[PlanInbounds]
 class Plan
 {
+    /** The product type of every plan made before PM2a and of every plan made since (VpnProductModule::TYPE). */
+    public const DEFAULT_PRODUCT_TYPE = 'vpn';
+
     #[ORM\Id]
     #[ORM\GeneratedValue]
     #[ORM\Column]
@@ -112,6 +115,22 @@ class Plan
     /** The lowest wholesale price of this plan for any reseller (Toman), on top of the reseller.floor_bp rule; null = none. */
     #[ORM\Column(nullable: true)]
     private ?int $resellerFloorAmount = null;
+
+    /**
+     * The product module that sells this plan (docs/design/product-modules.md 3.2, PM2a); a service bought with it
+     * takes it (VpnProvisioningService). Read-only in this version: every plan is 'vpn'.
+     */
+    #[ORM\Column(length: 32, options: ['default' => self::DEFAULT_PRODUCT_TYPE])]
+    private string $productType = self::DEFAULT_PRODUCT_TYPE;
+
+    /**
+     * The module's own plan options (3.2, validated by its planSchema() when one exists). Unused for now: 'vpn' keeps
+     * its columns and leaves it null.
+     *
+     * @var array<string, mixed>|null
+     */
+    #[ORM\Column(type: 'json', nullable: true)]
+    private ?array $moduleConfig = null;
 
     #[ORM\Column]
     private \DateTimeImmutable $createdAt;
@@ -553,6 +572,32 @@ class Plan
     public function setResellerFloorAmount(?int $resellerFloorAmount): self
     {
         $this->resellerFloorAmount = null === $resellerFloorAmount || $resellerFloorAmount <= 0 ? null : $resellerFloorAmount;
+
+        return $this;
+    }
+
+    public function getProductType(): string
+    {
+        return $this->productType;
+    }
+
+    public function setProductType(string $productType): self
+    {
+        $this->productType = $productType;
+
+        return $this;
+    }
+
+    /** @return array<string, mixed>|null */
+    public function getModuleConfig(): ?array
+    {
+        return $this->moduleConfig;
+    }
+
+    /** @param array<string, mixed>|null $moduleConfig */
+    public function setModuleConfig(?array $moduleConfig): self
+    {
+        $this->moduleConfig = $moduleConfig;
 
         return $this;
     }
