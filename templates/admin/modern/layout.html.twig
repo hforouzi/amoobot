@@ -47,8 +47,16 @@
     </div>
 {% endblock %}
 
-{# The pages of the current section the admin may open (AdminSections), above the page. #}
+{# The pages of the current section the admin may open (AdminSections), above the page.
+   EasyAdmin's .content-wrapper is a two-column grid on desktop (the page, then a 10px resize handle): the tabs and the
+   page must stay ONE grid item, or the page is pushed into the handle's column (a few pixels wide). Hence the wrapper,
+   which also keeps the structure right when the stylesheet does not load. #}
 {% block content %}
-    <div class="admin-section-tabs">{{ include('admin/_tabs.html.twig', {tabs: admin_section_tabs(), label: 'admin_ui.section_tabs'}) }}</div>
-    {{ parent() }}
+    <div class="admin-content-column">
+        {%- set admin_tabs_html = include('admin/_tabs.html.twig', {tabs: admin_section_tabs(), label: 'admin_ui.section_tabs'})|trim -%}
+        {%- if admin_tabs_html is not empty %}
+        <div class="admin-section-tabs">{{ admin_tabs_html|raw }}</div>
+        {%- endif %}
+        {{ parent() }}
+    </div>
 {% endblock %}

@@ -20,6 +20,7 @@ body[data-admin-ui="modern"] {
     --admin-radius: 16px;
     --admin-radius-sm: 10px;
     --admin-target: 44px;
+    --sidebar-max-width: 260px;
     --admin-ok: #15803d;
     --admin-warn: #b45309;
     --admin-danger: #dc2626;
@@ -118,19 +119,19 @@ body[data-admin-ui="modern"] [data-admin-badge="card-receipts"] {
     font-weight: 700;
 }
 
-/* Sidebar bottom: theme and sidebar toggles, language, admin name and logout. */
+/* Sidebar bottom: theme and sidebar toggles, language, admin name and logout. One control per row at the full
+   sidebar width, so every label stays on one line ("پوسته تیره", "جمع کردن منو"). */
 body[data-admin-ui="modern"] .admin-sidebar-tools {
     display: flex;
     flex-direction: column;
     gap: .5rem;
-    padding: .75rem;
-    border-block-start: 1px solid var(--admin-border);
-    background: var(--admin-card);
+    min-inline-size: 0;
 }
 
 body[data-admin-ui="modern"] .admin-sidebar-toggles {
     display: flex;
-    gap: .5rem;
+    flex-direction: column;
+    gap: .375rem;
 }
 
 body[data-admin-ui="modern"] .admin-sidebar-tool,
@@ -139,15 +140,36 @@ body[data-admin-ui="modern"] .admin-sidebar-logout {
     min-inline-size: var(--admin-target);
     display: inline-flex;
     align-items: center;
-    justify-content: center;
-    gap: .4rem;
+    gap: .5rem;
     padding-inline: .75rem;
     border: 1px solid var(--admin-border);
     border-radius: var(--admin-radius-sm);
     background: transparent;
     color: var(--admin-text);
+    font: inherit;
+    line-height: 1.2;
+    white-space: nowrap;
     text-decoration: none;
     cursor: pointer;
+}
+
+body[data-admin-ui="modern"] .admin-sidebar-tool {
+    inline-size: 100%;
+    justify-content: flex-start;
+    text-align: start;
+}
+
+body[data-admin-ui="modern"] .admin-sidebar-tool .fa,
+body[data-admin-ui="modern"] .admin-sidebar-logout .fa {
+    flex: none;
+    inline-size: 1.25em;
+    text-align: center;
+}
+
+body[data-admin-ui="modern"] .admin-sidebar-tool-label {
+    min-inline-size: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 body[data-admin-ui="modern"] .admin-sidebar-tool:hover,
@@ -176,6 +198,7 @@ body[data-admin-ui="modern"] .admin-sidebar-tools .admin-locale-switcher a {
     padding-inline: .75rem;
     border-radius: var(--admin-radius-sm);
     color: var(--admin-text);
+    white-space: nowrap;
     text-decoration: none;
 }
 
@@ -189,6 +212,7 @@ body[data-admin-ui="modern"] .admin-sidebar-user {
     align-items: center;
     gap: .5rem;
     min-block-size: var(--admin-target);
+    min-inline-size: 0;
 }
 
 body[data-admin-ui="modern"] .admin-sidebar-user-name {
@@ -199,26 +223,75 @@ body[data-admin-ui="modern"] .admin-sidebar-user-name {
     white-space: nowrap;
 }
 
-/* Compact sidebar (collapse controller): icons only. */
-body[data-admin-ui="modern"].admin-sidebar-compact .sidebar-wrapper {
-    max-inline-size: 5rem;
+/*
+ * Page layout. EasyAdmin (>= 992px): .wrapper is a grid [sidebar | content] and .content-wrapper a grid
+ * [page | 10px resize handle]. Both use "auto" tracks, which grow with wide content (tables) instead of shrinking,
+ * so the modern layout pins them to minmax(0, 1fr): the content column takes all the remaining width, in RTL and LTR
+ * alike (grid columns follow the writing direction), and wide tables scroll inside .admin-table-scroll, not the page.
+ * The section tabs and the page are one grid item (.admin-content-column, layout.html.twig).
+ */
+@media (min-width: 992px) {
+    body[data-admin-ui="modern"] .wrapper {
+        grid-template-columns: var(--sidebar-max-width) minmax(0, 1fr);
+    }
+
+    body[data-admin-ui="modern"] .content-wrapper {
+        grid-template-columns: minmax(0, 1fr) var(--resize-handler-width);
+    }
+
+    body[data-admin-ui="modern"] .sidebar-wrapper {
+        inline-size: var(--sidebar-max-width);
+    }
+
+    body[data-admin-ui="modern"] .ea-sidebar {
+        inline-size: var(--sidebar-max-width);
+    }
 }
 
-body[data-admin-ui="modern"].admin-sidebar-compact .ea-sidebar-item-label,
-body[data-admin-ui="modern"].admin-sidebar-compact .admin-sidebar-tool-label,
-body[data-admin-ui="modern"].admin-sidebar-compact .admin-sidebar-user-name,
-body[data-admin-ui="modern"].admin-sidebar-compact .logo-custom {
-    display: none;
+body[data-admin-ui="modern"] .main-content,
+body[data-admin-ui="modern"] .admin-content-column,
+body[data-admin-ui="modern"] .content {
+    min-inline-size: 0;
 }
 
-body[data-admin-ui="modern"].admin-sidebar-compact .admin-sidebar-toggles {
-    flex-direction: column;
+/* Below 992px EasyAdmin's own phone layout applies: the sidebar is off-canvas (the menu button opens it) and the
+   content is full width; nothing here changes that. */
+
+/* Compact sidebar (collapse controller, desktop only): the grid's sidebar column itself narrows to the icons, so the
+   content gains the width; the bottom tools stay visible (as icons) so the sidebar can be widened again. */
+@media (min-width: 992px) {
+    body[data-admin-ui="modern"].admin-sidebar-compact {
+        --sidebar-max-width: 76px;
+    }
+
+    body[data-admin-ui="modern"].admin-sidebar-compact .ea-sidebar-item-label,
+    body[data-admin-ui="modern"].admin-sidebar-compact .admin-sidebar-tool-label,
+    body[data-admin-ui="modern"].admin-sidebar-compact .admin-sidebar-user-name,
+    body[data-admin-ui="modern"].admin-sidebar-compact .admin-sidebar-tools .admin-locale-switcher,
+    body[data-admin-ui="modern"].admin-sidebar-compact .logo-custom {
+        display: none;
+    }
+
+    body[data-admin-ui="modern"].admin-sidebar-compact .logo-compact {
+        display: block;
+    }
+
+    body[data-admin-ui="modern"].admin-sidebar-compact .ea-sidebar-item-link,
+    body[data-admin-ui="modern"].admin-sidebar-compact .admin-sidebar-tool,
+    body[data-admin-ui="modern"].admin-sidebar-compact .admin-sidebar-user {
+        justify-content: center;
+        padding-inline: 0;
+    }
+
+    body[data-admin-ui="modern"].admin-sidebar-compact .ea-sidebar-footer {
+        padding-inline: .5rem;
+    }
 }
 
 /* Tabs: the section tabs (pages of the sidebar item) and the page's own tabs. */
 body[data-admin-ui="modern"] .admin-section-tabs {
-    padding-inline: var(--content-padding-left, 1.5rem);
     padding-block-start: .75rem;
+    min-inline-size: 0;
 }
 
 body[data-admin-ui="modern"] .admin-tabs {
