@@ -6,6 +6,7 @@ namespace App\Payment\Application;
 
 use App\Entity\Payment;
 use App\Entity\VpnService;
+use App\Module\Application\UnknownProductTypeGuard;
 use App\Payment\Domain\PaymentStatus;
 use App\Shared\Infrastructure\TransactionRollback;
 use Doctrine\ORM\EntityManagerInterface;
@@ -15,7 +16,8 @@ use Doctrine\ORM\EntityManagerInterface;
  * (its settlement's process died before or while sending it, or nothing reached the customer) is sent once, by
  * PaymentCustomerNotifier::resendMissing() (which claims it, so a concurrent retry never sends it twice, and abandons it
  * when the service changed owner, is not active, or the delivery is older than PaymentDeliveryLog::MAX_AGE). One whose
- * payment is no longer confirmed or whose service is gone is abandoned here. Only counts are logged.
+ * payment is no longer confirmed or whose service is gone is abandoned here. Only counts are logged. PM2a: one whose
+ * service has a product type without a module is left alone and stays due (fail closed, UnknownProductTypeGuard).
  */
 final class MissingDeliveryResender
 {
@@ -24,6 +26,7 @@ final class MissingDeliveryResender
         private readonly PaymentDeliveryLog $deliveryLog,
         private readonly PaymentCustomerNotifier $customerNotifier,
         private readonly TransactionRollback $transactionRollback,
+        private readonly UnknownProductTypeGuard $unknownTypes,
     ) {
     }
 
@@ -45,6 +48,9 @@ final class MissingDeliveryResender
                     $this->deliveryLog->abandon($row['service_id'], $row['order_id'], $payment instanceof Payment && $service instanceof VpnService ? 'payment_not_confirmed' : 'service_missing');
                 }
                 ++$summary['abandoned'];
+                continue;
+            }
+            if ($this->unknownTypes->skips($service)) {
                 continue;
             }
             if (!$dryRun) {

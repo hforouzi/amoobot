@@ -11,6 +11,7 @@ use App\Entity\VpnInbound;
 use App\Entity\VpnPanel;
 use App\Entity\VpnService;
 use App\Entity\VpnServiceInbound;
+use App\Module\Application\UnknownProductTypeGuard;
 use App\Provisioning\Domain\Dto\InboundDetachResult;
 use App\Provisioning\Domain\Dto\InboundMoveAttachResult;
 use App\Provisioning\Domain\InboundAttachDriverInterface;
@@ -151,6 +152,7 @@ final class InboundMoveRunner
         private readonly InboundAttachAlerts $alerts,
         private readonly AdminAuditLogger $auditLogger,
         private readonly LoggerInterface $logger,
+        private readonly UnknownProductTypeGuard $unknownTypes,
         private readonly Sanaei3xuiRemoteIdParser $remoteIdParser = new Sanaei3xuiRemoteIdParser(),
     ) {
     }
@@ -229,6 +231,15 @@ final class InboundMoveRunner
                     return $pass;
                 }
                 $lastId = $moveId;
+                if (null !== $unknown = $this->unknownProductType($moveId)) {
+                    // PM2a: a service of a type without a module is left alone (fail closed): not claimed, no panel
+                    // call, the move stays due. Counted as skipped, not as a failure or a panel read.
+                    $this->count($pass, $unknown);
+                    if (null !== $onItem) {
+                        $onItem($unknown);
+                    }
+                    continue;
+                }
                 $item = $step($moveId);
                 if (InboundMoveItem::IDENTITY_CHANGED === $item->outcome) {
                     // Picked again at once (4.3 step 3), for the credentials the service has now.
@@ -274,6 +285,20 @@ final class InboundMoveRunner
         $this->finishRun($runId, $planId, $pass);
 
         return $pass;
+    }
+
+    /**
+     * PM2a: the item for a move whose service has a product type without a module (UnknownProductTypeGuard logs it),
+     * or null to go on.
+     */
+    private function unknownProductType(int $moveId): ?InboundMoveItem
+    {
+        $owner = $this->db()->fetchAssociative('SELECT s.id, s.product_type FROM service_inbound_move m JOIN vpn_service s ON s.id = m.service_id WHERE m.id = ?', [$moveId]);
+        if (false === $owner || !$this->unknownTypes->skipsRow((int) $owner['id'], (string) $owner['product_type'])) {
+            return null;
+        }
+
+        return new InboundMoveItem($moveId, (int) $owner['id'], '-', '-', InboundMoveItem::SKIPPED, 'unknown product type: left alone');
     }
 
     /** The moves of a run that a pass would look at now (--dry-run of the scheduled task; at most 1000). */

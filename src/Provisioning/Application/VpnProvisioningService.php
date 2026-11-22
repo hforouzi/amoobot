@@ -124,7 +124,9 @@ class VpnProvisioningService
             $trafficLimitValue = $adopted->trafficLimitGb;
         }
 
+        // PM2a: the one place a service takes its product type, from the plan it was bought with.
         $vpnService = (new VpnService())
+            ->setProductType($order->requirePlan()->getProductType())
             ->setUser($order->getUser())
             ->setOrder($order)
             ->setSoldByReseller($order->getReseller())

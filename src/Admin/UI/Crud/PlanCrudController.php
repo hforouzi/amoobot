@@ -183,6 +183,8 @@ class PlanCrudController extends AbstractCrudController
         return [
             IdField::new('id')->onlyOnIndex(),
             TextField::new('title'),
+            // The plan's product module (PM2a): on the detail page only, never edited here (the list's columns are pinned).
+            TextField::new('productType', 'field.type')->onlyOnDetail(),
             TextareaField::new('description')->hideOnIndex(),
             IntegerField::new('durationDays')->setTemplatePath(AdminFormat::TEMPLATE)->formatValue(static fn (mixed $v, ?Plan $plan): string => true === $plan?->isUnlimitedDuration() ? $t('format.unlimited') : $t('format.days', ['%count%' => (int) $v])),
             IntegerField::new('trafficGb')->setTemplatePath(AdminFormat::TEMPLATE)->formatValue(static fn (mixed $v): string => '<bdi>'.number_format((int) $v).' GB</bdi>'),

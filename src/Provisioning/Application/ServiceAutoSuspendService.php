@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Provisioning\Application;
 
 use App\Entity\VpnService;
+use App\Module\Application\UnknownProductTypeGuard;
 use App\Provisioning\Domain\VpnServiceStatus;
 use App\Provisioning\Infrastructure\VpnPanelDriverRegistry;
 use Doctrine\ORM\EntityManagerInterface;
@@ -16,6 +17,7 @@ final class ServiceAutoSuspendService
         private readonly EntityManagerInterface $entityManager,
         private readonly VpnPanelDriverRegistry $driverRegistry,
         private readonly LoggerInterface $logger,
+        private readonly UnknownProductTypeGuard $unknownTypes,
     ) {
     }
 
@@ -41,6 +43,11 @@ final class ServiceAutoSuspendService
         $skipped = 0;
 
         foreach ($services as $service) {
+            // PM2a: a service of a type without a module is left alone (fail closed).
+            if ($this->unknownTypes->skips($service)) {
+                ++$skipped;
+                continue;
+            }
             ++$checked;
             $serviceId = (int) ($service->getId() ?? 0);
 
@@ -99,6 +106,11 @@ final class ServiceAutoSuspendService
         $now = new \DateTimeImmutable();
 
         foreach ($services as $service) {
+            // PM2a: a service of a type without a module is left alone (fail closed).
+            if ($this->unknownTypes->skips($service)) {
+                ++$skipped;
+                continue;
+            }
             ++$checked;
             $serviceId = (int) ($service->getId() ?? 0);
 

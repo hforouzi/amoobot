@@ -199,7 +199,8 @@ final class MiniAppAdminPlanController extends AbstractController
         }
 
         return $this->actions->run($request, $user, $id, null, function () use ($request, $user, $source): array {
-            $copy = new Plan();
+            // The copy sells the same product (PM2a); the form has no field for it.
+            $copy = (new Plan())->setProductType($source->getProductType())->setModuleConfig($source->getModuleConfig());
             $this->input->toPlan($copy, array_map(static fn (mixed $v): mixed => true === $v ? '1' : (false === $v ? '' : $v), CatalogInput::snapshot($source, CatalogInput::PLAN_FIELDS)));
             $copy->setTitle(mb_substr($this->translator->trans('admin.plan.copy_of', ['%title%' => $source->getTitle()], 'miniapp', MiniAppLocale::fromRequest($request)), 0, 255))->setIsActive(false);
             $this->plans->save($copy);
