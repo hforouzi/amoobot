@@ -1,0 +1,14 @@
+{# Modern layout: the pages written for the standalone custom_page.html.twig shell (gateway install, gateway config,
+   plugin upload) render on the EasyAdmin layout, like every other admin page (docs/design/admin-redesign.md, 5.1).
+   Their blocks map onto EasyAdmin's: custom_title -> the page title, actions -> page actions, custom_body -> main. #}
+{% extends '@EasyAdmin/page/content.html.twig' %}
+
+{% block content_title %}{{ block('custom_title') }}{% endblock %}
+{% block page_actions %}{{ block('actions') }}{% endblock %}
+{% block main %}<div class="admin-custom-page">{{ block('custom_body') }}</div>{% endblock %}
+
+{# Filled by the page (custom_page.html.twig's blocks). #}
+{% block custom_title %}{% endblock %}
+{% block actions %}{% endblock %}
+{% block page_section %}{% endblock %}
+{% block custom_body %}{% endblock %}

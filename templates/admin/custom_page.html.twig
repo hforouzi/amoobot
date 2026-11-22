@@ -1,3 +1,8 @@
+{# The standalone shell of the admin pages that render without EasyAdmin's context (plain #[Route]s) in the classic
+   layout. EasyAdmin's stylesheet comes from its own asset manifest: the hashed file name was written here by hand
+   before and went stale with an EasyAdmin upgrade (docs/design/admin-redesign.md, section 0). Pages that extend this
+   shell put their content in custom_title / custom_body (in the modern layout they render on the EasyAdmin layout
+   instead, admin/modern/custom_page.html.twig). #}
 {% trans_default_domain 'admin' %}
 {% set currentLocale = app.request.locale|default('fa') %}
 {% set isRtl = currentLocale starts with 'fa' %}
@@ -9,7 +14,7 @@
     <meta name="robots" content="noindex, nofollow">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% block title %}{{ block('page_title')|striptags }}{% endblock %}</title>
-    <link rel="stylesheet" href="{{ asset('bundles/easyadmin/app.459a1f73.css') }}">
+    <link rel="stylesheet" href="{{ asset('app.css', 'easyadmin.assets.package') }}">
     <link rel="stylesheet" href="{{ asset('assets/admin/admin.css') }}">
 </head>
 <body class="ea admin-custom-shell {{ isRtl ? 'admin-custom-rtl' : 'admin-custom-ltr' }}">
@@ -29,7 +34,7 @@
             <header class="admin-custom-header">
                 <div>
                     <div class="admin-custom-section">{% block page_section %}{{ 'admin.payment_gateways'|trans }}{% endblock %}</div>
-                    <h1 class="admin-page-title">{% block page_title %}{% endblock %}</h1>
+                    <h1 class="admin-page-title">{% block page_title %}{% block custom_title %}{% endblock %}{% endblock %}</h1>
                 </div>
                 <div class="admin-custom-header-actions">
                     {% block actions %}{% endblock %}
@@ -42,9 +47,9 @@
             </header>
 
             <main class="admin-custom-page">
-                {% block body %}
+                {% block body %}{% block custom_body %}
                     {% block main %}{% endblock %}
-                {% endblock %}
+                {% endblock %}{% endblock %}
             </main>
         </div>
     </div>

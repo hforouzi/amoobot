@@ -1,10 +1,10 @@
-{% extends 'admin/custom_page.html.twig' %}
+{% extends ea() is null ? 'admin/custom_page.html.twig' : 'admin/modern/custom_page.html.twig' %}
 {% trans_default_domain 'admin' %}
 
 {% block page_section %}{{ 'admin.plugins'|trans }}{% endblock %}
-{% block page_title %}{{ 'plugin.upload_title'|trans }}{% endblock %}
+{% block custom_title %}{{ 'plugin.upload_title'|trans }}{% endblock %}
 
-{% block body %}
+{% block custom_body %}
     {% for label, messages in app.flashes %}
         {% for message in messages %}
             <div class="alert alert-{{ label }}">{{ message }}</div>

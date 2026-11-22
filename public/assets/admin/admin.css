@@ -1,5 +1,9 @@
-/* Fonts */
-@import url('https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css');
+/* Fonts: Vazirmatn v33.003 (OFL, fonts/OFL.txt), self-hosted (the same file as the Mini App, public/miniapp/fonts):
+   one variable woff2 (100-900) instead of the jsDelivr CDN, so the panel needs no outside request. */
+@font-face {
+    font-family: Vazirmatn; font-style: normal; font-weight: 100 900; font-display: swap;
+    src: url("fonts/Vazirmatn-wght.woff2?v=33.003") format("woff2-variations"), url("fonts/Vazirmatn-wght.woff2?v=33.003") format("woff2");
+}
 
 :root {
     --admin-bg: #f5f7fb;

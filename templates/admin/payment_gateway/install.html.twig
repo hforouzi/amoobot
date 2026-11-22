@@ -1,9 +1,9 @@
-{% extends 'admin/custom_page.html.twig' %}
+{% extends ea() is null ? 'admin/custom_page.html.twig' : 'admin/modern/custom_page.html.twig' %}
 {% trans_default_domain 'admin' %}
 
-{% block page_title %}{{ 'payment_gateway.install_action'|trans }}{% endblock %}
+{% block custom_title %}{{ 'payment_gateway.install_action'|trans }}{% endblock %}
 
-{% block body %}
+{% block custom_body %}
     <div class="admin-custom-page-inner">
         <div class="admin-card-grid">
             {% for module in modules %}

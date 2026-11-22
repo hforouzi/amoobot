@@ -53,9 +53,27 @@ final class ClassicShellSnapshotTest extends IntegrationTestCase
                     file_put_contents($file, $html);
                 }
                 self::assertFileExists($file);
-                self::assertSame(file_get_contents($file), $html, sprintf('%s %s: the classic shell changed', $name, $path));
+                // A Windows checkout (core.autocrlf) may turn the fixture's line ends into CRLF.
+                $expected = str_replace("\r\n", "\n", (string) file_get_contents($file));
+                // The one intended change (AD1, docs/design/admin-redesign.md section 0): custom_page.html.twig named
+                // EasyAdmin's stylesheet by a hashed file name that no longer exists (a 404); it now comes from
+                // EasyAdmin's manifest. Nothing else of the classic shell may differ.
+                $expected = str_replace('href="/bundles/easyadmin/app.459a1f73.css"', 'href="'.$this->easyAdminCss().'"', $expected);
+                self::assertSame($expected, $html, sprintf('%s %s: the classic shell changed', $name, $path));
             }
         }
+    }
+
+    public function testTheStandaloneShellLinksAnExistingEasyAdminStylesheet(): void
+    {
+        self::assertFileDoesNotExist(dirname(__DIR__, 3).'/public/bundles/easyadmin/app.459a1f73.css', 'the old hashed name is gone');
+        self::assertFileExists(dirname(__DIR__, 3).'/public'.$this->easyAdminCss());
+    }
+
+    /** EasyAdmin's stylesheet as its asset package (manifest) names it. */
+    private function easyAdminCss(): string
+    {
+        return self::getContainer()->get('assets.packages')->getUrl('app.css', 'easyadmin.assets.package');
     }
 
     /**
