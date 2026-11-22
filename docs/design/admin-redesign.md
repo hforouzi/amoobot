@@ -1,12 +1,14 @@
 # Admin panel redesign
 
-Status: **design for review**. Nothing here is built. Base commit: `2ab34b3` (tip of `develop/v3`, 2026-11-22).
+Status: **design, owner decisions applied (2026-11-22, section 8)**. Nothing here is built. Base commit: `2ab34b3` (tip
+of `develop/v3`, 2026-11-22).
 
 Builds on `docs/design/admin-panel-audit.md` (the audit: inventory 1.1-1.5, IA in 6, dashboard, workflow pattern) and its
 decision: **EasyAdmin + Twig + a small amount of Stimulus, no React** (audit 5, option (i)). This document turns the
 owner-approved mockup into a page map, a rollout, the missing service actions, the dashboard data and a PR plan.
 
-Phase names continue the **PM** prefix. Section 7 renumbers the audit's unbuilt PM13-PM19 (see 7.0).
+The redesign's PRs are numbered **AD1, AD2, …** (section 7). They replace the audit's unbuilt PM13-PM19, whose numbers
+are not reused here; PM20 and PM21 are the Marzban and PasarGuard drivers (`product-modules.md`). See 7.0.
 
 **The short version.**
 
@@ -17,8 +19,10 @@ Phase names continue the **PM** prefix. Section 7 renumbers the audit's unbuilt 
   home stay where they are and are reached from the Settings hub.
 - **One real defect blocks the mockup's service modal as written:** a web "extend" or "add traffic" can't truthfully say
   "applied on the 3x-ui panel too", because `ServiceAdministration::extend()` and `addTraffic()` write the database
-  only, and the next usage sync puts the panel's values back (3.2). This also affects the bot and the Mini App today. It
-  needs a fix (PM14) before the web offers those actions, or the confirm text must change. **Open question 1.**
+  only, and the next usage sync puts the panel's values back (3.2). This also affects the bot and the Mini App today.
+  The owner decided the panel is updated first (decision 1); that fix is a separate branch,
+  `fix/admin-extend-traffic-on-panel`, outside this series. **Web extend/add traffic (AD5) requires
+  fix/admin-extend-traffic-on-panel merged.**
 
 ## 0. What the audit says, checked against the code at `2ab34b3`
 
@@ -57,7 +61,15 @@ New facts found while checking, used below:
   `<job>.last-success`; `bin/check-scheduled-jobs.sh:25-28` reads them with the manifest
   `/var/lib/amoobot/scheduled-jobs.conf` and checks the newest nightly backup in `/var/backups/amoobot`.
 - `/healthz` reports only database reachability (`src/Shared/UI/HealthController.php:25-36`). There is no app version in
-  the code or deploy (no `VERSION` file, `deploy.sh` doesn't record the deployed commit for PHP to read).
+  the code (no `VERSION` file), but `deploy.sh` already records the deployed commit as root in
+  `/var/lib/amoobot/deployed-commit` and appends to `releases.log` (`deploy.sh:1895-1898`; corrects the first version
+  of this document). That file is root's own record and, under `deploy.sh`'s `umask 027` (`deploy.sh:20`), is
+  `root:root 0640`: PHP can't read it, and shouldn't (deploy trusts it, `deploy.sh:1879`).
+- Scheduled jobs run as the web user: their systemd units have `User=${WEB_USER}` (`www-data`, `deploy.sh:40,403-404`),
+  `/var/lib/amoobot/jobs` is `www-data`-owned `0755` (`deploy.sh:2335`) and the manifest is `root:root 0644`
+  (`deploy.sh:2392`). PHP-FPM (also `www-data`) can therefore already read job state without any new right. The
+  nightly backup runs as root through `amoobot-backup` (`deploy.sh:766-769`) with `umask 077` into a `0700` directory
+  (`bin/backup-database.sh:18,39`): PHP can't see it, and shouldn't.
 - Gateway credential failures are only sent as Telegram alerts, rate-limited, and not stored
   (`src/Payment/Application/PaymentGatewayCredentialAlert.php:12-20`).
 - Broadcasts can already target chosen customers: `BroadcastMessage::TARGET_SELECTED_USERS` with `targetUserIds`
@@ -72,15 +84,16 @@ New facts found while checking, used below:
 
 Summarised from the owner's approval. Labels are the owner's.
 
-**Shell.** RTL Persian first, fa/en switch. Font Vazirmatn. Light theme with a dark toggle. One accent colour. White
-cards on `#F4F6F9`, radius 16px. Touch targets at least 44px.
+**Shell.** RTL Persian first, fa/en switch. Font Vazirmatn. Light theme with a dark toggle. One accent colour: the
+brand colour from Branding (decision 15). White cards on `#F4F6F9`, radius 16px. Touch targets at least 44px. The brand
+name replaces "Amoobot Admin" in the header and the browser tab (decision 9).
 
 **Sidebar, exactly 7 items:**
 
 | # | Label | Holds |
 |---|---|---|
 | 1 | داشبورد | Dashboard |
-| 2 | فروش و پرداخت‌ها | Orders, payments, receipt review. **Red badge = receipts waiting** |
+| 2 | فروش و پرداخت‌ها | Orders, payments, receipt review. **Red badge = card-to-card receipts waiting only** (decision 5) |
 | 3 | مشتریان | Customers, wallets, resellers, claims |
 | 4 | سرویس‌ها | Services |
 | 5 | پلن‌ها و تخفیف | Plans, trials, discounts |
@@ -221,13 +234,15 @@ Env-only settings (`BRAND_PUBLIC_BASE_URL`, `PAYMENT_CARD_*`, `SERVICE_NOTIFY_*`
 | `app:services:attach-inbounds` | Worklist row "inbounds not attached" → services tab "needs attention"; per service "retry attach" (exists) |
 | `app:inbound:regenerate-service-configs` | Stays CLI above 10 services (`WEB_REGENERATE_MAX_SERVICES`) |
 | `app:plan:apply-inbounds --retire-now`, `--keep-old`, `--grace-hours` | Stays CLI (not in the mockup) |
-| `app:payments:winapay-reconcile`, `app:wallet:reconcile`, `app:service:verify-links`, `app:panel:doctor`, `detect-version`, `test-client-links`, `app:trial-plans:backing-audit`, `app:plugin:doctor`, `validate-package`, `app:payment:repair-plugin-gateway`, `app:telegram:set-webhook`, `set-menu-button`, `app:bot-content:missing`, `seed`, `app:sales:status`, `app:admin:create-user` | Stay CLI. Not in the mockup; the hub may list them later as "expert tools" (open question 12) |
+| `app:payments:winapay-reconcile`, `app:wallet:reconcile`, `app:service:verify-links`, `app:panel:doctor`, `detect-version`, `test-client-links`, `app:trial-plans:backing-audit`, `app:plugin:doctor`, `validate-package`, `app:payment:repair-plugin-gateway`, `app:telegram:set-webhook`, `set-menu-button`, `app:bot-content:missing`, `seed`, `app:sales:status`, `app:admin:create-user` | Stay CLI. Not in the hub for now (decision 12) |
 
-### 2.6 What I cannot place
+### 2.6 Placed late, or not yet placeable
 
 1. **Broadcast preview / send now / cancel** (`BroadcastMessageCrudController.php:260-324`). The methods exist but no
-   action or route reaches them (0). They belong in §6, but wiring them is a feature, not a move. Listed so it isn't
-   mistaken for lost. Open question 11.
+   action or route reaches them. The owner decided to wire them (decision 11): §6, in **AD7** (the PR that builds the
+   section pages, of which §6 is one). They get `#[AdminRoute]`s, actions on the broadcast detail page, `BROADCAST_SEND`,
+   the PM12 pattern (GET confirm page naming the recipient count, POST + token) and an audit row each; preview is a GET
+   that changes nothing.
 2. **Modules page** ("ماژول‌ها" in the hub card). There is no module enable/disable page yet: that is
    `product-modules.md` PM2b/PM3b. Until then the card shows Plugins only.
 3. **Mockup items with no backend on the web:** "resend link to customer" and "links & QR" on a service, the
@@ -251,6 +266,12 @@ The web does exactly what the bot and the Mini App do, through the same code, ne
 | Resend link | `ServiceManagementService::resendConfig(…, adminMode: true)` (`:258`) | `SERVICES_ASSIST` | `_resend_config` |
 | Regenerate config | existing web route `admin_vpn_service_regenerate_config` | `SERVICES_ASSIST` | `_regenerate_config` |
 
+**Support in the modal (decision 8).** An admin with `SERVICES_ASSIST` but not `SERVICES_MANAGE` (today: `ROLE_SUPPORT`)
+sees the header, the three tiles and **one action: "resend link"**. No links, no QR, no "more", no red zone. The modal
+decides this by permission (`SERVICES_MANAGE` for links & QR and "more"), not by role name, so a later role split (AD11)
+needs no template change. This is a modal rule only: the detail page and today's routes keep their current permissions
+until AD11 adds masking (audit 4.2); nothing is taken away from support in this series.
+
 Reset usage, extend and add traffic move to the module contract when it gets admin actions (product-modules.md PM3a,
 "Still on ServiceAdministration"). The web controller calls them through one small application service
 (`App\Admin\Application\ServiceActions`), so that move changes one class, not three surfaces. The bot and the Mini App
@@ -261,9 +282,11 @@ again inside `extend()`/`addTraffic()`. Presets as the Mini App: `EXTEND_PRESETS
 `TRAFFIC_PRESETS = [10, 50, 100]` (`MiniAppAdminServiceController.php:56-57`), plus a custom value. Persian digits are
 accepted (`AdminText::latinDigits()`, as `ServiceDeleteController.php:54`).
 
-### 3.2 Blocking defect: extend and add traffic don't reach the panel
+### 3.2 Why web extend / add traffic waits for a separate fix
 
-From reading; **confirm by test before PM18**:
+**Dependency: web extend/add traffic (the single-service actions PR, AD5) requires fix/admin-extend-traffic-on-panel
+merged.** That branch is not part of this series: it fixes the bot and the Mini App now (decision 1). The finding that
+led to it, from reading:
 
 - `ServiceAdministration` says so itself: "extend and add traffic (local only, as they always were)"
   (`ServiceAdministration.php:17-20`). `extend()` sets `expiresAt` and flushes (`:102-114`); `addTraffic()` sets the
@@ -278,11 +301,12 @@ date, and the sync then reverts the row. The mockup's confirm text "new expiry �
 be false.
 
 The drivers already have what is needed: `renewService()` with `expiresAt` (`Sanaei3xuiModernDriver.php:759-770`) and
-`addTrafficLimit()` (`:776`). **PM14** makes `extend()` and `addTraffic()` call the panel first, like `suspend()`
-(panel first, nothing changes locally if the panel fails: `onPanel()`, `:134-149`). That changes the bot and the Mini
-App too, so it's the owner's call (open question 1). Until it ships there is no true confirm text to show (even "the
-panel is updated at the next sync" would be false: the sync goes the other way), so **the web must not offer extend
-and add traffic before PM14**. Suspend, activate, reset usage and delete do reach the panel today.
+`addTrafficLimit()` (`:776`), so the fix can call the panel first, like `suspend()` (nothing changes locally if the
+panel fails: `onPanel()`, `:134-149`). Until it is merged there is no true confirm text to show (even "the panel is
+updated at the next sync" would be false: the sync goes the other way), so **AD5 ships extend and add traffic only
+once fix/admin-extend-traffic-on-panel is merged**; if AD5 is ready first, it ships the other actions and adds these two
+in a follow-up commit. Suspend, activate, reset usage and delete do reach the panel today. AD5's tests include the
+regression "sync after a web extend keeps the new date".
 
 ### 3.3 Single-service actions: request flow
 
@@ -306,21 +330,27 @@ Confirm texts, each computed server-side from the service (no JS maths):
 
 | Action | Text (fa first; en key mirrors it) |
 |---|---|
-| Extend | "انقضای جدید: {date}. روی پنل {panel} هم اعمال می‌شود. از کیف پول کسر نمی‌شود." (only after PM14) |
-| Add traffic | "حجم جدید: {old} + {n} = {new} گیگ. روی پنل {panel} هم اعمال می‌شود. از کیف پول کسر نمی‌شود." (only after PM14) |
+| Extend | "انقضای جدید: {date}. روی پنل {panel} هم اعمال می‌شود. از کیف پول کسر نمی‌شود." (only with fix/admin-extend-traffic-on-panel merged) |
+| Add traffic | "حجم جدید: {old} + {n} = {new} گیگ. روی پنل {panel} هم اعمال می‌شود. از کیف پول کسر نمی‌شود." (same) |
 | Reset usage | "مصرف {used} صفر می‌شود، روی پنل هم. حجم کل تغییر نمی‌کند." |
-| Suspend | "اتصال مشتری روی پنل {panel} قطع می‌شود تا وقتی دوباره فعال کنید. پیامی برای مشتری نمی‌رود." |
-| Activate | "اتصال روی پنل {panel} دوباره برقرار می‌شود. تاریخ انقضا تغییر نمی‌کند." |
+| Suspend | "اتصال مشتری روی پنل {panel} قطع می‌شود تا وقتی دوباره فعال کنید." + the sentence about the customer message that matches today's behaviour |
+| Activate | "اتصال روی پنل {panel} دوباره برقرار می‌شود. تاریخ انقضا تغییر نمی‌کند." + the same |
 | Resend link | "لینک‌ها در چت تلگرام {customer} دوباره فرستاده می‌شود." |
 | Delete (red zone) | Today's text and the typed name (`ServiceDeleteController.php:39-46`) |
 
-Whether suspend or activate notifies the customer must match what the bot does today; the text is written after
-checking `ServiceManagementService::suspendService()` in PM18, not guessed here.
+Customer messages on suspend/activate keep today's behaviour (decision 4): the web calls the same module methods and
+adds no message of its own. AD5 reads `ServiceManagementService::suspendService()`/`activateService()` and the module
+path to write the matching sentence, and a test pins that the web sends exactly what the bot's admin path sends.
 
 ### 3.4 Bulk actions
 
 Bulk changes the panel for many customers, so it follows the audit's workflow pattern (audit 6): dry run → explicit
 confirmation → job → per-row result.
+
+**Who: super admin only (decision 3).** A new permission `SERVICES_BULK` in `AdminPermission`, granted only to
+`ROLE_SUPER_ADMIN` in `AdminRolePermissions::forRole()`. A permission, not a role check, so it fits the existing matrix
+and the fail-closed listener. The checkboxes and the bulk bar render only with it; every bulk route requires it, and the
+action's own permission (`SERVICES_MANAGE`) as well.
 
 | Step | What happens |
 |---|---|
@@ -341,8 +371,9 @@ Execution:
 - **Idempotent per item:** an item is claimed (`planned → running`) with a row lock, and done items are never redone.
   Extend/add traffic store the amount on the run; an interrupted item is re-checked before retry (a re-run of extend
   would extend twice, so a `running` item older than the timeout is marked `unknown` for the admin, not retried).
-- **Limits:** max 500 services per run (open question 6); one active run per admin; the action's own MAX per service;
-  the run's permission is checked at creation and again by the runner (the admin may lose the role meanwhile).
+- **Limits (decision 6):** max **500** services per run; **one active run per admin**; typed count confirmation
+  **above 20** services; the action's own MAX per service. The run's permissions (`SERVICES_BULK` + the action's) are
+  checked at creation and again by the runner (the admin may lose the role meanwhile).
 - **Audit:** one row for the run (`service.bulk.<action>`, counts) and one per item (`service.<action>`, `run` id), so
   the log of one service shows bulk changes too.
 - **Pause / cancel:** as `InboundMoveRun` (`inbound_move_run_action`: pause, resume, cancel), reusing its page shape.
@@ -357,10 +388,10 @@ Delete is **not** a bulk action (not in the mockup either); one service at a tim
 
 | Row | Source | Exists? | Query | Button |
 |---|---|---|---|---|
-| Receipts to review | `pending`/`submitted` payments of a card method with `receiptFileId` or `trackingCode` | **New** (`PaymentTabs` gets a `receipts` tab with this filter) | 1 COUNT | §2 tab "receipts", oldest first |
-| Needs review (amount mismatch) | `PaymentTabs::countByTab()['needs_review']` | Exists (`DashboardOverview::attention()`) | shared GROUP BY | §2 tab |
+| Receipts to review (card-to-card) | `pending`/`submitted` payments of the card-to-card method with `receiptFileId` or `trackingCode`. **This count, and only this, is the sidebar's red badge** (decision 5) | **New** (`PaymentTabs` gets a `receipts` tab with this filter) | 1 COUNT | §2 tab "receipts", oldest first |
+| Needs review (gateway amount mismatch) | `PaymentTabs::countByTab()['needs_review']`. A separate row, never in the badge (decision 5) | Exists (`DashboardOverview::attention()`) | shared GROUP BY | §2 tab |
 | Paid but not delivered | `provisioning_failed` count (exists) + `StuckPaymentFinder` count (confirmed, unfulfilled, older than 30 min) | Partly; the finder needs a `count()` | 1 GROUP BY + 1 COUNT | §2 tab / the payment's retry confirm |
-| Services expiring today | `ServiceTabs::countByTab()` + one `SUM(CASE … expiresAt <= end of today)` column | **New column** in the existing query | shared | §4 tab "expiring", sorted by expiry |
+| Services expiring today | `ServiceTabs::countByTab()` + one `SUM(CASE … expiresAt <= end of today)` column, "today" = the calendar day in **Asia/Tehran** (decision 10, 4.2) | **New column** in the existing query | shared | §4 tab "expiring", sorted by expiry |
 | Inbounds not attached | `ServiceInboundCounts::notConnectedByService()` (`src/Provisioning/Application/ServiceInboundCounts.php:71`) | Exists | 1 GROUP BY | §4 tab "needs attention". Only when multi-inbound is on |
 | Failed inbound moves | services with failed moves (`VpnServiceCrudController` `?moves=failed`) | Exists as a filter; count is new | 1 COUNT | §4 filtered |
 
@@ -382,27 +413,38 @@ Rows with a zero count are hidden; an empty list shows "همه چیز مرتب �
 | Services by status | `ServiceTabs::countByTab()` | Exists |
 | Latest payments | **New:** 8 rows, newest first, joined with user and order; amount, method, status chip, link | New |
 
-Days are in the app's time zone, as `today()` uses (`$clock->now()->setTime(0, 0)`); with Jalali display (6.3) the chart
-labels are Jalali weekdays.
+**Day boundaries: Asia/Tehran.** The app runs in UTC (`src/Kernel.php:17,25`), so today's `today()` counts from UTC
+midnight (`$clock->now()->setTime(0, 0)`, 03:30 in Tehran). Decision 10 sets "expiring today" to the calendar day in
+Asia/Tehran; so that one page never mixes two "todays", the modern dashboard uses that day for **every** boundary:
+expiring today, sales/payments/customers today, yesterday, the 7 days. One constant (`AdminCalendar::TIMEZONE =
+'Asia/Tehran'`), converted to UTC instants for the queries; stored data stays UTC. The classic dashboard keeps UTC
+midnight unchanged, so the two can differ by up to 3.5 hours of activity (flip checklist 3 accounts for this). With
+Jalali display (6.3) the chart labels are Jalali dates in Persian.
 
 ### 4.3 Header
 
 - **Global search:** one box, routed by what is typed: a number → service id, payment id, order id (shows "found in …"
   choices); `@name` or text → customers (`CustomerSearch`, `src/Admin/Application/CustomerSearch.php`) and services by
-  username. Results are links; it's a GET form to a `admin_search` page, no live suggestions in the first version.
+  username. Results are links; it's a GET form to an `admin_search` page. **No typeahead** (decision 14).
 - **"System healthy · version" chip:** green when every health line (4.4) is OK, amber with the count otherwise; click
-  opens the health block. Version: **new**, see 4.4.
+  opens the health block. Version from the deploy record (4.4, decision 13).
 
 ### 4.4 System health
 
 | Line | Source | Exists? | Cost |
 |---|---|---|---|
 | Panels | `PanelHealth::of()` from stored probe data (`DashboardOverview::panels()`, `:157-174`); nothing is contacted | Exists | 1 query |
-| Jobs | Read `/var/lib/amoobot/scheduled-jobs.conf` and `jobs/<job>.last-success`, `.last-run` (written by `bin/scheduled-job.sh:61-64`) and apply the same OK/STALE/NEVER/FAILED rules as `bin/check-scheduled-jobs.sh` in PHP (`ScheduledJobHealth`). "FAILED" and "INACTIVE" need systemd, which PHP-FPM can't ask: shown as "unknown" unless a state file says so | **New** reader. **Needs**: the files readable by the PHP-FPM user (ops check) | ~12 `stat()` calls |
-| Last backup | `bin/backup-database.sh` touches `/var/lib/amoobot/jobs/backup.last-success` on success (new line), PHP reads it like a job. Reading `/var/backups/amoobot` directly would need root | **New** (ops) | 1 `stat()` |
+| Jobs | Read `/var/lib/amoobot/scheduled-jobs.conf` (`root:root 0644`) and `jobs/<job>.last-success`, `.last-run`, `.installed` (written by the jobs themselves as `www-data`, `bin/scheduled-job.sh:61-64`) and apply the OK/STALE/NEVER/NEW rules of `bin/check-scheduled-jobs.sh` in PHP (`ScheduledJobHealth`). FAILED comes from `rc=` in `.last-run`. INACTIVE (timer stopped) needs systemd, which PHP never asks: it shows as STALE once the job is overdue | **New** reader. **No new right**: FPM and the jobs are both `www-data` (section 0) | ~12 `stat()` calls |
+| Last backup | Root writes `/var/lib/amoobot/backup-last-success` (`root:root 0644`, one line: the UTC time of the last successful nightly dump; no file name, size or path) at the end of `bin/backup-database.sh` when the label is `nightly`. PHP reads that file only; `/var/backups/amoobot` stays `0700` | **New** (one line in a root script) | 1 file read |
 | Gateways | **New**: `PaymentGatewayCredentialAlert` also stores the last failure per gateway (code and time) in the cache pool, 24 h TTL; the line shows active gateways and any recent credential failure | New | 1 cache read |
 | Bot webhook | `TelegramApiClient::getWebhookInfo()` (`src/Bot/Infrastructure/TelegramApiClient.php:367`) is a **remote call**: never on page load. Cached 10 min, refreshed by a timer tick or the "check now" button (POST) on the bot card | New | 1 cache read |
-| Version | **New**: `deploy.sh` writes the deployed commit and time to `var/deploy.json` (`DEPLOY_REF`, `git rev-parse --short HEAD`); PHP reads it. Missing file → "dev" | New (ops) | 1 file read |
+| Version | Decision 13. `deploy.sh` already records the commit in `deployed-commit` (`root:root 0640`, root's trusted record, `deploy.sh:1897`). Rather than open that file to PHP, `deploy.sh` writes a **separate public copy** next to it, `/var/lib/amoobot/deployed-version` (`install -m 0644 -o root -g root`, one line: short commit, UTC deploy time, `DEPLOY_REF`), at the same step. PHP reads only that; it holds nothing secret and is written only by root. Missing file → "dev" | New (one line in `deploy.sh`) | 1 file read |
+
+**Least privilege, summarised.** PHP-FPM gains no group, no sudo rule, no `systemctl` call and no access to the backup
+directory, the deploy record, logs or locks. It reads three things: the job state it already owns, and two one-line
+`0644` files that root writes for it on purpose (`deployed-version`, `backup-last-success`). All paths are constants in
+one class with an env override for tests (`AMOOBOT_STATE_DIR`, as the scripts' `AMOOBOT_JOBS_STATE_DIR`); an unreadable
+file shows "unknown", never an error.
 
 ### 4.5 Cost per page load and caching
 
@@ -414,11 +456,11 @@ tabs, panels, wallet totals). The new one:
 | Worklist | ~5 (receipts, payment tabs, stuck count, service tabs + today column, not attached) | **None**: must be fresh, all are indexed COUNTs |
 | KPI + charts | ~4 (today range, yesterday range, 7-day CASE, new services today in service tabs) | 60 s in `cache.app`, key = section + day + permission set (not per admin: the numbers don't depend on who asks, only whether they may see them) |
 | Latest payments | 1 (LIMIT 8) | None |
-| Health | 1 query + ~14 `stat()` + 2 cache reads | 60 s |
-| Sidebar badge (every admin page) | 1 COUNT (receipts) | 30 s, shared |
+| Health | 1 query + ~12 `stat()` + 2 file reads + 2 cache reads | 60 s |
+| Sidebar badge (every admin page) | 1 COUNT (card-to-card receipts) | 30 s, shared |
 
 So ~12 queries cold, ~7 warm, each an aggregate with no per-row query (the class's own rule, `DashboardOverview.php:24-27`).
-Indexes to check in PM15: `payment(status)`, `payment(confirmed_at)`, `vpn_service(status, expires_at)`,
+Indexes to check in AD2: `payment(status)`, `payment(confirmed_at)`, `vpn_service(status, expires_at)`,
 `vpn_service(created_at)`, `user(created_at)`. A migration only if `EXPLAIN` on a production-size copy shows a scan.
 
 Sections stay per permission, as now: a support admin sees no money cards (`$can(...)` in `DashboardOverview::for()`).
@@ -429,8 +471,15 @@ Sections stay per permission, as now: a support admin sees no money cards (`$can
 
 **Switch.** A setting `admin.ui.layout` = `classic` (default) | `modern`, in the `setting` table, edited on a card in hub
 "پیشرفته" (super admin, POST + token + confirm, audited as `settings.update`). Plus an env override
-`ADMIN_UI_FORCE_CLASSIC=1` for the case where the modern layout breaks the page that would switch it back. Before the
-flip, a super admin can preview per session (`?admin_ui=preview` sets a session flag, `?admin_ui=classic` clears it).
+`ADMIN_UI_FORCE_CLASSIC=1` for the case where the modern layout breaks the page that would switch it back.
+
+**Preview before the flip: super admin only (decision 2).** `?admin_ui=preview` sets a session flag,
+`?admin_ui=classic` clears it. `AdminUiMode` honours the flag only for an admin whose assigned roles include
+`ROLE_SUPER_ADMIN` (`AdminUser::getAssignedRoles()`); for anyone else the parameter is ignored. Other admins see the new
+layout only after the flip.
+
+**Brand name (decision 9).** In modern mode `configureDashboard()->setTitle()` and the `<title>` use the brand name from
+Branding instead of `'Amoobot Admin'` (`DashboardController.php:86`); fallback "Amoobot" when none is set.
 
 **One reader**, `AdminUiMode` (request-scoped, reads the setting once), used by:
 
@@ -448,12 +497,12 @@ pages still work by URL (they're useful and harmless) but no menu links them; th
 are not tied to the layout.
 
 **`custom_page.html.twig`**: its 4 pages move to extend the EasyAdmin layout (dropping the hashed CSS file name,
-section 0) in PM13, in both modes.
+section 0) in AD1, in both modes.
 
 **Section pages = tab groups.** Items 2, 3, 5 and 6 are groups of existing pages; each gets an `AdminTabs` group (the
 existing mechanism, `AdminTabs.php:22-37`) so the tab strip shows the section's pages and the sidebar item stays active.
 EasyAdmin's active-menu detection works by the menu item's controller; for a tab on another controller the layout
-override marks the item from the section map (`AdminSections::of(route)`). To verify in PM13 on EasyAdmin 5.6.1.
+override marks the item from the section map (`AdminSections::of(route)`). To verify in AD1 on EasyAdmin 5.6.1.
 
 ### 5.2 Reuse vs custom
 
@@ -494,7 +543,8 @@ no-JS fallback (a link to a full page), so tests stay crawler tests.
 - Every new string is a key in `translations/admin.fa.yaml` and `admin.en.yaml`; `TranslationCompletenessTest` guards
   both (audit 3). Persian first: the fa text is written first and the en mirrors it.
 - No exception text or English data in pages (audit 2.3): actions answer by outcome enum (3.3).
-- The title `'Amoobot Admin'` (`DashboardController.php:86`) becomes the brand name in modern mode (open question 9).
+- The title `'Amoobot Admin'` (`DashboardController.php:86`) becomes the brand name in modern mode, header and browser
+  tab (decision 9).
 - Labels use the owner's words from the mockup; technical words (inbound, regenerate) appear only under "more".
 
 ### 6.2 RTL
@@ -506,22 +556,27 @@ no-JS fallback (a link to a full page), so tests stay crawler tests.
 
 ### 6.3 Dates and digits
 
-- Modern mode shows Jalali dates in fa, Gregorian in en, through one Twig filter built on the existing
-  `SubscriptionFormat` approach (`IntlDateFormatter('fa_IR@calendar=persian')`, `SubscriptionFormat.php:36`), falling
-  back to `Y-m-d` without intl. Classic mode keeps `yyyy-MM-dd` (`DashboardController.php:79-80`).
-- Digits: Persian digits in display text in fa; Latin digits in ids, codes, inputs and anything copyable. Inputs accept
-  both (`AdminText::latinDigits()`).
-- Open question 7 (the audit's question 4 is still open).
+Decision 7: **Jalali dates with Persian digits in Persian, Gregorian in English.**
+
+- Modern mode formats every date (lists, detail pages, dashboard, chart labels) through one Twig filter, `admin_date`,
+  built on the existing `SubscriptionFormat` approach (`IntlDateFormatter('fa_IR@calendar=persian')`,
+  `SubscriptionFormat.php:36`), which writes Persian digits; `en` gets Gregorian with Latin digits. Without intl it falls
+  back to `Y-m-d`. EasyAdmin date fields use it through the existing `AdminValueConfigurator` hook. Classic mode keeps
+  `yyyy-MM-dd` (`DashboardController.php:79-80`).
+- Times shown with a date are in Asia/Tehran, the same zone as the dashboard's days (4.2); stored values stay UTC.
+- Digits in fa: Persian in display text (dates, counts, amounts in cards and tables). Latin stays in ids, codes, URLs,
+  usernames, inputs and anything copyable, inside the LTR islands (6.2). Inputs accept both (`AdminText::latinDigits()`).
 
 ### 6.4 Theme and dark mode
 
 - Tokens as CSS custom properties in `admin-modern.css`: `--bg: #F4F6F9`, `--card: #fff`, `--radius: 16px`, one
-  `--accent` (from the brand's accent colour setting in Branding, fallback a default), status colours (ok, warn, danger,
-  info, muted), text and border.
+  `--accent` = **the brand colour from Branding** (decision 15), written into the page as one inline custom property
+  (validated as a hex colour; fallback a default when unset), status colours (ok, warn, danger, info, muted), text and
+  border. Text on accent picks black or white by contrast, so any brand colour stays readable (6.5).
 - Dark mode: the same tokens under `[data-theme="dark"]`. EasyAdmin has its own light/dark scheme handling and
   `configureDashboard()` doesn't disable it (`DashboardController.php:83-94`), but `admin.css` has no dark rules (0
   matches for "dark"), so its overrides are light-only. The modern toggle drives EasyAdmin's scheme and the tokens
-  together; classic keeps whatever it does today. To verify on a running panel in PM13.
+  together; classic keeps whatever it does today. To verify on a running panel in AD1.
 - Choice persists per browser (`localStorage`), default = system preference.
 
 ### 6.5 Accessibility rules
@@ -547,79 +602,86 @@ Modern mode adds, still with no build step:
   so the panel works without the CDN (audit question 11). Classic switches to it too (one line), since it only removes a
   network dependency.
 - `public/assets/admin/vendor/stimulus.js` and `public/assets/admin/controllers/*.js` (5.3).
-- Cache busting: `?v=` from the version file (4.4), as the Mini App does with its font.
+- Cache busting: `?v=` from `deployed-version` (4.4), as the Mini App does with its font.
 
 ## 7. PR plan
 
 ### 7.0 Numbering
 
-The audit's PM13-PM19 (audit 7) were never built. This plan takes PM13-PM21. The audit items not covered here keep
-running independently under new numbers:
+The redesign's PRs are **AD1-AD9**, in the order below. The audit's PM13-PM19 (audit 7) were never built; their numbers
+are not reused, and PM20/PM21 belong to the Marzban and PasarGuard drivers (`product-modules.md`). The audit items not
+covered by this series keep running on their own:
 
-- audit "PM13 language" (stored English messages, bulk-price page, README roles) → **PM22**;
-- audit "PM18 roles" (sales manager, permission split, masking) → **PM23**.
+- audit "PM13 language" (stored English messages, bulk-price page, README roles) → **AD10**;
+- audit "PM18 roles" (sales manager, permission split, masking) → **AD11**.
 
-Audit "PM14 menu", "PM15 jobs", "PM16 dashboard", "PM17 workflows" and "PM19 Jalali/fonts" are absorbed below.
+Audit "PM14 menu", "PM15 jobs", "PM16 dashboard", "PM17 workflows" and "PM19 Jalali/fonts" are absorbed into AD1-AD8.
+
+**Outside the series:** the panel-side extend / add traffic fix is its own branch, `fix/admin-extend-traffic-on-panel`,
+for the bot and the Mini App (decision 1, reason in 3.2). **Web extend/add traffic (AD5) requires
+fix/admin-extend-traffic-on-panel merged.**
 
 ### 7.1 PRs
 
 | PR | Content | Switch | Risk | Tests |
 |---|---|---|---|---|
-| **PM13** Shell | `AdminUiMode` + setting + env override + preview; layout override (sidebar 7 items, bottom toggles, header); `admin-modern.css` tokens, local font; vendored Stimulus + `theme`, `collapse`; section tab groups (`AdminTabs`) and `AdminSections`; `custom_page.html.twig` on the EasyAdmin layout; receipts badge | Off. Classic output unchanged | Low-medium (layout override touches every page) | Classic: snapshot of the menu HTML before/after is identical. Modern: crawl every menu target as each role (`RoleAccessWebTest` style) → 200 or 403 exactly as classic; badge count; preview flag only for super admin |
-| **PM14** Panel-side extend / add traffic | `ServiceAdministration::extend()` and `addTraffic()` call the panel first via `renewService(expiresAt)` / `addTrafficLimit()`; nothing local on failure | **None: changes bot and Mini App behaviour.** Needs the owner's yes (Q1) | Medium | Unit: driver called with the new absolute expiry / limit; panel failure leaves the row; sync after extend keeps the new date (the defect's regression test). Real-panel checklist |
-| **PM15** Dashboard | `DashboardOverview` gains `worklist()`, `range()`, `sevenDays()`, `latestPayments()`, the service-tab columns, `StuckPaymentFinder::count()`, `PaymentTabs` `receipts`; caching (4.5); modern dashboard template; global search page | Modern only (data methods are mode-free) | Low | Each new query against fixtures (counts, revenue rule incl. wallet and top-up, day boundaries in the app time zone, yesterday = 0); permission sections per role; query count ≤ 12 cold |
-| **PM16** Health | `ScheduledJobHealth` reader; backup stamp in `bin/backup-database.sh`; `var/deploy.json` from `deploy.sh`; gateway failure memory; cached webhook info + "check now"; jobs page; health block and chip | Modern pages; ops lines are inert for classic | Medium (ops scripts, file permissions) | Reader on fixture dirs (OK/STALE/NEVER/NEW, unreadable → unknown); `tests/ops` for the two script lines; webhook never called on page load (spy) |
-| **PM17** Services list + modal (read-only) | Modern index template, tabs incl. "needs attention", search, plan/panel/reseller filters, usage bar, status chip; `admin_vpn_service_panel` fragment (tiles, links & QR via `endroid/qr-code`, existing actions in "more" opening existing confirm pages); `dialog` controller | Modern only | Low | Filters and tabs return the right ids; fragment needs `SERVICES_VIEW`; links/QR hidden without permission (open question 8); no-JS fallback link |
-| **PM18** Single-service actions | `ServiceActions` application service; `ServiceActionsController` (suspend, activate, reset usage, resend link; extend and add traffic **only if PM14 merged**); confirm fragments; audit; limiter; idempotency key; toast; red zone wired to the existing delete | Routes mode-free; buttons in modern modal | Medium | Per action × role: 403 without permission, CSRF required, GET never changes, one audit row with outcome, `PANEL_FAILED` leaves the row, double POST does it once; module resolver spy proves suspend/resume/terminate go through `ProductModuleResolver` |
-| **PM19** Bulk actions | `BulkServiceRun` + items (migration, additive), planner (dry run), confirm, runner (in request ≤ 10, timer `bulk-actions` above), run page with pause/cancel/retry failed, message owners → broadcast prefill; EasyAdmin batch actions on the services list | Routes mode-free; bar in modern | **Medium-high** (many customers at once) | Dry run writes nothing; counts match the run; one active run per admin; limit 500; item claimed once under concurrent runners; `running` timeout → `unknown`, not retried; audit per item; permission re-checked by the runner; migration on a production-size copy |
-| **PM20** Settings hub + section polish | Hub page and cards with status chips; `?card=` tab filtering on settings; advanced collapsible with the layout switch; module-gated cards (`[vpn]` until PM3b, then real gating); page-level help lines | Modern only | Low | Each card per role; every settings tab still reachable by URL; module-off fixture hides `[vpn]` cards once PM3b exists |
-| **PM21** Polish and readiness | Jalali filter in modern mode; dark theme pass; accessibility pass (6.5); empty states; login page tokens; flip checklist (7.2) run on staging | Modern only | Low | a11y checks in crawler tests (labels, dialog attributes, 44px class on targets); Jalali and digit rules unit-tested |
+| **AD1** Shell | `AdminUiMode` + setting + env override + super-admin-only preview (decision 2); layout override (sidebar 7 items, bottom toggles, header); brand name in header and tab (decision 9); `admin-modern.css` tokens with the Branding colour as accent (decision 15), local font; vendored Stimulus + `theme`, `collapse`; section tab groups (`AdminTabs`) and `AdminSections`; `custom_page.html.twig` on the EasyAdmin layout; card-to-card receipts badge (decision 5) | Off. Classic output unchanged | Low-medium (layout override touches every page) | Classic: snapshot of the menu HTML before/after is identical. Modern: crawl every menu target as each role (`RoleAccessWebTest` style) → 200 or 403 exactly as classic; badge counts card-to-card receipts only; `?admin_ui=preview` ignored for admin and support, honoured for super admin; accent value rejected unless a hex colour |
+| **AD2** Dashboard | `DashboardOverview` gains `worklist()`, `range()`, `sevenDays()`, `latestPayments()`, the service-tab columns, `StuckPaymentFinder::count()`, `PaymentTabs` `receipts`; `AdminCalendar` (Asia/Tehran days, decision 10); caching (4.5); modern dashboard template; global search page, no typeahead (decision 14) | Modern only (data methods are mode-free) | Low | Each new query against fixtures (counts, revenue rule incl. wallet and top-up, yesterday = 0); day boundaries at Tehran midnight (a service expiring 23:59 Tehran counts, 00:01 next day doesn't; a payment at 21:00 UTC counts for the next Tehran day); permission sections per role; query count ≤ 12 cold |
+| **AD3** Health | `ScheduledJobHealth` reader; `backup-last-success` line in `bin/backup-database.sh`; `deployed-version` line in `deploy.sh` (decision 13); gateway failure memory; cached webhook info + "check now"; jobs page; health block and version chip | Modern pages; the two ops lines are inert for classic | Medium (root scripts) | Reader on fixture dirs (OK/STALE/NEVER/NEW/FAILED, unreadable → unknown); `tests/ops`: both new files `root:root 0644` with one line each, `deployed-commit` mode unchanged, backup dir still `0700`; webhook never called on page load (spy) |
+| **AD4** Services list + modal (read-only) | Modern index template, tabs incl. "needs attention", search, plan/panel/reseller filters, usage bar, status chip; `admin_vpn_service_panel` fragment (tiles, links & QR via `endroid/qr-code` for `SERVICES_MANAGE` only, existing actions in "more" opening existing confirm pages); support sees "resend link" only (decision 8); `dialog` controller | Modern only | Low | Filters and tabs return the right ids; fragment needs `SERVICES_VIEW`; as support: no links, no QR, no "more", no red zone in the HTML (not just hidden by CSS); no-JS fallback link |
+| **AD5** Single-service actions | `ServiceActions` application service; `ServiceActionsController`: suspend, activate, reset usage, resend link; **extend and add traffic only with fix/admin-extend-traffic-on-panel merged**; confirm fragments; customer messages as today (decision 4); audit; limiter; idempotency key; toast; red zone wired to the existing delete | Routes mode-free; buttons in modern modal | Medium | Per action × role: 403 without permission, CSRF required, GET never changes, one audit row with outcome, `PANEL_FAILED` leaves the row, double POST does it once; module resolver spy proves suspend/resume/terminate go through `ProductModuleResolver`; web suspend/activate send the same customer message as the bot's admin path; sync after a web extend keeps the new date |
+| **AD6** Bulk actions | `SERVICES_BULK` permission, super admin only (decision 3); `BulkServiceRun` + items (migration, additive), planner (dry run), confirm with typed count above 20, runner (in request ≤ 10, timer `bulk-actions` above), run page with pause/cancel/retry failed, message owners → broadcast prefill; EasyAdmin batch actions on the services list | Routes mode-free; bar in modern | **Medium-high** (many customers at once) | Dry run writes nothing; counts match the run; 403 for admin and support; limit 500, one active run per admin, typed count required at 21 and not at 20 (decision 6); item claimed once under concurrent runners; `running` timeout → `unknown`, not retried; audit per item; permissions re-checked by the runner; migration on a production-size copy |
+| **AD7** Settings hub, section pages, broadcast send | Hub page and cards with status chips, no CLI-tools card (decision 12); `?card=` tab filtering on settings; advanced collapsible with the layout switch; module-gated cards (`[vpn]` until PM3b, then real gating); page-level help lines; §6: **broadcast preview / send now / cancel wired** (decision 11, 2.6) | Hub modern only; broadcast actions in both layouts | Low-medium (send now reaches every recipient) | Each card per role; every settings tab still reachable by URL; module-off fixture hides `[vpn]` cards once PM3b exists; send now: `BROADCAST_SEND`, GET confirm shows the recipient count and sends nothing, POST + token sends once (second POST is refused), audit row; preview changes nothing |
+| **AD8** Polish and readiness | `admin_date` filter: Jalali + Persian digits in fa, Gregorian in en (decision 7); dark theme pass; accessibility pass (6.5); empty states; login page tokens; flip checklist (7.2) run on staging | Modern only | Low | a11y checks in crawler tests (labels, dialog attributes, 44px class on targets); date and digit rules unit-tested in both locales, with and without intl |
+| **AD9** Remove classic | One month after the flip (decision 16): delete the classic menu branch, `admin.css` rules no longer used, `custom_page.html.twig` leftovers, the setting, the env override and the preview flag; modern becomes the only layout | n/a | Low-medium (large deletion) | Full `tests/Admin` suite green; the role crawl of AD1 now without the switch; no route removed (`debug:router` before/after equal) |
 
-**Order.** PM13 → PM15 → PM16 → PM17 → PM18 → PM19 → PM20 → PM21 → flip. PM14 is independent and can go first; PM18's
-extend/add traffic wait for it. PM20 may go any time after PM13. PM12-style defects found on the way are fixed in their
-own PRs, not folded in.
+**Order.** AD1 → AD2 → AD3 → AD4 → AD5 → AD6 → AD7 → AD8 → flip → (one month) → AD9. AD7 may go any time after AD1;
+its broadcast part needs only AD1's section pages. AD5's extend and add traffic wait for
+fix/admin-extend-traffic-on-panel. AD10 and AD11 are independent of the switch and may run in parallel. PM12-style
+defects found on the way are fixed in their own PRs, not folded in.
 
-### 7.2 The flip (last step, not a PR)
+### 7.2 The flip (after AD8, not a PR)
 
 The owner sets `admin.ui.layout = modern` in hub → Advanced. Checklist first, on staging with a production copy:
 
 1. Every row of section 2 opens from the modern layout, as each of the three roles, with the same 200/403 as classic.
 2. Every write in section 2 still asks its confirm page and writes one audit row (sample: payment confirm, wallet
-   adjust, plugin enable, settings save, service delete).
-3. Dashboard numbers equal the classic dashboard's for the same moment (today's orders, revenue, service tabs).
-4. Worklist rows each lead to a page that lists exactly the counted items.
-5. Service actions on a test service on a real panel: suspend, activate, reset, extend, add traffic; the panel shows the
-   change and the next sync keeps it.
-6. A bulk run of 3 services and one of 15 (timer path) finish with per-row results.
-7. fa and en, light and dark, phone width (360 px) and desktop: no clipped text, no horizontal scroll.
+   adjust, plugin enable, settings save, service delete, broadcast send now from AD7).
+3. Dashboard numbers equal the classic dashboard's for the same moment, compared with the same day boundary (classic
+   counts from UTC midnight, modern from Tehran midnight, 4.2): service tabs equal at any time; today's orders and revenue
+   equal when checked with both set to the same range in a test.
+4. Worklist rows each lead to a page that lists exactly the counted items; the badge equals the card-to-card receipts
+   row.
+5. Service actions (AD5) on a test service on a real panel: suspend, activate, reset, extend, add traffic; the panel
+   shows the change and the next sync keeps it (requires fix/admin-extend-traffic-on-panel).
+6. A bulk run (AD6) of 3 services and one of 25 (timer path, typed count) finish with per-row results, as super admin;
+   an admin gets 403.
+7. fa and en, light and dark, phone width (360 px) and desktop: no clipped text, no horizontal scroll; Jalali dates with
+   Persian digits in fa, Gregorian in en (AD8).
 8. The panel loads with `cdn.jsdelivr.net` blocked.
-9. Health lines show real values on the production box (file permissions, 4.4).
-10. Switching back to classic, and `ADMIN_UI_FORCE_CLASSIC=1`, both restore today's panel at once.
+9. Health lines (AD3) show real values on the production box: jobs, `deployed-version`, `backup-last-success`.
+10. Support sees only "resend link" in the modal (AD4).
+11. Switching back to classic, and `ADMIN_UI_FORCE_CLASSIC=1`, both restore today's panel at once.
 
-After the flip, classic stays available for at least one release. Removing it is a later, separate decision.
+Classic stays available for **one month** after the flip (decision 16); then AD9 removes it.
 
-## 8. Open questions for the owner
+## 8. Decisions (owner, 2026-11-22)
 
-1. **Extend and add traffic don't reach the panel today, from the bot and Mini App either (3.2).** May PM14 change
-   them to update the panel first (and fail if the panel is down, like suspend)? Until then, should the web modal hide
-   these two actions?
-2. Is the `classic`/`modern` setting the switch you want, with a per-session preview for the super admin before the
-   flip? Or should every admin be able to try the new layout early?
-3. Who may run bulk actions: super admin only, or admins too? Support never (as today's `SERVICES_MANAGE`)?
-4. Should suspend/activate tell the customer? Today's behaviour will be kept unless you decide otherwise.
-5. Is "receipts waiting" only card-to-card receipts, or also gateway payments in `needs_review`? (Designed: two rows,
-   receipts and "needs review"; the badge counts receipts only.)
-6. Bulk limit: 500 services per run, one active run per admin, typed count above 20. Right numbers?
-7. Jalali dates in the modern panel in Persian, Gregorian in English? Persian digits in tables?
-8. May support see access links and the QR in the modal, or only "resend link"? (Audit 4.2 masking; today support can
-   read links on the detail page.)
-9. Should the brand name replace "Amoobot Admin" in the header and the browser tab?
-10. "Services expiring today": by the calendar day in the app's time zone (designed), or "within 24 hours"?
-11. Broadcast "send now" and "preview" exist in code but no button reaches them (2.6). Wire them as part of §6, or
-    leave as is?
-12. Which CLI tools (2.5) should appear in the hub as "expert tools", if any?
-13. The version chip needs `deploy.sh` to record the deployed commit (4.4). OK to add that line? And is the
-    PHP-FPM user allowed to read `/var/lib/amoobot/jobs` on the server?
-14. Global search: is a search page enough at first, or do you want suggestions while typing?
-15. The accent colour: the brand's accent colour from Branding, or a fixed panel colour?
-16. After the flip, how long should the classic layout stay available before it is removed?
+| # | Decision | Applied in |
+|---|---|---|
+| 1 | Extend/add traffic must update the panel first: yes, via the separate fix `fix/admin-extend-traffic-on-panel` (bot and Mini App) | Short version, 3.2, 3.3 texts, 7.0, AD5, flip 5 |
+| 2 | Preview of the new layout before the flip: super admin only | 5.1, AD1 |
+| 3 | Bulk actions: super admin only | 3.4 (`SERVICES_BULK`), AD6, flip 6 |
+| 4 | Suspend/activate customer message: keep today's behaviour | 3.3, AD5 |
+| 5 | Red badge: card-to-card receipts only; "needs review" is a separate worklist row | 1, 4.1, 4.5, AD1, flip 4 |
+| 6 | Bulk limit: 500 services per run, one active run per admin, typed count confirmation above 20 | 3.4, AD6 |
+| 7 | Dates: Jalali with Persian digits in Persian, Gregorian in English | 6.3, AD8, flip 7 |
+| 8 | Support role: only "resend link" in the modal, no links/QR | 3.1, AD4, flip 10 |
+| 9 | Brand name replaces "Amoobot Admin" in header and tab | 1, 5.1, 6.1, AD1 |
+| 10 | "Expiring today": calendar day in Asia/Tehran (extended to every dashboard day boundary so one page has one "today") | 4.1, 4.2, 6.3, AD2, flip 3 |
+| 11 | Broadcast preview / send now: wire them | 2.6, AD7 |
+| 12 | CLI tools in the settings hub: not now | 2.5, AD7 |
+| 13 | `deploy.sh` records the deployed commit for the version chip; the FPM user may read job status, the least-privilege way | 0, 4.4 (`deployed-version`, `backup-last-success`, no new rights), AD3 |
+| 14 | Global search: a search page first, no typeahead | 4.3, AD2 |
+| 15 | Accent colour: the brand colour from Branding | 1, 6.4, AD1 |
+| 16 | Classic layout stays one month after the flip, then a removal PR | 7.2, AD9 |
