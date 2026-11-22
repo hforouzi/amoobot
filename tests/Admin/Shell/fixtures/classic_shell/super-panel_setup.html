@@ -1,0 +1,84 @@
+
+<!DOCTYPE html>
+<html lang="fa" dir="rtl" data-turbo="false">
+<head>
+    <meta charset="utf-8">
+    <meta name="robots" content="noindex, nofollow">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title></title>
+    <link rel="stylesheet" href="/bundles/easyadmin/app.459a1f73.css">
+    <link rel="stylesheet" href="/assets/admin/admin.css">
+</head>
+<body class="ea admin-custom-shell admin-custom-rtl">
+    <div class="admin-custom-layout">
+        <aside class="admin-custom-sidebar">
+            <a class="admin-custom-brand" href="/admin">Amoobot Admin</a>
+            <nav class="admin-custom-nav" aria-label="Admin">
+                <a href="/admin">داشبورد</a>
+                                    <a href="/admin/payment-gateway">درگاه‌های پرداخت</a>
+                    
+                            </nav>
+        </aside>
+
+        <div class="admin-custom-content">
+            <header class="admin-custom-header">
+                <div>
+                    <div class="admin-custom-section">درگاه‌های پرداخت</div>
+                    <h1 class="admin-page-title"></h1>
+                </div>
+                <div class="admin-custom-header-actions">
+                                        <nav class="admin-locale-switcher">
+                        <a href="/admin/locale/fa?redirect_to=http://localhost/admin/panel-setup/new" class="active">فارسی</a>
+                        <span aria-hidden="true">|</span>
+                        <a href="/admin/locale/en?redirect_to=http://localhost/admin/panel-setup/new" class="">English</a>
+                    </nav>
+                </div>
+            </header>
+
+            <main class="admin-custom-page">
+                                        <div class="admin-custom-page">
+        <nav class="panel-setup-steps mb-3" aria-label="مراحل اتصال پنل">
+    <ol class="list-inline mb-0">
+                    <li class="list-inline-item">
+                                <span class="badge bg-primary">1</span>
+                اتصال
+                            </li>
+                    <li class="list-inline-item">
+                                <span class="badge bg-secondary">2</span>
+                انتخاب اینباندها
+                            </li>
+                    <li class="list-inline-item">
+                                <span class="badge bg-secondary">3</span>
+                اتصال پلن‌ها
+                            </li>
+            </ol>
+</nav>
+        <p class="text-muted">فقط آدرس پنل و API Token لازم است. بعد از ذخیره، «تست اتصال» را بزنید.</p>
+
+        <form name="panel_connection" method="post" class="admin-form-card" novalidate="novalidate">
+            <div><label for="panel_connection_title" class="required">نام پنل</label><input type="text" id="panel_connection_title" name="panel_connection[title]" required="required" /></div>
+            <div><label for="panel_connection_baseUrl" class="required">آدرس پنل</label><input type="text" id="panel_connection_baseUrl" name="panel_connection[baseUrl]" required="required" dir="ltr" placeholder="https://panel.example.com:2053/secret-path/" aria-describedby="panel_connection_baseUrl_help" /><div id="panel_connection_baseUrl_help" class="help-text">آدرسی که پنل را در مرورگر با آن باز می‌کنید، با مسیر مخفی (web base path) اگر دارد؛ مثلاً https://panel.example.com:2053/secret/ . اگر پنل روی همین سرور است: http://127.0.0.1:2053/secret/</div></div>
+            <div><label for="panel_connection_plainApiToken">API Token</label><input type="password" id="panel_connection_plainApiToken" name="panel_connection[plainApiToken]" dir="ltr" autocomplete="off" aria-describedby="panel_connection_plainApiToken_help" /><div id="panel_connection_plainApiToken_help" class="help-text">در پنل 3x-ui: Settings → Security → API Token. این توکن دسترسی کامل مدیر دارد؛ رمزنگاری‌شده ذخیره می‌شود و هرگز نمایش داده نمی‌شود.</div></div>
+                        <div><label for="panel_connection_isActive">فعال</label><input type="checkbox" id="panel_connection_isActive" name="panel_connection[isActive]" aria-describedby="panel_connection_isActive_help" value="1" checked="checked" /><div id="panel_connection_isActive_help" class="help-text">پنل غیرفعال خرید جدید نمی‌پذیرد؛ سرویس‌های موجود کار می‌کنند.</div></div>
+
+            
+                        <details class="mt-3 mb-3" >
+                <summary>تنظیمات پیشرفته</summary>
+                <div class="mt-2">
+                    <div><label for="panel_connection_subscriptionBaseUrl">آدرس پایه اشتراک (subscription)</label><input type="text" id="panel_connection_subscriptionBaseUrl" name="panel_connection[subscriptionBaseUrl]" dir="ltr" aria-describedby="panel_connection_subscriptionBaseUrl_help" /><div id="panel_connection_subscriptionBaseUrl_help" class="help-text">آدرس سرویس اشتراک پنل برای ساخت لینک اشتراک مشتری؛ مثلاً https://sub.example.com:2096</div></div>
+                    <div><label for="panel_connection_subscriptionPathPrefix">مسیر اشتراک</label><input type="text" id="panel_connection_subscriptionPathPrefix" name="panel_connection[subscriptionPathPrefix]" dir="ltr" placeholder="/sub" /></div>
+                    <div><label for="panel_connection_useProxy">اتصال از طریق پروکسی</label><input type="checkbox" id="panel_connection_useProxy" name="panel_connection[useProxy]" aria-describedby="panel_connection_useProxy_help" value="1" /><div id="panel_connection_useProxy_help" class="help-text">پروکسی PANEL_PROXY_* تنظیم‌شده در سرور برای این پنل استفاده شود.</div></div>
+                    <div><label for="panel_connection_tlsPin">پین کلید عمومی گواهی (فقط برای گواهی self-signed)</label><input type="text" id="panel_connection_tlsPin" name="panel_connection[tlsPin]" dir="ltr" placeholder="sha256//…=" aria-describedby="panel_connection_tlsPin_help" /><div id="panel_connection_tlsPin_help" class="help-text">برای پنلی با گواهی self-signed، به‌جای خاموش کردن بررسی گواهی، هش SHA-256 کلید عمومی آن را وارد کنید (راهنما در docs/fa/panel-connection.md). برای گواهی معتبر (مثلاً Let&#039;s Encrypt) خالی بگذارید.</div></div>
+                    <div><label for="panel_connection_integrationModeValue" class="required">حالت اتصال</label><select id="panel_connection_integrationModeValue" name="panel_connection[integrationModeValue]" aria-describedby="panel_connection_integrationModeValue_help"><option value="auto" selected="selected">خودکار (پیشنهادی)</option><option value="modern">جدید (API Token)</option><option value="legacy">قدیمی (نام کاربری و رمز)</option></select><div id="panel_connection_integrationModeValue_help" class="help-text">«خودکار» با تست اتصال تشخیص می‌دهد پنل API جدید (توکن) دارد یا نسخه قدیمی (نام کاربری/رمز) است. فقط در صورت نیاز حالت را دستی انتخاب کنید.</div></div>
+                    <div><label for="panel_connection_publicHost">هاست عمومی (جایگزین)</label><input type="text" id="panel_connection_publicHost" name="panel_connection[publicHost]" dir="ltr" aria-describedby="panel_connection_publicHost_help" /><div id="panel_connection_publicHost_help" class="help-text">فقط وقتی در لینک‌های کانفیگ ساخته‌شده قرار می‌گیرد که نه پنل و نه اینباند هاستی بدهند.</div></div>
+                </div>
+            </details>
+
+            <button type="submit" class="btn btn-primary">ذخیره</button>
+                    <input type="hidden" id="panel_connection__token" name="panel_connection[_token]" data-controller="csrf-protection" value="" /></form>
+    </div>
+                            </main>
+        </div>
+    </div>
+</body>
+</html>

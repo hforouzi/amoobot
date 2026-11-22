@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Admin\UI;
 
+use App\Admin\Application\CardReceiptQueue;
 use App\Admin\Security\AdminCrudPermissions;
 use App\Admin\UI\Crud\AdminAuditLogCrudController;
 use App\Admin\UI\Crud\AdminUserCrudController;
@@ -20,6 +21,10 @@ use App\Admin\UI\Crud\UserCrudController;
 use App\Admin\UI\Crud\VpnPanelCrudController;
 use App\Admin\UI\Crud\VpnServiceCrudController;
 use App\Admin\UI\Dashboard\DashboardOverview;
+use App\Admin\UI\Shell\AdminBrand;
+use App\Admin\UI\Shell\AdminSections;
+use App\Admin\UI\Shell\AdminUiMode;
+use App\Admin\UI\Shell\SectionMenuItemMatcher;
 use App\Entity\AdminUser;
 use App\Security\AdminActor;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Assets;
@@ -40,6 +45,10 @@ class DashboardController extends AbstractDashboardController
 {
     public function __construct(
         private readonly DashboardOverview $overview,
+        private readonly AdminUiMode $uiMode,
+        private readonly AdminSections $sections,
+        private readonly AdminBrand $brand,
+        private readonly CardReceiptQueue $cardReceipts,
     ) {
     }
 
@@ -83,7 +92,8 @@ class DashboardController extends AbstractDashboardController
     public function configureDashboard(): Dashboard
     {
         return Dashboard::new()
-            ->setTitle('Amoobot Admin')
+            // Modern: the brand name instead of "Amoobot Admin" (decision 9). EasyAdmin prints the title as HTML.
+            ->setTitle($this->uiMode->isModern() ? htmlspecialchars($this->brand->name(), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') : 'Amoobot Admin')
             ->setTranslationDomain('admin')
             // Labels a CRUD does not set are translation keys too (AdminTranslationIdGenerator).
             ->useEntityTranslations()
@@ -95,7 +105,14 @@ class DashboardController extends AbstractDashboardController
 
     public function configureAssets(): Assets
     {
-        return Assets::new()->addCssFile('assets/admin/admin.css')->addJsFile('assets/admin/admin.js');
+        $assets = Assets::new()->addCssFile('assets/admin/admin.css')->addJsFile('assets/admin/admin.js');
+        if ($this->uiMode->isModern()) {
+            // The tokens and shell of the redesign (classic: exactly the two files above). The Stimulus controllers
+            // are an ES module, loaded by the modern layout.
+            $assets->addCssFile('assets/admin/admin-modern.css');
+        }
+
+        return $assets;
     }
 
     /**
@@ -108,6 +125,12 @@ class DashboardController extends AbstractDashboardController
      */
     public function configureMenuItems(): iterable
     {
+        if ($this->uiMode->isModern()) {
+            yield from $this->modernMenuItems();
+
+            return;
+        }
+
         yield MenuItem::linkToDashboard('admin.dashboard', 'fa fa-home');
 
         $groups = [
@@ -157,6 +180,38 @@ class DashboardController extends AbstractDashboardController
 
         yield MenuItem::section();
         yield MenuItem::linkToLogout('admin.logout', 'fa fa-sign-out');
+    }
+
+    /**
+     * The modern sidebar: exactly the 7 sections (AdminSections). Each item opens the first page of its section the
+     * admin may open, with that page's permission; a section with none is left out. "Sales & payments" carries the
+     * card-to-card receipts badge (decision 5). Logout is at the bottom of the sidebar, next to the admin's name.
+     *
+     * @return iterable<MenuItemInterface>
+     */
+    private function modernMenuItems(): iterable
+    {
+        foreach (AdminSections::SECTIONS as $section => [$label, $icon]) {
+            if (AdminSections::DASHBOARD === $section) {
+                $item = MenuItem::linkToDashboard($label, $icon);
+            } else {
+                $page = $this->sections->landing($section);
+                if (null === $page) {
+                    continue;
+                }
+                $item = (null === $page['route'] ? MenuItem::linkTo($page['controller'], $label, $icon) : MenuItem::linkToRoute($label, $icon, $page['route']))
+                    ->setPermission(AdminSections::permission($page['controller'], $page['route']));
+                if (AdminSections::SALES === $section) {
+                    $receipts = $this->cardReceipts->cachedCount();
+                    if ($receipts > 0) {
+                        $item->setBadge($receipts, 'danger', ['data-admin-badge' => 'card-receipts']);
+                    }
+                }
+            }
+            $item->getAsDto()->setHtmlAttribute(SectionMenuItemMatcher::ATTRIBUTE, $section);
+
+            yield $item;
+        }
     }
 
     /**

@@ -1,0 +1,54 @@
+{# The modern admin layout (docs/design/admin-redesign.md, 1 and 5.1), used only when AdminUiMode says so (the switch,
+   or a super admin's preview). It overrides the shell only: the brand in the tab, the accent colour, the sidebar's
+   bottom (theme, language, admin name, logout), the section tabs and the Stimulus controllers. Every page's own
+   content is EasyAdmin's / the page's template, unchanged. #}
+{% extends '@!EasyAdmin/layout.html.twig' %}
+{% trans_default_domain 'admin' %}
+
+{# Browser tab: the page, then the brand (decision 9). #}
+{% block page_title %}
+    {%- set admin_page_title = block('content_title')|striptags|trim -%}
+    {{- admin_page_title -}}{{- admin_page_title is empty ? '' : ' · ' -}}{{- admin_brand_name() -}}
+{% endblock %}
+
+{# One accent colour: the brand colour, checked as a hex colour (AdminBrand, decision 15). #}
+{% block body_attr %} data-admin-ui="modern" style="--admin-accent: {{ admin_accent() }}; --admin-accent-fg: {{ admin_accent_text() }};"{% endblock %}
+
+{% block head_javascript %}
+    {{ parent() }}
+    <script type="module" src="{{ asset('assets/admin/modern.js') }}"></script>
+{% endblock %}
+
+{% block sidebar_footer %}
+    <div class="admin-sidebar-tools">
+        <div class="admin-sidebar-toggles">
+            <button type="button" class="admin-sidebar-tool" data-controller="theme" data-action="theme#toggle"
+                    data-theme-light-label-value="{{ 'admin_ui.theme.to_light'|trans }}" data-theme-dark-label-value="{{ 'admin_ui.theme.to_dark'|trans }}"
+                    aria-label="{{ 'admin_ui.theme.toggle'|trans }}" title="{{ 'admin_ui.theme.toggle'|trans }}">
+                <i class="fa fa-adjust" aria-hidden="true"></i>
+                <span class="admin-sidebar-tool-label" data-theme-target="label">{{ 'admin_ui.theme.toggle'|trans }}</span>
+            </button>
+            <button type="button" class="admin-sidebar-tool" data-controller="collapse" data-action="collapse#toggle"
+                    data-collapse-class-value="admin-sidebar-compact" data-collapse-key-value="admin/sidebarCompact"
+                    aria-expanded="true" aria-label="{{ 'admin_ui.sidebar.collapse'|trans }}" title="{{ 'admin_ui.sidebar.collapse'|trans }}">
+                <i class="fa fa-columns" aria-hidden="true"></i>
+                <span class="admin-sidebar-tool-label">{{ 'admin_ui.sidebar.collapse'|trans }}</span>
+            </button>
+        </div>
+        {{ include('admin/_locale_switcher.html.twig') }}
+        <div class="admin-sidebar-user">
+            <i class="fa fa-user-circle" aria-hidden="true"></i>
+            <span class="admin-sidebar-user-name" dir="auto">{{ app.user is not null ? (app.user.displayName ?? app.user.userIdentifier) : '' }}</span>
+            <a class="admin-sidebar-logout" href="{{ path('admin_logout') }}" title="{{ 'admin.logout'|trans }}">
+                <i class="fa fa-sign-out" aria-hidden="true"></i>
+                <span class="admin-sidebar-tool-label">{{ 'admin.logout'|trans }}</span>
+            </a>
+        </div>
+    </div>
+{% endblock %}
+
+{# The pages of the current section the admin may open (AdminSections), above the page. #}
+{% block content %}
+    <div class="admin-section-tabs">{{ include('admin/_tabs.html.twig', {tabs: admin_section_tabs(), label: 'admin_ui.section_tabs'}) }}</div>
+    {{ parent() }}
+{% endblock %}
