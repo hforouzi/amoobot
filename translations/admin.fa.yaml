@@ -1846,3 +1846,21 @@ action_confirm:
   service_delete:
     title: "حذف روی پنل"
     body: "سرویس #%id% (%name%) ابتدا روی پنل «%panel%» حذف و سپس در اینجا حذف‌شده علامت می‌خورد. اتصال مشتری قطع می‌شود و این کار برگشت‌پذیر نیست."
+
+# Modern admin layout (docs/design/admin-redesign.md, AD1): the 7 sidebar sections (the owner's labels) and the shell.
+admin_ui:
+  nav:
+    dashboard: "داشبورد"
+    sales: "فروش و پرداخت‌ها"
+    customers: "مشتریان"
+    services: "سرویس‌ها"
+    catalog: "پلن‌ها و تخفیف"
+    messaging: "پیام‌ها و متن ربات"
+    settings: "تنظیمات"
+  section_tabs: "صفحه‌های این بخش"
+  theme:
+    toggle: "تغییر پوسته"
+    to_dark: "پوسته تیره"
+    to_light: "پوسته روشن"
+  sidebar:
+    collapse: "جمع کردن منو"

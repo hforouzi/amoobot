@@ -126,8 +126,9 @@ final class TranslationCompletenessTest extends IntegrationTestCase
         $keys = [];
         $finder = (new Finder())->files()->name('*.php')->in(dirname(__DIR__, 2).'/src/Admin');
         foreach ($finder as $file) {
-            // Not keys: audit action names (->record('plan.bulk_price_adjust', ...)) and DQL paths ('entity.plan').
-            $code = (string) preg_replace("/->record\\(\\s*'[^']*'/", '', $file->getContents());
+            // Not keys: audit action names (->record('plan.bulk_price_adjust', ...)), Setting row names
+            // (const SETTING = 'admin.ui.layout') and DQL paths ('entity.plan').
+            $code = (string) preg_replace(["/->record\\(\\s*'[^']*'/", "/const SETTING = '[^']*'/"], '', $file->getContents());
             preg_match_all("/'((?:".self::KEY_PREFIXES.')\\.[a-zA-Z0-9_]+(?:\\.[a-zA-Z0-9_]+)*)\'/', $code, $matches);
             foreach (preg_grep('/^entity\\.[a-zA-Z_]+$/', $matches[1], PREG_GREP_INVERT) ?: [] as $key) {
                 $keys[$key] = $file->getRelativePathname();

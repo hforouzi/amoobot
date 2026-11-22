@@ -1846,3 +1846,21 @@ action_confirm:
   service_delete:
     title: "Delete on panel"
     body: "Service #%id% (%name%) is deleted on panel \"%panel%\" first, then marked deleted here. The customer's connection stops, and this cannot be undone."
+
+# Modern admin layout (docs/design/admin-redesign.md, AD1): the 7 sidebar sections and the shell.
+admin_ui:
+  nav:
+    dashboard: "Dashboard"
+    sales: "Sales & payments"
+    customers: "Customers"
+    services: "Services"
+    catalog: "Plans & discounts"
+    messaging: "Messages & bot texts"
+    settings: "Settings"
+  section_tabs: "Pages of this section"
+  theme:
+    toggle: "Switch theme"
+    to_dark: "Dark theme"
+    to_light: "Light theme"
+  sidebar:
+    collapse: "Collapse menu"

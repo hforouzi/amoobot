@@ -1,0 +1,278 @@
+/*
+ * Modern admin layout (docs/design/admin-redesign.md, 1 and 6): tokens and shell. Loaded only in modern mode
+ * (AdminUiMode), after admin.css; every rule is scoped to body[data-admin-ui="modern"], so classic is untouched.
+ *
+ * - One accent colour: the brand colour (decision 15), set on <body> as --admin-accent / --admin-accent-fg by
+ *   templates/admin/modern/layout.html.twig (a checked #rrggbb value, AdminBrand).
+ * - RTL first: logical properties only (margin-inline-start, inset-inline-end, text-align: start), no [dir] rules, so
+ *   one stylesheet serves fa and en.
+ * - Touch targets at least 44px (sidebar items, tabs, buttons, toggles).
+ * - Dark: the same tokens under .ea-dark-scheme (EasyAdmin's class, driven by the theme controller).
+ * - Font: Vazirmatn, self-hosted (admin.css @font-face), no CDN.
+ */
+
+body[data-admin-ui="modern"] {
+    --admin-bg: #f4f6f9;
+    --admin-card: #ffffff;
+    --admin-text: #1f2937;
+    --admin-muted: #6b7280;
+    --admin-border: #e5e7eb;
+    --admin-radius: 16px;
+    --admin-radius-sm: 10px;
+    --admin-target: 44px;
+    --admin-ok: #15803d;
+    --admin-warn: #b45309;
+    --admin-danger: #dc2626;
+    --admin-info: #2563eb;
+    --admin-accent: #166534;
+    --admin-accent-fg: #ffffff;
+    --admin-accent-soft: color-mix(in srgb, var(--admin-accent) 12%, transparent);
+
+    /* EasyAdmin's own tokens follow ours. */
+    --body-bg: var(--admin-bg);
+    --ea-primary: var(--admin-accent);
+    --color-primary: var(--admin-accent);
+    --text-on-primary: var(--admin-accent-fg);
+    --button-primary-bg: var(--admin-accent);
+    --bs-primary: var(--admin-accent);
+    --sidebar-bg: var(--admin-card);
+    --sidebar-border-color: var(--admin-border);
+    --sidebar-menu-color: var(--admin-text);
+    --sidebar-menu-icon-color: var(--admin-muted);
+    --sidebar-menu-hover-color: var(--admin-text);
+    --sidebar-item-hover-bg: var(--admin-accent-soft);
+    --sidebar-menu-active-item-bg: var(--admin-accent);
+    --sidebar-menu-active-item-color: var(--admin-accent-fg);
+    --sidebar-logo-color: var(--admin-text);
+    --font-family-base: "Vazirmatn", Tahoma, Arial, sans-serif;
+    --font-family-sans-serif: "Vazirmatn", Tahoma, Arial, sans-serif;
+
+    background: var(--admin-bg);
+    color: var(--admin-text);
+    font-family: "Vazirmatn", Tahoma, Arial, sans-serif;
+}
+
+body[data-admin-ui="modern"].ea-dark-scheme {
+    --admin-bg: #0b1020;
+    --admin-card: #151b2e;
+    --admin-text: #e5e7eb;
+    --admin-muted: #9ca3af;
+    --admin-border: #263049;
+    --admin-ok: #22c55e;
+    --admin-warn: #f59e0b;
+    --admin-danger: #f87171;
+    --admin-info: #60a5fa;
+    --admin-accent-soft: color-mix(in srgb, var(--admin-accent) 24%, transparent);
+}
+
+/* Cards: content, tables and forms sit on white cards with the 16px radius. */
+body[data-admin-ui="modern"] .content,
+body[data-admin-ui="modern"] .admin-custom-page {
+    text-align: start;
+}
+
+body[data-admin-ui="modern"] .content-body > .datagrid,
+body[data-admin-ui="modern"] .content-body .admin-table-scroll,
+body[data-admin-ui="modern"] .content-body form,
+body[data-admin-ui="modern"] .admin-card,
+body[data-admin-ui="modern"] .admin-form-card {
+    background: var(--admin-card);
+    border: 1px solid var(--admin-border);
+    border-radius: var(--admin-radius);
+}
+
+/* Sidebar: the 7 sections, large targets. */
+body[data-admin-ui="modern"] .ea-sidebar-item-link {
+    min-block-size: var(--admin-target);
+    display: flex;
+    align-items: center;
+    gap: .6rem;
+    padding-inline: .9rem;
+    border-radius: var(--admin-radius-sm);
+    font-weight: 500;
+}
+
+body[data-admin-ui="modern"] .ea-sidebar-item.is-active > .ea-sidebar-item-link,
+body[data-admin-ui="modern"] .ea-sidebar-item-link[aria-current="page"] {
+    background: var(--admin-accent);
+    color: var(--admin-accent-fg);
+}
+
+body[data-admin-ui="modern"] .ea-sidebar-item.is-active .ea-sidebar-item-icon {
+    color: var(--admin-accent-fg);
+}
+
+body[data-admin-ui="modern"] .ea-sidebar-logo .logo,
+body[data-admin-ui="modern"] .responsive-logo {
+    font-weight: 700;
+    color: var(--admin-text);
+}
+
+/* The card-to-card receipts badge (decision 5): red, with a minimum size so one digit is still readable. */
+body[data-admin-ui="modern"] [data-admin-badge="card-receipts"] {
+    background: var(--admin-danger);
+    color: #ffffff;
+    min-inline-size: 1.5rem;
+    border-radius: 999px;
+    text-align: center;
+    font-weight: 700;
+}
+
+/* Sidebar bottom: theme and sidebar toggles, language, admin name and logout. */
+body[data-admin-ui="modern"] .admin-sidebar-tools {
+    display: flex;
+    flex-direction: column;
+    gap: .5rem;
+    padding: .75rem;
+    border-block-start: 1px solid var(--admin-border);
+    background: var(--admin-card);
+}
+
+body[data-admin-ui="modern"] .admin-sidebar-toggles {
+    display: flex;
+    gap: .5rem;
+}
+
+body[data-admin-ui="modern"] .admin-sidebar-tool,
+body[data-admin-ui="modern"] .admin-sidebar-logout {
+    min-block-size: var(--admin-target);
+    min-inline-size: var(--admin-target);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: .4rem;
+    padding-inline: .75rem;
+    border: 1px solid var(--admin-border);
+    border-radius: var(--admin-radius-sm);
+    background: transparent;
+    color: var(--admin-text);
+    text-decoration: none;
+    cursor: pointer;
+}
+
+body[data-admin-ui="modern"] .admin-sidebar-tool:hover,
+body[data-admin-ui="modern"] .admin-sidebar-logout:hover {
+    background: var(--admin-accent-soft);
+}
+
+body[data-admin-ui="modern"] .admin-sidebar-tool:focus-visible,
+body[data-admin-ui="modern"] .admin-sidebar-logout:focus-visible,
+body[data-admin-ui="modern"] .ea-sidebar-item-link:focus-visible,
+body[data-admin-ui="modern"] .admin-tabs .nav-link:focus-visible {
+    outline: 3px solid var(--admin-accent);
+    outline-offset: 2px;
+}
+
+body[data-admin-ui="modern"] .admin-sidebar-tools .admin-locale-switcher {
+    display: flex;
+    gap: .25rem;
+    align-items: center;
+}
+
+body[data-admin-ui="modern"] .admin-sidebar-tools .admin-locale-switcher a {
+    min-block-size: var(--admin-target);
+    display: inline-flex;
+    align-items: center;
+    padding-inline: .75rem;
+    border-radius: var(--admin-radius-sm);
+    color: var(--admin-text);
+    text-decoration: none;
+}
+
+body[data-admin-ui="modern"] .admin-sidebar-tools .admin-locale-switcher a.active {
+    background: var(--admin-accent-soft);
+    font-weight: 700;
+}
+
+body[data-admin-ui="modern"] .admin-sidebar-user {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+    min-block-size: var(--admin-target);
+}
+
+body[data-admin-ui="modern"] .admin-sidebar-user-name {
+    flex: 1;
+    min-inline-size: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Compact sidebar (collapse controller): icons only. */
+body[data-admin-ui="modern"].admin-sidebar-compact .sidebar-wrapper {
+    max-inline-size: 5rem;
+}
+
+body[data-admin-ui="modern"].admin-sidebar-compact .ea-sidebar-item-label,
+body[data-admin-ui="modern"].admin-sidebar-compact .admin-sidebar-tool-label,
+body[data-admin-ui="modern"].admin-sidebar-compact .admin-sidebar-user-name,
+body[data-admin-ui="modern"].admin-sidebar-compact .logo-custom {
+    display: none;
+}
+
+body[data-admin-ui="modern"].admin-sidebar-compact .admin-sidebar-toggles {
+    flex-direction: column;
+}
+
+/* Tabs: the section tabs (pages of the sidebar item) and the page's own tabs. */
+body[data-admin-ui="modern"] .admin-section-tabs {
+    padding-inline: var(--content-padding-left, 1.5rem);
+    padding-block-start: .75rem;
+}
+
+body[data-admin-ui="modern"] .admin-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .25rem;
+    border-block-end: 1px solid var(--admin-border);
+}
+
+body[data-admin-ui="modern"] .admin-tabs .nav-link {
+    min-block-size: var(--admin-target);
+    display: inline-flex;
+    align-items: center;
+    padding-inline: 1rem;
+    border: 0;
+    border-block-end: 3px solid transparent;
+    border-radius: 0;
+    background: transparent;
+    color: var(--admin-muted);
+    font-weight: 500;
+}
+
+body[data-admin-ui="modern"] .admin-tabs .nav-link.active {
+    color: var(--admin-text);
+    border-block-end-color: var(--admin-accent);
+}
+
+/* Buttons and form controls: 44px targets, accent for the primary action. */
+body[data-admin-ui="modern"] .btn,
+body[data-admin-ui="modern"] .form-control,
+body[data-admin-ui="modern"] .form-select {
+    min-block-size: var(--admin-target);
+    border-radius: var(--admin-radius-sm);
+}
+
+body[data-admin-ui="modern"] .btn-primary {
+    background: var(--admin-accent);
+    border-color: var(--admin-accent);
+    color: var(--admin-accent-fg);
+}
+
+body[data-admin-ui="modern"] .form-check-input {
+    inline-size: 1.25rem;
+    block-size: 1.25rem;
+}
+
+body[data-admin-ui="modern"] .page-actions .btn,
+body[data-admin-ui="modern"] .datagrid .actions a {
+    min-inline-size: var(--admin-target);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    body[data-admin-ui="modern"] * {
+        transition: none !important; /* forced: EasyAdmin's own transitions are declared with higher specificity */
+        animation: none !important;
+    }
+}
