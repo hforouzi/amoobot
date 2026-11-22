@@ -9,12 +9,16 @@ use App\Entity\VpnService;
 use App\Module\Application\ProductModuleRegistry;
 use App\Module\Application\ProviderDriverRegistry;
 use App\Module\Domain\CapabilitySet;
+use App\Module\Domain\CustomerActionInput;
+use App\Module\Domain\CustomerActionResult;
+use App\Module\Domain\CustomerActions;
 use App\Module\Domain\ModuleRegistryException;
 use App\Module\Domain\ProductModuleInterface;
 use App\Module\Domain\ProviderDriverInterface;
 use App\Provisioning\Application\AutoSuspendSummary;
 use App\Provisioning\Application\RenewalResult;
 use App\Provisioning\Application\ServiceAdminOutcome;
+use App\Provisioning\Application\VpnCustomerView;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -148,6 +152,21 @@ final class ModuleRegistriesTest extends TestCase
             }
 
             public function runLifecycleTask(string $task, int $limit, bool $dryRun): AutoSuspendSummary
+            {
+                throw new \LogicException('not used');
+            }
+
+            public function customerView(VpnService $service): VpnCustomerView
+            {
+                throw new \LogicException('not used');
+            }
+
+            public function customerActions(VpnService $service, string $channel): CustomerActions
+            {
+                throw new \LogicException('not used');
+            }
+
+            public function runCustomerAction(VpnService $service, string $action, CustomerActionInput $input): CustomerActionResult
             {
                 throw new \LogicException('not used');
             }

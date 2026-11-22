@@ -29,12 +29,12 @@ use App\Provisioning\Application\TrafficAddonSettingsProvider;
 use App\Provisioning\Application\CustomerAccessGuard;
 use App\Provisioning\Application\CustomerServiceFinder;
 use App\Module\Application\ProductModuleResolver;
-use App\Reseller\Application\ServiceOwnership;
+use App\Module\Domain\CustomerActions;
 use App\Provisioning\Application\FinalConfigLinkProvider;
 use App\Provisioning\Application\ServiceAdminOutcome;
 use App\Provisioning\Application\ServiceAdministration;
-use App\Provisioning\Application\ServiceInboundCounts;
 use App\Provisioning\Application\VpnConfigLinkSetResult;
+use App\Provisioning\Application\VpnCustomerView;
 use App\Provisioning\Domain\VpnServiceStatus;
 use App\Shared\Infrastructure\SettingValueProvider;
 use App\Shop\Application\PlanPricingService;
@@ -53,7 +53,6 @@ use App\Shop\Domain\OrderStatus;
 use App\Shop\Domain\OrderType;
 use App\Security\AdminPermission;
 use App\Subscription\Application\LinksUpdatingNotice;
-use App\Subscription\Application\SubscriptionPageUrl;
 use Doctrine\ORM\EntityManagerInterface;
 
 class ServiceManagementService
@@ -77,17 +76,12 @@ class ServiceManagementService
         private readonly FinalConfigLinkProvider $finalConfigLinkProvider,
         private readonly ServiceConfigDeliveryRefresher $deliveryRefresher,
         private readonly SalesSettingsProvider $salesSettingsProvider,
-        private readonly VpnAccessMessageFormatter $vpnAccessMessageFormatter,
         private readonly QrCodeSender $qrCodeSender,
-        private readonly CustomerAccessGuard $accessGuard,
-        private readonly SubscriptionPageUrl $subscriptionPageUrl,
         private readonly CustomerServiceFinder $customerServices,
         private readonly ServiceOrderCheckout $serviceOrderCheckout,
         private readonly DiscountApplication $discountApplication,
         private readonly PaymentStarter $paymentStarter,
         private readonly WalletPayment $walletPayment,
-        private readonly ServiceOwnership $serviceOwnership,
-        private readonly ServiceInboundCounts $inboundCounts,
         private readonly LinksUpdatingNotice $linksUpdatingNotice,
         private readonly ProductModuleResolver $productModules,
     ) {
@@ -219,26 +213,27 @@ class ServiceManagementService
             return;
         }
 
-        if (!$this->ensureFreshConfigBeforeDelivery($chatId, $service, 'telegram_subscription')) {
+        $view = $this->customerView($service);
+        if (!$this->ensureFreshConfigBeforeDelivery($chatId, $service, 'telegram_subscription', $view)) {
             $this->acknowledgeCallback($callbackId);
 
             return;
         }
 
-        $subscriptionUrl = (string) $this->accessGuard->subscriptionUrl($service);
+        $subscriptionUrl = (string) $view->subscriptionUrl();
         if ('' === $subscriptionUrl && '' !== trim((string) $service->getSubscriptionUrl())) {
             // Stored but not reachable by a client: the access message says so (contact support) and carries any usable link.
             $this->acknowledgeCallback($callbackId);
-            $this->sendAccessMessages($chatId, $service, '✅ سرویس شما آماده شد', 'telegram_subscription_withheld');
+            $this->sendAccessMessages($chatId, $view, '✅ سرویس شما آماده شد', 'telegram_subscription_withheld');
             $this->debugLog(sprintf('service_subscription_withheld service_id=%d', $serviceId));
 
             return;
         }
         if ('' === $subscriptionUrl) {
             $this->showPopupOrMessage($chatId, $callbackId, 'لینک اشتراک برای این سرویس موجود نیست.', 'missing_subscription_url');
-            $configLinkSet = $this->collectConfigLinks($service, 'telegram_subscription_fallback_config');
+            $configLinkSet = $view->configLinkSet('telegram_subscription_fallback_config');
             if ([] !== $configLinkSet->finalLinks) {
-                $this->sendAccessMessages($chatId, $service, '✅ سرویس شما آماده شد', 'telegram_subscription_fallback_config');
+                $this->sendAccessMessages($chatId, $view, '✅ سرویس شما آماده شد', 'telegram_subscription_fallback_config');
                 $this->debugLog(sprintf(
                     'service_subscription_fallback_configs service_id=%d raw_link_count=%d formatted_link_count=%d final_sent_count=%d dropped_duplicate_count=%d',
                     $serviceId,
@@ -249,14 +244,14 @@ class ServiceManagementService
                 ));
             } elseif ($configLinkSet->linksPending) {
                 // The display guard (plan-inbound-change.md 5.5): no config, the customer is told the links are being updated.
-                $this->sendAccessMessages($chatId, $service, '✅ سرویس شما آماده شد', 'telegram_subscription_fallback_config');
+                $this->sendAccessMessages($chatId, $view, '✅ سرویس شما آماده شد', 'telegram_subscription_fallback_config');
             }
 
             return;
         }
 
         $this->acknowledgeCallback($callbackId);
-        $this->sendAccessMessages($chatId, $service, '✅ سرویس شما آماده شد', 'telegram_subscription_only');
+        $this->sendAccessMessages($chatId, $view, '✅ سرویس شما آماده شد', 'telegram_subscription_only');
         $this->debugLog(sprintf('service_subscription_sent service_id=%d user_id=%d', $serviceId, $account->getUser()->getId()));
     }
 
@@ -275,22 +270,23 @@ class ServiceManagementService
             return;
         }
 
-        if (!$this->ensureFreshConfigBeforeDelivery($chatId, $service, 'telegram_resend_config')) {
+        $view = $this->customerView($service);
+        if (!$this->ensureFreshConfigBeforeDelivery($chatId, $service, 'telegram_resend_config', $view)) {
             $this->acknowledgeCallback($callbackId);
 
             return;
         }
 
-        $configLinkSet = $this->collectConfigLinks($service, 'telegram_resend_config');
+        $configLinkSet = $view->configLinkSet('telegram_resend_config');
         // While the display guard withholds the configs (plan-inbound-change.md 5.5) the access message says so instead.
-        if (!$configLinkSet->linksPending && [] === $this->accessGuard->configLinks($service, $configLinkSet->finalLinks) && null === $this->accessGuard->subscriptionUrl($service)) {
+        if (!$configLinkSet->linksPending && [] === $view->usableConfigLinks($configLinkSet->finalLinks) && null === $view->subscriptionUrl()) {
             $this->showPopupOrMessage($chatId, $callbackId, 'اطلاعات اتصال کامل نیست. لطفاً با پشتیبانی تماس بگیرید.', 'missing_config');
 
             return;
         }
 
         $this->acknowledgeCallback($callbackId);
-        $this->sendAccessMessages($chatId, $service, '✅ سرویس شما آماده شد', 'telegram_resend_config');
+        $this->sendAccessMessages($chatId, $view, '✅ سرویس شما آماده شد', 'telegram_resend_config');
         $this->debugLog(sprintf(
             'service_resend_config service_id=%d actor_user_id=%d admin_mode=%s raw_link_count=%d formatted_link_count=%d final_sent_count=%d dropped_duplicate_count=%d',
             $serviceId,
@@ -312,20 +308,21 @@ class ServiceManagementService
             return;
         }
 
-        if (!$this->ensureFreshConfigBeforeDelivery($chatId, $service, 'telegram_subscription_qr')) {
+        $view = $this->customerView($service);
+        if (!$this->ensureFreshConfigBeforeDelivery($chatId, $service, 'telegram_subscription_qr', $view)) {
             $this->acknowledgeCallback($callbackId);
 
             return;
         }
 
-        $subscriptionUrl = (string) $this->accessGuard->subscriptionUrl($service);
+        $subscriptionUrl = (string) $view->subscriptionUrl();
         if ('' === $subscriptionUrl) {
             if ('' !== trim((string) ($service->getSubscriptionUrl() ?? ''))) {
                 $this->acknowledgeCallback($callbackId);
                 $this->telegramApiClient->sendMessage($chatId, CustomerAccessGuard::SUPPORT_NOTICE);
             }
-            $configLinkSet = $this->collectConfigLinks($service, 'telegram_qr_fallback_config');
-            $qrLinks = $this->accessGuard->configLinks($service, $configLinkSet->finalLinks);
+            $configLinkSet = $view->configLinkSet('telegram_qr_fallback_config');
+            $qrLinks = $view->usableConfigLinks($configLinkSet->finalLinks);
             if ([] === $qrLinks && $configLinkSet->linksPending) {
                 // The display guard (plan-inbound-change.md 5.5): no QR of a config that may name an inbound the service left.
                 $this->acknowledgeCallback($callbackId);
@@ -1265,7 +1262,7 @@ class ServiceManagementService
             return;
         }
 
-        $outcome = $this->serviceAdministration->delete($service);
+        $outcome = $this->productModules->forService($service)->terminate($service);
         if (ServiceAdminOutcome::ALREADY_DELETED === $outcome) {
             $this->debugLog(sprintf('admin_service_delete_already_deleted service_id=%d', $serviceId));
         }
@@ -1494,6 +1491,12 @@ class ServiceManagementService
         return true;
     }
 
+    /** What the customer sees of the service, from its product module (PM1d). */
+    private function customerView(VpnService $service): VpnCustomerView
+    {
+        return $this->productModules->forService($service)->customerView($service);
+    }
+
     private function findServiceOrPopup(int $serviceId, string $chatId, ?string $callbackId, string $logKey): ?VpnService
     {
         $service = $this->entityManager->getRepository(VpnService::class)->find($serviceId);
@@ -1506,7 +1509,7 @@ class ServiceManagementService
         return null;
     }
 
-    private function formatServiceDetailForUser(VpnService $service): string
+    private function formatServiceDetailForUser(VpnService $service, VpnCustomerView $view): string
     {
         $inbound = $service->getInbound();
         $limit = $this->formatTrafficLimit($service);
@@ -1519,7 +1522,7 @@ class ServiceManagementService
             $service->getId(),
             $this->statusLabel($service->getStatus()),
             sprintf('%s / %s', $inbound?->getHost() ?? '-', $inbound?->getCountry() ?? '-'),
-            $this->serverCountLines($service),
+            $this->serverCountLines($view),
             $inbound?->getProtocol() ?? '-',
             $inbound?->getNetwork() ?? '-',
             $inbound?->getSecurity() ?? '-',
@@ -1529,7 +1532,7 @@ class ServiceManagementService
             $remaining,
             $service->getLastUsageSyncedAt()?->format('Y-m-d H:i:s') ?? '-',
             null === $ipLimit ? 'پیشفرض/نامحدود' : (string) $ipLimit,
-            $this->accessGuard->subscriptionUrl($service) ?? ('' !== trim((string) $service->getSubscriptionUrl()) ? CustomerAccessGuard::SUPPORT_NOTICE : '-')
+            $view->subscriptionUrl() ?? ('' !== trim((string) $service->getSubscriptionUrl()) ? CustomerAccessGuard::SUPPORT_NOTICE : '-')
         );
     }
 
@@ -1538,9 +1541,9 @@ class ServiceManagementService
      * not connected: still being connected (retried automatically), or "contact support" once the retry will not try
      * them any more (M2c F10). Never which ones, where or why. Empty for every other service, so its text stays as it was.
      */
-    private function serverCountLines(VpnService $service): string
+    private function serverCountLines(VpnCustomerView $view): string
     {
-        $servers = $this->inboundCounts->servers($service);
+        $servers = $view->servers();
         if (null === $servers) {
             return '';
         }
@@ -1555,32 +1558,39 @@ class ServiceManagementService
         return $lines;
     }
 
+    /**
+     * The customer's service view: what the service's module shows (customerView()) and offers (customerActions()),
+     * drawn by the bot's keyboard. The module's rules are the ones this method had (renewal, extra traffic and the
+     * page button not for a deleted service; new connection links for a claim-link owner, D4).
+     */
     private function sendUserServiceDetail(string $chatId, VpnService $service, string $sourceFlow): void
     {
-        if (!$this->ensureFreshConfigBeforeDelivery($chatId, $service, $sourceFlow)) {
+        $module = $this->productModules->forService($service);
+        $view = $module->customerView($service);
+        if (!$this->ensureFreshConfigBeforeDelivery($chatId, $service, $sourceFlow, $view)) {
             return;
         }
 
+        $text = $this->formatServiceDetailForUser($service, $view);
+        $actions = $module->customerActions($service, CustomerActions::CHANNEL_BOT);
         $this->telegramApiClient->sendMessage(
             $chatId,
-            $this->formatServiceDetailForUser($service),
+            $text,
             $this->keyboardFactory->userServiceDetail(
                 (int) $service->getId(),
-                VpnServiceStatus::DELETED !== $service->getStatus() && $this->salesSettingsProvider->renewalsEnabled(),
-                VpnServiceStatus::DELETED !== $service->getStatus() && $this->salesSettingsProvider->addTrafficEnabled(),
-                // A deleted service has no page.
-                VpnServiceStatus::DELETED !== $service->getStatus() ? $this->subscriptionPageUrl->forTelegram($service) : null,
-                // Claim links: the owner who got it by a link may give it new connection links (D4).
-                $this->serviceOwnership->canResetLinks($service->getUser(), $service),
+                $actions->has(CustomerActions::RENEW),
+                $actions->has(CustomerActions::ADD_TRAFFIC),
+                $actions->pageUrl,
+                $actions->has(CustomerActions::RESET_LINKS),
             )
         );
 
-        $configLinkSet = $this->collectConfigLinks($service, $sourceFlow);
+        $configLinkSet = $view->configLinkSet($sourceFlow);
         if ([] === $configLinkSet->finalLinks && !$configLinkSet->linksPending) {
             return;
         }
 
-        $this->sendAccessMessages($chatId, $service, '✅ سرویس شما آماده شد', $sourceFlow);
+        $this->sendAccessMessages($chatId, $view, '✅ سرویس شما آماده شد', $sourceFlow);
         $this->debugLog(sprintf(
             'service_detail_configs service_id=%d source_flow=%s raw_link_count=%d formatted_link_count=%d final_sent_count=%d dropped_duplicate_count=%d',
             $service->getId() ?? 0,
@@ -1592,9 +1602,9 @@ class ServiceManagementService
         ));
     }
 
-    private function sendAccessMessages(string $chatId, VpnService $service, string $headline, string $sourceFlow): void
+    private function sendAccessMessages(string $chatId, VpnCustomerView $view, string $headline, string $sourceFlow): void
     {
-        foreach ($this->vpnAccessMessageFormatter->formatServiceAccessMessages($service, $headline, $sourceFlow) as $message) {
+        foreach ($view->accessMessages($headline, $sourceFlow) as $message) {
             $this->telegramApiClient->sendHtmlMessage($chatId, $message);
         }
     }
@@ -1767,9 +1777,13 @@ class ServiceManagementService
         return $this->finalConfigLinkProvider->getFinalLinkSetForService($service, $sourceFlow);
     }
 
-    private function ensureFreshConfigBeforeDelivery(string $chatId, VpnService $service, string $sourceFlow): bool
+    /**
+     * @param VpnCustomerView|null $view the customer's view, which refreshes for a customer delivery; null for the admin's
+     *                                   service view, which refreshes directly
+     */
+    private function ensureFreshConfigBeforeDelivery(string $chatId, VpnService $service, string $sourceFlow, ?VpnCustomerView $view = null): bool
     {
-        $outcome = $this->deliveryRefresher->refreshBeforeDelivery($service, $sourceFlow);
+        $outcome = null !== $view ? $view->refreshBeforeDelivery($sourceFlow) : $this->deliveryRefresher->refreshBeforeDelivery($service, $sourceFlow);
         if ($outcome->succeeded) {
             $this->entityManager->flush();
             $this->debugLog(sprintf(

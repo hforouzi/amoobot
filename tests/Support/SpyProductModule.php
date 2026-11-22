@@ -7,10 +7,14 @@ namespace App\Tests\Support;
 use App\Entity\Order;
 use App\Entity\VpnService;
 use App\Module\Application\ProductModuleRegistry;
+use App\Module\Domain\CustomerActionInput;
+use App\Module\Domain\CustomerActionResult;
+use App\Module\Domain\CustomerActions;
 use App\Module\Domain\ProductModuleInterface;
 use App\Provisioning\Application\AutoSuspendSummary;
 use App\Provisioning\Application\RenewalResult;
 use App\Provisioning\Application\ServiceAdminOutcome;
+use App\Provisioning\Application\VpnCustomerView;
 use App\Provisioning\Application\VpnProductModule;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 
@@ -82,6 +86,21 @@ final class SpyProductModule implements ProductModuleInterface
     public function runLifecycleTask(string $task, int $limit, bool $dryRun): AutoSuspendSummary
     {
         return $this->record('runLifecycleTask', [$task, $limit, $dryRun], $this->inner->runLifecycleTask($task, $limit, $dryRun));
+    }
+
+    public function customerView(VpnService $service): VpnCustomerView
+    {
+        return $this->record('customerView', [$service], $this->inner->customerView($service));
+    }
+
+    public function customerActions(VpnService $service, string $channel): CustomerActions
+    {
+        return $this->record('customerActions', [$service, $channel], $this->inner->customerActions($service, $channel));
+    }
+
+    public function runCustomerAction(VpnService $service, string $action, CustomerActionInput $input): CustomerActionResult
+    {
+        return $this->record('runCustomerAction', [$service, $action, $input], $this->inner->runCustomerAction($service, $action, $input));
     }
 
     /**

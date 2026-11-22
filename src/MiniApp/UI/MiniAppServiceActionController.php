@@ -4,10 +4,11 @@ declare(strict_types=1);
 
 namespace App\MiniApp\UI;
 
-use App\Bot\Application\ServiceManagementService;
 use App\MiniApp\Security\MiniAppUser;
+use App\Module\Application\ProductModuleResolver;
+use App\Module\Domain\CustomerActionInput;
+use App\Module\Domain\CustomerActions;
 use App\Provisioning\Application\CustomerServiceFinder;
-use App\Provisioning\Application\ServiceUsageSyncService;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -19,9 +20,10 @@ use Symfony\Component\Security\Http\Attribute\IsGranted;
 use Symfony\Contracts\Translation\TranslatorInterface;
 
 /**
- * The owner's self-service actions on a service, the same ones the bot's service view offers and run by the bot's own
- * code (ServiceManagementService): the link, QR and configs are delivered into the user's chat with the bot, never in
- * this response. Refresh syncs usage from the panel (ServiceUsageSyncService) and the app reloads the section.
+ * The owner's self-service actions on a service, the same ones the bot's service view offers, run by the service's
+ * product module (runCustomerAction(), PM1d; for VPN the bot's own code, ServiceManagementService): the link, QR and
+ * configs are delivered into the user's chat with the bot, never in this response. Refresh syncs usage from the panel
+ * (for VPN ServiceUsageSyncService::syncOne()) and the app reloads the section.
  * The service id is checked against the signed-in customer first (404 for anything not theirs); CSRF by the firewall.
  */
 #[IsGranted(MiniAppUser::ROLE)]
@@ -29,8 +31,7 @@ final class MiniAppServiceActionController extends AbstractController
 {
     public function __construct(
         private readonly CustomerServiceFinder $customerServices,
-        private readonly ServiceManagementService $serviceManagement,
-        private readonly ServiceUsageSyncService $usageSync,
+        private readonly ProductModuleResolver $productModules,
         private readonly TranslatorInterface $translator,
     ) {
     }
@@ -45,20 +46,22 @@ final class MiniAppServiceActionController extends AbstractController
         $locale = MiniAppLocale::fromRequest($request);
         // A private chat's id is the user's id: where the bot sends its answers.
         $chatId = $user->telegramUserId();
+        $module = $this->productModules->forService($service);
+        $input = new CustomerActionInput($user->account, $chatId, '');
 
         switch ($action) {
             case 'send-link':
-                $this->serviceManagement->sendSubscription($user->account, $id, $chatId, '');
+                $module->runCustomerAction($service, CustomerActions::SEND_LINK, $input);
                 break;
             case 'send-qr':
-                $this->serviceManagement->sendSubscriptionQr($user->account, $id, $chatId, '');
+                $module->runCustomerAction($service, CustomerActions::SEND_QR, $input);
                 break;
             case 'resend-config':
-                $this->serviceManagement->resendConfig($user->account, $id, $chatId, '', false);
+                $module->runCustomerAction($service, CustomerActions::RESEND_CONFIG, $input);
                 break;
             case 'refresh':
                 try {
-                    $failed = $this->usageSync->syncOne($service)->isFailed();
+                    $failed = $module->runCustomerAction($service, CustomerActions::REFRESH, $input)->failed;
                 } catch (\Throwable) {
                     $failed = true;
                 }
