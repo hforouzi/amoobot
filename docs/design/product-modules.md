@@ -1818,6 +1818,82 @@ reproduce today, so every existing plan and service is `'vpn'` and nothing a cus
   because a migration is pending, and runs it. Going back means restoring that dump or a forward fix (3.6:
   `check_schema_matches()` stops a deploy of an older commit).
 
+**PM2b (driver plugins).** The payment plugin system is reused, not doubled: the same `plugin` table and entity,
+`PluginManager` (install, enable, disable), `PluginFilesLock`, `PluginAutoloader`, the ZIP checks, `app:plugin:*` and
+the admin plugin page. No customer-visible change: nothing a customer reaches reads the new rows or loads a package,
+and no text, translation or snapshot changed.
+- **Migration** `Version20261122120000`: `ALTER TABLE plugin ADD source VARCHAR(16) DEFAULT 'package' NOT NULL`, then
+  four `INSERT`s of core rows (`source = 'core'`, `version = 'core'`, `path = ''`, `main_class` NULL, `manifest` `{}`):
+  `vpn` (`product_module`, enabled), `server` (`product_module`, disabled), `sanaei_3xui` and `dummy` (`vpn_driver`,
+  enabled). Existing gateway rows are not written; they read `'package'`. `up()` is refused, changing nothing, when a row
+  already has one of the four codes; `down()` deletes the core rows and drops the column, and is refused while a driver
+  package row exists.
+- **Types.** `Plugin::TYPES` gains `vpn_driver`, `server_driver` and also `product_module` (4.2.1: the type of the
+  module rows, not installable: install answers "type is not supported."). `Plugin::DRIVER_TYPES` maps each driver
+  type to its module. Install refuses the core codes (`vpn`, `server`, `product_module`, `sanaei_3xui`,
+  `sanaei_3xui_legacy`, `dummy`) for every type, as it refused `wallet`.
+- **Manifest v2** (`App\Plugin\Driver\DriverManifest`), required for driver types; gateways still need and get v1,
+  unchanged. `requires` has `core` (a range), **`module`** (added to 4.3's example: must be the type's module) and
+  `contract` (`{"vpn_driver": 1}`); plus `capabilities` and `files`; `connectionSchema`/`planSchema` are optional and
+  validated like `configSchema`. A malformed v2 manifest is refused at install (nothing stored). Ranges
+  (`VersionConstraint`) are space-separated comparators `>=`, `>`, `<=`, `<`, `=` with partial versions (`>=2.4 <3.0`);
+  no `^`, `~` or `||`. The core version is the new constant `App\Plugin\CoreVersion::CURRENT` (`'2.4.1'`), **bumped by
+  hand in each release commit**.
+- **Doctor for drivers** (`DriverPluginDoctor`), run at install, at enable, by `app:plugin:doctor` and on every registry
+  load. Before any package code runs: manifest, `plugin.json` on disk equal to the stored manifest, `requires.core`
+  against `CoreVersion`, `requires.contract` against `VpnDriverInterface::VERSION`, and every file's sha256
+  (`PackageIntegrity`: every file except `plugin.json` must be listed, every listed file must exist, a symbolic link is
+  refused). Then: the main class implements the type's interface, is built with no constructor arguments, answers the
+  plugin code, the module and the contract version; its declared capabilities are exactly its `instanceof` set,
+  within the manifest's list, and include `panel_sub_links` or `subscription_url`. Since `subscription_url` has no
+  interface yet (PM1a), a package must in practice implement `PanelLinkSourceDriverInterface`. A wrong hash, contract
+  or core version (or any other failure) installs the row with status `error` and the reason, and
+  `app:plugin:install` exits 1 ("installed with status error, not loaded"); enable re-runs the doctor and keeps it
+  `error`. Deviations from 4.5.3: the installer records no hash of the ZIP, and there is no sync-job recheck: the
+  registry load (below) rechecks instead.
+- **`server_driver`** has no contract in this core (`ServerDriverInterface` is PM6), so every server driver package
+  ends in `error` ("this core has no server_driver contract yet") until then.
+- **Registry.** `ProviderDriverRegistry` merges, after the tagged core drivers, the drivers `DriverPackageLoader` builds
+  from enabled `package` rows of a driver type whose module is in `APP_MODULES_ALLOWED` and whose module row (if any)
+  is enabled. Each load runs the doctor again; a package that fails is set to `error` with one DBAL `UPDATE` (not the
+  EntityManager, so nothing else pending is flushed) and is not loaded. A core driver wins a code collision (the
+  package is listed as `shadowed`). New: `isPackage()`, `shadowedPackages()`, `reset()`. **Core drivers stay as
+  today**: always registered, whatever their row says; `sanaei_3xui_legacy` has no row (the PR's list names only
+  `sanaei_3xui` and `dummy`) and lists as `enabled`. The two 1a rules "not enforced yet" are now enforced **for
+  packages only**: the contract version, and `panel_sub_links`/`subscription_url` (`dummy`, a core driver, keeps
+  working). Note: no production code calls `ProviderDriverRegistry` yet, and `VpnPanelDriverRegistry` (provisioning)
+  does not see packages, so an installed package serves no panel before PM3a/PM5b.
+- **Core rows have no runtime effect yet** besides the ceiling: disabling `vpn`, `sanaei_3xui` or `dummy` on the admin
+  page changes nothing until PM3b gates by row (they show their row's status in the listing). A module without a row is
+  treated as enabled when allowed.
+- **`APP_MODULES_ALLOWED`** (`ModuleAllowList`, default `vpn`, comma separated): `PluginManager::enable()` throws
+  `PluginEnableRefused` before any change for a module row outside it or a driver of such a module; `app:plugin:enable`
+  and `app:plugin:install --enable` exit 1 with the reason; the admin page shows it with the existing
+  `inbound_move.flash.refused` text ("Not done: %reason%"), so no text was added. It is a ceiling: it never disables a
+  row that is already enabled. An empty value allows nothing.
+- **`PLUGIN_UPLOAD_ENABLED`**, deviation from 4.5.4: **default off**, and it gates only **driver** packages uploaded
+  from the admin page (`installFromZip(..., fromWeb: true)`); gateway uploads are unchanged and the CLI
+  (`app:plugin:install`) always installs.
+- **Commands.** `app:plugin:doctor` prints a driver table (core range and version, contract package/core, hashes,
+  interface, manifest and driver capabilities) for driver types and a short note for core rows; the gateway output is
+  unchanged. New `app:product:list-modules`: kind, module, code, source, version, contract, status, allowed,
+  capabilities, for modules and drivers (packages not loaded show their manifest's capabilities, marked
+  `(manifest)`). `app:plugin:validate-package` runs the driver doctor on a driver ZIP. `app:plugin:upgrade` refuses
+  any non-gateway plugin ("not supported yet"). The admin plugin page asks `PluginDoctorDispatcher` (payment doctor for
+  gateways, unchanged; driver doctor; nothing for core rows).
+- **Tests.** No existing test file changed. New: `DriverPackageTest` (the fixture `tests/Support/plugins/fake-vpn-driver`
+  validates, installs, enables, loads as a package, passes the doctor, lists, disables; wrong hash, unlisted file,
+  wrong contract, wrong core version and a driver without link capability end in `error` and are never loaded, even
+  with the row forced to `enabled`; a file changed after enable is caught on load; web upload refused while the switch
+  is off; core codes and `product_module` refused; malformed v2 refused; `APP_MODULES_ALLOWED` blocks enabling
+  `server`, and `vpn,server` allows it; list-modules output), `FakeVpnDriverPackageContractTest` (the VPN contract kit
+  on the driver the doctor builds from the fixture directory), `DriverPluginRulesTest` (ranges, allow list),
+  `DriverPluginMigrationTest` (down/up, gateway row untouched, refusals). The fixture is `-text` in `.gitattributes`:
+  its manifest pins the files' sha256.
+- **Deploy.** A FULL deploy (it has a migration), backup first: `sudo amoobot-backup pre-pm2b`, then
+  `sudo amoobot-deploy --ref develop/v3` (without `--app-only`). No env change is needed: the defaults are
+  `APP_MODULES_ALLOWED=vpn` and `PLUGIN_UPLOAD_ENABLED` off.
+
 ## 10. What this design did not check
 
 - No production data: row counts, table sizes, real RAM headroom on the box, and PHP-FPM worker counts are unknown.

@@ -5,8 +5,11 @@ declare(strict_types=1);
 namespace App\Plugin;
 
 use App\Entity\Plugin;
+use App\Module\Application\ModuleAllowList;
 use App\Payment\Infrastructure\PaymentGatewayRegistry;
 use App\Payment\Plugin\PluginConfigSchemaValidator;
+use App\Plugin\Driver\DriverManifest;
+use App\Plugin\Driver\DriverPluginDoctor;
 use Doctrine\ORM\EntityManagerInterface;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\File\UploadedFile;
@@ -23,6 +26,12 @@ final class PluginManager
         'assets',
     ];
 
+    /**
+     * Codes of the core rows (docs/design/product-modules.md 4.2) and of the core drivers without a row: no package may
+     * take them (plugin.code is unique, and a driver code is unique within its module).
+     */
+    public const CORE_CODES = ['vpn', 'server', 'product_module', 'sanaei_3xui', 'sanaei_3xui_legacy', 'dummy'];
+
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
         private readonly LoggerInterface $logger,
@@ -31,10 +40,16 @@ final class PluginManager
         private readonly PluginFilesLock $filesLock,
         private readonly string $projectDir,
         private readonly int $maxUploadBytes = self::MAX_UPLOAD_BYTES,
+        private readonly ?DriverPluginDoctor $driverDoctor = null,
+        private readonly ModuleAllowList $moduleAllowList = new ModuleAllowList(),
+        private readonly bool $driverUploadEnabled = false,
     ) {
     }
 
-    public function installFromZip(UploadedFile|string $zipPath): PluginInstallResult
+    /**
+     * @param bool $fromWeb an upload from the admin panel: a driver package is refused unless PLUGIN_UPLOAD_ENABLED
+     */
+    public function installFromZip(UploadedFile|string $zipPath, bool $fromWeb = false): PluginInstallResult
     {
         // Never at the same time as another install or an upgrade (PluginUpgrader): both move directories in var/plugins.
         $lock = null;
@@ -47,7 +62,7 @@ final class PluginManager
         }
 
         try {
-            return $this->installLocked($zipPath);
+            return $this->installLocked($zipPath, $fromWeb);
         } finally {
             $this->filesLock->release($lock);
         }
@@ -105,7 +120,7 @@ final class PluginManager
         return $this->pluginDir($code);
     }
 
-    private function installLocked(UploadedFile|string $zipPath): PluginInstallResult
+    private function installLocked(UploadedFile|string $zipPath, bool $fromWeb): PluginInstallResult
     {
         $tmpDir = null;
         $cleanupDir = null;
@@ -117,6 +132,10 @@ final class PluginManager
             $manifest = $package->manifest;
 
             $code = (string) $manifest['code'];
+            $isDriver = isset(Plugin::DRIVER_TYPES[(string) $manifest['type']]);
+            if ($isDriver && $fromWeb && !$this->driverUploadEnabled) {
+                throw new PluginInstallException('Driver packages cannot be uploaded from the admin panel on this install (PLUGIN_UPLOAD_ENABLED is off); install them with app:plugin:install.');
+            }
             if (null !== $this->entityManager->getRepository(Plugin::class)->findOneBy(['code' => $code])) {
                 throw new PluginInstallException('Plugin already installed.');
             }
@@ -140,6 +159,7 @@ final class PluginManager
                 ->setVersion((string) $manifest['version'])
                 ->setDescription(isset($manifest['description']) && is_array($manifest['description']) ? $this->stringMap($manifest['description']) : null)
                 ->setStatus(Plugin::STATUS_INSTALLED)
+                ->setSource(Plugin::SOURCE_PACKAGE)
                 ->setPath($this->relativeProjectPath($targetDir))
                 ->setMainClass((string) $manifest['mainClass'])
                 ->setManifest($manifest)
@@ -150,6 +170,14 @@ final class PluginManager
 
             if (Plugin::TYPE_PAYMENT_GATEWAY === $plugin->getType()) {
                 $doctor = $this->doctor->inspect($plugin);
+                if (!$doctor->ok()) {
+                    $plugin
+                        ->setStatus(Plugin::STATUS_ERROR)
+                        ->setErrorMessage($doctor->errorMessage());
+                }
+            } elseif ($isDriver) {
+                // A wrong hash, contract or core version installs as 'error' (kept for the doctor), never loaded.
+                $doctor = $this->driverDoctor()->inspect($plugin);
                 if (!$doctor->ok()) {
                     $plugin
                         ->setStatus(Plugin::STATUS_ERROR)
@@ -184,8 +212,9 @@ final class PluginManager
     public function validateManifest(array $manifest): ValidationResult
     {
         $errors = [];
+        $isDriver = is_string($manifest['type'] ?? null) && isset(Plugin::DRIVER_TYPES[$manifest['type']]);
 
-        if (($manifest['manifestVersion'] ?? null) !== 1) {
+        if (!$isDriver && ($manifest['manifestVersion'] ?? null) !== 1) {
             $errors[] = 'manifestVersion must be 1.';
         }
 
@@ -194,14 +223,15 @@ final class PluginManager
             $errors[] = 'code is required.';
         } elseif (!preg_match('/^[a-z0-9_-]+$/', $code)) {
             $errors[] = 'code may only contain lowercase letters, numbers, underscore, and dash.';
-        } elseif (in_array($code, PaymentGatewayRegistry::RESERVED_CODES, true)) {
+        } elseif (in_array($code, PaymentGatewayRegistry::RESERVED_CODES, true) || in_array($code, self::CORE_CODES, true)) {
             $errors[] = sprintf('code "%s" is reserved.', $code);
         }
 
         $type = $manifest['type'] ?? null;
         if (!is_string($type) || '' === trim($type)) {
             $errors[] = 'type is required.';
-        } elseif (!in_array($type, Plugin::TYPES, true)) {
+        } elseif (!in_array($type, Plugin::TYPES, true) || Plugin::TYPE_PRODUCT_MODULE === $type) {
+            // product_module: modules are built in (4.2); its rows are core rows, never a package.
             $errors[] = 'type is not supported.';
         }
 
@@ -217,13 +247,30 @@ final class PluginManager
             $errors[] = 'mainClass is required.';
         }
 
+        if ($isDriver) {
+            array_push($errors, ...DriverManifest::errors($manifest, $this->schemaValidator));
+        }
+
         return [] === $errors ? ValidationResult::valid() : ValidationResult::invalid($errors);
     }
 
+    /**
+     * @throws PluginEnableRefused a module outside APP_MODULES_ALLOWED, or a driver of one; nothing is changed
+     */
     public function enable(Plugin $plugin): void
     {
+        $module = $plugin->module();
+        if (null !== $module && !$this->moduleAllowList->allows($module)) {
+            throw new PluginEnableRefused(sprintf('Module "%s" is not allowed on this install (APP_MODULES_ALLOWED=%s); %s was not enabled.', $module, implode(',', $this->moduleAllowList->modules()), $plugin->getCode()));
+        }
+
+        $doctor = null;
         if (Plugin::TYPE_PAYMENT_GATEWAY === $plugin->getType()) {
             $doctor = $this->doctor->inspect($plugin);
+        } elseif ($plugin->isDriver() && !$plugin->isCore()) {
+            $doctor = $this->driverDoctor()->inspect($plugin);
+        }
+        if (null !== $doctor) {
             if (!$doctor->ok()) {
                 $plugin
                     ->setStatus(Plugin::STATUS_ERROR)
@@ -252,6 +299,11 @@ final class PluginManager
             ->setUpdatedAt(new \DateTimeImmutable());
 
         $this->entityManager->flush();
+    }
+
+    private function driverDoctor(): DriverPluginDoctor
+    {
+        return $this->driverDoctor ?? throw new PluginInstallException('Driver packages are not supported here.');
     }
 
     public function uninstall(Plugin $plugin): void

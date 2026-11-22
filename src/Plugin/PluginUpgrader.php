@@ -97,6 +97,10 @@ final class PluginUpgrader
         if ((string) $manifest['type'] !== $plugin->getType()) {
             return PluginUpgradeResult::refused([sprintf('The plugin type cannot change (installed "%s", ZIP "%s").', $plugin->getType(), (string) $manifest['type'])], null, $dryRun);
         }
+        if (Plugin::TYPE_PAYMENT_GATEWAY !== $plugin->getType() || $plugin->isCore()) {
+            // PM2b: only gateway packages have an upgrade path (the checks above and below are a gateway's).
+            return PluginUpgradeResult::refused([sprintf('Upgrading a %s plugin is not supported yet.', $plugin->getType())], null, $dryRun);
+        }
 
         $oldVersion = $plugin->getVersion();
         $newVersion = (string) $manifest['version'];

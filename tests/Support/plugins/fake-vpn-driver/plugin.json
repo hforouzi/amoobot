@@ -1,0 +1,26 @@
+{
+  "manifestVersion": 2,
+  "type": "vpn_driver",
+  "code": "fake_vpn",
+  "version": "1.0.0",
+  "name": {
+    "en": "Fake VPN driver (tests only)"
+  },
+  "mainClass": "Amoobot\\Plugin\\FakeVpnDriver\\FakeVpnDriver",
+  "requires": {
+    "core": ">=2.4 <3.0",
+    "module": "vpn",
+    "contract": {
+      "vpn_driver": 1
+    }
+  },
+  "capabilities": [
+    "panel_sub_links",
+    "traffic_reset"
+  ],
+  "files": {
+    "src/FakeVpnDriver.php": "sha256:506ac6b309fac1ce93705560d9f1ff649794548bc55badfd55fbfebd08cf50d5",
+    "src/NoLinksVpnDriver.php": "sha256:b579b2f78fb146bf6a6b94c3cd3eb97d968e3bf86ead2cf7c9a659e82c147e0e"
+  },
+  "permissions": []
+}

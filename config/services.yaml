@@ -24,6 +24,12 @@ parameters:
     default_traffic_addon_max_gb: '100'
     default_traffic_addon_price_per_gb: '0'
     app.plugin_max_upload_bytes: 10485760
+    # Product modules (docs/design/product-modules.md 4.5, 4.7, PM2b). APP_MODULES_ALLOWED: the modules this install
+    # may enable (comma separated; the server install sets "server"). PLUGIN_UPLOAD_ENABLED: whether a driver package
+    # may be uploaded from the admin panel; off by default, so drivers are installed with app:plugin:install only.
+    # Payment gateway uploads are not affected.
+    app.modules_allowed_default: 'vpn'
+    app.plugin_upload_enabled_default: 'false'
     # App downloads (AppDownloadStorage): kept outside public/, served by /d/{id}. Large uploads also need the web
     # server and PHP limits raised (deploy.sh, docs/fa/deployment.md "App downloads").
     app.downloads_dir_default: '%kernel.project_dir%/var/downloads'
@@ -83,6 +89,8 @@ services:
             $paymentDescription: '%env(default::PAYMENT_DESCRIPTION)%'
             string $projectDir: '%kernel.project_dir%'
             int $maxUploadBytes: '%app.plugin_max_upload_bytes%'
+            string $modulesAllowed: '%env(default:app.modules_allowed_default:APP_MODULES_ALLOWED)%'
+            bool $driverUploadEnabled: '%env(bool:default:app.plugin_upload_enabled_default:PLUGIN_UPLOAD_ENABLED)%'
 
     App\:
         resource: '../src/'
@@ -109,6 +117,8 @@ services:
     App\Module\Application\ProviderDriverRegistry:
         arguments:
             $drivers: !tagged_iterator 'app.provider_driver'
+            # PM2b: enabled driver packages (plugin rows), merged with the tagged core drivers.
+            $packages: '@App\Module\Application\DriverPackageLoader'
 
     # Admin labels a CRUD does not set: "entity.<name>.singular|plural" and "field.<property>" (admin domain).
     EasyCorp\Bundle\EasyAdminBundle\Contracts\Translation\EntityTranslationIdGeneratorInterface:

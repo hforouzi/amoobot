@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Command;
 
+use App\Plugin\PluginEnableRefused;
 use App\Plugin\PluginManager;
 use App\Plugin\PluginRegistry;
 use App\Entity\Plugin;
@@ -39,7 +40,13 @@ final class PluginEnableCommand extends Command
             return Command::FAILURE;
         }
 
-        $this->pluginManager->enable($plugin);
+        try {
+            $this->pluginManager->enable($plugin);
+        } catch (PluginEnableRefused $refused) {
+            $io->error($refused->getMessage());
+
+            return Command::FAILURE;
+        }
         if (Plugin::STATUS_ERROR === $plugin->getStatus()) {
             $io->error(sprintf('Plugin %s failed validation: %s', $plugin->getCode(), (string) $plugin->getErrorMessage()));
 

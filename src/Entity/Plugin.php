@@ -21,6 +21,17 @@ class Plugin
     public const STATUS_ERROR = 'error';
 
     public const TYPE_PAYMENT_GATEWAY = 'payment_gateway';
+    /** A product module's row (docs/design/product-modules.md 4.2): built in only, never installable from a package. */
+    public const TYPE_PRODUCT_MODULE = 'product_module';
+    public const TYPE_VPN_DRIVER = 'vpn_driver';
+    public const TYPE_SERVER_DRIVER = 'server_driver';
+
+    /** Built into the application: no files, no main class, never installed, upgraded or uninstalled. */
+    public const SOURCE_CORE = 'core';
+    /** Installed from a ZIP into var/plugins/<code>. */
+    public const SOURCE_PACKAGE = 'package';
+
+    public const SOURCES = [self::SOURCE_CORE, self::SOURCE_PACKAGE];
 
     public const STATUSES = [
         self::STATUS_INSTALLED,
@@ -31,6 +42,15 @@ class Plugin
 
     public const TYPES = [
         self::TYPE_PAYMENT_GATEWAY,
+        self::TYPE_PRODUCT_MODULE,
+        self::TYPE_VPN_DRIVER,
+        self::TYPE_SERVER_DRIVER,
+    ];
+
+    /** Driver plugin types and the module each one serves (<module>_driver). */
+    public const DRIVER_TYPES = [
+        self::TYPE_VPN_DRIVER => 'vpn',
+        self::TYPE_SERVER_DRIVER => 'server',
     ];
 
     #[ORM\Id]
@@ -60,6 +80,10 @@ class Plugin
     #[ORM\Column(length: 32)]
     #[Assert\Choice(choices: self::STATUSES)]
     private string $status = self::STATUS_INSTALLED;
+
+    #[ORM\Column(length: 16, options: ['default' => self::SOURCE_PACKAGE])]
+    #[Assert\Choice(choices: self::SOURCES)]
+    private string $source = self::SOURCE_PACKAGE;
 
     #[ORM\Column(length: 512)]
     private string $path = '';
@@ -201,6 +225,38 @@ class Plugin
         $this->status = $status;
 
         return $this;
+    }
+
+    public function getSource(): string
+    {
+        return $this->source;
+    }
+
+    public function setSource(string $source): self
+    {
+        $this->source = $source;
+
+        return $this;
+    }
+
+    public function isCore(): bool
+    {
+        return self::SOURCE_CORE === $this->source;
+    }
+
+    public function isDriver(): bool
+    {
+        return isset(self::DRIVER_TYPES[$this->type]);
+    }
+
+    /** The module a driver or module row belongs to: its own code for a module row, null for a payment gateway. */
+    public function module(): ?string
+    {
+        return match (true) {
+            self::TYPE_PRODUCT_MODULE === $this->type => $this->code,
+            isset(self::DRIVER_TYPES[$this->type]) => self::DRIVER_TYPES[$this->type],
+            default => null,
+        };
     }
 
     public function getPath(): string
