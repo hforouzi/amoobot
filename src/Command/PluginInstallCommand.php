@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Command;
 
+use App\Entity\Plugin;
+use App\Plugin\PluginEnableRefused;
 use App\Plugin\PluginManager;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
@@ -40,8 +42,27 @@ final class PluginInstallCommand extends Command
             return Command::FAILURE;
         }
 
+        // A driver package that fails its doctor (hash, contract, core version, ...) is kept with status 'error' for
+        // app:plugin:doctor and never loaded; say so. A gateway's output is unchanged.
+        if ($result->plugin->isDriver() && Plugin::STATUS_ERROR === $result->plugin->getStatus()) {
+            $io->error(sprintf('Plugin %s installed with status error, not loaded: %s', $result->plugin->getCode(), (string) $result->plugin->getErrorMessage()));
+
+            return Command::FAILURE;
+        }
+
         if (true === $input->getOption('enable')) {
-            $this->pluginManager->enable($result->plugin);
+            try {
+                $this->pluginManager->enable($result->plugin);
+            } catch (PluginEnableRefused $refused) {
+                $io->error(sprintf('Plugin %s installed, not enabled: %s', $result->plugin->getCode(), $refused->getMessage()));
+
+                return Command::FAILURE;
+            }
+            if ($result->plugin->isDriver() && Plugin::STATUS_ERROR === $result->plugin->getStatus()) {
+                $io->error(sprintf('Plugin %s installed, not enabled: %s', $result->plugin->getCode(), (string) $result->plugin->getErrorMessage()));
+
+                return Command::FAILURE;
+            }
         }
 
         $io->success(sprintf(

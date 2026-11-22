@@ -11,7 +11,8 @@ use App\Admin\UI\DashboardController;
 use App\Admin\UI\Support\AdminJsonFormatter;
 use App\Admin\UI\Support\AdminStatusBadge;
 use App\Entity\Plugin;
-use App\Plugin\PaymentPluginDoctor;
+use App\Plugin\PluginDoctorDispatcher;
+use App\Plugin\PluginEnableRefused;
 use App\Plugin\PluginManager;
 use App\Security\AdminAuditLogger;
 use Doctrine\ORM\EntityManagerInterface;
@@ -40,7 +41,7 @@ final class PluginCrudController extends AbstractCrudController
 
     public function __construct(
         private readonly PluginManager $pluginManager,
-        private readonly PaymentPluginDoctor $pluginDoctor,
+        private readonly PluginDoctorDispatcher $pluginDoctor,
         private readonly AdminUrlGeneratorInterface $adminUrlGenerator,
         private readonly EntityManagerInterface $entityManager,
     ) {
@@ -168,7 +169,7 @@ final class PluginCrudController extends AbstractCrudController
         if ($form->isSubmitted() && $form->isValid()) {
             $file = $form->get('pluginZip')->getData();
             if ($file instanceof UploadedFile) {
-                $result = $this->pluginManager->installFromZip($file);
+                $result = $this->pluginManager->installFromZip($file, fromWeb: true);
                 if ($result->success && null !== $result->plugin) {
                     $auditLogger->record('plugin.install', 'Plugin', $result->plugin->getId(), ['code' => $result->plugin->getCode(), 'version' => $result->plugin->getVersion()]);
                     $this->flash('success', 'flash.plugin.installed');
@@ -197,7 +198,13 @@ final class PluginCrudController extends AbstractCrudController
             return $this->invalidToken();
         }
 
-        $this->pluginManager->enable($plugin);
+        try {
+            $this->pluginManager->enable($plugin);
+        } catch (PluginEnableRefused $refused) {
+            $this->flash('danger', 'inbound_move.flash.refused', ['%reason%' => $refused->getMessage()]);
+
+            return $this->redirect($this->pluginDetailUrl($plugin));
+        }
         $auditLogger->record('plugin.enable', 'Plugin', $plugin->getId(), ['code' => $plugin->getCode()]);
         $this->flash('success', 'flash.plugin.enabled');
 

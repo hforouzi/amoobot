@@ -6,6 +6,7 @@ namespace App\Plugin;
 
 use App\Entity\Plugin;
 use App\Payment\Plugin\PluginConfigSchemaValidator;
+use App\Plugin\Driver\DriverPluginDoctor;
 
 final class PluginPackageValidator
 {
@@ -16,6 +17,7 @@ final class PluginPackageValidator
         private readonly PaymentPluginDoctor $doctor,
         private readonly PluginConfigSchemaValidator $schemaValidator,
         private readonly string $projectDir,
+        private readonly ?DriverPluginDoctor $driverDoctor = null,
     ) {
     }
 
@@ -60,6 +62,20 @@ final class PluginPackageValidator
                 if (!$doctor->ok()) {
                     array_push($errors, ...$doctor->errors);
                 }
+            } elseif (is_string($manifest['type'] ?? null) && isset(Plugin::DRIVER_TYPES[$manifest['type']]) && null !== $this->driverDoctor && [] === $errors) {
+                // Hashes, core and contract versions first; the package's code is loaded only when they hold.
+                $plugin = (new Plugin())
+                    ->setCode((string) ($manifest['code'] ?? ''))
+                    ->setType($manifest['type'])
+                    ->setName(is_array($manifest['name'] ?? null) ? $this->stringMap($manifest['name']) : ['en' => (string) ($manifest['code'] ?? '')])
+                    ->setVersion((string) ($manifest['version'] ?? ''))
+                    ->setPath($root)
+                    ->setMainClass((string) ($manifest['mainClass'] ?? ''))
+                    ->setManifest($manifest)
+                    ->setStatus(Plugin::STATUS_INSTALLED);
+                $driverDoctor = $this->driverDoctor->inspect($plugin);
+                $doctor = $driverDoctor->toPluginDoctorResult();
+                array_push($errors, ...$driverDoctor->errors);
             }
 
             return ['manifest' => $manifest, 'doctor' => $doctor, 'errors' => array_values(array_unique($errors)), 'root' => $root];
