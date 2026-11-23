@@ -6,7 +6,7 @@ namespace App\Provisioning\Application;
 
 use App\Entity\VpnService;
 use App\Entity\VpnServiceInbound;
-use App\Provisioning\Domain\InboundAttachDriverInterface;
+use App\Provisioning\Domain\VpnCapability;
 use App\Provisioning\Domain\VpnServiceStatus;
 use App\Provisioning\Infrastructure\VpnPanelDriverRegistry;
 use App\Shop\Application\MultiInboundSettings;
@@ -110,6 +110,12 @@ final class ServiceInboundCounts
     {
         $panel = $service->getPanel();
 
-        return null !== $panel && $this->driverRegistry->resolve($panel) instanceof InboundAttachDriverInterface;
+        if (null === $panel) {
+            return false;
+        }
+        $driver = $this->driverRegistry->resolve($panel);
+
+        return VpnCapability::has($driver, VpnCapability::MULTI_INBOUND)
+            && VpnCapability::has($driver, VpnCapability::PER_USER_INBOUND_SELECTION);
     }
 }

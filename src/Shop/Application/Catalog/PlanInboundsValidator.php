@@ -7,6 +7,8 @@ namespace App\Shop\Application\Catalog;
 use App\Entity\Plan;
 use App\Entity\TrialPlan;
 use App\Entity\VpnInbound;
+use App\Module\Application\VpnPanelCapabilities;
+use App\Provisioning\Domain\VpnCapability;
 use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http\PanelApiException;
 use App\Provisioning\Infrastructure\Sanaei3xui\Modern\ModernClientsApi;
 use App\Shop\Application\MultiInboundSettings;
@@ -24,7 +26,7 @@ use Symfony\Component\Validator\ConstraintValidator;
  *   MAX_ADDITIONAL;
  * - every additional inbound is on the primary's panel and is not the primary; a newly chosen one is active (a kept one
  *   that became inactive since is a warning, PlanInboundWarnings);
- * - the panel is a 3x-ui panel in modern mode (the effective mode: forced, or auto with the detected one) when the
+ * - the panel driver declares multi_inbound when the
  *   inbounds or the primary change;
  * - D1: only VLESS, VMess, Trojan and Shadowsocks; Shadowsocks only when every SS inbound of the plan has the same
  *   method; a VLESS primary with a vision flow only with flow-capable VLESS additional inbounds. These two read the
@@ -42,6 +44,7 @@ final class PlanInboundsValidator extends ConstraintValidator
         private readonly MultiInboundSettings $settings,
         private readonly ModernClientsApi $api,
         private readonly EntityManagerInterface $entityManager,
+        private readonly VpnPanelCapabilities $capabilities,
     ) {
     }
 
@@ -88,7 +91,7 @@ final class PlanInboundsValidator extends ConstraintValidator
             }
         }
         $panel = $primary->getPanel();
-        if ($changed && ('sanaei_3xui' !== $panel->getType() || !$panel->isModern())) {
+        if ($changed && !$this->capabilities->has($panel, VpnCapability::MULTI_INBOUND)) {
             $this->violation('plan.additional_inbounds.not_modern');
         }
         foreach ($value->getInbounds() as $inbound) {

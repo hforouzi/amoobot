@@ -12,6 +12,7 @@ use App\Provisioning\Application\CustomerServiceFinder;
 use App\Provisioning\Application\ServiceConfigRegenerator;
 use App\Provisioning\Domain\CredentialRotationDriverInterface;
 use App\Provisioning\Domain\Dto\RotatedCredentials;
+use App\Provisioning\Domain\VpnCapability;
 use App\Provisioning\Domain\VpnServiceStatus;
 use App\Provisioning\Infrastructure\VpnPanelDriverRegistry;
 use App\Reseller\Domain\ClaimException;
@@ -377,7 +378,7 @@ class ServiceOwnership
     private function verifyRotationHeld(VpnService $service, RotatedCredentials $rotated): void
     {
         $driver = null === $service->getPanel() ? null : $this->drivers->resolve($service->getPanel());
-        if (!$driver instanceof CredentialRotationDriverInterface) {
+        if (!$driver instanceof CredentialRotationDriverInterface || !VpnCapability::has($driver, VpnCapability::CREDENTIAL_ROTATION)) {
             return;
         }
         for ($attempt = 1; $attempt <= 2; ++$attempt) {
@@ -450,7 +451,7 @@ class ServiceOwnership
         $protocol = strtolower((string) $service->getInbound()?->getProtocol());
 
         return match (true) {
-            !$driver instanceof CredentialRotationDriverInterface || !$driver->canRotateCredentials((string) $service->getRemoteId(), $service->getPanel()) => 'driver',
+            (!$driver instanceof CredentialRotationDriverInterface || !VpnCapability::has($driver, VpnCapability::CREDENTIAL_ROTATION)) || !$driver->canRotateCredentials((string) $service->getRemoteId(), $service->getPanel()) => 'driver',
             '' !== $protocol && !in_array($protocol, self::UUID_PROTOCOLS, true) => 'protocol',
             $this->ordersInFlight->exists((int) $service->getId()) => 'busy',
             default => null,

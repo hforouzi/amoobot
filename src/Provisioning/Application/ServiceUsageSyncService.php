@@ -8,11 +8,12 @@ use App\Entity\Payment;
 use App\Entity\VpnPanel;
 use App\Entity\VpnService;
 use App\Module\Application\UnknownProductTypeGuard;
+use App\Payment\Domain\PaymentStatus;
 use App\Provisioning\Domain\BatchUsageDriverInterface;
 use App\Provisioning\Domain\Dto\VpnUsage;
+use App\Provisioning\Domain\VpnCapability;
 use App\Provisioning\Domain\VpnServiceStatus;
 use App\Provisioning\Infrastructure\VpnPanelDriverRegistry;
-use App\Payment\Domain\PaymentStatus;
 use App\Shared\Infrastructure\SafeErrorLog;
 use App\Shop\Domain\OrderType;
 use Doctrine\ORM\EntityManagerInterface;
@@ -200,7 +201,7 @@ final class ServiceUsageSyncService
         foreach ($byPanel as ['panel' => $panel, 'services' => $panelServices]) {
             try {
                 $driver = $this->driverRegistry->resolve($panel);
-                if (!$driver instanceof BatchUsageDriverInterface) {
+                if (!$driver instanceof BatchUsageDriverInterface || !VpnCapability::has($driver, VpnCapability::BATCH_USAGE)) {
                     continue;
                 }
                 $batch = $driver->getUsages($panel, array_map(static fn (VpnService $s): string => trim((string) $s->getRemoteId()), $panelServices));

@@ -232,10 +232,11 @@ class Plan
      * plans.multi_inbound_enabled through PlanSaleRule; without it such a plan is not sold (fail closed).
      *
      * @param bool|\Closure(): bool $multiInboundEnabled
+     * @param \Closure(VpnPanel): \App\Module\Domain\CapabilitySet|null $capabilities
      */
-    public function isAvailableForSale(bool|\Closure $multiInboundEnabled = false): bool
+    public function isAvailableForSale(bool|\Closure $multiInboundEnabled = false, ?\Closure $capabilities = null): bool
     {
-        if (!$this->isActive || null !== $this->multiInboundSaleBlocker($multiInboundEnabled)) {
+        if (!$this->isActive || null !== $this->multiInboundSaleBlocker($multiInboundEnabled, $capabilities)) {
             return false;
         }
         if (null === $this->inbound) {
@@ -250,14 +251,15 @@ class Plan
      * for a plan without additional inbounds.
      *
      * @param bool|\Closure(): bool $multiInboundEnabled
+     * @param \Closure(VpnPanel): \App\Module\Domain\CapabilitySet|null $capabilities
      */
-    public function multiInboundSaleBlocker(bool|\Closure $multiInboundEnabled): ?string
+    public function multiInboundSaleBlocker(bool|\Closure $multiInboundEnabled, ?\Closure $capabilities = null): ?string
     {
         if (!$this->hasAdditionalInbounds()) {
             return null;
         }
 
-        return MultiInboundSale::blocker($this->inbound, $this->getAdditionalInbounds(), $multiInboundEnabled);
+        return MultiInboundSale::blocker($this->inbound, $this->getAdditionalInbounds(), $multiInboundEnabled, $capabilities);
     }
 
     public function setIsActive(bool $isActive): self

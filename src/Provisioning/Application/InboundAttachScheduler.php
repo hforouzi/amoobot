@@ -8,6 +8,7 @@ use App\Entity\VpnService;
 use App\Entity\VpnServiceInbound;
 use App\Module\Application\UnknownProductTypeGuard;
 use App\Provisioning\Domain\InboundAttachDriverInterface;
+use App\Provisioning\Domain\VpnCapability;
 use App\Provisioning\Domain\VpnServiceStatus;
 use App\Provisioning\Infrastructure\VpnPanelDriverRegistry;
 use App\Shop\Application\MultiInboundSettings;
@@ -158,7 +159,7 @@ final class InboundAttachScheduler
             return sprintf('skipped (panel #%d stopped for this run)', $panelId);
         }
         $driver = $this->driverRegistry->resolve($panel);
-        if (!$driver instanceof InboundAttachDriverInterface) {
+        if (!$driver instanceof InboundAttachDriverInterface || (!VpnCapability::has($driver, VpnCapability::MULTI_INBOUND) || !VpnCapability::has($driver, VpnCapability::PER_USER_INBOUND_SELECTION))) {
             ++$run->skipped;
 
             return 'skipped (panel not in modern mode)';

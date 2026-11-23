@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Provisioning\Application;
 
 use App\Entity\VpnService;
+use App\Module\Application\VpnPanelCapabilities;
+use App\Provisioning\Domain\VpnCapability;
 use App\Shared\Infrastructure\SafeErrorLog;
 
 final class FinalConfigLinkProvider
@@ -12,6 +14,7 @@ final class FinalConfigLinkProvider
     public function __construct(
         private readonly VpnAccessLinkGenerator $vpnAccessLinkGenerator,
         private readonly VpnConfigLinkSet $vpnConfigLinkSet,
+        private readonly VpnPanelCapabilities $capabilities,
     ) {
     }
 
@@ -83,7 +86,7 @@ final class FinalConfigLinkProvider
             return false;
         }
         $panel = $service->getPanel();
-        if (null === $panel || 'sanaei_3xui' !== strtolower(trim((string) $panel->getType())) || !$panel->isModern()) {
+        if (!$this->capabilities->has($panel, VpnCapability::PANEL_SUB_LINKS)) {
             return false;
         }
         $syncedAt = $service->getLastAccessInfoSyncedAt();
@@ -169,7 +172,8 @@ final class FinalConfigLinkProvider
             return false;
         }
 
-        return 'sanaei_3xui' === strtolower(trim((string) ($service->getPanel()?->getType() ?? '')));
+        return $this->capabilities->has($service->getPanel(), VpnCapability::PANEL_SUB_LINKS)
+            || $this->capabilities->usesLegacyConfig($service->getPanel());
     }
 
     private function logResult(VpnService $service, string $sourceFlow, int $rawCount, int $formattedCount, VpnConfigLinkSetResult $result): void

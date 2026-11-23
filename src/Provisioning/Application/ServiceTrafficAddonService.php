@@ -7,8 +7,9 @@ namespace App\Provisioning\Application;
 use App\Entity\Order;
 use App\Entity\VpnService;
 use App\Provisioning\Domain\Dto\RenewVpnServiceRequest;
-use App\Provisioning\Domain\VpnServiceStatus;
 use App\Provisioning\Domain\TrafficLimitDriverInterface;
+use App\Provisioning\Domain\VpnCapability;
+use App\Provisioning\Domain\VpnServiceStatus;
 use App\Provisioning\Infrastructure\VpnPanelDriverRegistry;
 
 final class ServiceTrafficAddonService
@@ -42,7 +43,7 @@ final class ServiceTrafficAddonService
         }
 
         $driver = $this->driverRegistry->resolve($service->getPanel());
-        if ($driver instanceof TrafficLimitDriverInterface) {
+        if ($driver instanceof TrafficLimitDriverInterface && VpnCapability::has($driver, VpnCapability::TRAFFIC_ADD)) {
             $driver->addTrafficLimit((string) ($service->getRemoteId() ?? ''), $newTrafficLimitGb, $service->getPanel());
         } else {
             $driver->renewService(

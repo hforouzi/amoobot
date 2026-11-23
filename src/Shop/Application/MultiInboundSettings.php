@@ -12,7 +12,7 @@ use App\Shared\Infrastructure\SettingValueProvider;
  * field and refuses one sent anyway, the plan list and the inbound page look as before.
  *
  * A plan with additional inbounds is sold only with the switch on, every inbound active and on the primary's panel, and
- * that panel 3x-ui in modern mode (PlanSaleRule over MultiInboundSale, M2c; checked at the catalog, draft confirmation,
+ * its driver declaring multi_inbound (PlanSaleRule over MultiInboundSale, M2c; checked at the catalog, draft confirmation,
  * payment start and wallet payment). Renewals and add-traffic are not gated. With the switch off, an order already paid
  * for such a plan still gets its primary inbound on any panel; its additional inbounds are recorded "not attached"
  * (VpnProvisioningService::SWITCHED_OFF) and never tried until the switch is on and an admin retries (M2c F3).

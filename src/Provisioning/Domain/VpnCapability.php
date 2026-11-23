@@ -82,13 +82,22 @@ final class VpnCapability
         return CapabilitySet::of(...$names);
     }
 
+    /** An implementation alone is not permission: the driver must declare the capability. */
+    public static function has(VpnPanelDriverInterface $driver, string $capability): bool
+    {
+        return $driver instanceof VpnDriverInterface && $driver->capabilities()->has($capability);
+    }
+
     /**
      * Use of a capability: allowed only when the driver declares it.
      *
      * @throws CapabilityNotSupported
      */
-    public static function require(VpnDriverInterface $driver, string $capability): void
+    public static function require(VpnPanelDriverInterface $driver, string $capability): void
     {
+        if (!$driver instanceof VpnDriverInterface) {
+            throw new CapabilityNotSupported($capability);
+        }
         $driver->capabilities()->require($capability, $driver->code());
     }
 }
