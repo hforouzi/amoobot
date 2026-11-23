@@ -9,6 +9,7 @@ use App\Entity\VpnService;
 use App\Entity\VpnServiceInbound;
 use App\Provisioning\Domain\Dto\InboundAttachment;
 use App\Provisioning\Domain\InboundAttachDriverInterface;
+use App\Provisioning\Domain\VpnCapability;
 use App\Provisioning\Domain\VpnServiceStatus;
 use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http\PanelCallBudget;
 use App\Provisioning\Infrastructure\VpnPanelDriverRegistry;
@@ -100,7 +101,7 @@ final class ServiceInboundAttacher
             return new InboundAttachRetry(InboundAttachRetry::NOT_APPLICABLE);
         }
         $driver = $this->driverRegistry->resolve($panel);
-        if (!$driver instanceof InboundAttachDriverInterface) {
+        if (!$driver instanceof InboundAttachDriverInterface || !VpnCapability::has($driver, VpnCapability::MULTI_INBOUND)) {
             return new InboundAttachRetry(InboundAttachRetry::NOT_MODERN, error: InboundAttachDriverInterface::MODERN_PANEL_REQUIRED);
         }
 

@@ -9,6 +9,7 @@ use App\Entity\VpnServiceInbound;
 use App\Provisioning\Domain\Dto\RenewVpnServiceRequest;
 use App\Provisioning\Domain\ServiceActivationDriverInterface;
 use App\Provisioning\Domain\TrafficLimitDriverInterface;
+use App\Provisioning\Domain\VpnCapability;
 use App\Provisioning\Domain\VpnPanelDriverInterface;
 use App\Provisioning\Domain\VpnServiceStatus;
 use App\Provisioning\Infrastructure\VpnPanelDriverRegistry;
@@ -58,7 +59,7 @@ final class ServiceAdministration
             return ServiceAdminOutcome::NOT_ALLOWED;
         }
         $activated = $this->onPanel($service, 'activate', static function ($driver) use ($service): void {
-            if ($driver instanceof ServiceActivationDriverInterface) {
+            if ($driver instanceof ServiceActivationDriverInterface && VpnCapability::has($driver, VpnCapability::RESUME)) {
                 $driver->activateService((string) $service->getRemoteId(), $service->getPanel());
             } else {
                 $driver->renewService((string) $service->getRemoteId(), new RenewVpnServiceRequest(
@@ -94,7 +95,10 @@ final class ServiceAdministration
 
     public function resetUsage(VpnService $service): ServiceAdminOutcome
     {
-        if (!$this->onPanel($service, 'reset_usage', static fn ($driver) => $driver->resetUsage((string) $service->getRemoteId(), $service->getPanel()))) {
+        if (!$this->onPanel($service, 'reset_usage', static function ($driver) use ($service): void {
+            VpnCapability::require($driver, VpnCapability::TRAFFIC_RESET);
+            $driver->resetUsage((string) $service->getRemoteId(), $service->getPanel());
+        })) {
             return ServiceAdminOutcome::PANEL_FAILED;
         }
 
@@ -148,7 +152,7 @@ final class ServiceAdministration
         }
 
         $added = $this->onLivePanel($service, 'add_traffic', function (VpnPanelDriverInterface $driver) use ($service, $newLimitGb): void {
-            if ($driver instanceof TrafficLimitDriverInterface) {
+            if ($driver instanceof TrafficLimitDriverInterface && VpnCapability::has($driver, VpnCapability::TRAFFIC_ADD)) {
                 $driver->addTrafficLimit((string) $service->getRemoteId(), $newLimitGb, $service->getPanel());
 
                 return;

@@ -15,7 +15,6 @@ use App\Provisioning\Domain\ClientOwnerNotApplicable;
 use App\Provisioning\Domain\CredentialRotationDriverInterface;
 use App\Provisioning\Domain\Dto\RotatedCredentials;
 use App\Provisioning\Domain\ExistingClientAwareDriverInterface;
-use App\Provisioning\Domain\VpnPanelDriverInterface;
 
 /**
  * Test VPN panel driver for panels of type "test" (registered in config/services_test.yaml).
@@ -41,8 +40,20 @@ use App\Provisioning\Domain\VpnPanelDriverInterface;
  *   currentCredentials() throw, $canRotate answers canRotateCredentials(); TEST_PANEL_ROTATE_DELAY_MS sleeps inside
  *   rotateCredentials() (a reset racing a claim or a return). A client is found by its current UUID or any it had.
  */
-final class ProgrammableVpnPanelDriver implements VpnPanelDriverInterface, ExistingClientAwareDriverInterface, ClientOwnerDriverInterface, CredentialRotationDriverInterface
+final class ProgrammableVpnPanelDriver implements \App\Provisioning\Domain\VpnDriverInterface, ExistingClientAwareDriverInterface, ClientOwnerDriverInterface, CredentialRotationDriverInterface
 {
+    use \App\Provisioning\Domain\VpnDriverIdentity;
+
+    public function code(): string
+    {
+        return self::TYPE;
+    }
+
+    public function capabilities(): \App\Module\Domain\CapabilitySet
+    {
+        return \App\Provisioning\Domain\VpnCapability::derive($this);
+    }
+
     public const TYPE = 'test';
 
     private int $failuresLeft = 0;

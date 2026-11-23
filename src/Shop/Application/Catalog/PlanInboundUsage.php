@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Shop\Application\Catalog;
 
 use App\Entity\Plan;
+use App\Module\Application\VpnPanelCapabilities;
 use App\Provisioning\Domain\VpnServiceStatus;
 use Doctrine\DBAL\ArrayParameterType;
 use Doctrine\ORM\EntityManagerInterface;
@@ -29,7 +30,7 @@ final class PlanInboundUsage implements ResetInterface
     public const ROLE_PRIMARY = 'primary';
     public const ROLE_ADDITIONAL = 'additional';
 
-    public function __construct(private readonly EntityManagerInterface $entityManager)
+    public function __construct(private readonly EntityManagerInterface $entityManager, private readonly VpnPanelCapabilities $capabilities)
     {
     }
 
@@ -56,7 +57,7 @@ final class PlanInboundUsage implements ResetInterface
                 // As the database has them now, not as entities this request loaded earlier.
                 ->getQuery()->setHint(Query::HINT_REFRESH, true)->getResult();
             foreach ($plans as $plan) {
-                $this->saleBlockers[(int) $plan->getId()] = $plan->multiInboundSaleBlocker(true);
+                $this->saleBlockers[(int) $plan->getId()] = $plan->multiInboundSaleBlocker(true, $this->capabilities->forPanel(...));
             }
         }
 

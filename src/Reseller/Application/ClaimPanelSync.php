@@ -8,6 +8,7 @@ use App\Entity\ServiceClaim;
 use App\Entity\VpnService;
 use App\Provisioning\Domain\ClientOwnerDriverInterface;
 use App\Provisioning\Domain\ClientOwnerNotApplicable;
+use App\Provisioning\Domain\VpnCapability;
 use App\Provisioning\Infrastructure\VpnPanelDriverRegistry;
 use Doctrine\ORM\EntityManagerInterface;
 use Psr\Clock\ClockInterface;
@@ -57,7 +58,7 @@ class ClaimPanelSync
 
         try {
             $driver = null === $panel || '' === $remoteId ? null : $this->drivers->resolve($panel);
-            if (!$driver instanceof ClientOwnerDriverInterface) {
+            if (!$driver instanceof ClientOwnerDriverInterface || !VpnCapability::has($driver, VpnCapability::CLIENT_OWNER_NOTE)) {
                 $claim->panelSyncSkipped(null === $panel || '' === $remoteId ? 'no panel client' : 'the panel driver cannot set the owner (legacy)');
                 $this->entityManager->flush();
 

@@ -17,6 +17,7 @@ use App\Provisioning\Domain\Dto\InboundMoveAttachResult;
 use App\Provisioning\Domain\InboundAttachDriverInterface;
 use App\Provisioning\Domain\InboundDetachDriverInterface;
 use App\Provisioning\Domain\InboundMoveDriverInterface;
+use App\Provisioning\Domain\VpnCapability;
 use App\Provisioning\Domain\VpnServiceStatus;
 use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http\PanelCallBudget;
 use App\Provisioning\Infrastructure\Sanaei3xui\Sanaei3xuiRemoteIdParser;
@@ -504,7 +505,7 @@ final class InboundMoveRunner
         $moveId = (int) $move['id'];
         $serviceId = (int) $service->getId();
         $driver = $this->drivers->resolve($service->getPanel());
-        if (!$driver instanceof InboundMoveDriverInterface) {
+        if (!$driver instanceof InboundMoveDriverInterface || !VpnCapability::has($driver, VpnCapability::INBOUND_MOVE)) {
             $this->settleClaim($serviceId, $moveId, $claim['claimedAt'], ServiceInboundMove::STATE_ATTACHING, ServiceInboundMove::STATE_SKIPPED, InboundMovePlanner::SKIP_NOT_MODERN);
 
             return new InboundMoveItem($moveId, $serviceId, $from, $to, InboundMoveItem::SKIPPED, InboundMovePlanner::skipText(InboundMovePlanner::SKIP_NOT_MODERN));
@@ -714,7 +715,7 @@ final class InboundMoveRunner
             return new InboundMoveItem($moveId, $serviceId, $from, $to, InboundMoveItem::SKIPPED, InboundMovePlanner::addSkipText($reason));
         };
         $driver = $this->drivers->resolve($service->getPanel());
-        if (!$driver instanceof InboundMoveDriverInterface) {
+        if (!$driver instanceof InboundMoveDriverInterface || !VpnCapability::has($driver, VpnCapability::INBOUND_MOVE)) {
             return $skip(InboundMovePlanner::SKIP_NOT_MODERN);
         }
         self::assertNoTransaction($this->db());
@@ -987,7 +988,7 @@ final class InboundMoveRunner
 
             return new InboundMoveItem($moveId, $serviceId, $from, $to, InboundMoveItem::SKIPPED, 'not undone: '.InboundMovePlanner::addSkipText($reason), true);
         };
-        if (!$panel instanceof VpnPanel || !$driver instanceof InboundDetachDriverInterface || !$driver instanceof InboundMoveDriverInterface) {
+        if (!$panel instanceof VpnPanel || (!$driver instanceof InboundDetachDriverInterface || !VpnCapability::has($driver, VpnCapability::INBOUND_DETACH)) || (!$driver instanceof InboundMoveDriverInterface || !VpnCapability::has($driver, VpnCapability::INBOUND_MOVE))) {
             return $skip(InboundMovePlanner::SKIP_NOT_MODERN);
         }
         self::assertNoTransaction($this->db());
@@ -1277,7 +1278,7 @@ final class InboundMoveRunner
 
             return new InboundMoveItem($moveId, $serviceId, $from, $to, InboundMoveItem::SKIPPED, 'not removed: '.InboundMovePlanner::addSkipText($reason), true);
         };
-        if (!$panel instanceof VpnPanel || !$driver instanceof InboundDetachDriverInterface || !$driver instanceof InboundMoveDriverInterface) {
+        if (!$panel instanceof VpnPanel || (!$driver instanceof InboundDetachDriverInterface || !VpnCapability::has($driver, VpnCapability::INBOUND_DETACH)) || (!$driver instanceof InboundMoveDriverInterface || !VpnCapability::has($driver, VpnCapability::INBOUND_MOVE))) {
             return $skip(InboundMovePlanner::SKIP_NOT_MODERN);
         }
         self::assertNoTransaction($this->db());
@@ -1465,7 +1466,7 @@ final class InboundMoveRunner
 
             return new InboundMoveItem($moveId, $serviceId, $from, $to, InboundMoveItem::FAILED, 'not undone: '.$text.' (run --undo again)', $panelRead);
         };
-        if (!$target instanceof VpnInbound || !$panel instanceof VpnPanel || !$driver instanceof InboundMoveDriverInterface) {
+        if (!$target instanceof VpnInbound || !$panel instanceof VpnPanel || (!$driver instanceof InboundMoveDriverInterface || !VpnCapability::has($driver, VpnCapability::INBOUND_MOVE))) {
             return $failed('the panel is not in modern mode, or the inbound is gone', null);
         }
 
@@ -1878,7 +1879,7 @@ final class InboundMoveRunner
         $serviceId = (int) $service->getId();
         $panel = $service->getPanel();
         $driver = $this->drivers->resolve($panel);
-        if (!$panel instanceof VpnPanel || !$driver instanceof InboundDetachDriverInterface || !$driver instanceof InboundMoveDriverInterface) {
+        if (!$panel instanceof VpnPanel || (!$driver instanceof InboundDetachDriverInterface || !VpnCapability::has($driver, VpnCapability::INBOUND_DETACH)) || (!$driver instanceof InboundMoveDriverInterface || !VpnCapability::has($driver, VpnCapability::INBOUND_MOVE))) {
             $this->settleClaim($serviceId, $moveId, $claim['claimedAt'], ServiceInboundMove::STATE_DETACHING, ServiceInboundMove::STATE_SKIPPED, InboundMovePlanner::SKIP_NOT_MODERN);
 
             return new InboundMoveItem($moveId, $serviceId, $from, $to, InboundMoveItem::SKIPPED, 'old inbound not removed: '.InboundMovePlanner::skipText(InboundMovePlanner::SKIP_NOT_MODERN));
@@ -2047,7 +2048,7 @@ final class InboundMoveRunner
         $old = $this->entityManager->find(VpnInbound::class, (int) $move['from_inbound_id']);
         $panel = $service->getPanel();
         $driver = $this->drivers->resolve($panel);
-        if (!$old instanceof VpnInbound || !$panel instanceof VpnPanel || !$driver instanceof InboundMoveDriverInterface || !$driver instanceof InboundDetachDriverInterface) {
+        if (!$old instanceof VpnInbound || !$panel instanceof VpnPanel || (!$driver instanceof InboundMoveDriverInterface || !VpnCapability::has($driver, VpnCapability::INBOUND_MOVE)) || (!$driver instanceof InboundDetachDriverInterface || !VpnCapability::has($driver, VpnCapability::INBOUND_DETACH))) {
             $this->releaseUndo($serviceId, $moveId, $claim['claimedAt'], $claim['previous'], 'not undone: the panel is not in modern mode, or the old inbound is gone');
 
             return new InboundMoveItem($moveId, $serviceId, $from, $to, InboundMoveItem::FAILED, 'not undone: the panel is not in modern mode, or the old inbound is gone');
@@ -2240,7 +2241,7 @@ final class InboundMoveRunner
         $driver = $this->drivers->resolve($panel);
         $result = null;
         $error = null;
-        if (!$panel instanceof VpnPanel || !$driver instanceof InboundDetachDriverInterface || !$driver instanceof InboundMoveDriverInterface) {
+        if (!$panel instanceof VpnPanel || (!$driver instanceof InboundDetachDriverInterface || !VpnCapability::has($driver, VpnCapability::INBOUND_DETACH)) || (!$driver instanceof InboundMoveDriverInterface || !VpnCapability::has($driver, VpnCapability::INBOUND_MOVE))) {
             $error = InboundMovePlanner::skipText(InboundMovePlanner::SKIP_NOT_MODERN);
         } else {
             self::assertNoTransaction($this->db());

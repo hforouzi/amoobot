@@ -7,6 +7,7 @@ namespace App\Shop\Application\Checkout;
 use App\Entity\Order;
 use App\Entity\Plan;
 use App\Entity\VpnInbound;
+use App\Module\Application\VpnPanelCapabilities;
 use App\Shop\Application\Catalog\TrialBackingPlans;
 use App\Shop\Application\MultiInboundSettings;
 use App\Shop\Domain\MultiInboundSale;
@@ -36,12 +37,13 @@ final class PlanSaleRule
         private readonly MultiInboundSettings $settings,
         private readonly EntityManagerInterface $entityManager,
         private readonly TrialBackingPlans $trialBacking,
+        private readonly VpnPanelCapabilities $capabilities,
     ) {
     }
 
     public function isSellable(Plan $plan): bool
     {
-        return $plan->isAvailableForSale($this->switch()) && !$this->trialBacking->isBacking($plan);
+        return $plan->isAvailableForSale($this->switch(), $this->capabilities->forPanel(...)) && !$this->trialBacking->isBacking($plan);
     }
 
     /**
@@ -52,7 +54,7 @@ final class PlanSaleRule
     public function sellable(array $plans): array
     {
         $switch = $this->switch();
-        $plans = array_values(array_filter($plans, static fn (Plan $plan): bool => $plan->isAvailableForSale($switch)));
+        $plans = array_values(array_filter($plans, fn (Plan $plan): bool => $plan->isAvailableForSale($switch, $this->capabilities->forPanel(...))));
         // One query for the whole list.
         $backing = $this->trialBacking->backingAmong(array_values(array_filter(array_map(static fn (Plan $plan): ?int => $plan->getId(), $plans))));
 
@@ -62,7 +64,7 @@ final class PlanSaleRule
     /** A chosen plan may still become an order: active, and the multi-inbound rule holds. */
     public function acceptsOrders(Plan $plan): bool
     {
-        return $plan->isActive() && null === $plan->multiInboundSaleBlocker($this->switch()) && !$this->trialBacking->isBacking($plan);
+        return $plan->isActive() && null === $plan->multiInboundSaleBlocker($this->switch(), $this->capabilities->forPanel(...)) && !$this->trialBacking->isBacking($plan);
     }
 
     /**
@@ -89,7 +91,7 @@ final class PlanSaleRule
         }
         $snapshot = $order->planInboundSnapshot();
         if (null === $snapshot) {
-            return null === $plan->multiInboundSaleBlocker($this->switch());
+            return null === $plan->multiInboundSaleBlocker($this->switch(), $this->capabilities->forPanel(...));
         }
         if ([] === $snapshot['additional']) {
             return true;
@@ -105,7 +107,7 @@ final class PlanSaleRule
         }
 
         /** @var list<VpnInbound> $additional */
-        return null === MultiInboundSale::blocker($primary, $additional, $this->switch());
+        return null === MultiInboundSale::blocker($primary, $additional, $this->switch(), $this->capabilities->forPanel(...));
     }
 
     /**

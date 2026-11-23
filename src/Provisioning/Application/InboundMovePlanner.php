@@ -12,8 +12,9 @@ use App\Entity\VpnPanel;
 use App\Entity\VpnServiceInbound;
 use App\Provisioning\Domain\InboundAttachDriverInterface;
 use App\Provisioning\Domain\InboundMoveDriverInterface;
+use App\Provisioning\Domain\VpnCapability;
 use App\Provisioning\Domain\VpnServiceStatus;
-use App\Provisioning\Infrastructure\DummyVpnPanelDriver;
+use App\Provisioning\Infrastructure\PanelCredentials;
 use App\Provisioning\Infrastructure\Sanaei3xui\Modern\Http\PanelCallBudget;
 use App\Provisioning\Infrastructure\Sanaei3xui\Modern\ModernClientsApi;
 use App\Provisioning\Infrastructure\Sanaei3xui\Sanaei3xuiRemoteIdParser;
@@ -27,7 +28,6 @@ use App\Shop\Domain\OrderType;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
 use Doctrine\ORM\EntityManagerInterface;
-use App\Provisioning\Infrastructure\PanelCredentials;
 use Psr\Log\LoggerInterface;
 
 /**
@@ -484,6 +484,9 @@ final class InboundMovePlanner
                 InboundMoveCandidate::ACTION_REMOVE,
             );
             [$reason, $otherRun] = $this->addSkipReason($row, $target, $scope, null);
+            if (null === $reason && !VpnCapability::has($this->drivers->resolve($target->getPanel()), VpnCapability::INBOUND_DETACH)) {
+                $reason = self::SKIP_NOT_MODERN;
+            }
             if (null !== $reason) {
                 $candidate = $candidate->skipped($reason, self::addSkipText($reason, $otherRun));
             } elseif ($readPanel) {
@@ -780,13 +783,13 @@ final class InboundMovePlanner
         } catch (\RuntimeException) {
             return [self::SKIP_NOT_MODERN, null];
         }
-        if ($driver instanceof DummyVpnPanelDriver) {
+        if ($driver instanceof \App\Provisioning\Domain\VpnDriverInterface && [] === array_diff($driver->capabilities()->names(), [VpnCapability::TRAFFIC_RESET])) {
             return [self::SKIP_NOT_REAL_PANEL, null];
         }
         if ($panelId !== (int) $target->getPanel()->getId()) {
             return [self::SKIP_OTHER_PANEL, null];
         }
-        if (!$driver instanceof InboundMoveDriverInterface || !$driver instanceof InboundAttachDriverInterface) {
+        if ((!$driver instanceof InboundMoveDriverInterface || !VpnCapability::has($driver, VpnCapability::INBOUND_MOVE)) || (!$driver instanceof InboundAttachDriverInterface || (!VpnCapability::has($driver, VpnCapability::MULTI_INBOUND) || !VpnCapability::has($driver, VpnCapability::PER_USER_INBOUND_SELECTION)))) {
             return [self::SKIP_NOT_MODERN, null];
         }
         if (null === $this->remoteIdParser->withInbound((string) $service['remote_id'], (int) $target->getId(), $target->getRemoteInboundId())) {
@@ -990,7 +993,7 @@ final class InboundMovePlanner
         }
         $panel = $this->entityManager->find(VpnPanel::class, (int) $row['panel_id']);
         $driver = $panel instanceof VpnPanel ? $this->drivers->resolve($panel) : null;
-        if (!$driver instanceof InboundAttachDriverInterface) {
+        if (!$driver instanceof InboundAttachDriverInterface || (!VpnCapability::has($driver, VpnCapability::MULTI_INBOUND) || !VpnCapability::has($driver, VpnCapability::PER_USER_INBOUND_SELECTION))) {
             return ['panel not read', false];
         }
         try {
@@ -1082,7 +1085,7 @@ final class InboundMovePlanner
         }
         $panel = $this->entityManager->find(VpnPanel::class, (int) $row['panel_id']);
         $driver = $panel instanceof VpnPanel ? $this->drivers->resolve($panel) : null;
-        if (!$driver instanceof InboundAttachDriverInterface) {
+        if (!$driver instanceof InboundAttachDriverInterface || (!VpnCapability::has($driver, VpnCapability::MULTI_INBOUND) || !VpnCapability::has($driver, VpnCapability::PER_USER_INBOUND_SELECTION))) {
             return ['ids' => null, 'now' => null, 'note' => 'panel not read', 'failed' => false];
         }
         try {

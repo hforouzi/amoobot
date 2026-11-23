@@ -5,11 +5,13 @@ declare(strict_types=1);
 namespace App\Shop\Domain;
 
 use App\Entity\VpnInbound;
+use App\Entity\VpnPanel;
+use App\Provisioning\Domain\VpnCapability;
 
 /**
  * The one sale rule for plans with additional inbounds (docs/design/multi-inbound-plans.md 4, D3; M2c F1): sellable only
  * with plans.multi_inbound_enabled on AND every inbound (primary and additional) active AND on the primary's panel AND
- * that panel 3x-ui in modern mode. Without additional inbounds there is nothing to decide here (null).
+ * its driver declaring multi_inbound. Without additional inbounds there is nothing to decide here (null).
  *
  * Pure: Plan::multiInboundSaleBlocker() asks it for a plan, PlanSaleRule for an order's snapshot. The switch may be a
  * closure, read only when a plan has additional inbounds.
@@ -26,9 +28,10 @@ final class MultiInboundSale
      * @param list<VpnInbound>       $additional
      * @param bool|\Closure(): bool $enabled    plans.multi_inbound_enabled
      *
+     * @param \Closure(VpnPanel): \App\Module\Domain\CapabilitySet|null $capabilities
      * @return self::*|null why such a plan is not sold, or null
      */
-    public static function blocker(?VpnInbound $primary, array $additional, bool|\Closure $enabled): ?string
+    public static function blocker(?VpnInbound $primary, array $additional, bool|\Closure $enabled, ?\Closure $capabilities = null): ?string
     {
         if ([] === $additional) {
             return null;
@@ -50,6 +53,6 @@ final class MultiInboundSale
             }
         }
 
-        return 'sanaei_3xui' === $panel->getType() && $panel->isModern() ? null : self::NOT_MODERN;
+        return null !== $capabilities && $capabilities($panel)->has(VpnCapability::MULTI_INBOUND) ? null : self::NOT_MODERN;
     }
 }

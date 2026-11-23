@@ -4,31 +4,33 @@ declare(strict_types=1);
 
 namespace App\Admin\UI\Crud;
 
-use App\Admin\UI\TranslatedFlashes;
-use App\Admin\UI\Support\AdminFormat;
 use App\Admin\UI\DashboardController;
+use App\Admin\UI\Support\AdminFormat;
+use App\Admin\UI\TranslatedFlashes;
 use App\Entity\Plan;
 use App\Entity\TrialPlan;
 use App\Entity\VpnInbound;
+use App\Module\Application\VpnPanelCapabilities;
 use App\Provisioning\Application\InboundMoveOverview;
+use App\Provisioning\Domain\VpnCapability;
 use App\Security\AdminPermission;
-use App\Shop\Application\InboundMoveSettings;
 use App\Shop\Application\Catalog\InvalidCatalogEntry;
 use App\Shop\Application\Catalog\PlanAdminService;
+use App\Shop\Application\Catalog\PlanInUse;
 use App\Shop\Application\Catalog\PlanInboundDrift;
 use App\Shop\Application\Catalog\PlanInboundUsage;
 use App\Shop\Application\Catalog\PlanInboundWarnings;
-use App\Shop\Application\Catalog\PlanInUse;
 use App\Shop\Application\Catalog\TrialBackingPlanLocked;
 use App\Shop\Application\Catalog\TrialBackingPlans;
+use App\Shop\Application\InboundMoveSettings;
 use App\Shop\Application\MultiInboundSettings;
 use App\Shop\Application\PlanPriceSanityChecker;
 use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\ORM\QueryBuilder;
-use EasyCorp\Bundle\EasyAdminBundle\Config\Action;
-use EasyCorp\Bundle\EasyAdminBundle\Config\Actions;
 use EasyCorp\Bundle\EasyAdminBundle\Collection\FieldCollection;
 use EasyCorp\Bundle\EasyAdminBundle\Collection\FilterCollection;
+use EasyCorp\Bundle\EasyAdminBundle\Config\Action;
+use EasyCorp\Bundle\EasyAdminBundle\Config\Actions;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Crud;
 use EasyCorp\Bundle\EasyAdminBundle\Config\KeyValueStore;
 use EasyCorp\Bundle\EasyAdminBundle\Context\AdminContext;
@@ -41,8 +43,8 @@ use EasyCorp\Bundle\EasyAdminBundle\Field\DateTimeField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\Field;
 use EasyCorp\Bundle\EasyAdminBundle\Field\IdField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\IntegerField;
-use EasyCorp\Bundle\EasyAdminBundle\Field\TextareaField;
 use EasyCorp\Bundle\EasyAdminBundle\Field\TextField;
+use EasyCorp\Bundle\EasyAdminBundle\Field\TextareaField;
 use EasyCorp\Bundle\EasyAdminBundle\Router\AdminUrlGeneratorInterface;
 use Symfony\Bridge\Doctrine\Form\Type\EntityType;
 use Symfony\Component\HttpFoundation\RedirectResponse;
@@ -70,6 +72,7 @@ class PlanCrudController extends AbstractCrudController
         private readonly InboundMoveOverview $moveOverview,
         private readonly InboundMoveSettings $moveSettings,
         private readonly Environment $twig,
+        private readonly VpnPanelCapabilities $capabilities,
     ) {
     }
 
@@ -277,7 +280,7 @@ class PlanCrudController extends AbstractCrudController
             return;
         }
         $this->flashPriceWarnings($plan);
-        foreach (PlanInboundWarnings::of($plan, $this->multiInbound->enabled()) as $warning) {
+        foreach (PlanInboundWarnings::of($plan, $this->multiInbound->enabled(), $this->capabilities->forPanel(...)) as $warning) {
             $this->flash('warning', $warning['key'], $warning['parameters']);
         }
         // Saving never moves existing services: said when the inbounds changed and some stay on another one (P1).
@@ -385,7 +388,7 @@ class PlanCrudController extends AbstractCrudController
         $inbounds = $this->entityManager->getRepository(VpnInbound::class)->findBy($criteria, ['id' => 'ASC']);
         $choices = [];
         foreach ([...$plan?->getAdditionalInbounds() ?? [], ...$inbounds] as $inbound) {
-            $isPanelOk = null !== $panel || ('sanaei_3xui' === $inbound->getPanel()->getType() && $inbound->getPanel()->isModern());
+            $isPanelOk = null !== $panel || $this->capabilities->has($inbound->getPanel(), VpnCapability::MULTI_INBOUND);
             if ($inbound !== $plan?->getInbound() && ($isPanelOk || in_array($inbound, $plan?->getAdditionalInbounds() ?? [], true))) {
                 $choices[spl_object_id($inbound)] = $inbound;
             }

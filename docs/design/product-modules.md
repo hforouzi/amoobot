@@ -1894,6 +1894,94 @@ and no text, translation or snapshot changed.
   `sudo amoobot-deploy --ref develop/v3` (without `--app-only`). No env change is needed: the defaults are
   `APP_MODULES_ALLOWED=vpn` and `PLUGIN_UPLOAD_ENABLED` off.
 
+**PM3a (capability gates).** Behaviour-neutral for the built-in drivers. No migration, setting, switch, text,
+translation or golden snapshot changes. The declarations and existing capability assertions are frozen: modern 12,
+legacy 3, dummy 1. `VpnCapability::has()` requires an explicit declaration; the remaining optional-interface checks
+only establish that the corresponding method exists. `require()` also refuses old, undeclared driver implementations.
+
+- **Converted gates (file-by-file audit).**
+  - `Shop/Domain/MultiInboundSale`, `Entity/Plan`, `Shop/Application/Checkout/PlanSaleRule`: `multi_inbound` at
+    catalogue, order and payment decisions, including the order's frozen inbound snapshot. The pure predicate takes a
+    lazy capability lookup supplied by the application; no container or driver is stored in an entity. Calling it
+    without a lookup fails closed for additional inbounds, just as omitting the switch does. All production callers
+    now supply the lookup, including `PlanInboundWarnings`, `PlanInboundUsage` and `Admin/UI/Crud/PlanCrudController`.
+  - `Shop/Application/Catalog/PlanInboundsValidator`, `Admin/UI/Crud/PlanCrudController::additionalChoices`:
+    `multi_inbound` replaces the modern-panel test; existing selections remain removable. The protocol/options
+    validation still reads 3x-ui data (see the provider-specific exceptions below).
+  - `Provisioning/Application/PanelLinkSnapshot::driverFor`: `panel_sub_links`; absence returns null as before.
+  - `Provisioning/Application/FinalConfigLinkProvider`: `panel_sub_links` for pending-link display and stored-only
+    delivery, with the frozen legacy-rendering exception below. `VpnProvisioningService` uses the same distinction
+    when selecting its existing link-generation fallback.
+  - `Provisioning/Application/ServiceInboundAttacher`, `InboundAttachScheduler`, `ServiceInboundCounts`:
+    `multi_inbound`; the scheduler's read additionally requires `per_user_inbound_selection`. Old skip/refusal
+    results and texts stay. `VpnProvisioningService::additionalInbounds` records unsupported additional rows with
+    the same reason instead of trying them.
+  - `Provisioning/Application/InboundMovePlanner`: `inbound_move`, `multi_inbound`, `inbound_detach` for removal, and
+    `per_user_inbound_selection` before the corresponding planning/read paths. The dummy classification now uses its
+    base-only capability set instead of its concrete class, keeping the same skip reason.
+  - `Provisioning/Application/InboundMoveRunner`: every move/add gate requires `inbound_move`; every remove,
+    retire, undo-add and undo-move detach gate requires `inbound_detach` as well as the existing move prerequisite.
+  - `Reseller/Application/ServiceOwnership`: `credential_rotation` for availability, rotation and post-commit
+    verification. `Reseller/Application/ClaimPanelSync`: `client_owner_note`, otherwise the existing skipped result.
+  - `Provisioning/Application/ServiceTrafficAddonService`, `ServiceAdministration::addTraffic`: `traffic_add`
+    before calling the optional method. **The base `renewService()` fallback stays**: dummy and test drivers without
+    `traffic_add` still receive the same update, without calling an undeclared optional operation. Hiding that
+    add-traffic button would change today's behaviour; no button, price or purchase rule changed.
+  - `Provisioning/Application/ServiceUsageSyncService`: `batch_usage`; absent means individual usage reads.
+    `ServiceAdministration::activate`: `resume`; absent means the existing zero-day renewal.
+    `ServiceAdministration::resetUsage`: require `traffic_reset` inside the existing remote-call policy.
+- **Resolution.** `Module/Application/VpnPanelCapabilities` reads the resolved driver's declaration; unavailable
+  drivers give an empty set. `VpnPanelDriverRegistry` still tries the tagged drivers first (including test doubles).
+  Only if none supports the panel does `Module/Application/VpnProviderResolver` ask `ProviderDriverRegistry` for the
+  panel's driver code. Known core panels never load packages. Package integrity/enable rules remain PM2b's rules;
+  core row disable gating remains PM3b. `ProductModuleResolver` and existing lifecycle/customer module routing are
+  unchanged. No new module interface method was needed for the VPN sale predicate.
+- **Owner-approved deferrals (2026-11-23).**
+  - `PanelClientImporter::import`: import stays type-gated until the first non-3x-ui VPN driver; client_import is
+    added then, with its own interface. No driver declares `client_import` in this PR.
+  - `ServiceAdministration::onPanel`: converting it would change behaviour for dummy (declares traffic_reset) ?
+    deferred. The `sanaei_3xui` check itself is unchanged for suspend/activate/delete/reset/extend/add traffic.
+- **Other deliberately retained matches (audit of 6.4 and the rest of src).** These select a provider-specific
+  implementation, data format or diagnostic, rather than authorize an optional driver operation. Giving them an
+  unrelated existing capability would incorrectly authorize another provider's API. No capabilities are invented.
+  - `Admin/UI/PanelSetupController`: default/type assignments and modern/legacy setup branches;
+    `Admin/UI/Crud/VpnPanelCrudController`: guided-setup action, legacy inbound-sync action, credential form and type
+    choices. Those screens configure 3x-ui credentials/probes, not a generic connection schema (PM5b).
+  - `Admin/UI/Crud/VpnInboundCrudController`: test-client, resync, access-metadata sync and config-regeneration
+    actions; `Admin/UI/VpnPanelInboundActionsController::testCreateClient`: existing real-panel diagnostic policy.
+    There is no test-client, inbound-catalogue or access-metadata capability in the frozen contract. These handlers
+    and `Provisioning/Application/VpnInboundSyncService::ensureSupportedPanel` still use the 3x-ui inbound schema.
+  - `Command/PanelDoctorCommand`, `PanelDetectVersionCommand`, `PanelTestLoginCommand`,
+    `PanelListInboundsCommand`, `PanelSyncInboundsCommand`, `PanelTestCreateClientCommand`,
+    `PanelTestClientLinksCommand`: 3x-ui API diagnostics, with existing output. `ModernModeGuard` and its probe remain
+    version-specific as 6.4 explicitly requires. Generic connection health waits for PM5b.
+  - `MiniApp/UI/Admin/MiniAppAdminPanelController` subscription diagnostic: `PanelSubscriptionUrlCheck` validates
+    the 3x-ui subscription-base setting; `subscription_url` has no interface and is not added to any frozen set.
+  - `Provisioning/Application/VpnServiceConfigRefreshService` legacy-only refresh and its `api_version` exclusion;
+    `VpnAccessLinkGenerator`'s VLESS/3x-ui-format renderer: frozen legacy/config-format adapters, not optional panel
+    link reads. `VpnPanelCapabilities::usesLegacyConfig` identifies the registered legacy driver code only for that
+    same rendering exception; it is not used to grant an optional operation. The existing modern empty-link
+    provisioning fallback is preserved rather than tightening link delivery in this neutral PR.
+  - `ServiceUsageSyncService::syncOne`'s dummy skip: simulator identity policy (no remote usage), not the optional
+    batch capability. Required `getUsage()` exists even on dummy, and changing this skip would alter sync results.
+  - `Provisioning/Infrastructure/Sanaei3xui/**` routing, remote-id parsing, API versions and guards: these are inside
+    the provider adapter. `DummyVpnPanelDriver::supports`, `VpnPanel::isModern`, plugin reserved codes,
+    driver-identity constants, DTO/comments, panel-type log/context values and admin-shell `isModern()` are identity,
+    storage, diagnostics or unrelated UI matches. Plugin `instanceof` checks validate contracts, not VPN features.
+- **Tests.** The only existing test double changed is `tests/Support/ProgrammableVpnPanelDriver`: it now implements
+  `VpnDriverInterface`, supplies identity, and declares exactly its existing implemented capabilities. No existing
+  test assertion changed. New `CapabilityLimitedVpnDriver` forwards to `Fake3xuiPanel` but independently controls its
+  declarations and records attempted methods. `VpnCapabilityGatesTest` exercises catalogue/order/payment sale,
+  plan validation/choices, panel-link refresh/pending display, manual attach/counts, provisioning attach/adoption,
+  move planning/removal/undo detach, scheduled selection reads, ownership availability/note sync, traffic fallback, resume fallback, reset, batch usage
+  and provider resolution with capability present/absent. Persistence is mocked; these tests need no database.
+  The unchanged VPN contract kit and capability-set/registry guards are also runnable without MariaDB.
+- **Local validation.** PHP 8.2.8 is available; MariaDB is not available for this task. Run the database-free checks
+  reported in the PR, PHPStan and `lint:container` locally. The database-backed `tests/Module`, `tests/Provisioning`,
+  `tests/Shop`, `tests/Reseller`, `tests/Command`, and all snapshot tests are left to GitHub Actions (four full-suite
+  shards, PHPStan and lints). No claim is made that the database-backed suites passed locally.
+
+
 ## 10. What this design did not check
 
 - No production data: row counts, table sizes, real RAM headroom on the box, and PHP-FPM worker counts are unknown.

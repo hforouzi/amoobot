@@ -6,6 +6,7 @@ namespace App\Provisioning\Application;
 
 use App\Entity\VpnService;
 use App\Provisioning\Domain\PanelLinkSourceDriverInterface;
+use App\Provisioning\Domain\VpnCapability;
 use App\Provisioning\Infrastructure\Sanaei3xui\Sanaei3xuiRemoteIdParser;
 use App\Provisioning\Infrastructure\VpnPanelDriverRegistry;
 use App\Shared\Infrastructure\TransactionRollback;
@@ -53,7 +54,7 @@ final class PanelLinkSnapshot
             return null;
         }
 
-        return $driver instanceof PanelLinkSourceDriverInterface ? $driver : null;
+        return $driver instanceof PanelLinkSourceDriverInterface && VpnCapability::has($driver, VpnCapability::PANEL_SUB_LINKS) ? $driver : null;
     }
 
     /**

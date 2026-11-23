@@ -10,14 +10,16 @@ use App\Entity\VpnInbound;
 use App\Entity\VpnPanel;
 use App\Entity\VpnService;
 use App\Entity\VpnServiceInbound;
+use App\Module\Application\VpnPanelCapabilities;
 use App\Provisioning\Domain\Dto\AdoptedVpnService;
 use App\Provisioning\Domain\Dto\CreateVpnServiceRequest;
 use App\Provisioning\Domain\ExistingClientAwareDriverInterface;
 use App\Provisioning\Domain\InboundAttachDriverInterface;
+use App\Provisioning\Domain\VpnCapability;
 use App\Provisioning\Domain\VpnPanelDriverInterface;
 use App\Provisioning\Domain\VpnServiceStatus;
-use App\Shared\Domain\SecretRedactor;
 use App\Provisioning\Infrastructure\VpnPanelDriverRegistry;
+use App\Shared\Domain\SecretRedactor;
 use App\Shared\Infrastructure\SafeErrorLog;
 use App\Shop\Application\MultiInboundSettings;
 use App\Shop\Domain\OrderStatus;
@@ -43,6 +45,7 @@ class VpnProvisioningService
         private readonly string $appSecret,
         private readonly LoggerInterface $logger,
         private readonly MultiInboundSettings $multiInbound,
+        private readonly VpnPanelCapabilities $capabilities,
     ) {
     }
 
@@ -149,7 +152,6 @@ class VpnProvisioningService
             ->setTrafficLimitBytes(null === $trafficLimitValue ? null : ($trafficLimitValue * self::BYTES_PER_GB))
             ->setTrafficUsedBytes(0);
 
-        $panelType = strtolower(trim((string) ($panel?->getType() ?? '')));
         $createdConfigText = trim((string) ($created->configText ?? ''));
         $createdConfigLinks = array_values(array_filter((array) ($created->configLinks ?? []), static fn (mixed $link): bool => '' !== trim((string) $link)));
         $configLinks = $createdConfigLinks;
@@ -160,7 +162,7 @@ class VpnProvisioningService
         // it has its subscription URL only (docs/design/multi-inbound-plans.md 9.1). One created with the switch off or on a
         // panel that cannot attach is on its primary alone, so it is treated as a single-inbound service here.
         $multiInbound = [] !== $attachable || [] !== array_filter($notAttached, static fn (array $n): bool => !in_array($n[1], self::PRIMARY_ONLY, true));
-        if ('sanaei_3xui' !== $panelType || ([] === $configLinks && '' === $createdConfigText && !$multiInbound)) {
+        if ((!$this->capabilities->has($panel, VpnCapability::PANEL_SUB_LINKS) && !$this->capabilities->usesLegacyConfig($panel)) || ([] === $configLinks && '' === $createdConfigText && !$multiInbound)) {
             $links = $this->vpnAccessLinkGenerator->generate($vpnService);
             $configLinks = array_values(array_filter((array) ($links['configLinks'] ?? []), static fn (mixed $link): bool => '' !== trim((string) $link)));
             $missing = array_values(array_filter((array) ($links['missing'] ?? []), static fn (mixed $item): bool => '' !== trim((string) $item)));
@@ -288,7 +290,7 @@ class VpnProvisioningService
         if (!$this->multiInbound->enabled()) {
             return [[], array_map(static fn (VpnInbound $inbound): array => [$inbound, self::SWITCHED_OFF], $inbounds)];
         }
-        $canAttach = $driver instanceof InboundAttachDriverInterface;
+        $canAttach = $driver instanceof InboundAttachDriverInterface && VpnCapability::has($driver, VpnCapability::MULTI_INBOUND);
         $attachable = [];
         $notAttached = [];
         foreach ($inbounds as $inbound) {
@@ -347,7 +349,7 @@ class VpnProvisioningService
      */
     private function findAdoptableClient(VpnPanelDriverInterface $driver, CreateVpnServiceRequest $request, ?VpnPanel $panel, Order $order, bool $generatedName): ?AdoptedVpnService
     {
-        if (!$driver instanceof ExistingClientAwareDriverInterface) {
+        if (!$driver instanceof ExistingClientAwareDriverInterface || !VpnCapability::has($driver, VpnCapability::ADOPT_EXISTING)) {
             return null;
         }
 

@@ -19,16 +19,17 @@ use App\Entity\Plan;
 final class PlanInboundWarnings
 {
     /**
+     * @param \Closure(\App\Entity\VpnPanel): \App\Module\Domain\CapabilitySet|null $capabilities
      * @return list<array{key: string, parameters: array<string, string>}>
      */
-    public static function of(Plan $plan, bool $multiInboundEnabled): array
+    public static function of(Plan $plan, bool $multiInboundEnabled, ?\Closure $capabilities = null): array
     {
         $additional = $plan->getAdditionalInbounds();
         if ([] === $additional) {
             return [];
         }
         $warnings = [];
-        $blocker = $plan->multiInboundSaleBlocker($multiInboundEnabled);
+        $blocker = $plan->multiInboundSaleBlocker($multiInboundEnabled, $capabilities);
         if (null !== $blocker) {
             $warnings[] = ['key' => 'plan_inbounds.not_sold.'.$blocker, 'parameters' => []];
         }
