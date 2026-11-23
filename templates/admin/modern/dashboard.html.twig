@@ -1,0 +1,38 @@
+{% extends '@EasyAdmin/page/content.html.twig' %}
+{% trans_default_domain 'admin' %}
+{% block content_title %}{{ 'admin.dashboard'|trans }}{% endblock %}
+{% block main %}
+{% set locale = app.request.locale %}
+<div class="ad2-dashboard">
+<header class="ad2-header">{{ include('admin/modern/_search.html.twig') }}{% if health is defined and health and version is defined and version %}<a class="ad2-health" href="#system-health">{{ health }} · {{ version }}</a>{% endif %}</header>
+<section class="ad2-card" aria-labelledby="ad2-work"><h2 id="ad2-work">{{ 'ad2.work.title'|trans }}</h2>
+<ul class="ad2-worklist">{% for row in overview.worklist %}<li data-work="{{ row.key }}"><span>{{ row.label|trans }} <strong>{{ row.count|dashboard_number(locale) }}</strong></span><a href="{{ path(row.route, row.parameters) }}" aria-label="{{ row.label|trans }}">{{ 'ad2.open'|trans }}</a></li>{% else %}<li>{{ 'ad2.clear'|trans }}</li>{% endfor %}</ul></section>
+<div class="ad2-kpis">
+{% if overview.today is not null %}
+<a class="ad2-card" href="{{ path('admin_payment_index', {tab: 'confirmed'}) }}"><span>{{ 'ad2.sales'|trans }}</span><strong>{{ overview.today.revenue|number_format|dashboard_number(locale) }} <small>{{ 'currency.IRT'|trans }}</small></strong><span>{{ overview.change is null ? '—' : (overview.change|dashboard_number(locale) ~ '%') }} {{ 'ad2.yesterday'|trans }}</span></a>
+<a class="ad2-card" href="{{ path('admin_payment_index') }}"><span>{{ 'ad2.payments'|trans }}</span><strong>{{ overview.today.payments|dashboard_number(locale) }}</strong><span>{{ 'ad2.waiting'|trans }}: {{ overview.payments.pending|dashboard_number(locale) }}</span></a>
+{% endif %}
+{% if overview.services is not null %}
+<a class="ad2-card" href="{{ path('admin_vpn_service_index', {tab: 'active'}) }}"><span>{{ 'ad2.active'|trans }}</span><strong>{{ overview.services.active|dashboard_number(locale) }}</strong><span>{{ 'ad2.new_today'|trans }}: {{ overview.services.new_today|dashboard_number(locale) }}</span></a>
+<a class="ad2-card" href="{{ path('admin_vpn_service_index', {tab: 'expiring'}) }}"><span>{{ 'ad2.expiring'|trans }}</span><strong>{{ overview.services.expiring|dashboard_number(locale) }}</strong></a>
+{% endif %}
+{% if overview.customers is not null %}<a class="ad2-card" href="{{ path('admin_customer_index') }}"><span>{{ 'ad2.customers'|trans }}</span><strong>{{ overview.customers|dashboard_number(locale) }}</strong></a>{% endif %}
+</div>
+<div class="ad2-charts">
+{% if overview.days is not null %}
+<section class="ad2-card" aria-labelledby="ad2-sales"><h2 id="ad2-sales">{{ 'ad2.seven_days'|trans }}</h2>
+{% set maximum = max(1, max(overview.days|map(day => day.revenue))) %}
+<ol class="ad2-bars">{% for day in overview.days %}<li><span>{{ day.revenue|number_format|dashboard_number(locale) }}</span><div class="ad2-bar-track" aria-hidden="true"><div style="height: {{ max(0, day.revenue * 100 / maximum) }}%"></div></div><time datetime="{{ day.date|date('c') }}">{{ day.date|dashboard_date(locale) }}</time></li>{% endfor %}</ol>
+</section>{% endif %}
+{% if overview.services is not null %}
+<section class="ad2-card" aria-labelledby="ad2-status"><h2 id="ad2-status">{{ 'ad2.statuses'|trans }}</h2>
+{% set statusTotal = overview.services.active + overview.services.expired + overview.services.suspended %}
+<div class="ad2-status-bar" aria-hidden="true">{% for key in ['active', 'expired', 'suspended'] %}<span class="ad2-status-{{ key }}" style="flex-grow: {{ overview.services[key] }}"></span>{% endfor %}</div>
+<ul class="ad2-legend">{% for key in ['active', 'expired', 'suspended'] %}<li><a href="{{ path('admin_vpn_service_index', {tab: key}) }}"><i class="ad2-status-{{ key }}" aria-hidden="true"></i>{{ ('service.tabs.' ~ key)|trans }}: {{ overview.services[key]|dashboard_number(locale) }}</a></li>{% endfor %}</ul>
+{% if statusTotal == 0 %}<p>{{ 'ad2.empty'|trans }}</p>{% endif %}</section>{% endif %}
+</div>
+{% if overview.latest is not null %}<section class="ad2-card" aria-labelledby="ad2-latest"><h2 id="ad2-latest">{{ 'ad2.latest'|trans }}</h2><div class="ad2-table-scroll"><table><caption class="visually-hidden">{{ 'ad2.latest'|trans }}</caption><thead><tr>{% for key in ['id','customer','amount','method','status','date'] %}<th scope="col">{{ ('ad2.column.' ~ key)|trans }}</th>{% endfor %}</tr></thead><tbody>
+{% for payment in overview.latest %}<tr><td><a href="{{ path('admin_payment_detail', {entityId: payment.id}) }}" aria-label="{{ 'ad2.column.id'|trans }} {{ payment.id }}">#{{ payment.id|dashboard_number(locale) }}</a></td><td dir="auto">{{ payment.customer }}</td><td>{{ payment.amount|number_format|dashboard_number(locale) }}</td><td>{{ payment.method }}</td><td><span class="ad2-payment-status">{{ ('status.' ~ payment.status)|trans }}</span></td><td><time datetime="{{ payment.createdAt|date('c') }}">{{ payment.createdAt|dashboard_date(locale) }}</time></td></tr>{% else %}<tr><td colspan="6">{{ 'ad2.empty'|trans }}</td></tr>{% endfor %}
+</tbody></table></div></section>{% endif %}
+</div>
+{% endblock %}

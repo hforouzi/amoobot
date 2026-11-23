@@ -8,6 +8,7 @@ use App\Entity\Payment;
 use App\Payment\Domain\PaymentGatewayType;
 use App\Payment\Domain\PaymentStatus;
 use Doctrine\ORM\EntityManagerInterface;
+use Doctrine\ORM\QueryBuilder;
 use Symfony\Contracts\Cache\CacheInterface;
 use Symfony\Contracts\Cache\ItemInterface;
 
@@ -30,18 +31,19 @@ final class CardReceiptQueue
     ) {
     }
 
+    public static function apply(QueryBuilder $qb, string $alias): QueryBuilder
+    {
+        return $qb->andWhere("$alias.status IN (:receiptStatuses)")
+            ->andWhere("($alias.gatewayType = :receiptManual OR ($alias.gatewayType IS NULL AND $alias.method = :receiptManual))")
+            ->andWhere("(($alias.receiptFileId IS NOT NULL AND $alias.receiptFileId <> '') OR ($alias.trackingCode IS NOT NULL AND $alias.trackingCode <> ''))")
+            ->setParameter('receiptStatuses', [PaymentStatus::PENDING, PaymentStatus::SUBMITTED])
+            ->setParameter('receiptManual', PaymentGatewayType::MANUAL_CARD);
+    }
+
     public function count(): int
     {
-        return (int) $this->entityManager->createQueryBuilder()
-            ->select('COUNT(p.id)')
-            ->from(Payment::class, 'p')
-            ->where('p.status IN (:statuses)')
-            ->andWhere('(p.gatewayType = :manual OR (p.gatewayType IS NULL AND p.method = :manual))')
-            ->andWhere("((p.receiptFileId IS NOT NULL AND p.receiptFileId <> '') OR (p.trackingCode IS NOT NULL AND p.trackingCode <> ''))")
-            ->setParameter('statuses', [PaymentStatus::PENDING, PaymentStatus::SUBMITTED])
-            ->setParameter('manual', PaymentGatewayType::MANUAL_CARD)
-            ->getQuery()
-            ->getSingleScalarResult();
+        return (int) self::apply($this->entityManager->createQueryBuilder()->select('COUNT(p.id)')->from(Payment::class, 'p'), 'p')
+            ->getQuery()->getSingleScalarResult();
     }
 
     /** count(), cached for CACHE_SECONDS. */

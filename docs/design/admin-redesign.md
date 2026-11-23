@@ -640,6 +640,35 @@ its broadcast part needs only AD1's section pages. AD5's extend and add traffic 
 fix/admin-extend-traffic-on-panel. AD10 and AD11 are independent of the switch and may run in parallel. PM12-style
 defects found on the way are fixed in their own PRs, not folded in.
 
+### AD2 implementation notes
+
+- Modern dashboard only; classic dashboard template and AD1 snapshot fixtures/tests are unchanged.
+- The current permission matrix grants `PAYMENTS_VIEW` to support as well as admin and super admin.
+  AD2 preserves that matrix and the classic dashboard's visibility (including money), as required for this rollout.
+  The sentence in 4.5 claiming support sees no money cards does not describe the current code; changing it belongs
+  to the separate role/permission work, AD11.
+- `StuckPaymentFinder::count()` counts database candidates only, including unfulfilled renewal/add-traffic orders.
+  It never calls `classifyRenewal()` or a panel. The existing repair command still performs its panel comparison.
+  A new read-only, paginated `/admin/payment-worklist` page combines provisioning failures and these candidates,
+  linking to the existing payment detail/retry actions. This intermediary is needed because no existing tab lists
+  that union; no dashboard GET performs a repair. Pages hold 100 rows and offer previous/next links.
+- Expiring-today opens the existing services list with a `dashboard_day` filter for that exact Tehran day;
+  the broader three-day `expiring` tab would not list the same counted items. Unattached inbounds use the existing
+  `inbounds=not_connected` filter until AD4 adds the needs-attention tab. Failed moves use `moves=failed`.
+- Payment receipts are an additional tab in modern mode only. `PaymentTabs::countByTab($em, true)` opts into its
+  count, preserving existing callers' result shape and classic tab output.
+- Shared service-tab aggregates remain fresh because the worklist needs them; the KPI/service chart reuses those
+  values rather than caching a second copy. Revenue, payment KPI, new-customer KPI and seven-day revenue use
+  `cache.app`, 60-second TTL, keyed by Tehran day and sorted effective permission set. Worklist and latest payments
+  are uncached; the existing shell badge remains independently cached for 30 seconds. The query budget tests cover both a cold dashboard overview and the full dashboard GET for all three roles,
+  including shell/authentication and multi-inbound enabled. Search/list navigation requests are separate.
+  To keep the full GET within 12 queries, the cached seven-day CASE query also supplies today/yesterday revenue,
+  today's confirmed count and an authorized scalar new-customer subquery; failed moves share the service aggregate.
+- Dashboard-only date/number filters implement decision 7 now; rollout of `admin_date` to other pages remains AD8.
+  Health/version are omitted unless both real values are supplied (AD3). No health probe runs on dashboard load.
+- No indexes or schema migrations added: production-size EXPLAIN is unavailable locally; the existing index review
+  in 4.5 remains a staging task. No production database was queried or changed.
+
 ### 7.2 The flip (after AD8, not a PR)
 
 The owner sets `admin.ui.layout = modern` in hub → Advanced. Checklist first, on staging with a production copy:

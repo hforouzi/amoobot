@@ -48,6 +48,7 @@ final class PaymentCrudController extends AbstractCrudController
         private readonly EntityManagerInterface $entityManager,
         private readonly AdminFormat $format,
         private readonly TranslatorInterface $translator,
+        private readonly \App\Admin\UI\Shell\AdminUiMode $uiMode,
     ) {
     }
 
@@ -104,10 +105,13 @@ final class PaymentCrudController extends AbstractCrudController
      */
     private function tabs(): array
     {
-        $counts = self::countByTab($this->entityManager);
+        $counts = PaymentTabs::countByTab($this->entityManager, $this->uiMode->isModern());
         $active = $this->currentTab();
         $tabs = [];
         foreach (array_keys(self::TABS) as $tab) {
+            if ('receipts' === $tab && !$this->uiMode->isModern()) {
+                continue;
+            }
             $tabs[] = [
                 'key' => $tab,
                 'label' => 'payment.tabs.'.$tab,
