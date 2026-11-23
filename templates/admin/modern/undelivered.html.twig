@@ -1,0 +1,5 @@
+{% extends '@EasyAdmin/page/content.html.twig' %}
+{% trans_default_domain 'admin' %}
+{% block content_title %}{{ 'ad2.work.undelivered'|trans }}{% endblock %}
+{% block main %}<p>{{ 'ad2.undelivered.help'|trans }}</p><ul class="ad2-results">
+{% for payment in payments %}<li><a href="{{ path('admin_payment_detail', {entityId: payment.id}) }}">#{{ payment.id|dashboard_number(app.request.locale) }} · {{ ('status.' ~ payment.status)|trans }}</a></li>{% else %}<li>{{ 'ad2.empty'|trans }}</li>{% endfor %}</ul><nav class="ad2-results" aria-label="{{ 'ad2.pagination'|trans }}">{% if page > 1 %}<a href="{{ path('admin_payment_worklist', {page: page - 1}) }}">{{ 'ad2.previous'|trans }}</a>{% endif %}{% if more %}<a href="{{ path('admin_payment_worklist', {page: page + 1}) }}">{{ 'ad2.next'|trans }}</a>{% endif %}</nav>{% endblock %}

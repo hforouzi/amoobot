@@ -5,11 +5,12 @@ declare(strict_types=1);
 namespace App\Admin\Application;
 
 use App\Entity\VpnService;
+use App\Provisioning\Application\InboundMoveOverview;
 use App\Provisioning\Domain\VpnServiceStatus;
 use Doctrine\Common\Collections\ArrayCollection;
 use Doctrine\ORM\EntityManagerInterface;
-use Doctrine\ORM\Query\Parameter;
 use Doctrine\ORM\QueryBuilder;
+use Doctrine\ORM\Query\Parameter;
 
 /**
  * The service list's tabs, shared by the web list (VpnServiceCrudController), the dashboards and the Mini App.
@@ -55,9 +56,9 @@ final class ServiceTabs
      *
      * @return array<string, int>
      */
-    public static function countByTab(EntityManagerInterface $entityManager, \DateTimeImmutable $now): array
+    public static function countByTab(EntityManagerInterface $entityManager, \DateTimeImmutable $now, ?\DateTimeImmutable $dayStart = null): array
     {
-        $row = $entityManager->createQueryBuilder()
+        $qb = $entityManager->createQueryBuilder()
             ->select(
                 'COUNT(s.id) AS all_count',
                 'SUM(CASE WHEN s.status = :active AND (s.expiresAt IS NULL OR s.expiresAt > :now) THEN 1 ELSE 0 END) AS active_count',
@@ -74,11 +75,17 @@ final class ServiceTabs
                 new Parameter('deleted', VpnServiceStatus::DELETED),
                 new Parameter('now', $now),
                 new Parameter('soon', $now->modify('+'.self::EXPIRING_DAYS.' days')),
-            ]))
-            ->getQuery()
-            ->getSingleResult();
+            ]));
+        if (null !== $dayStart) {
+            $qb->addSelect('SUM(CASE WHEN '.InboundMoveOverview::listFilterDql('failed', 's').' THEN 1 ELSE 0 END) AS failed_moves')
+                ->addSelect('SUM(CASE WHEN s.createdAt >= :dayStart AND s.createdAt < :dayEnd THEN 1 ELSE 0 END) AS new_today')
+                ->addSelect('SUM(CASE WHEN s.status = :active AND s.expiresAt >= :dayStart AND s.expiresAt < :dayEnd THEN 1 ELSE 0 END) AS expiring_today')
+                ->setParameter('dayStart', $dayStart)->setParameter('dayEnd', $dayStart->modify('+1 day'));
+        }
+        $row = $qb->getQuery()->getSingleResult();
 
         return [
+            ...(null === $dayStart ? [] : ['failed_moves' => (int) $row['failed_moves'], 'new_today' => (int) $row['new_today'], 'expiring_today' => (int) $row['expiring_today']]),
             'all' => (int) $row['all_count'],
             'active' => (int) $row['active_count'],
             'expiring' => (int) $row['expiring_count'],

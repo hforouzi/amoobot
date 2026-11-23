@@ -1,0 +1,5 @@
+<form class="ad2-search" role="search" method="get" action="{{ path('admin_search') }}">
+<label for="ad2-search">{{ 'ad2.search.title'|trans({}, 'admin') }}</label>
+<input id="ad2-search" type="search" name="q" maxlength="64" value="{{ query|default('') }}" placeholder="{{ 'ad2.search.hint'|trans({}, 'admin') }}">
+<button type="submit">{{ 'ad2.search.go'|trans({}, 'admin') }}</button>
+</form>

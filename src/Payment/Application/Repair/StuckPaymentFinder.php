@@ -11,6 +11,7 @@ use App\Payment\Domain\PaymentStatus;
 use App\Shop\Domain\OrderStatus;
 use App\Shop\Domain\OrderType;
 use Doctrine\ORM\EntityManagerInterface;
+use Doctrine\ORM\QueryBuilder;
 
 /**
  * Finds CONFIRMED payments whose order was never fulfilled (left behind by the pre-settlement code,
@@ -54,6 +55,23 @@ class StuckPaymentFinder
         }
 
         return $stuck;
+    }
+
+    /** Database-only dashboard count: never invoke renewal panel comparisons. */
+    public function count(\DateTimeImmutable $confirmedBefore): int
+    {
+        return (int) $this->query($confirmedBefore)->select('COUNT(p.id)')->getQuery()->getSingleScalarResult();
+    }
+
+    public function query(\DateTimeImmutable $confirmedBefore, string $alias = 'p'): QueryBuilder
+    {
+        return $this->entityManager->createQueryBuilder()->from(Payment::class, $alias)->join($alias.'.order', 'stuckOrder')
+            ->andWhere($alias.'.status = :stuckConfirmed')->andWhere('COALESCE('.$alias.'.confirmedAt, '.$alias.'.createdAt) <= :stuckBefore')
+            ->andWhere('stuckOrder.type <> :stuckTopUp')
+            ->andWhere('(stuckOrder.type IN (:stuckChanges) AND stuckOrder.status NOT IN (:stuckFulfilled)) OR (stuckOrder.type NOT IN (:stuckChanges) AND NOT EXISTS (SELECT stuckService.id FROM '.VpnService::class.' stuckService WHERE stuckService.order = stuckOrder))')
+            ->setParameter('stuckConfirmed', PaymentStatus::CONFIRMED)->setParameter('stuckBefore', $confirmedBefore)
+            ->setParameter('stuckTopUp', OrderType::WALLET_TOPUP)->setParameter('stuckChanges', [OrderType::RENEWAL, OrderType::ADD_TRAFFIC])
+            ->setParameter('stuckFulfilled', self::FULFILLED_ORDER_STATUSES);
     }
 
     public function classify(Payment $payment): ?StuckPayment

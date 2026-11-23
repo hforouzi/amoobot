@@ -349,3 +349,32 @@ body[data-admin-ui="modern"] .datagrid .actions a {
         animation: none !important;
     }
 }
+
+/* AD2: dashboard, scoped to modern pages. */
+body[data-admin-ui="modern"] .ad2-dashboard { display:grid; gap:24px; }
+body[data-admin-ui="modern"] .ad2-card { background:var(--admin-card); border:1px solid var(--admin-border); border-radius:16px; padding:24px; color:var(--admin-text); }
+body[data-admin-ui="modern"] .ad2-card h2 { font-size:1.15rem; margin:0 0 20px; }
+body[data-admin-ui="modern"] .ad2-kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:16px; }
+body[data-admin-ui="modern"] .ad2-kpis > a { display:flex; flex-direction:column; gap:12px; text-decoration:none; min-height:140px; }
+body[data-admin-ui="modern"] .ad2-kpis strong { font-size:1.6rem; }
+body[data-admin-ui="modern"] .ad2-kpis small { font-size:.8rem; }
+body[data-admin-ui="modern"] .ad2-worklist, body[data-admin-ui="modern"] .ad2-legend { list-style:none; padding:0; margin:0; }
+body[data-admin-ui="modern"] .ad2-worklist li { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:8px 0; }
+body[data-admin-ui="modern"] .ad2-worklist a, body[data-admin-ui="modern"] .ad2-search button { background:var(--admin-accent); color:var(--admin-accent-fg); border:0; border-radius:8px; padding:12px 20px; min-height:44px; }
+body[data-admin-ui="modern"] .ad2-search { display:flex; flex-wrap:wrap; align-items:center; gap:12px; }
+body[data-admin-ui="modern"] .ad2-search input { flex:1; min-width:140px; min-height:44px; border:1px solid var(--admin-border); border-radius:8px; padding:10px; background:var(--body-bg); color:var(--admin-text); }
+body[data-admin-ui="modern"] .ad2-charts { display:grid; grid-template-columns:2fr 1fr; gap:24px; }
+body[data-admin-ui="modern"] .ad2-bars { display:flex; align-items:end; list-style:none; gap:10px; margin:0; padding:0; }
+body[data-admin-ui="modern"] .ad2-bars li { flex:1; min-width:0; text-align:center; font-size:.75rem; overflow-wrap:anywhere; }
+body[data-admin-ui="modern"] .ad2-bar-track { height:150px; display:flex; align-items:end; justify-content:center; margin:12px 0; }
+body[data-admin-ui="modern"] .ad2-bar-track div { background:var(--admin-accent); width:70%; border-radius:6px 6px 0 0; }
+body[data-admin-ui="modern"] .ad2-status-bar { display:flex; height:20px; overflow:hidden; border-radius:8px; background:var(--admin-border); }
+body[data-admin-ui="modern"] .ad2-status-active { background:#16794b; }
+body[data-admin-ui="modern"] .ad2-status-expired { background:#b63333; }
+body[data-admin-ui="modern"] .ad2-status-suspended { background:#876000; }
+body[data-admin-ui="modern"] .ad2-legend i { display:inline-block; width:12px; height:12px; border-radius:50%; margin-inline-end:8px; }
+body[data-admin-ui="modern"] .ad2-legend a, body[data-admin-ui="modern"] .ad2-results a, body[data-admin-ui="modern"] .ad2-table-scroll a { display:inline-flex; align-items:center; min-height:44px; }
+body[data-admin-ui="modern"] .ad2-table-scroll { overflow-x:auto; }
+body[data-admin-ui="modern"] .ad2-table-scroll table { width:100%; border-collapse:collapse; }
+body[data-admin-ui="modern"] .ad2-table-scroll td, body[data-admin-ui="modern"] .ad2-table-scroll th { text-align:start; padding:10px; border-bottom:1px solid var(--admin-border); }
+@media(max-width:800px) { body[data-admin-ui="modern"] .ad2-charts { grid-template-columns:1fr; } body[data-admin-ui="modern"] .ad2-card { padding:16px; } }

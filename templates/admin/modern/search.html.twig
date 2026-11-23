@@ -1,0 +1,7 @@
+{% extends '@EasyAdmin/page/content.html.twig' %}
+{% trans_default_domain 'admin' %}
+{% block content_title %}{{ 'ad2.search.title'|trans }}{% endblock %}
+{% block main %}
+{{ include('admin/modern/_search.html.twig') }}
+<ul class="ad2-results">{% for result in results %}<li><a href="{{ path(result.route, {entityId: result.id}) }}">{{ result.label|trans }} #{{ result.id|dashboard_number(app.request.locale) }}</a></li>{% else %}<li>{{ 'ad2.empty'|trans }}</li>{% endfor %}</ul>
+{% endblock %}

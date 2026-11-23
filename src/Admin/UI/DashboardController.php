@@ -5,18 +5,19 @@ declare(strict_types=1);
 namespace App\Admin\UI;
 
 use App\Admin\Application\CardReceiptQueue;
+use App\Admin\Application\GlobalAdminSearch;
 use App\Admin\Security\AdminCrudPermissions;
 use App\Admin\UI\Crud\AdminAuditLogCrudController;
 use App\Admin\UI\Crud\AdminUserCrudController;
 use App\Admin\UI\Crud\AppDownloadCrudController;
-use App\Admin\UI\Crud\BroadcastMessageCrudController;
 use App\Admin\UI\Crud\BotMessageTemplateCrudController;
+use App\Admin\UI\Crud\BroadcastMessageCrudController;
 use App\Admin\UI\Crud\DiscountCodeCrudController;
 use App\Admin\UI\Crud\OrderCrudController;
 use App\Admin\UI\Crud\PaymentCrudController;
 use App\Admin\UI\Crud\PaymentGatewayCrudController;
-use App\Admin\UI\Crud\PluginCrudController;
 use App\Admin\UI\Crud\PlanCrudController;
+use App\Admin\UI\Crud\PluginCrudController;
 use App\Admin\UI\Crud\UserCrudController;
 use App\Admin\UI\Crud\VpnPanelCrudController;
 use App\Admin\UI\Crud\VpnServiceCrudController;
@@ -26,18 +27,24 @@ use App\Admin\UI\Shell\AdminSections;
 use App\Admin\UI\Shell\AdminUiMode;
 use App\Admin\UI\Shell\SectionMenuItemMatcher;
 use App\Entity\AdminUser;
+use App\Payment\Application\Repair\StuckPaymentFinder;
+use App\Security\AdminAccessPolicy;
 use App\Security\AdminActor;
+use App\Security\AdminPermission;
+use EasyCorp\Bundle\EasyAdminBundle\Attribute\AdminDashboard;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Assets;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Crud;
-use EasyCorp\Bundle\EasyAdminBundle\Config\UserMenu;
-use EasyCorp\Bundle\EasyAdminBundle\Attribute\AdminDashboard;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Dashboard;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Locale;
 use EasyCorp\Bundle\EasyAdminBundle\Config\MenuItem;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Menu\ControllerMenuItem;
+use EasyCorp\Bundle\EasyAdminBundle\Config\UserMenu;
 use EasyCorp\Bundle\EasyAdminBundle\Contracts\Menu\MenuItemInterface;
 use EasyCorp\Bundle\EasyAdminBundle\Controller\AbstractDashboardController;
+use Psr\Clock\ClockInterface;
+use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\Routing\Attribute\Route;
 use Symfony\Component\Security\Core\User\UserInterface;
 
 #[AdminDashboard(routePath: '/admin', routeName: 'admin')]
@@ -62,10 +69,47 @@ class DashboardController extends AbstractDashboardController
             throw $this->createAccessDeniedException('Inactive admin account.');
         }
 
+        if ($this->uiMode->isModern() && $user instanceof AdminUser) {
+            return $this->render('admin/modern/dashboard.html.twig', ['overview' => $this->overview->dashboard(AdminActor::fromAdminUser($user))]);
+        }
+
         return $this->render('admin/dashboard.html.twig', [
             'admin_user' => $user,
             'overview' => $user instanceof AdminUser ? $this->overview->for(AdminActor::fromAdminUser($user)) : null,
         ]);
+    }
+
+    #[Route('/admin/search', name: 'admin_search', methods: ['GET'])]
+    public function search(Request $request, GlobalAdminSearch $search): Response
+    {
+        if (!$this->uiMode->isModern() || !($user = $this->getUser()) instanceof AdminUser) {
+            throw $this->createNotFoundException();
+        }
+        if (!$user->isActive()) {
+            throw $this->createAccessDeniedException('Inactive admin account.');
+        }
+        $query = trim($request->query->getString('q'));
+        return $this->render('admin/modern/search.html.twig', ['query' => $query, 'results' => $search->search(AdminActor::fromAdminUser($user), $query)]);
+    }
+
+    #[Route('/admin/payment-worklist', name: 'admin_payment_worklist', methods: ['GET'])]
+    public function undelivered(Request $request, StuckPaymentFinder $finder, ClockInterface $clock, AdminAccessPolicy $policy): Response
+    {
+        $user = $this->getUser();
+        if (!$user instanceof AdminUser || !$policy->can(AdminActor::fromAdminUser($user), AdminPermission::PAYMENTS_VIEW)) {
+            throw $this->createAccessDeniedException();
+        }
+        if (!$this->uiMode->isModern()) {
+            throw $this->createNotFoundException();
+        }
+        $qb = $finder->query($clock->now()->modify('-30 minutes'));
+        // Keep the age/type constraints in the stuck branch; failures are actionable immediately.
+        $conditions = (string) $qb->getDQLPart('where');
+        $qb->where('('.$conditions.') OR p.status = :provisioningFailed')->setParameter('provisioningFailed', 'provisioning_failed');
+        $page = max(1, min(100000, $request->query->getInt('page', 1)));
+        $rows = $qb->select('p.id, p.amount, p.status')->orderBy('p.id', 'ASC')->setFirstResult(($page - 1) * 100)->setMaxResults(101)->getQuery()->getArrayResult();
+        $more = count($rows) > 100;
+        return $this->render('admin/modern/undelivered.html.twig', ['payments' => array_slice($rows, 0, 100), 'page' => $page, 'more' => $more]);
     }
 
     /**

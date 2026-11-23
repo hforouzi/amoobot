@@ -19,6 +19,7 @@ final class PaymentTabs
     public const TABS = [
         'all' => [],
         'pending' => [PaymentStatus::PENDING, PaymentStatus::SUBMITTED],
+        'receipts' => [PaymentStatus::PENDING, PaymentStatus::SUBMITTED],
         'needs_review' => [PaymentStatus::NEEDS_REVIEW],
         'provisioning_failed' => [PaymentStatus::PROVISIONING_FAILED],
         'confirmed' => [PaymentStatus::CONFIRMED],
@@ -26,7 +27,7 @@ final class PaymentTabs
     ];
 
     /** Tabs an admin works through: oldest first (as the old "needs attention" lists). */
-    public const OLDEST_FIRST = ['needs_review', 'provisioning_failed'];
+    public const OLDEST_FIRST = ['receipts', 'needs_review', 'provisioning_failed'];
 
     public static function normalize(?string $tab): string
     {
@@ -43,6 +44,9 @@ final class PaymentTabs
         if ([] !== self::TABS[$tab]) {
             $qb->andWhere(sprintf('%s.status IN (:tabStatuses)', $alias))->setParameter('tabStatuses', self::TABS[$tab]);
         }
+        if ('receipts' === $tab) {
+            CardReceiptQueue::apply($qb, $alias);
+        }
         if ($order) {
             $qb->orderBy($alias.'.id', in_array($tab, self::OLDEST_FIRST, true) ? 'ASC' : 'DESC');
         }
@@ -55,7 +59,7 @@ final class PaymentTabs
      *
      * @return array<string, int>
      */
-    public static function countByTab(EntityManagerInterface $entityManager): array
+    public static function countByTab(EntityManagerInterface $entityManager, bool $receipts = false): array
     {
         $byStatus = [];
         foreach ($entityManager->createQueryBuilder()->select('p.status AS status', 'COUNT(p.id) AS total')->from(Payment::class, 'p')->groupBy('p.status')->getQuery()->getArrayResult() as $row) {
@@ -64,9 +68,13 @@ final class PaymentTabs
 
         $counts = [];
         foreach (self::TABS as $tab => $statuses) {
+            if ('receipts' === $tab) { continue; }
             $counts[$tab] = [] === $statuses ? array_sum($byStatus) : array_sum(array_map(static fn (string $status): int => $byStatus[$status] ?? 0, $statuses));
         }
 
+        if ($receipts) {
+            $counts['receipts'] = (int) CardReceiptQueue::apply($entityManager->createQueryBuilder()->select('COUNT(p.id)')->from(Payment::class, 'p'), 'p')->getQuery()->getSingleScalarResult();
+        }
         return $counts;
     }
 }

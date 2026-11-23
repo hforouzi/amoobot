@@ -275,6 +275,14 @@ class VpnServiceCrudController extends AbstractCrudController
             $queryBuilder->andWhere(InboundMoveOverview::listFilterDql($moves, 'entity'));
         }
 
+        $day = (string) $this->requestStack->getCurrentRequest()?->query->get('dashboard_day', '');
+        $localDay = \DateTimeImmutable::createFromFormat('!Y-m-d', $day, new \DateTimeZone(\App\Admin\UI\Dashboard\AdminCalendar::TIMEZONE));
+        if (false !== $localDay && $localDay->format('Y-m-d') === $day) {
+            $from = $localDay->setTimezone(new \DateTimeZone('UTC'));
+            return ServiceTabs::apply($queryBuilder, 'entity', 'all', $this->clock->now())
+                ->andWhere('entity.status = :dashboardActive AND entity.expiresAt >= :dashboardFrom AND entity.expiresAt < :dashboardTo')
+                ->setParameter('dashboardActive', 'active')->setParameter('dashboardFrom', $from)->setParameter('dashboardTo', $from->modify('+1 day'))->orderBy('entity.expiresAt', 'ASC');
+        }
         return ServiceTabs::apply($queryBuilder, 'entity', $this->notConnectedFilter() || null !== $moves ? 'all' : $this->currentTab(), $this->clock->now());
     }
 
