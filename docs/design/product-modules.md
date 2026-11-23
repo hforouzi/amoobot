@@ -1939,8 +1939,7 @@ only establish that the corresponding method exists. `require()` also refuses ol
 - **Owner-approved deferrals (2026-11-23).**
   - `PanelClientImporter::import`: import stays type-gated until the first non-3x-ui VPN driver; client_import is
     added then, with its own interface. No driver declares `client_import` in this PR.
-  - `ServiceAdministration::onPanel`: converting it would change behaviour for dummy (declares traffic_reset) ?
-    deferred. The `sanaei_3xui` check itself is unchanged for suspend/activate/delete/reset/extend/add traffic.
+  - `ServiceAdministration::onPanel`: converting it would change behaviour for dummy (declares traffic_reset) — deferred. The `sanaei_3xui` check itself is unchanged for suspend/activate/delete/reset/extend/add traffic.
 - **Other deliberately retained matches (audit of 6.4 and the rest of src).** These select a provider-specific
   implementation, data format or diagnostic, rather than authorize an optional driver operation. Giving them an
   unrelated existing capability would incorrectly authorize another provider's API. No capabilities are invented.
