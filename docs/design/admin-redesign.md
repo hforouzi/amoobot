@@ -669,6 +669,47 @@ defects found on the way are fixed in their own PRs, not folded in.
 - No indexes or schema migrations added: production-size EXPLAIN is unavailable locally; the existing index review
   in 4.5 remains a staging task. No production database was queried or changed.
 
+### AD3 implementation notes
+
+What was built: `SystemStateFiles` (every path, `AMOOBOT_STATE_DIR` override), `ScheduledJobHealth`, `SystemHealth`,
+`GatewayFailureMemory` (written by `PaymentGatewayCredentialAlert`), `TelegramWebhookStatus`, `SystemHealthController`
+(`/admin/settings/jobs`, `/admin/settings/jobs/webhook-check`), the chip and health block on the modern dashboard, the
+`deployed-version` line in `deploy.sh` and the `backup-last-success` line in `bin/backup-database.sh`. Least privilege
+as 4.4: no group, sudo rule, `systemctl` call, backup-dir access or deploy-record access for PHP; a test scans
+`src/Admin` and `src/Payment` for them.
+
+Deviations from 4.3-4.5 and 7.1 (owner to confirm):
+
+- **Who sees it.** 4.4 names no permission. The chip, the health block, the jobs page and "check now" need
+  `SETTINGS_MANAGE` (super admin today); admin and support see no chip. Version included.
+- **Webhook refresh.** No timer tick (it would be a new scheduled job in `deploy.sh`). Only "check now" (GET confirm
+  page, POST + CSRF) calls `getWebhookInfo`. The answer is kept 24 h, not 10 min, and shown with its age. Never checked
+  in the last day = "unchecked", which does not count against the chip. The button is on the health block and the jobs
+  page, since the bot card belongs to AD7's hub. Only the URL's presence is kept, never the URL (it carries the secret).
+  In long-polling mode (`TELEGRAM_MODE` other than `webhook`), "ok" means no webhook is set.
+- **Health is not cached** (4.5 said 60 s). It runs no query: about 12 `stat()` calls, 2 one-line reads and 2 cache
+  reads, which costs about what a cache read of the result would. It is fresher, and AD2's 12-query budget is unchanged.
+- **Gateways line** lists the failures of the last 24 h (title, code, age), not the active gateways: that would add a
+  query to the dashboard. The title is stored with the code, nothing else (no provider text).
+- **Panels line** is not in the health block: it would add a query, and panel status already has its own page.
+  Deferred to AD4 or later.
+- **Job statuses.** The five states plus `PAUSED` (deploy marker younger than 30 min, as the script does) and `UNKNOWN`
+  (a file PHP cannot read, including a jobs directory it cannot search). A deploy stuck for over 30 min counts as one
+  problem, as in `bin/check-scheduled-jobs.sh`.
+- **Missing `backup-last-success`** shows "no record yet" (unknown) and counts against the chip until the first nightly
+  dump after this deploy. Writing the line is best effort: a failure warns and never fails the backup. Only the
+  `nightly` label writes it.
+- **`deployed-version`** is written with `mktemp` + `chown root:root` + `chmod 0644` + `mv -f` (atomic, never follows a
+  link) instead of `install -m 0644 -o root -g root`. The result is the same file. The commit is the first 12 hex chars.
+  The checkout step's writes moved into `record_deployed_commit()` so `tests/ops` can run them under a fake root.
+  `deployed-commit` and `releases.log` are written exactly as before (`deployed-commit` stays `root:root 0640`).
+- **Version chip** shows "dev" when the file is missing and "unknown" when it can't be read or parsed. The `?v=` cache
+  busting from 6.6 is not done here.
+- **Jobs page** is a Settings section tab, modern only (404 in classic for those who may open it, 403 for the rest).
+  `ModernShellTest` now expects that for `AdminSections::MODERN_ONLY_ROUTES`. The classic snapshot test is unchanged.
+- **Rollout.** The deploy runs the `deploy.sh` installed by the *previous* deploy, so `deployed-version` first appears
+  on the deploy after the one that ships AD3. `backup-last-success` appears after the next nightly dump.
+
 ### 7.2 The flip (after AD8, not a PR)
 
 The owner sets `admin.ui.layout = modern` in hub → Advanced. Checklist first, on staging with a production copy:

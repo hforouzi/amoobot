@@ -7,6 +7,7 @@ namespace App\Tests\Payment\Plugin;
 use Amoobot\Plugin\ConstrainedGateway\InvoicingGatewayPlugin;
 use App\Entity\StorePaymentMethod;
 use App\Payment\Application\AdminPaymentAlerter;
+use App\Payment\Application\GatewayFailureMemory;
 use App\Shop\Application\Checkout\PaymentStarter;
 use App\Tests\Support\ConstrainedGatewayFixture;
 use App\Tests\Support\IntegrationTestCase;
@@ -34,6 +35,13 @@ final class GatewayCredentialAlertTest extends IntegrationTestCase
         $this->method = $this->constrainedMethod();
         $this->resetLimiter($this->method);
         self::getContainer()->get(RecordingLogger::class)->records = [];
+        self::getContainer()->get('cache.app')->delete(GatewayFailureMemory::CACHE_KEY);
+    }
+
+    /** @return array<int, string> gateway id => code remembered for the admin's health block (AD3) */
+    private function remembered(): array
+    {
+        return array_map(static fn (array $f): string => $f['code'], self::getContainer()->get(GatewayFailureMemory::class)->recent());
     }
 
     protected function tearDown(): void
@@ -94,6 +102,9 @@ final class GatewayCredentialAlertTest extends IntegrationTestCase
         self::assertStringNotContainsString(self::API_KEY, implode("\n", $this->http->telegramTexts()), 'the provider text quoted the key: the alert does not');
         self::assertStringNotContainsString(self::API_KEY, self::getContainer()->get(RecordingLogger::class)->text());
 
+        $gatewayId = (int) $this->method->getGateway()->getId();
+        self::assertSame([$gatewayId => 'unauthorized'], $this->remembered(), 'remembered even when the hourly alert limit holds the alert back');
+
         $other = $this->constrainedMethod([], 'دومین درگاه', 60);
         $this->resetLimiter($other);
         self::assertFalse($this->start($other));
@@ -110,6 +121,7 @@ final class GatewayCredentialAlertTest extends IntegrationTestCase
         self::assertCount(1, $alerts);
         self::assertStringContainsString('API key invalid or store disabled', $alerts[0]);
         self::assertStringNotContainsString(self::API_KEY, $alerts[0]);
+        self::assertSame([(int) $this->method->getGateway()->getId() => 'store_disabled'], $this->remembered());
     }
 
     public function testOtherFailuresAndSuccessesAlertNobody(): void
@@ -120,5 +132,6 @@ final class GatewayCredentialAlertTest extends IntegrationTestCase
         self::assertTrue($this->start($this->method));
 
         self::assertSame([], $this->alerts());
+        self::assertSame([], $this->remembered());
     }
 }

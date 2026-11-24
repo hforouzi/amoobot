@@ -1655,6 +1655,72 @@ else
 fi
 check "deploy.sh documents how to pin the Composer version" grep -q -- '--version=<2.x.y>' "$ROOT/deploy.sh"
 
+echo "== AD3: the two public one-line status files root writes for the admin (decision 13)"
+# Static: the modes the files below rely on, and nothing opens the backup dir or the deploy record.
+check "deploy.sh still runs under umask 027 (deployed-commit stays root:root 0640)" grep -qx 'umask 027' "$ROOT/deploy.sh"
+check "record_deployed_commit never changes deployed-commit's mode or owner" bash -c \
+  '! sed -n "/^record_deployed_commit() {/,/^}/p" "$1" | grep -E "(chmod|chown|install -m).*deployed-commit"' _ "$ROOT/deploy.sh"
+check "backup-database.sh still keeps BACKUP_DIR 0700 and never loosens it" bash -c \
+  'grep -q "^chmod 700 \"\$BACKUP_DIR\"" "$1" && [[ $(grep -cE "chmod [0-7]+ \"\\\$BACKUP_DIR\"" "$1") == 1 ]] && grep -qx "umask 077" "$1"' _ "$ROOT/bin/backup-database.sh"
+if can_dry_run; then
+  check "dry-run announces deployed-version as root:root 0644" grep -qF 'public one-line copy /var/lib/amoobot/deployed-version (root:root 0644)' <<< "$BASE_OUT"
+else
+  skip "$DRY_RUN_SKIP"
+fi
+if have unshare && unshare -r true 2> /dev/null; then
+  S="$WORK/ad3-state"
+  mkdir -p "$WORK/ad3-elsewhere"; printf 'keep\n' > "$WORK/ad3-elsewhere/victim"
+  out="$(unshare -r bash -c '
+    set -u; umask 027; ROOT="$1"; STATE_DIR="$2"
+    warn() { printf "WARN: %s\n" "$*"; }
+    eval "$(sed -n "/^record_deployed_commit() {/,/^}/p" "$ROOT/deploy.sh")"
+    record_deployed_commit 0123456789abcdef0123456789abcdef01234567 "" main
+    ln -sfn "$3" "$STATE_DIR/deployed-version"   # a link planted there is replaced, never followed
+    record_deployed_commit fedcba9876543210fedcba9876543210fedcba98 0123456789abcdef0123456789abcdef01234567 release/v1.2.3
+    for f in deployed-commit deployed-version releases.log; do printf "%s %s\n" "$f" "$(stat -c "%U:%G %a %F" "$STATE_DIR/$f")"; done
+  ' _ "$ROOT" "$S" "$WORK/ad3-elsewhere/victim" 2>&1)"
+  check "deployed-version is root:root 0644, a regular file" grep -qx 'deployed-version root:root 644 regular file' <<< "$out"
+  check "deployed-commit keeps its mode: root:root 0640 (unchanged)" grep -qx 'deployed-commit root:root 640 regular file' <<< "$out"
+  check "deployed-version holds exactly one line: 12-char commit, UTC time, ref" bash -c \
+    '[[ $(wc -l < "$1") == 1 ]] && grep -qE "^fedcba987654 [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z release/v1\.2\.3$" "$1"' _ "$S/deployed-version"
+  check "deployed-commit still holds the full commit for the next deploy" grep -qx 'fedcba9876543210fedcba9876543210fedcba98' "$S/deployed-commit"
+  check "releases.log still gets one line per deploy" test "$(wc -l < "$S/releases.log")" -eq 2
+  check "a link planted at deployed-version is replaced, its target untouched" grep -qx 'keep' "$WORK/ad3-elsewhere/victim"
+  check "no temporary file is left behind" bash -c '! ls -A "$1" | grep -q "^\.deployed-version\."' _ "$S"
+  out="$(unshare -r bash -c 'umask 027; STATE_DIR="$2/missing/x"; warn() { printf "WARN: %s\n" "$*"; }; install() { return 1; }
+    eval "$(sed -n "/^record_deployed_commit() {/,/^}/p" "$1/deploy.sh")"; record_deployed_commit 0123456789abcdef0123456789abcdef01234567 "" "bad ref"' _ "$ROOT" "$WORK" 2>&1)"
+  check "an invalid version line is never written (warns instead)" grep -q 'WARN: Could not write .*deployed-version' <<< "$out"
+
+  if have php && have gzip; then
+    B="$WORK/ad3-backups"; S2="$WORK/ad3-state2"; mkdir -p "$S2" "$WORK/ad3-bin"
+    printf '#!/usr/bin/env bash\necho "CREATE TABLE t (id int);"\necho "-- Dump completed on 2026-11-24"\n' > "$WORK/ad3-bin/mariadb-dump"
+    chmod +x "$WORK/ad3-bin/mariadb-dump"
+    ad3_backup() {  # ad3_backup LABEL [status file]
+      unshare -r env PATH="$WORK/ad3-bin:$PATH" DATABASE_URL='mysql://u:p@127.0.0.1:3306/amoobot' BACKUP_DIR="$B" BACKUP_LABEL="$1" \
+        AMOOBOT_BACKUP_STATUS_FILE="${2:-$S2/backup-last-success}" bash "$ROOT/bin/backup-database.sh" 2>&1
+    }
+    out="$(ad3_backup nightly)"; rc=$?
+    check "nightly backup succeeds" test "$rc" -eq 0
+    st="$(unshare -r stat -c '%U:%G %a %F' "$S2/backup-last-success" 2>&1)"
+    check "backup-last-success is root:root 0644, a regular file" test "$st" = 'root:root 644 regular file'
+    check "backup-last-success holds exactly one line: the UTC time, nothing else" bash -c \
+      '[[ $(wc -l < "$1") == 1 ]] && grep -qxE "[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z" "$1"' _ "$S2/backup-last-success"
+    check "the backup directory is still 0700" test "$(stat -c %a "$B")" = 700
+    check "the dump itself is still 0600" bash -c 'for f in "$1"/*_nightly_*.sql.gz; do [[ $(stat -c %a "$f") == 600 ]] || exit 1; done' _ "$B"
+    before="$(cat "$S2/backup-last-success")"; touch -d '2 days ago' "$S2/backup-last-success"
+    ad3_backup manual > /dev/null; rc=$?
+    check "a manual backup succeeds and does not touch backup-last-success" bash -c \
+      '[[ $2 == 0 && "$(cat "$1")" == "$3" && $(( $(date +%s) - $(stat -c %Y "$1") )) -gt 86400 ]]' _ "$S2/backup-last-success" "$rc" "$before"
+    out="$(ad3_backup nightly "$WORK/ad3-no-such-dir/backup-last-success")"; rc=$?
+    check "a missing state dir only warns: the nightly backup still succeeds" bash -c \
+      '[[ $1 == 0 ]] && grep -q "WARNING: could not record the backup time" <<< "$2"' _ "$rc" "$out"
+  else
+    skip "AD3 backup-last-success (needs php and gzip)"
+  fi
+else
+  skip "AD3 status files (fake root: unshare -r not available)"
+fi
+
 echo
 echo "passed: $PASS  failed: $FAIL  skipped: $SKIP"
 (( FAIL == 0 ))

@@ -84,6 +84,8 @@ final class AdminSections
         ],
         self::SETTINGS => [
             'settings' => ['admin.settings', UI\SettingsAdminController::class, 'admin_settings'],
+            // Scheduled jobs (AD3): modern only, like the section tabs themselves.
+            'jobs' => ['ad3.jobs.title', UI\SystemHealthController::class, 'admin_system_jobs'],
             'payment_gateways' => ['admin.payment_gateways', Crud\PaymentGatewayCrudController::class, null],
             'vpn_panels' => ['admin.vpn_panels', Crud\VpnPanelCrudController::class, null],
             'plugins' => ['admin.plugins', Crud\PluginCrudController::class, null],
@@ -131,6 +133,7 @@ final class AdminSections
         Crud\ClientAppCrudController::class => self::MESSAGING,
 
         UI\SettingsAdminController::class => self::SETTINGS,
+        UI\SystemHealthController::class => self::SETTINGS,
         Crud\SettingCrudController::class => self::SETTINGS,
         Crud\RequiredChannelCrudController::class => self::SETTINGS,
         Crud\PaymentGatewayCrudController::class => self::SETTINGS,
@@ -148,6 +151,9 @@ final class AdminSections
         Crud\ServiceNotificationLogCrudController::class => self::SETTINGS,
         Crud\BotMessageLogCrudController::class => self::SETTINGS,
     ];
+
+    /** Section pages that exist in the modern layout only (404 in classic; the section tabs are modern only too). */
+    public const MODERN_ONLY_ROUTES = ['admin_system_jobs'];
 
     /** Routes in another section than their controller's. */
     private const ROUTES = [

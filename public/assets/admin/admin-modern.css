@@ -378,3 +378,21 @@ body[data-admin-ui="modern"] .ad2-table-scroll { overflow-x:auto; }
 body[data-admin-ui="modern"] .ad2-table-scroll table { width:100%; border-collapse:collapse; }
 body[data-admin-ui="modern"] .ad2-table-scroll td, body[data-admin-ui="modern"] .ad2-table-scroll th { text-align:start; padding:10px; border-bottom:1px solid var(--admin-border); }
 @media(max-width:800px) { body[data-admin-ui="modern"] .ad2-charts { grid-template-columns:1fr; } body[data-admin-ui="modern"] .ad2-card { padding:16px; } }
+
+/* AD3: system health, scoped to modern pages. Colours carry a word too (never colour alone). */
+body[data-admin-ui="modern"] .ad2-header { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; }
+body[data-admin-ui="modern"] .ad3-chip { display:inline-flex; align-items:center; gap:6px; min-height:44px; padding:8px 16px; border-radius:999px; border:1px solid var(--admin-border); text-decoration:none; color:var(--admin-text); background:var(--admin-card); }
+body[data-admin-ui="modern"] .ad3-chip-ok::before, body[data-admin-ui="modern"] .ad3-chip-warn::before { content:""; width:10px; height:10px; border-radius:50%; background:#16794b; }
+body[data-admin-ui="modern"] .ad3-chip-warn::before { background:#b26a00; }
+body[data-admin-ui="modern"] .ad3-health-lines { list-style:none; margin:0; padding:0; }
+body[data-admin-ui="modern"] .ad3-line { display:flex; flex-wrap:wrap; align-items:center; gap:8px 12px; padding:8px 0; border-bottom:1px solid var(--admin-border); }
+body[data-admin-ui="modern"] .ad3-line > span:nth-child(2) { flex:1; min-width:200px; overflow-wrap:anywhere; }
+body[data-admin-ui="modern"] .ad3-line a { display:inline-flex; align-items:center; min-height:44px; }
+body[data-admin-ui="modern"] .ad3-dot { width:10px; height:10px; border-radius:50%; flex:none; background:var(--admin-border); }
+body[data-admin-ui="modern"] .ad3-ok .ad3-dot { background:#16794b; }
+body[data-admin-ui="modern"] .ad3-problem .ad3-dot { background:#b63333; }
+body[data-admin-ui="modern"] .ad3-unknown .ad3-dot { background:#b26a00; }
+body[data-admin-ui="modern"] .ad3-status { display:inline-block; padding:2px 10px; border-radius:999px; border:1px solid var(--admin-border); font-size:.85rem; }
+body[data-admin-ui="modern"] .ad3-status-failed, body[data-admin-ui="modern"] .ad3-status-stale, body[data-admin-ui="modern"] .ad3-status-never { border-color:#b63333; }
+body[data-admin-ui="modern"] .ad3-status-unknown { border-color:#b26a00; }
+body[data-admin-ui="modern"] .ad3-status-ok { border-color:#16794b; }

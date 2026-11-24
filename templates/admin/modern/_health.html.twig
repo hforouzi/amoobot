@@ -1,0 +1,24 @@
+{# AD3: the health lines (SystemHealth::summary()). Reads cached/stored values only: nothing here calls Telegram. #}
+{% trans_default_domain 'admin' %}
+{% set locale = app.request.locale %}
+<ul class="ad3-health-lines">
+<li data-health="jobs" class="ad3-line ad3-{{ health.jobs.state }}"><span class="ad3-dot" aria-hidden="true"></span><span><strong>{{ 'ad3.line.jobs'|trans }}</strong>:
+{% if health.jobs.report.state == 'unknown' %}{{ ('ad3.jobs.reason.' ~ health.jobs.report.reason)|trans }}
+{% elseif health.jobs.report.problems > 0 %}{{ 'ad3.jobs.problems'|trans({'%count%': health.jobs.report.problems|dashboard_number(locale), '%total%': health.jobs.report.jobs|length|dashboard_number(locale)}) }}
+{% else %}{{ 'ad3.jobs.all_ok'|trans({'%total%': health.jobs.report.jobs|length|dashboard_number(locale)}) }}{% endif %}
+{% if health.jobs.report.reason == 'unreadable' and health.jobs.report.state != 'unknown' %} · {{ 'ad3.jobs.reason.unreadable'|trans }}{% endif %}
+{% if health.jobs.report.deploy %} · {{ ('ad3.jobs.deploy.' ~ health.jobs.report.deploy)|trans }}{% endif %}</span>
+{% if show_jobs_link ?? true %}<a href="{{ path('admin_system_jobs') }}">{{ 'ad3.jobs.open'|trans }}</a>{% endif %}</li>
+<li data-health="backup" class="ad3-line ad3-{{ health.backup.state }}"><span class="ad3-dot" aria-hidden="true"></span><span><strong>{{ 'ad3.line.backup'|trans }}</strong>:
+{% if health.backup.at is not null %}{{ 'ad3.backup.last'|trans({'%age%': health.backup.at|health_age(locale)}) }}{% else %}{{ ('ad3.backup.reason.' ~ health.backup.reason)|trans }}{% endif %}</span></li>
+<li data-health="gateways" class="ad3-line ad3-{{ health.gateways.state }}"><span class="ad3-dot" aria-hidden="true"></span><span><strong>{{ 'ad3.line.gateways'|trans }}</strong>:
+{% for failure in health.gateways.failures %}{{ 'ad3.gateways.failure'|trans({'%title%': failure.title, '%code%': failure.code, '%age%': failure.at|health_age(locale)}) }}{% if not loop.last %}; {% endif %}{% else %}{{ 'ad3.gateways.ok'|trans }}{% endfor %}</span></li>
+<li data-health="webhook" class="ad3-line ad3-{{ health.webhook.state }}"><span class="ad3-dot" aria-hidden="true"></span><span><strong>{{ 'ad3.line.webhook'|trans }}</strong>:
+{% set info = health.webhook.info %}
+{% if info is null %}{{ 'ad3.webhook.unchecked'|trans }}
+{% elseif not info.reachable %}{{ 'ad3.webhook.unreachable'|trans }}
+{% else %}{{ (info.urlSet ? 'ad3.webhook.url_set' : 'ad3.webhook.no_url')|trans }} · {{ 'ad3.webhook.pending'|trans({'%count%': info.pending|dashboard_number(locale)}) }}{% if info.lastErrorAt is not null %} · <span dir="auto">{{ 'ad3.webhook.last_error'|trans({'%age%': info.lastErrorAt|health_age(locale), '%message%': info.lastError ?? '—'}) }}</span>{% endif %}{% endif %}
+{% if info is not null %} · {{ 'ad3.webhook.checked'|trans({'%age%': info.checkedAt|health_age(locale)}) }}{% endif %}
+{% if not health.webhook.expected %} · {{ 'ad3.webhook.polling'|trans }}{% endif %}</span>
+<a href="{{ path('admin_system_webhook_check') }}">{{ 'ad3.webhook.check_now'|trans }}</a></li>
+</ul>
