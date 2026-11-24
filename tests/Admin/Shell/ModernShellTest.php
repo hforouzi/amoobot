@@ -86,11 +86,16 @@ final class ModernShellTest extends IntegrationTestCase
     {
         $sections = self::getContainer()->get(AdminSections::class);
         $urls = [];
+        $modernOnly = [];
         foreach (array_keys(AdminSections::SECTIONS) as $section) {
             foreach (AdminSections::pages($section) as $page) {
                 $urls[] = $sections->url($page);
+                if (in_array($page['route'], AdminSections::MODERN_ONLY_ROUTES, true)) {
+                    $modernOnly[] = $sections->url($page);
+                }
             }
         }
+        self::assertCount(count(AdminSections::MODERN_ONLY_ROUTES), $modernOnly);
         $urls[] = '/admin';
         self::assertGreaterThan(20, count($urls));
 
@@ -117,6 +122,13 @@ final class ModernShellTest extends IntegrationTestCase
             $this->setLayout('classic');
             foreach ($urls as $url) {
                 $status = $this->statusOf($url);
+                if (in_array($url, $modernOnly, true)) {
+                    // AD3's jobs page: modern only. The permission is checked first (403 in both layouts); whoever may open
+                    // it gets the page in modern and 404 in classic.
+                    self::assertContains($modern[$url], [200, 403], $role.' modern '.$url);
+                    self::assertSame(200 === $modern[$url] ? 404 : 403, $status, $role.' classic '.$url);
+                    continue;
+                }
                 self::assertContains($status, [200, 403], $role.' '.$url);
                 self::assertSame($status, $modern[$url], sprintf('%s GET %s: classic %d, modern %d', $role, $url, $status, $modern[$url]));
                 if (200 === $status) {

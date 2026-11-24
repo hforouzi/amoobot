@@ -6,6 +6,7 @@ namespace App\Admin\UI;
 
 use App\Admin\Application\CardReceiptQueue;
 use App\Admin\Application\GlobalAdminSearch;
+use App\Admin\Application\Health\SystemHealth;
 use App\Admin\Security\AdminCrudPermissions;
 use App\Admin\UI\Crud\AdminAuditLogCrudController;
 use App\Admin\UI\Crud\AdminUserCrudController;
@@ -56,6 +57,8 @@ class DashboardController extends AbstractDashboardController
         private readonly AdminSections $sections,
         private readonly AdminBrand $brand,
         private readonly CardReceiptQueue $cardReceipts,
+        private readonly SystemHealth $health,
+        private readonly AdminAccessPolicy $policy,
     ) {
     }
 
@@ -70,7 +73,13 @@ class DashboardController extends AbstractDashboardController
         }
 
         if ($this->uiMode->isModern() && $user instanceof AdminUser) {
-            return $this->render('admin/modern/dashboard.html.twig', ['overview' => $this->overview->dashboard(AdminActor::fromAdminUser($user))]);
+            $actor = AdminActor::fromAdminUser($user);
+
+            return $this->render('admin/modern/dashboard.html.twig', [
+                'overview' => $this->overview->dashboard($actor),
+                // AD3: system health and version, for those who manage the system (no query, no remote call).
+                'health' => $this->policy->can($actor, AdminPermission::SETTINGS_MANAGE) ? $this->health->summary() : null,
+            ]);
         }
 
         return $this->render('admin/dashboard.html.twig', [

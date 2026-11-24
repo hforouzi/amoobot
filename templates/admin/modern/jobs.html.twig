@@ -1,0 +1,19 @@
+{% extends '@EasyAdmin/page/content.html.twig' %}
+{% trans_default_domain 'admin' %}
+{% block content_title %}{{ 'ad3.jobs.title'|trans }}{% endblock %}
+{% block main %}
+{% set locale = app.request.locale %}
+<div class="ad2-dashboard ad3-jobs">
+<section class="ad2-card" aria-labelledby="ad3-health-title"><h2 id="ad3-health-title">{{ 'ad3.title'|trans }}</h2>
+{{ include('admin/modern/_health.html.twig', {health: health, show_jobs_link: false}) }}
+<p class="ad3-version">{{ 'ad3.version.label'|trans }}: {{ include('admin/modern/_version.html.twig', {version: health.version}) }}</p>
+</section>
+<section class="ad2-card" aria-labelledby="ad3-jobs-title"><h2 id="ad3-jobs-title">{{ 'ad3.jobs.list'|trans }}</h2>
+<p>{{ 'ad3.jobs.help'|trans }}</p>
+{% if health.jobs.report.state == 'unknown' %}<p>{{ ('ad3.jobs.reason.' ~ health.jobs.report.reason)|trans }}</p>{% else %}
+<div class="ad2-table-scroll"><table><caption class="visually-hidden">{{ 'ad3.jobs.list'|trans }}</caption><thead><tr>{% for key in ['status', 'job', 'last_success', 'max_age', 'last_run', 'schedule'] %}<th scope="col">{{ ('ad3.jobs.column.' ~ key)|trans }}</th>{% endfor %}</tr></thead><tbody>
+{% for job in health.jobs.report.jobs %}<tr data-job="{{ job.name }}" data-status="{{ job.status }}"><td><span class="ad3-status ad3-status-{{ job.status }}">{{ ('ad3.status.' ~ job.status)|trans }}</span></td><td dir="ltr">{{ job.name }}</td><td>{{ job.lastSuccess is null ? '—' : job.lastSuccess|health_age(locale) }}</td><td>{{ (job.maxAge // 60)|dashboard_number(locale) }} {{ 'ad3.jobs.minutes'|trans }}</td><td dir="ltr">{{ job.lastRc is null ? '—' : 'rc=' ~ job.lastRc }}</td><td dir="ltr">{{ job.schedule }}</td></tr>{% endfor %}
+</tbody></table></div>{% endif %}
+</section>
+</div>
+{% endblock %}

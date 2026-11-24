@@ -4,7 +4,7 @@
 {% block main %}
 {% set locale = app.request.locale %}
 <div class="ad2-dashboard">
-<header class="ad2-header">{{ include('admin/modern/_search.html.twig') }}{% if health is defined and health and version is defined and version %}<a class="ad2-health" href="#system-health">{{ health }} · {{ version }}</a>{% endif %}</header>
+<header class="ad2-header">{{ include('admin/modern/_search.html.twig') }}{% if health is defined and health %}<a class="ad3-chip ad3-chip-{{ health.attention > 0 ? 'warn' : 'ok' }}" href="#system-health" data-health-chip>{{ health.attention > 0 ? 'ad3.chip.attention'|trans({'%count%': health.attention|dashboard_number(locale)}) : 'ad3.chip.ok'|trans }} · {{ include('admin/modern/_version.html.twig', {version: health.version}) }}</a>{% endif %}</header>
 <section class="ad2-card" aria-labelledby="ad2-work"><h2 id="ad2-work">{{ 'ad2.work.title'|trans }}</h2>
 <ul class="ad2-worklist">{% for row in overview.worklist %}<li data-work="{{ row.key }}"><span>{{ row.label|trans }} <strong>{{ row.count|dashboard_number(locale) }}</strong></span><a href="{{ path(row.route, row.parameters) }}" aria-label="{{ row.label|trans }}">{{ 'ad2.open'|trans }}</a></li>{% else %}<li>{{ 'ad2.clear'|trans }}</li>{% endfor %}</ul></section>
 <div class="ad2-kpis">
@@ -34,5 +34,6 @@
 {% if overview.latest is not null %}<section class="ad2-card" aria-labelledby="ad2-latest"><h2 id="ad2-latest">{{ 'ad2.latest'|trans }}</h2><div class="ad2-table-scroll"><table><caption class="visually-hidden">{{ 'ad2.latest'|trans }}</caption><thead><tr>{% for key in ['id','customer','amount','method','status','date'] %}<th scope="col">{{ ('ad2.column.' ~ key)|trans }}</th>{% endfor %}</tr></thead><tbody>
 {% for payment in overview.latest %}<tr><td><a href="{{ path('admin_payment_detail', {entityId: payment.id}) }}" aria-label="{{ 'ad2.column.id'|trans }} {{ payment.id }}">#{{ payment.id|dashboard_number(locale) }}</a></td><td dir="auto">{{ payment.customer }}</td><td>{{ payment.amount|number_format|dashboard_number(locale) }}</td><td>{{ payment.method }}</td><td><span class="ad2-payment-status">{{ ('status.' ~ payment.status)|trans }}</span></td><td><time datetime="{{ payment.createdAt|date('c') }}">{{ payment.createdAt|dashboard_date(locale) }}</time></td></tr>{% else %}<tr><td colspan="6">{{ 'ad2.empty'|trans }}</td></tr>{% endfor %}
 </tbody></table></div></section>{% endif %}
+{% if health is defined and health %}<section class="ad2-card" id="system-health" aria-labelledby="ad3-health-title"><h2 id="ad3-health-title">{{ 'ad3.title'|trans }}</h2>{{ include('admin/modern/_health.html.twig', {health: health}) }}</section>{% endif %}
 </div>
 {% endblock %}

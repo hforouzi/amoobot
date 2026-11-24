@@ -103,6 +103,8 @@ final class AdminCrudPermissions
             \App\Admin\UI\GuideTextAdminController::class => $p(AdminPermission::BOT_TEXTS_MANAGE),
             Crud\BotButtonLabelCrudController::class => $p(AdminPermission::BOT_TEXTS_MANAGE),
             SettingsAdminController::class => $p(AdminPermission::SETTINGS_MANAGE),
+            // Scheduled jobs page and the webhook's "check now" (AD3, modern only).
+            \App\Admin\UI\SystemHealthController::class => $p(AdminPermission::SETTINGS_MANAGE),
             Crud\SettingCrudController::class => $p(AdminPermission::SETTINGS_MANAGE),
             Crud\RequiredChannelCrudController::class => $p(AdminPermission::SETTINGS_MANAGE),
             Crud\PaymentGatewayCrudController::class => $p(AdminPermission::GATEWAYS_MANAGE),

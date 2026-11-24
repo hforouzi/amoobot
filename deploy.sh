@@ -309,6 +309,30 @@ dotenv_quote() {
 
 is_deploy_only() { [[ "$DEPLOY_ONLY_KEYS" == *" $1 "* ]]; }
 
+# record_deployed_commit TARGET PREVIOUS REF: root's own record of what is deployed, at the checkout step.
+#   deployed-commit    the full commit, root's trusted record (read back by the next deploy). Written under the
+#                      script's umask 027 (root:root 0640) exactly as before: PHP can't read it, and shouldn't.
+#   releases.log       one line appended per deploy.
+#   deployed-version   a SEPARATE public copy for the admin's version chip (docs/design/admin-redesign.md 4.4,
+#                      decision 13): root:root 0644, ONE line "<12-char commit> <UTC time> <ref>", nothing secret.
+#                      Replaced atomically (rename: a link there is replaced, never followed). Never read back by deploy.
+record_deployed_commit() {
+  local target="$1" previous="$2" ref="$3" now tmp version
+  now="$(date -u +%FT%TZ)"
+  install -d -m 755 "$STATE_DIR"
+  printf '%s\n' "$target" > "$STATE_DIR/deployed-commit"
+  printf '%s %s -> %s (%s)\n' "$now" "${previous:-none}" "$target" "$ref" >> "$STATE_DIR/releases.log"
+  # Fields are validated (40-hex commit, ref ^[A-Za-z0-9._/-]+$), so the line can't hold a space or a newline of its own.
+  version="${target:0:12} ${now} ${ref}"
+  if [[ "$version" =~ ^[0-9a-f]{12}\ [0-9TZ:-]+\ [A-Za-z0-9._/-]+$ ]] && tmp="$(mktemp "$STATE_DIR/.deployed-version.XXXXXX")"; then
+    if printf '%s\n' "$version" > "$tmp" && chown root:root "$tmp" && chmod 0644 "$tmp" && mv -f "$tmp" "$STATE_DIR/deployed-version"; then
+      return 0
+    fi
+    rm -f "$tmp"
+  fi
+  warn "Could not write ${STATE_DIR}/deployed-version; the admin shows the version as unknown until the next deploy."
+}
+
 # parse_job "<SCHEDULED_JOBS entry>"  ->  JOB_NAME JOB_GROUP JOB_CALENDAR JOB_TIMEOUT JOB_INTERVAL JOB_COMMAND
 parse_job() {
   IFS='|' read -r JOB_NAME JOB_GROUP JOB_CALENDAR JOB_TIMEOUT JOB_INTERVAL JOB_COMMAND <<< "$1"
@@ -1891,11 +1915,10 @@ pause_scheduled_jobs
 set_maintenance on
 if (( DRY_RUN )); then
   log "[dry-run] check out ${DEPLOY_REF} in ${APP_DIR} as ${DEPLOY_USER}, from a bundle of the root-owned mirror (no GitHub access for ${DEPLOY_USER})"
+  log "[dry-run] record the commit in ${STATE_DIR}/deployed-commit (root-only) and releases.log, and its public one-line copy ${STATE_DIR}/deployed-version (root:root 0644)"
 else
   fill_checkout "$TARGET_COMMIT"
-  install -d -m 755 "$STATE_DIR"
-  printf '%s\n' "$TARGET_COMMIT" > "$STATE_DIR/deployed-commit"
-  printf '%s %s -> %s (%s)\n' "$(date -u +%FT%TZ)" "${PREVIOUS_COMMIT:-none}" "$TARGET_COMMIT" "$DEPLOY_REF" >> "$STATE_DIR/releases.log"
+  record_deployed_commit "$TARGET_COMMIT" "$PREVIOUS_COMMIT" "$DEPLOY_REF"
   log "Deploying ${TARGET_COMMIT} (previous: ${PREVIOUS_COMMIT:-none}). History: ${STATE_DIR}/releases.log"
 fi
 # Root-run scripts come from the commit in the root-owned mirror, so nothing the deploy user can edit runs as root.

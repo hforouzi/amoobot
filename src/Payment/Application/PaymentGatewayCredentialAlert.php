@@ -17,6 +17,9 @@ use Symfony\Component\RateLimiter\RateLimiterFactory;
  * Generic: any gateway may report these codes as rawResponse.error of a failed PaymentRequestResult (the Tetraminator
  * plugin does, for HTTP 401 and 403). The alert text is fixed per code: no provider message, so no key can reach it.
  * Failures are logged, never thrown: the checkout answer stays the same.
+ *
+ * Every such failure is also remembered (GatewayFailureMemory, 24 h, before the hourly limit) for the admin's health
+ * block, so a failure stays visible after its alert was sent.
  */
 final class PaymentGatewayCredentialAlert
 {
@@ -33,6 +36,7 @@ final class PaymentGatewayCredentialAlert
         #[Autowire(service: 'limiter.payment_gateway_credential_alert')]
         private readonly RateLimiterFactory $limiter,
         private readonly LoggerInterface $logger,
+        private readonly GatewayFailureMemory $memory,
     ) {
     }
 
@@ -46,6 +50,7 @@ final class PaymentGatewayCredentialAlert
         if (!is_string($code) || !isset(self::DETAILS[$code]) || null === $gatewayId) {
             return;
         }
+        $this->memory->record($gatewayId, $payment->getGateway()->getTitle(), $code);
 
         try {
             if (!$this->limiter->create('gateway_'.$gatewayId)->consume()->isAccepted()) {

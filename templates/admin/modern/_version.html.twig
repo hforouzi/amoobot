@@ -1,0 +1,8 @@
+{% trans_default_domain 'admin' %}
+{%- if version.state == 'ok' -%}
+<span dir="ltr" class="ad3-version-value" title="{{ version.ref }}">{{ version.commit }}</span>
+{%- elseif version.state == 'dev' -%}
+<span dir="ltr" class="ad3-version-value">dev</span>
+{%- else -%}
+<span class="ad3-version-value">{{ 'ad3.version.unknown'|trans }}</span>
+{%- endif -%}
